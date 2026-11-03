@@ -1,0 +1,71 @@
+[graph]
+all-features = true
+
+[advisories]
+yanked = "deny"
+# Each entry is a decision: unmaintained, not a vulnerability, and why it stays.
+# Revisit when the dependency named in the reason moves on.
+ignore = [
+    # Reached through ratex-svg (formulas), and in the desktop through usvg, rustybuzz and
+    # gpui's text stack. Remove when those move to skrifa.
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser: transitive through ratex-svg and the desktop's GPUI and SVG stack" },
+    # Desktop only: gpui-base and gpui-component use it for timing. Replaced by web-time
+    # upstream; nothing to do in this repository.
+    { id = "RUSTSEC-2024-0384", reason = "instant: desktop only, inside the gpui-kit stack" },
+    # A proc macro: it runs at build time and ships no code. Through gpui-component,
+    # metal (macOS rendering) and pulp (image's EXR decoder).
+    { id = "RUSTSEC-2024-0436", reason = "paste: build-time macro in the desktop's GPUI, metal and image stacks" },
+    # Desktop only, through gpui-kit-assets' HTTP client (gpui-pre-reqwest). Goes when
+    # gpui-pre-reqwest parses PEM with rustls-pki-types.
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile: desktop only, gpui-pre-reqwest" },
+    # Desktop only: usvg shapes text inside SVG icons with it. Goes when resvg moves to
+    # harfrust.
+    { id = "RUSTSEC-2026-0206", reason = "rustybuzz: desktop only, usvg (SVG icons)" },
+    # Linux desktop only: D-Bus for the Secret Service (keyring, oo7), notifications,
+    # portals (ashpd) and accessibility (accesskit, atspi). Merged into zbus 6; they go
+    # when those crates move to zbus 6.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant: Linux desktop D-Bus stack, merged into zbus 6" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names: Linux desktop D-Bus stack, merged into zbus 6" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: Linux desktop D-Bus stack, merged into zbus 6" },
+    # The Marvin timing attack recovers a private key from decryption or signing
+    # timings. The Bilibili login only encrypts with the server's public key
+    # (c2m-source auth/passport.rs); no private-key operation exists here.
+    { id = "RUSTSEC-2023-0071", reason = "rsa: public-key encryption only, no private-key operations" },
+]
+
+[licenses]
+# The licenses packaging/licenses/about.toml accepts for shipped crates. The desktop
+# brings 0BSD (enum-iterator), BSD-2-Clause (arrayref), CC0-1.0 (notify, tiny-keccak) and
+# MPL-2.0 (dwrote, option-ext; cbindgen at build time), used unmodified.
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = [
+    # The desktop's UI stack: gpui-kit-material and the upstream it builds on.
+    "https://github.com/longbridge/gpui-kit",
+    "https://github.com/mizorewww/gpui-kit-material",
+    "https://github.com/mizorewww/gpui-material-symbols",
+    "https://github.com/mizorewww/model-fetch",
+    "https://github.com/mizorewww/slide-detect",
+    "https://github.com/mizorewww/subtitle-parse",
+]

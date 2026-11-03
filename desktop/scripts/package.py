@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """Build and package the native app and its matching CLI on the current platform."""
 import argparse
-import hashlib
 import importlib.util
-import json
 import os
 from pathlib import Path
 import platform
@@ -11,11 +9,11 @@ import plistlib
 import shutil
 import subprocess
 import tomllib
-import urllib.request
 import zipfile
 
 from dmg import build_install_dmg
 import ffmpeg_bundle
+import licenses
 import prebuilt
 import ytdlp_bundle
 
@@ -23,6 +21,8 @@ ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT.parent
 # Bundled tools that are built or downloaded once and reused by later runs.
 TOOL_CACHE = ROOT / ".cache/tools"
+# Where cargo puts its output: CARGO_TARGET_DIR (relative to the project) or target/.
+TARGET = PROJECT / (os.environ.get("CARGO_TARGET_DIR") or "target")
 
 
 def _load_versioning():
@@ -61,8 +61,19 @@ def copy_licenses(dest, tools=()):
         shutil.copy2(path, dest / path.name)
     shutil.copy2(PROJECT / "LICENSE", dest / "LICENSE")
     shutil.copy2(ROOT / "assets/material/LICENSE", dest / "LICENSE-material-icons")
-    shutil.copy2(ROOT / "assets/outline/LICENSE", dest / "LICENSE-lucide-icons")
     shutil.copytree(ROOT / "assets/themes/licenses", dest / "design-licenses", dirs_exist_ok=True)
+
+
+def third_party_notices(dest, swift, required):
+    """The dependency notices (licenses.py), or None in a development build that cannot make them."""
+    try:
+        return licenses.generate(dest / licenses.FILE_NAME, ROOT / "Cargo.toml", swift)
+    except (OSError, subprocess.CalledProcessError) as error:
+        if required:
+            raise SystemExit(f"Release builds must carry dependency licenses: {error}. "
+                             "Install cargo-about (see docs/PACKAGING.md).") from error
+        print(f"warning: dependency licenses not generated ({error})")
+        return None
 
 
 def notarize(path, key_path, key_id, issuer):
@@ -91,41 +102,13 @@ def bundle_ytdlp(parent, required, local=None, suffix=""):
         return None
 
 
-# aria2 downloads speech models over several connections. Package managers
-# supply it on macOS and Linux; Windows archives bundle the official static
-# build. It is GPL-2.0 and ships beside the app with its license.
-ARIA2_VERSION = "1.37.0"
-ARIA2_WINDOWS = "aria2-1.37.0-win-64bit-build1"
-ARIA2_WINDOWS_SHA256 = "67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288"
-
-
-def bundle_aria2(binaries, licenses, required):
-    """Place aria2c.exe beside the Windows binaries; the engine finds it there."""
-    url = (f"https://github.com/aria2/aria2/releases/download/release-{ARIA2_VERSION}/"
-           f"{ARIA2_WINDOWS}.zip")
-    tmp = binaries / "aria2.zip.download"
-    try:
-        with urllib.request.urlopen(url, timeout=300) as response, tmp.open("wb") as out:
-            shutil.copyfileobj(response, out)
-        digest = hashlib.sha256(tmp.read_bytes()).hexdigest()
-        if digest != ARIA2_WINDOWS_SHA256:
-            raise OSError(f"{ARIA2_WINDOWS} checksum mismatch: {digest}")
-        with zipfile.ZipFile(tmp) as archive:
-            (binaries / "aria2c.exe").write_bytes(archive.read(f"{ARIA2_WINDOWS}/aria2c.exe"))
-            (licenses / "LICENSE-aria2").write_bytes(archive.read(f"{ARIA2_WINDOWS}/COPYING"))
-        return binaries / "aria2c.exe"
-    except (OSError, KeyError, zipfile.BadZipFile) as error:
-        if required:
-            raise SystemExit(f"Release builds must bundle aria2: {error}") from error
-        print(f"warning: aria2 not bundled ({error}); models download without it")
-        return None
-    finally:
-        tmp.unlink(missing_ok=True)
-
-
 def verify_tools(binaries, system, skip=(), ytdlp=None):
     """Run each bundled tool once, so a missing library or an ffmpeg without
     TLS fails the package build rather than a user's first conversion."""
+    # yt-dlp's onedir build carries the notices of what it bundles.
+    if ytdlp and ytdlp.parent.name == ytdlp_bundle.DIRECTORY:
+        if not (ytdlp.parent / "_internal/THIRD_PARTY_LICENSES.txt").is_file():
+            raise SystemExit("The bundled yt-dlp has no THIRD_PARTY_LICENSES.txt")
     suffix = ".exe" if system == "Windows" else ""
     checks = []
     if ytdlp:
@@ -138,6 +121,8 @@ def verify_tools(binaries, system, skip=(), ytdlp=None):
         checks.append((["uv", "--version"], "uv "))
     if "llama.cpp" in names and "llama.cpp" not in skip:
         checks.append((["llama.cpp/llama-server", "--version"], "version"))
+    if "aria2" in names and "aria2" not in skip:
+        checks.append((["aria2c", "--version"], "aria2 version"))
     if system == "Linux":
         # Shared libraries the archive expects from the system: printed for the
         # log, and a missing one fails here.
@@ -226,27 +211,15 @@ def main():
                              "system package manager)")
     profile = "debug" if args.debug else "release"
     flags = [] if args.debug else ["--release", *(["--locked"] if distribution else [])]
-    revisions = {
-        name: subprocess.check_output(
-            ["git", "-C", str(ROOT / ".deps" / name), "rev-parse", "HEAD"], text=True
-        ).strip()
-        for name in ("zed", "component")
-    }
-    if distribution:
-        if not (ROOT / "sources.lock.json").is_file():
-            raise SystemExit("Freeze the tested source revisions with scripts/sources.py --freeze before release")
-        expected = json.loads((ROOT / "sources.lock.json").read_text())
-        if revisions != expected:
-            raise SystemExit("Prepared sources differ from the tested release revisions; prepare sources with --locked")
     if not args.no_build:
-        # build.rs reads COURSE2MD_NO_APPLE; pass the flag on to it.
+        # c2m-asr's build.rs reads COURSE2MD_NO_APPLE; pass the flag on to it.
         env = {**os.environ, "COURSE2MD_NO_APPLE": "1"} if args.no_apple else None
         run("cargo", "build", *flags, env=env)
         run("cargo", "build", "--manifest-path", str(ROOT / "Cargo.toml"), *flags, env=env)
-    version = tomllib.loads((PROJECT / "Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
+    version = tomllib.loads((PROJECT / "Cargo.toml").read_text(encoding="utf-8"))["workspace"]["package"]["version"]
     suffix = ".exe" if system == "Windows" else ""
     package_name = f"course2md-desktop-{system.lower()}-{platform.machine()}"
-    base = ROOT / "target" / "packages" / package_name
+    base = TARGET / "packages" / package_name
     if base.exists():
         shutil.rmtree(base)
     base.mkdir(parents=True, exist_ok=True)
@@ -269,8 +242,8 @@ def main():
         # MLX first searches beside the executable for mlx.metallib. Keeping
         # that layout avoids changing the CLI's working directory and breaking
         # user-supplied relative source, output, and model paths.
-        # build.rs copies it beside the CLI executable; see the note there.
-        metal = PROJECT / "target" / profile / "mlx.metallib"
+        # c2m-asr's build.rs copies it beside the CLI executable; see the note there.
+        metal = TARGET / profile / "mlx.metallib"
         if metal.is_file():
             shutil.copy2(metal, resources / "mlx.metallib")
             (binaries / "mlx.metallib").symlink_to("../Resources/mlx.metallib")
@@ -283,8 +256,8 @@ def main():
                 "[Desktop Entry]\nType=Application\nName=course2md\nComment=Turn courses into illustrated notes\n"
                 "Exec=course2md-desktop\nIcon=course2md\nTerminal=false\nCategories=Education;AudioVideo;\n")
             shutil.copy2(ROOT / "assets/icon.png", base / "course2md.png")
-    shutil.copy2(PROJECT / "target" / profile / f"course2md{suffix}", binaries / f"course2md{suffix}")
-    shutil.copy2(ROOT / "target" / profile / f"course2md-desktop{suffix}", binaries / f"course2md-desktop{suffix}")
+    shutil.copy2(TARGET / profile / f"course2md{suffix}", binaries / f"course2md{suffix}")
+    shutil.copy2(TARGET / profile / f"course2md-desktop{suffix}", binaries / f"course2md-desktop{suffix}")
     # yt-dlp's onedir build goes in a yt-dlp directory, which the engine
     # searches first: beside the binaries, or in the .app's Resources (its
     # data files may not live in Contents/MacOS). --no-ytdlp skips it.
@@ -301,28 +274,27 @@ def main():
         if bundled:
             placed, tool_licenses = bundled
             print("bundled " + ", ".join(path.name for path in placed))
-    # Windows/Linux: uv beside the engine (NPU worker) and llama-server in
-    # llama.cpp/ (GPU/CPU transcription); the app searches both before PATH.
-    skip = [name for name, off in (("uv", args.no_uv), ("llama.cpp", args.no_llama)) if off]
+    # Windows/Linux: uv and (Windows) aria2 beside the engine, llama-server in
+    # llama.cpp/; the app searches these before PATH.
+    skip = [name for name, off in (("uv", args.no_uv), ("llama.cpp", args.no_llama),
+                                   ("aria2", args.no_aria2)) if off]
     for name in prebuilt.bundle(system, platform.machine(), binaries, base,
                                 TOOL_CACHE / "downloads", required=tools_required, skip=skip):
         print(f"bundled {name}")
-    if system == "Windows" and not args.no_aria2:
-        if bundle_aria2(binaries, base, required=tools_required):
-            print("bundled aria2c.exe")
     if tools_required:
         verify_tools(binaries, system, skip=[*skip, *(["ffmpeg"] if args.no_ffmpeg else [])],
                      ytdlp=ytdlp)
     if system == "Windows":
         verify_windows_icon(binaries / "course2md-desktop.exe")
+    # The desktop's dependency graph includes the engine's. The Swift module is
+    # part of arm64 macOS builds only (c2m-asr's build.rs).
+    swift = system == "Darwin" and platform.machine() == "arm64" and not args.no_apple
+    if notices := third_party_notices(base.parent, swift, required=tools_required):
+        tool_licenses = [*tool_licenses, notices]
     copy_licenses(base, tool_licenses)
     shutil.copy2(PROJECT / "readme.md", base / "README.md")
-    # A development archive follows main and must not claim the previous release
-    # revisions. Release builds have already checked this snapshot against the lock.
-    (base / "sources.lock.json").write_text(json.dumps(revisions, indent=2) + "\n")
     if system == "Darwin":
         copy_licenses(resources, tool_licenses)
-        shutil.copy2(base / "sources.lock.json", resources / "sources.lock.json")
         identity = "-" if args.app_only else args.signing_identity
         signed = identity != "-"
         signing = ["--force", "--sign", identity]

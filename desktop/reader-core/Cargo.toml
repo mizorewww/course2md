@@ -1,0 +1,22 @@
+[package]
+name = "desktop-reader-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "What the course2md desktop's reader shows of a note, without GPUI"
+publish = false
+
+[dependencies]
+c2m-artifact = { path = "../../crates/c2m-artifact" }
+c2m-config = { path = "../../crates/c2m-config" }
+c2m-i18n = { path = "../../crates/c2m-i18n" }
+desktop-store = { path = "../store" }
+anyhow.workspace = true
+url.workspace = true
+chrono.workspace = true
+image = { workspace = true, features = ["webp"] }
+unicode-segmentation.workspace = true
+tempfile.workspace = true
+
+[dev-dependencies]
+desktop-store = { path = "../store", features = ["test-support"] }

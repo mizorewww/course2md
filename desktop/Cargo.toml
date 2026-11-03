@@ -1,65 +1,42 @@
 [package]
 name = "course2md-desktop"
-version = "2.0.1"
-edition = "2024"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "Native course2md desktop application"
-
-[workspace]
-exclude = [".deps/zed", ".deps/component"]
+publish = false
 
 [features]
 # Explicitly opt in when investigating native frame pacing. Ordinary builds
 # neither collect nor write performance data.
-performance = ["gpui/profiler"]
+performance = ["gpui-kit/profiler"]
 # Render named pages to PNG files for layout review (src/capture.rs).
-capture = ["gpui/test-support", "gpui_platform/test-support"]
+capture = ["gpui-kit/test-support"]
 
 [dependencies]
-course2md = { path = ".." }
-gpui = { path = ".deps/zed/crates/gpui" }
-gpui_platform = { path = ".deps/zed/crates/gpui_platform", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
-gpui-component = { path = ".deps/component/crates/component" }
-gpui-base = { path = ".deps/component/crates/base" }
-gpui-kit-assets = { path = ".deps/component/crates/assets" }
-anyhow = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-smol = "2"
-tempfile = "3"
-url = "2"
-ureq = { version = "2", features = ["json"] }
-uuid = { version = "1", features = ["v4"] }
-zeroize = "1"
-base64 = "0.22"
-chrono = "0.4"
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
-pulldown-cmark = "0.13"
-trash = "5"
-unicode-segmentation = "1"
+course2md = { path = "../crates/course2md", default-features = false }
+desktop-accounts = { path = "accounts" }
+desktop-prefs = { path = "prefs" }
+desktop-reader-core = { path = "reader-core" }
+desktop-store = { path = "store" }
+desktop-tasks = { path = "tasks" }
+desktop-ui = { path = "ui" }
+gpui-kit.workspace = true
+gpui-base.workspace = true
+gpui-kit-material = { workspace = true, features = ["buttons", "containment", "dialogs", "feedback", "inputs", "menus", "navigation", "progress", "selection", "window-chrome"] }
+anyhow.workspace = true
+serde_json.workspace = true
+smol.workspace = true
+tempfile.workspace = true
+url.workspace = true
+chrono.workspace = true
+image = { workspace = true, features = ["webp"] }
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
-[target.'cfg(not(target_os = "macos"))'.dependencies]
-keyring = "4"
-
-[target.'cfg(windows)'.dependencies]
-same-file = "1.0.6"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-security-framework = "3.7"
+libc.workspace = true
 
 [build-dependencies]
-embed-resource = "3.0"
+embed-resource.workspace = true
 
 [dev-dependencies]
-gpui = { path = ".deps/zed/crates/gpui", features = ["test-support"] }
-
-
-[profile.dev]
-debug = "line-tables-only"
-
-[profile.release]
-lto = "thin"
-strip = true
+gpui-kit = { workspace = true, features = ["test-support"] }

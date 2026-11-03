@@ -1,7 +1,6 @@
 # Built-in palette sources
 
-Retrieved 2026-09-08. `desktop/src/palettes.rs` contains the application mapping;
-`theme.rs` derives semantic hover, selection, status and elevated colors from it.
+Retrieved 2026-09-08. The palettes are defined in `gpui-kit-material-color` (`crates/color/src/palette.rs` in `gpui-kit-material`); the app chooses among them by `PaletteId`.
 
 | Family | Upstream | Mapping |
 | --- | --- | --- |
@@ -17,13 +16,8 @@ separate reading hierarchy from blue actions, not claims about upstream text
 roles. The upstream Day background `#e1e2e7`, blue `#2e7de9` and selection
 `#b7c1e3` remain the palette's basis.
 
-Every palette's window ground is painted as Material 3's surface container:
-its canvas color mixed with 4.5% (light) or 3% (dark) of its accent, so the
-surface-colored tiles of grouped settings and lists read as a layer above it.
-Dark palettes also paint their surfaces with 4.5% of their text color, as
-Material 3 lifts dark surface containers. The stored colors above are
-unchanged.
-
 Original licenses are in `licenses/` and included in distributed bundles. They
 cover the palette source material; upstream projects do not endorse course2md.
 Brand artwork has separate provenance in `../brands/SOURCES.md`.
+
+The Roboto faces in `../fonts/roboto` (400, 500, 600, Latin) are the ones gpui-kit-material's gallery instantiates from md3.io's variable font; `licenses/Roboto-OFL.txt` covers them.

@@ -130,9 +130,11 @@ Intel Mac 和 Linux ARM64 暂无桌面应用，可以使用[命令行工具](#�
 
 **转换时提示缺少 `ffmpeg`。**下载的应用把自带的 `ffmpeg` 放在 `course2md-desktop` 旁边，请完整解压或重新安装整个安装包。命令行工具和 Arch 软件包使用系统的 `ffmpeg`，需要先安装（macOS 用 `brew install ffmpeg`，Windows 用 `winget install --id Gyan.FFmpeg -e`，Linux 用系统包管理器）。「设置 → 应用 → 运行检查」（CLI 用 `course2md doctor`）会显示每个工具的来源。
 
-**Bilibili 视频失败或清晰度低。**在「设置 → 服务与账号 → Bilibili 账号」扫码登录。
+**Bilibili 视频失败或清晰度低。**在「设置 → 服务与账号 → Bilibili 账号」扫码登录，也可以用密码或短信验证码登录。
 
-**模型有多大，保存在哪里？**Apple 芯片约 1–2.3 GB（`~/Library/Caches/qwen3-speech/`），其他平台约 2.4 GB（`~/.cache/course2md/models/`）。在中国大陆从国内镜像（ModelScope / hf-mirror.com）下载，其他地区以镜像作为备用。下载中断后可以续传，GPU/CPU 模型另按 SHA-256 校验。
+**YouTube 要求登录。**在「设置 → 服务与账号 → YouTube 账号」选择已登录 YouTube 的浏览器。打开 YouTube 视频时由 yt-dlp 读取该浏览器的 Cookie，course2md 不保存这些 Cookie。用账号下载可能让 YouTube 限制这个账号，请适度使用。
+
+**模型有多大，保存在哪里？**Apple 芯片约 1–2.3 GB（`~/Library/Caches/qwen3-speech/`），其他平台约 2.4 GB（`~/.cache/course2md/models/`）。系统地区或时区为中国大陆时从国内镜像（ModelScope / hf-mirror.com）下载，其他地区以镜像作为备用。可用 `HF_ENDPOINT` 直接指定地址；设置 `COURSE2MD_IP_LOOKUP=1` 后，course2md 会向公共服务查询所在国家，这会把你的 IP 地址发送给这些服务。下载中断后可以续传，GPU/CPU 模型另按 SHA-256 校验。
 
 **从 1.7 升级后，旧笔记在哪里？**1.x 生成的笔记仍以 `course.md` / `course.html` 保存在原目录，可以用任意编辑器或浏览器打开，但 2.0 的笔记库只列出 2.0 生成的笔记。已下载的模型、Bilibili 登录和 CLI 的 `config.toml` 继续可用；识别方式和 AI 服务需要在首次引导中重新设置。
 
@@ -140,7 +142,7 @@ Intel Mac 和 Linux ARM64 暂无桌面应用，可以使用[命令行工具](#�
 
 ## 命令行工具
 
-习惯终端或脚本？`course2md` 命令行工具完成同样的转换，可以和桌面应用同时安装。两者共用 Bilibili 和 ChatGPT 登录以及已下载的语音模型，各自保存设置。
+习惯终端或脚本？`course2md` 命令行工具完成同样的转换，可以和桌面应用同时安装。两者共用 Bilibili、YouTube 和 ChatGPT 登录以及已下载的语音模型，各自保存设置。
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash   # macOS / Linux，安装到 ~/bin
@@ -158,9 +160,12 @@ course2md ./lecture.mp4 -o ./notes             # 指定笔记保存位置
 
 第一次运行会询问几项设置；笔记保存在输出目录的 `平台/标题/ID/` 下。
 
+识别模型不会在未经询问时下载。转换需要的模型尚未下载时，CLI 会说明模型名称、大小和保存位置，并询问 `[y/N]`；没有终端时（管道、脚本、`--json`、`--quiet`）直接停止，退出码为 1（`--json` 的错误代码为 `model_required`）。可先运行 `course2md models prepare --provider … --model …` 准备模型，或加 `--download-models`（或设置 `COURSE2MD_DOWNLOAD_MODELS=1`）允许本次下载。这样停止的转换在模型就绪后从中断处继续。
+
 | 命令 | 用途 |
 | --- | --- |
-| `course2md --login bilibili` / `--logout bilibili` | 扫码登录 Bilibili / 清除保存的登录 |
+| `course2md --login bilibili` / `--logout bilibili` | 扫码登录 Bilibili（`--method password` 或 `sms` 改用密码或短信验证码）/ 清除保存的登录 |
+| `course2md --login youtube` / `--logout youtube` | 使用浏览器中的 YouTube 登录（`--browser chrome`，指定配置文件用 `--browser "chrome:Profile 1"`）/ 停止使用 |
 | `course2md --login ollama` / `--login codex` | 使用本地 Ollama 服务 / 通过 Codex 登录使用 ChatGPT 订阅 |
 | `course2md doctor` | 检查依赖、识别后端和配置 |
 | `course2md models list` / `models prepare` | 检查已下载模型 / 预先下载模型 |
@@ -174,6 +179,6 @@ CLI 的设置保存在 `~/.config/course2md/config.toml`（Windows 为 `%APPDATA
 
 [全部文档（Wiki）](https://github.com/mizorewww/course2md/wiki) · [升级与卸载](https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#升级与卸载) · [故障排查](https://github.com/mizorewww/course2md/wiki/%E6%95%85%E9%9A%9C%E6%8E%92%E6%9F%A5) · [反馈问题](https://github.com/mizorewww/course2md/issues) · [发布说明](https://github.com/mizorewww/course2md/releases)
 
-开发者：[参与贡献](AGENTS.md) · [桌面开发](desktop/README.md) · [引擎架构](docs/DESIGN.md) · [性能基准](docs/BENCHMARKS.md) · [发布流程](docs/PACKAGING.md) · [更新日志](CHANGELOG.md)
+开发者：[参与贡献](AGENTS.md) · [桌面开发](desktop/README.md) · [crate 结构](docs/CRATES.md) · [引擎架构](docs/DESIGN.md) · [性能基准](docs/BENCHMARKS.md) · [发布流程](docs/PACKAGING.md) · [更新日志](CHANGELOG.md)
 
 course2md 以 [MIT 许可证](LICENSE)发布。

@@ -1,110 +1,112 @@
-//! One start intent continues source preparation through to a readable note.
-use super::*;
-
-/// Hero and preview share this ruler; the lower workbench reflows independently.
-const WORKBENCH_WIDTH: f32 = 760.;
-/// Spacing between workbench sections and the inset of its panels.
-const SECTION_GAP: Rems = rems(24. / 14.);
-/// Rhythm inside the hero: title, link pill, drop hint and preview card.
-const HERO_GAP: Rems = rems(16. / 14.);
-/// Square icon buttons beside the hero input.
-const HERO_CONTROL: Rems = rems(48. / 14.);
-/// The link field's text, which its placeholder is measured at.
-const SOURCE_FIELD_TEXT: Rems = rems(17. / 14.);
-/// Option labels and the selected video title.
-const TEXT_LEAD: Rems = rems(16. / 14.);
-use crate::{motion, preferences::ServicePurpose, theme::*};
+//! The workbench: a link, its video and options, and one start intent carried through
+//! preparation to a readable note.
+use crate::Change as _;
+use crate::{
+    ConversionOptions, Desktop, Field, Page, notes::Course, preferences::ServicePurpose, source,
+    symbols, task_ui::CardPlace, ui, workspace,
+};
 use anyhow::Context as _;
 use course2md::config::TranscriptSource;
 use course2md::subtitle::{SubtitleEvidence, SubtitleReadError, SubtitleTrack};
-use gpui_component::{
-    checkbox::Checkbox,
-    menu::{DropdownMenu, PopupMenuItem},
-    switch::Switch,
+use desktop_tasks::import::*;
+use gpui::{prelude::*, *};
+use gpui_base::{h_flex, v_flex};
+use gpui_kit_material::{color::ColorRole, icons::Icon, motion, prelude::*};
+use std::{
+    path::PathBuf,
+    sync::{Arc, atomic::AtomicBool},
 };
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
 
-/// A plain field label above its control.
-fn import_option_label(
-    id: impl Into<ElementId>,
-    label: &'static str,
-    content: impl IntoElement,
-) -> Div {
-    v_flex()
-        .w_full()
-        .min_w_0()
-        .gap_2()
-        .child(
-            accessible_text(id, label)
-                .text_size(TEXT_AUX)
-                .text_color(color(GRAY)),
-        )
-        .child(content)
-}
+/// The workbench's one column.
+const WORKBENCH_WIDTH: Rems = rem(760.);
+/// Rhythm inside the column: title, link, video and options.
+/// The hero title to the link field (H4).
+const HERO_GAP: Rems = rem(20.);
+/// The link field to the line under it: the drop hint or the source switch (H4).
+const HERO_HINT_GAP: Rems = rem(24.);
 
-/// A titled group of the workbench's connected option tiles.
-fn option_group(id: &'static str, title: &'static str, tiles: Vec<Div>) -> TileGroup {
-    TileGroup::new(id, title)
-        .scale(TileScale::Compact)
-        .children(tiles)
-}
-
-/// A label (with optional hint) on the left and a switch on the right.
-fn option_switch_tile(
-    id: impl Into<ElementId>,
-    label: &'static str,
-    hint: Option<&'static str>,
-    switch: impl IntoElement,
-) -> Div {
-    h_flex()
-        .w_full()
-        .min_w_0()
-        .min_h(rems(if hint.is_some() { 68. } else { 60. } / 14.))
-        .pl(rems(20. / 14.))
-        .pr(rems(16. / 14.))
-        .py(rems(12. / 14.))
-        .gap(rems(12. / 14.))
-        .items_center()
-        .child(TileScale::Compact.text(id, label, hint.map(SharedString::from)))
-        .child(div().flex_shrink_0().child(switch))
-}
-
-/// A queued or running task is shown by `box_running_task` in the video
-/// card's place.
-fn task_runs_in_card(task: &workspace::TaskRecord) -> bool {
-    matches!(
-        task.state,
-        workspace::TaskState::Queued
-            | workspace::TaskState::Running
-            | workspace::TaskState::Pausing
-    )
-}
-
-/// The mark on a cover slot whose video has no cover image, shared by the
-/// home page's video card, running task and task rows.
-pub(crate) fn cover_placeholder(size: Rems) -> gpui_component::Icon {
-    icons::movie()
-        .size(size)
-        .text_color(color(ON_SECONDARY_CONTAINER))
-}
-
-/// Secondary text below a control.
-/// The preview action keeps its label until the link field itself runs out of
-/// room: the field is the hero's measured width, not the window's breakpoint.
-fn preview_field_tight(window: &Window) -> bool {
-    let scale = f32::from(window.rem_size()) / 14.;
-    let field = crate::views::shell_content_width(Page::New, window) / scale;
-    field.min(WORKBENCH_WIDTH) < 520.
-}
-
-pub(crate) fn aux_text(content: impl IntoElement) -> Div {
+fn workbench_column() -> Div {
     div()
-        .text_size(TEXT_AUX)
-        .text_color(color(GRAY))
-        .child(content)
+        .w_full()
+        .min_w_0()
+        .max_w(WORKBENCH_WIDTH)
+        .mx_auto()
+        .flex()
+        .flex_col()
+}
+
+/// How far the hero sits below the bar: with nothing under it, near the optical center.
+fn hero_top(quiet: bool, compact: bool) -> f32 {
+    match (quiet, compact) {
+        (true, true) => 96.,
+        (true, false) => 160.,
+        (false, true) => 24.,
+        (false, false) => 48.,
+    }
+}
+
+/// The mark on a cover slot whose video has no cover image.
+pub(crate) fn cover_placeholder(size: Rems) -> Icon {
+    Icon::from(symbols::movie().filled(true))
+        .size(size)
+        .color(color(ColorRole::ON_SECONDARY_CONTAINER))
+}
+
+pub(crate) fn cover_width(window: &Window) -> Rems {
+    rem(if is_compact(window) { 200. } else { 256. })
+}
+
+/// A video's 16:9 cover, or its mark while it has none.
+pub(crate) fn video_cover(cover: Option<PathBuf>, width: Rems) -> Div {
+    div()
+        .relative()
+        .flex_shrink_0()
+        .w(width)
+        .max_w_full()
+        .aspect_ratio(16. / 9.)
+        .rounded(RADIUS_LARGE)
+        .overflow_hidden()
+        .bg(color(ColorRole::SECONDARY_CONTAINER))
+        .flex()
+        .items_center()
+        .justify_center()
+        .map(|slot| match cover {
+            Some(cover) => slot.child(img(cover).size_full().object_fit(ObjectFit::Cover)),
+            None => slot.child(cover_placeholder(rem(32.))),
+        })
+}
+
+/// A video's title, on the workbench and on a task's card.
+pub(crate) fn video_title(id: String, title: impl Into<SharedString>) -> Stateful<Div> {
+    let role = TypeRole::TitleLarge.scale();
+    accessible_text(ElementId::Name(id.into()), title)
+        .min_w_0()
+        .text_size(role.font_size)
+        .line_height(role.line_height)
+        .font_weight(FontWeight(role.font_weight as f32))
+        .whitespace_normal()
+        .text_ellipsis()
+        .line_clamp(2)
+}
+
+/// Text that names one thing beside a control.
+fn supporting(id: &'static str, text: impl Into<SharedString>) -> Stateful<Div> {
+    accessible_text(id, text)
+        .min_w_0()
+        .text_size(TEXT_BODY)
+        .text_color(color(ColorRole::ON_SURFACE_VARIANT))
+        .whitespace_normal()
+}
+
+/// A button that shows or hides the technical text under it.
+fn details_toggle(id: impl Into<ElementId>, open: bool) -> MaterialButton {
+    material_button(id, ButtonVariant::Text)
+        .icon(disclosure_chevron(open))
+        .child(if open {
+            course2md::tr!("收起技术详情")
+        } else {
+            course2md::tr!("技术详情")
+        })
 }
 
 /// The first line of a message when it is already readable. A raw download
@@ -114,434 +116,42 @@ fn readable_first_line(message: &str) -> Option<&str> {
     (!first.contains("WARNING:") && !first.contains("ERROR:")).then_some(first)
 }
 
-fn help(id: &'static str, text: impl Into<SharedString>) -> Div {
-    crate::theme::supporting_info(id, text).text_sm()
-}
-fn issue(id: &'static str, message: impl Into<SharedString>) -> Stateful<Div> {
-    error_text(id, message).text_sm().whitespace_normal()
-}
-/// An element id that follows the text it shows: an entrance replays and an
-/// expanded detail closes when a different message takes the same place.
-fn text_id(kind: &str, value: &str) -> SharedString {
-    use std::hash::{Hash, Hasher};
-    let mut hash = std::collections::hash_map::DefaultHasher::new();
-    value.hash(&mut hash);
-    format!("import-{kind}-{:x}", hash.finish()).into()
-}
-
-/// One AI processing switch in the processing options.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ConversionAiOption {
-    Proofread,
-    Vision,
-    Summary,
-}
-
-pub(crate) fn conversion_ai_option_label(option: ConversionAiOption) -> &'static str {
-    match option {
-        ConversionAiOption::Proofread => course2md::tr!("校对文字和标点"),
-        ConversionAiOption::Vision => course2md::tr!("校对时附带对应截图"),
-        ConversionAiOption::Summary => course2md::tr!("在开头生成摘要"),
-    }
-}
-
-pub(crate) fn conversion_ai_option_enabled(
-    options: &ConversionOptions,
-    option: ConversionAiOption,
-) -> bool {
-    match option {
-        ConversionAiOption::Proofread => options.llm,
-        ConversionAiOption::Vision => options.vision,
-        ConversionAiOption::Summary => options.summarize,
-    }
-}
-
-pub(crate) fn apply_conversion_ai_option(
-    options: &mut ConversionOptions,
-    option: ConversionAiOption,
-    enabled: bool,
-) {
-    match option {
-        ConversionAiOption::Proofread => options.llm = enabled,
-        ConversionAiOption::Vision => options.vision = enabled,
-        ConversionAiOption::Summary => options.summarize = enabled,
-    }
-}
-
-fn text_source_choices() -> [(TranscriptSource, &'static str); 3] {
-    [
-        (TranscriptSource::Auto, course2md::tr!("自动")),
-        (TranscriptSource::Subtitle, course2md::tr!("仅字幕")),
-        (TranscriptSource::Asr, course2md::tr!("语音识别")),
-    ]
-}
-
-fn text_source_id(mode: TranscriptSource) -> &'static str {
-    match mode {
-        TranscriptSource::Auto => "auto",
-        TranscriptSource::Subtitle => "subtitle",
-        TranscriptSource::Asr => "asr",
-    }
-}
-
-/// A consequence or recovery fact kept beside its action.
-pub(crate) fn conversion_fact(
-    id: &'static str,
-    value: impl Into<SharedString>,
-    warning: bool,
-) -> Stateful<Div> {
-    accessible_text(id, value)
-        .w_full()
-        .min_w_0()
-        .whitespace_normal()
-        .text_size(TEXT_BODY)
-        .text_color(color(if warning { WARNING } else { INK }))
-        .when(warning, |row| row.font_weight(FontWeight::SEMIBOLD))
-}
-
-fn uses_speech(source: &source::Source, source_mode: TranscriptSource) -> bool {
-    source_mode == TranscriptSource::Asr
-        || (source_mode == TranscriptSource::Auto
-            && source.selected_subtitle.is_none()
-            && source.subtitle_request.is_none()
-            && source.subtitle_read_error.is_none()
-            && matches!(
-                source.subtitles,
-                SubtitleEvidence::NoneFound
-                    | SubtitleEvidence::Unsupported { .. }
-                    | SubtitleEvidence::Failed { .. }
-            ))
-}
-
-fn automatic_subtitle_fallback(
-    source: &mut source::Source,
-    source_mode: TranscriptSource,
-    error: Option<&str>,
-) -> bool {
-    if source_mode != TranscriptSource::Auto
-        || source.selected_subtitle.is_some()
-        || matches!(
-            source.subtitle_read_error,
-            Some(SubtitleReadError::Cancelled)
-        )
-    {
-        return false;
-    }
-    let failure = error.map(str::to_owned).or_else(|| {
-        source
-            .subtitle_read_error
-            .as_ref()
-            .map(ToString::to_string)
-            .or_else(|| match &source.subtitles {
-                SubtitleEvidence::Failed { message } => Some(message.clone()),
-                _ => None,
-            })
-    });
-    let Some(message) = failure else {
-        return false;
-    };
-    source.subtitles = SubtitleEvidence::Failed { message };
-    source.subtitle_request = None;
-    source.subtitle_read_error = None;
-    true
-}
-
-fn subtitle_needs_confirmation(source: &source::Source, source_mode: TranscriptSource) -> bool {
-    !uses_speech(source, source_mode)
-        && (source.selected_subtitle.is_none()
-            || source.subtitle_request.is_some()
-            || source.subtitle_read_error.is_some())
-}
-
-/// Follow only this input's submitted recovery chain. A matching URL or the
-/// selected queue item alone cannot establish that a task belongs to this form.
-fn submitted_input_task<'a>(
-    draft: &workspace::Draft,
-    tasks: &'a [workspace::TaskRecord],
-    input: &str,
-) -> Option<&'a workspace::TaskRecord> {
-    if draft.input != input || input.trim().is_empty() {
-        return None;
-    }
-    let find = |id: &str| {
-        let mut matches = tasks.iter().filter(|task| task.id == id);
-        let task = matches.next()?;
-        matches.next().is_none().then_some(task)
-    };
-    let mut task = find(draft.submitted_task.as_deref()?)?;
-    let source_id = &task.plan.source_id;
-    let online = task.plan.source.online;
-    if source_id.is_empty()
-        || task.plan.source.input != input
-        || online != draft.online
-        || draft
-            .source
-            .as_ref()
-            .is_some_and(|source| source.identity != *source_id || source.online != online)
-    {
-        return None;
-    }
-    let mut visited = std::collections::BTreeSet::new();
-    loop {
-        if !visited.insert(task.id.as_str())
-            || task.plan.source_id != *source_id
-            || task.plan.source.identity != *source_id
-            || task.plan.source.online != online
-        {
-            return None;
-        }
-        let Some(next) = task.handled_by.as_deref() else {
-            return Some(task);
-        };
-        let next = find(next)?;
-        if next.parent.as_deref() != Some(task.id.as_str()) {
-            return None;
-        }
-        task = next;
-    }
-}
-
-/// The submitted task still owns this input until it finishes. Its plan
-/// copied the options at submission, so the form cannot change them.
-fn locked_input_task<'a>(
-    draft: &workspace::Draft,
-    tasks: &'a [workspace::TaskRecord],
-    input: &str,
-) -> Option<&'a workspace::TaskRecord> {
-    submitted_input_task(draft, tasks, input).filter(|task| !task.state.finished())
-}
-
-fn completed_input_task<'a>(
-    draft: &workspace::Draft,
-    tasks: &'a [workspace::TaskRecord],
-    input: &str,
-) -> Option<&'a workspace::TaskRecord> {
-    submitted_input_task(draft, tasks, input).filter(|task| {
-        matches!(
-            task.state,
-            workspace::TaskState::Complete | workspace::TaskState::Partial
-        ) && task.artifact.is_some()
-    })
-}
-
-/// A saved result is history when entering the workbench. A running or paused
-/// recovery, an uncertain request, and any changes after submission stay in place.
-fn retired_input_task<'a>(
-    draft: &workspace::Draft,
-    tasks: &'a [workspace::TaskRecord],
-    input: &str,
-) -> Option<&'a workspace::TaskRecord> {
-    let task = submitted_input_task(draft, tasks, input)?;
-    if !task.state.finished()
-        || task.has_uncertain()
-        || (task.state != workspace::TaskState::Cancelled && task.artifact.is_none())
-    {
-        return None;
-    }
-    let submitted = tasks
-        .iter()
-        .find(|task| Some(task.id.as_str()) == draft.submitted_task.as_deref())?;
-    (draft.title == submitted.plan.title
-        && draft.options.as_planned() == submitted.plan.options()
-        && draft.library_id == submitted.plan.library_id
-        && draft.folder == submitted.plan.folder
-        && draft.subtitle == submitted.plan.subtitle
-        && draft
-            .asr_service
-            .as_ref()
-            .is_none_or(|id| Some(id) == submitted.plan.asr_service.as_ref())
-        && draft
-            .ai_service
-            .as_ref()
-            .is_none_or(|id| Some(id) == submitted.plan.ai_service.as_ref()))
-    .then_some(task)
-}
-
-/// A live navigation intent is separate from the saved task. Leaving its
-/// originating input or note ends following without cancelling the work.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum ConversionFollow {
-    Preparing(u64),
-    Task {
-        id: String,
-        source_revision: u64,
-    },
-    ReaderTask {
-        id: String,
-        base_version: PathBuf,
-        reader_revision: u64,
-    },
-}
-
-impl ConversionFollow {
-    /// Opening a viewer owns the old version until the person closes it. Do not
-    /// restore this intent afterwards, even if an in-flight read is still pending.
-    pub(crate) fn interrupt_for_reader_viewer(follow: &mut Option<Self>) {
-        if matches!(follow, Some(Self::ReaderTask { .. })) {
-            *follow = None;
-        }
-    }
-
-    pub(crate) fn submitted(self, revision: u64, id: String) -> Option<Self> {
-        matches!(self, Self::Preparing(current) if current == revision).then_some(Self::Task {
-            id,
-            source_revision: revision,
-        })
-    }
-
-    pub(crate) fn follows(&self, id: &str, revision: u64) -> bool {
-        matches!(self, Self::Task { id: followed, source_revision }
-            if followed == id && *source_revision == revision)
-    }
-
-    pub(crate) fn reader_reprocess(
-        task: &workspace::TaskRecord,
-        version: &std::path::Path,
-        revision: u64,
-    ) -> Option<Self> {
-        let course2md::execution::Operation::Reprocess {
-            base_version_dir,
-            components,
-            ..
-        } = &task.plan.operation
-        else {
-            return None;
-        };
-        (base_version_dir == version && !components.is_empty() && !task.exports_only()).then(|| {
-            Self::ReaderTask {
-                id: task.id.clone(),
-                base_version: base_version_dir.clone(),
-                reader_revision: revision,
-            }
-        })
-    }
-
-    /// Check both before starting an automatic read and after its asynchronous
-    /// load. The latter also retains the caller's existing read-generation guard.
-    pub(crate) fn context_is_current(
-        &self,
-        page: Page,
-        source_revision: u64,
-        reader_revision: u64,
-        version: Option<&std::path::Path>,
-    ) -> bool {
-        match self {
-            Self::Preparing(_) => false,
-            Self::Task {
-                source_revision: expected,
-                ..
-            } => page == Page::New && *expected == source_revision,
-            Self::ReaderTask {
-                base_version,
-                reader_revision: expected,
-                ..
-            } => {
-                page == Page::Result
-                    && *expected == reader_revision
-                    && version == Some(base_version.as_path())
-            }
-        }
-    }
-
-    pub(crate) fn completed_reader_task(
-        &self,
-        task: &workspace::TaskRecord,
-        page: Page,
-        reader_revision: u64,
-        version: Option<&std::path::Path>,
-    ) -> bool {
-        let Self::ReaderTask {
-            id, base_version, ..
-        } = self
-        else {
-            return false;
-        };
-        task.id == *id
-            && self.context_is_current(page, 0, reader_revision, version)
-            && Self::reader_reprocess(task, base_version, reader_revision).as_ref() == Some(self)
-            && matches!(
-                task.state,
-                workspace::TaskState::Complete | workspace::TaskState::Partial
-            )
-            && task
-                .artifact
-                .as_ref()
-                .is_some_and(|path| path != base_version)
-    }
-
-    pub(crate) fn completed_task<'a>(
-        &self,
-        on_workbench: bool,
-        revision: u64,
-        draft: &workspace::Draft,
-        tasks: &'a [workspace::TaskRecord],
-        input: &str,
-    ) -> Option<&'a workspace::TaskRecord> {
-        let task = completed_input_task(draft, tasks, input)?;
-        (on_workbench && self.follows(&task.id, revision)).then_some(task)
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ConversionGate {
-    Wait,
-    Stop,
-    Submit,
-}
-
-/// Normal asynchronous stages retain the first Start intent. Only an abandoned
-/// source or an unresolved material choice ends this automatic continuation.
-/// What a pending Start depends on.
-#[derive(Clone, Copy)]
-struct GateInputs {
-    requested_revision: Option<u64>,
-    current_revision: u64,
-    reading: bool,
-    has_source: bool,
-    needs_text_choice: bool,
-    environment_ready: bool,
-    library_ready: bool,
-    existing_note: bool,
-}
-
-fn conversion_gate(gate: GateInputs) -> ConversionGate {
-    if gate.requested_revision != Some(gate.current_revision) {
-        ConversionGate::Stop
-    } else if gate.reading {
-        ConversionGate::Wait
-    } else if !gate.has_source {
-        ConversionGate::Stop
-    } else if gate.needs_text_choice || !gate.environment_ready || !gate.library_ready {
-        ConversionGate::Wait
-    } else if gate.existing_note {
-        ConversionGate::Stop
-    } else {
-        ConversionGate::Submit
-    }
+/// What a subtitle read belongs to. Its late result counts only while all of this holds.
+struct SubtitleRead {
+    generation: u64,
+    source_generation: u64,
+    identity: String,
+    input: Option<(String, u64)>,
 }
 
 impl Desktop {
     /// Explicit confirmation of an already visible preview owns submission.
     pub fn start_conversion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.reading && self.page == Page::New {
-            self.read_generation = self.read_generation.wrapping_add(1);
-            self.reading = false;
+        if self.page == Page::New {
+            self.reader.change(cx, |reader, _| {
+                if reader.opened.reading {
+                    reader.opened.stop_reading();
+                }
+            });
         }
         let input = self.value(Field::Source, cx);
-        if self.draft().is_some_and(|draft| draft.input != input) {
+        if self.draft(cx).is_some_and(|draft| draft.input != input) {
             if !self.prepare_next_import(&input, window, cx) {
                 return;
             }
-            self.following_conversion = None;
+            self.import.following_conversion = None;
             self.invalidate_source();
         }
         if input.is_empty() {
-            self.source_validation = Some(if self.online() {
-                course2md::tr!("先粘贴视频链接").into()
-            } else {
-                course2md::tr!("先选择一个视频").into()
-            });
-            if self.online() {
+            self.import.source_validation = Some(
+                if self.online(cx) {
+                    course2md::tr!("先粘贴视频链接")
+                } else {
+                    course2md::tr!("先选择一个视频")
+                }
+                .into(),
+            );
+            if self.online(cx) {
                 self.inputs[&Field::Source].update(cx, |input, cx| input.focus(window, cx));
             }
             cx.notify();
@@ -549,18 +159,18 @@ impl Desktop {
         }
         // Preview is a separate user step. Never queue an unseen source,
         // including callers returning from login or selecting a local file.
-        if self.source_preview.is_none() {
+        if self.import.source_preview.is_none() {
             self.inspect_source(window, cx);
             return;
         }
-        self.pending_conversion = Some(self.preview_generation);
-        self.following_conversion = (self.page == Page::New)
-            .then_some(ConversionFollow::Preparing(self.preview_generation));
+        self.import.pending_conversion = Some(self.import.preview_generation);
+        self.import.following_conversion = (self.page == Page::New)
+            .then_some(ConversionFollow::Preparing(self.import.preview_generation));
         self.advance_conversion(window, cx);
     }
 
     pub fn advance_conversion_when_ready(&mut self, cx: &mut Context<Self>) {
-        if self.pending_conversion.is_none() {
+        if self.import.pending_conversion.is_none() {
             return;
         }
         let Some(handle) = cx.windows().first().copied() else {
@@ -575,89 +185,117 @@ impl Desktop {
     }
 
     pub fn advance_conversion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(generation) = self.pending_conversion else {
+        let Some(generation) = self.import.pending_conversion else {
             return;
         };
-        let reading = self.preview_cancel.is_some() || self.subtitle_loading;
-        let source_mode = self.task_options().source_mode;
-        if generation == self.preview_generation
+        let reading = self.import.reading();
+        let source_mode = self.task_options(cx).source_mode;
+        if generation == self.import.preview_generation
             && !reading
-            && let Some(source) = &mut self.source_preview
-            && automatic_subtitle_fallback(source, source_mode, self.subtitle_error.as_deref())
+            && let Some(source) = &mut self.import.source_preview
+            && automatic_subtitle_fallback(
+                source,
+                source_mode,
+                self.import.subtitle_error.as_deref(),
+            )
         {
-            self.subtitle_error = None;
+            self.import.subtitle_error = None;
             if !self.save_current_draft(cx) {
-                self.pending_conversion = None;
+                self.import.pending_conversion = None;
                 return;
             }
         }
         match conversion_gate(GateInputs {
-            requested_revision: self.pending_conversion,
-            current_revision: self.preview_generation,
+            requested_revision: self.import.pending_conversion,
+            current_revision: self.import.preview_generation,
             reading,
-            has_source: self.source_preview.is_some(),
-            needs_text_choice: self.subtitle_attention_required(),
+            has_source: self.import.source_preview.is_some(),
+            needs_text_choice: self.subtitle_attention_required(cx),
             environment_ready: self.environment.is_some(),
-            library_ready: !self.loading,
-            existing_note: self.existing_source_note().is_some(),
+            library_ready: !self.library(cx).loading,
+            existing_note: self.existing_source_note(cx).is_some(),
         }) {
             ConversionGate::Wait => cx.notify(),
             ConversionGate::Stop => {
-                self.pending_conversion = None;
+                self.import.pending_conversion = None;
                 cx.notify();
             }
             ConversionGate::Submit => self.enqueue_current(window, cx),
         }
     }
 
-    fn subtitle_issue(&self, kind: &str, message: &str, cx: &mut Context<Self>) -> Div {
-        let summary = if source::legacy_login_failure_from_text(message) {
-            course2md::tr!("字幕需要登录，或改用语音识别")
-        } else {
-            readable_first_line(message)
-                .unwrap_or(course2md::tr!("无法读取字幕，可重试或改用语音识别"))
-        };
-        let details = if summary != message { message } else { "" };
-        let id = text_id(kind, message);
-        let expanded = self.expanded_subtitle_issue.as_ref() == Some(&id);
-        v_flex()
-            .min_w_0()
-            .gap_2()
-            .child(help("import-subtitle-issue-summary", summary.to_owned()))
-            .when(!details.trim().is_empty(), |view| {
-                view.child(
-                    quiet(id.clone())
-                        .icon(if expanded {
-                            crate::icons::chevron_up()
-                        } else {
-                            crate::icons::chevron_down()
-                        })
-                        .self_start()
-                        .label(if expanded {
-                            course2md::tr!("收起技术详情")
-                        } else {
-                            course2md::tr!("技术详情")
-                        })
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.expanded_subtitle_issue =
-                                if expanded { None } else { Some(id.clone()) };
-                            cx.notify();
-                        })),
-                )
-                .child(motion::disclosure(
-                    text_id("subtitle-technical", message),
-                    expanded,
-                    v_flex().child(help("import-subtitle-issue-details", details.to_owned())),
-                ))
-            })
-    }
-
-    fn import_base_config(&self) -> course2md::settings::ConfigFile {
-        self.workspace
-            .as_ref()
+    fn import_base_config(&self, cx: &App) -> course2md::settings::ConfigFile {
+        self.workspace(cx)
             .and_then(|workspace| workspace.state.draft())
             .and_then(|draft| draft.base_config.clone())
             .unwrap_or_else(|| self.preferences.defaults_config())
+    }
+
+    fn subtitle_read_is_current(&self, read: &SubtitleRead, cx: &App) -> bool {
+        self.import.subtitle_generation == read.generation
+            && self.import.preview_generation == read.source_generation
+            && self
+                .import
+                .source_preview
+                .as_ref()
+                .is_some_and(|source| source.identity == read.identity)
+            && read.input.as_ref().is_none_or(|(id, revision)| {
+                self.workspace(cx)
+                    .is_some_and(|workspace| workspace.state.matches_input(id, *revision))
+            })
+    }
+
+    /// Runs one subtitle read off the UI thread: `mark` records what was asked for
+    /// before any I/O, and `finish` takes the result unless the source moved on.
+    fn read_subtitles<T: Send + 'static>(
+        &mut self,
+        mark: impl FnOnce(&mut Self, &mut Context<Self>),
+        work: impl FnOnce(&source::Source, Arc<AtomicBool>) -> T + Send + 'static,
+        lost: fn() -> T,
+        finish: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(source) = self.import.source_preview.clone() else {
+            return;
+        };
+        let generation = self.stop_subtitle_read();
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.import.subtitle_cancel = Some(cancel.clone());
+        self.import.subtitle_loading = true;
+        self.import.subtitle_error = None;
+        mark(self, cx);
+        if !self.save_current_draft(cx) {
+            self.import.subtitle_loading = false;
+            self.import.subtitle_cancel = None;
+            return;
+        }
+        let read = SubtitleRead {
+            generation,
+            source_generation: self.import.preview_generation,
+            identity: source.identity.clone(),
+            input: self
+                .workspace(cx)
+                .and_then(|workspace| workspace.state.draft())
+                .map(|draft| (draft.id.clone(), draft.revision)),
+        };
+        self.import.preview_workers += 1;
+        let task = crate::spawn_blocking_io(move || work(&source, cancel));
+        cx.spawn(async move |this, cx| {
+            let result = task.await.unwrap_or_else(lost);
+            let _ = this.update(cx, |this, cx| {
+                this.import.preview_workers = this.import.preview_workers.saturating_sub(1);
+                if !this.subtitle_read_is_current(&read, cx) {
+                    return;
+                }
+                this.import.subtitle_loading = false;
+                this.import.subtitle_cancel = None;
+                finish(this, result, cx);
+                this.advance_conversion_when_ready(cx);
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
     }
 
     pub fn confirm_subtitle(
@@ -666,70 +304,52 @@ impl Desktop {
         explicit: bool,
         cx: &mut Context<Self>,
     ) {
-        let Some(source) = self.source_preview.clone() else {
-            return;
-        };
-        let generation = self.stop_subtitle_read();
-        let source_generation = self.preview_generation;
-        let token = self
-            .workspace
-            .as_ref()
-            .and_then(|workspace| workspace.state.draft())
-            .map(|draft| (draft.id.clone(), draft.revision));
-        let source_id = source.identity.clone();
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.subtitle_cancel = Some(cancel.clone());
-        self.subtitle_loading = true;
-        self.subtitle_error = None;
-        if explicit {
-            // The requested text source takes effect before I/O. A failed
-            // caption read must never silently keep the previous ASR choice.
-            self.update_task_options(|o| o.source_mode = TranscriptSource::Subtitle, cx);
-        }
-        if let Some(source) = &mut self.source_preview {
-            source.subtitle_request = Some(track.clone());
-            source.subtitle_read_error = None;
-        }
-        if !self.save_current_draft(cx) {
-            self.subtitle_loading = false;
-            self.subtitle_cancel = None;
-            return;
-        }
-        self.preview_workers += 1;
-        let task = crate::spawn_blocking_io(move || source::read_subtitle(&source, &track, cancel));
-        cx.spawn(async move |this, cx| {
-            let result = task.recv().await.unwrap_or_else(|_| {
-                Err(course2md::subtitle::SubtitleReadError::Failed {
+        self.read_track(track, explicit, false, cx);
+    }
+
+    /// Read the track the source's order put first. When it cannot be read, the
+    /// next ones are tried, as the command line does; a track the person picked,
+    /// or one they had before, is read alone.
+    pub fn confirm_default_subtitle(&mut self, track: SubtitleTrack, cx: &mut Context<Self>) {
+        self.read_track(track, false, true, cx);
+    }
+
+    fn read_track(
+        &mut self,
+        track: SubtitleTrack,
+        explicit: bool,
+        fallback: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let requested = track.clone();
+        self.read_subtitles(
+            move |this, cx| {
+                if explicit {
+                    // The requested text source takes effect before I/O. A failed
+                    // caption read must never silently keep the previous ASR choice.
+                    this.update_task_options(|o| o.source_mode = TranscriptSource::Subtitle, cx);
+                }
+                if let Some(source) = &mut this.import.source_preview {
+                    source.subtitle_request = Some(requested);
+                    source.subtitle_read_error = None;
+                }
+            },
+            move |source, cancel| {
+                if fallback {
+                    source::read_default_subtitle(source, &track, cancel)
+                } else {
+                    source::read_subtitle(source, &track, cancel)
+                }
+            },
+            || {
+                Err(SubtitleReadError::Failed {
                     message: course2md::tr!("字幕读取意外中断").into(),
                 })
-            });
-            let _ = this.update(cx, |this, cx| {
-                this.preview_workers = this.preview_workers.saturating_sub(1);
-                if this.subtitle_generation != generation
-                    || this.preview_generation != source_generation
-                {
-                    return;
-                }
-                if !this
-                    .source_preview
-                    .as_ref()
-                    .is_some_and(|source| source.identity == source_id)
-                {
-                    return;
-                }
-                if let Some((id, revision)) = &token
-                    && !this
-                        .workspace
-                        .as_ref()
-                        .is_some_and(|workspace| workspace.state.matches_input(id, *revision))
-                {
-                    return;
-                }
-                this.subtitle_loading = false;
-                this.subtitle_cancel = None;
+            },
+            move |this, result, cx| {
                 match result {
                     Ok(subtitle) => {
-                        if let Some(source) = &mut this.source_preview {
+                        if let Some(source) = &mut this.import.source_preview {
                             source.selected_subtitle = Some(subtitle);
                             source.subtitle_request = None;
                             source.subtitle_read_error = None;
@@ -740,32 +360,29 @@ impl Desktop {
                                 cx,
                             );
                         }
-                        this.save_current_draft(cx);
                     }
                     Err(SubtitleReadError::Cancelled) => {
-                        this.pending_conversion = None;
+                        this.import.pending_conversion = None;
+                        return;
                     }
                     Err(error) => {
-                        this.subtitle_error = Some(error.to_string());
-                        if let Some(source) = &mut this.source_preview {
+                        this.import.subtitle_error = Some(error.to_string());
+                        if let Some(source) = &mut this.import.source_preview {
                             source.subtitle_read_error = Some(error);
                         }
-                        this.save_current_draft(cx);
                     }
                 }
-                this.advance_conversion_when_ready(cx);
-                cx.notify();
-            });
-        })
-        .detach();
-        cx.notify();
+                this.save_current_draft(cx);
+            },
+            cx,
+        );
     }
 
     fn choose_attached_subtitle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(source) = self.source_preview.clone() else {
+        let Some(source) = self.import.source_preview.clone() else {
             return;
         };
-        let source_generation = self.preview_generation;
+        let source_generation = self.import.preview_generation;
         let prompt = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -775,8 +392,9 @@ impl Desktop {
         cx.spawn_in(window, async move |this, cx| {
             let result = prompt.await;
             let _ = this.update_in(cx, |this, _, cx| {
-                if this.preview_generation != source_generation
+                if this.import.preview_generation != source_generation
                     || !this
+                        .import
                         .source_preview
                         .as_ref()
                         .is_some_and(|current| current.identity == source.identity)
@@ -786,41 +404,17 @@ impl Desktop {
                 match result {
                     Ok(Ok(Some(paths))) => {
                         if let Some(path) = paths.into_iter().next() {
-                            if !course2md::subtitle::is_subtitle_file(&path) {
-                                this.subtitle_error =
-                                    Some(course2md::tr!("请选择 SRT 或 VTT 字幕文件").into());
-                            } else {
-                                let track = course2md::subtitle::file_track(path, None);
-                                if let Some(source) = &mut this.source_preview {
-                                    match &mut source.subtitles {
-                                        SubtitleEvidence::Found { tracks, .. } => {
-                                            if !tracks
-                                                .iter()
-                                                .any(|candidate| candidate.id == track.id)
-                                            {
-                                                tracks.push(track.clone());
-                                            }
-                                        }
-                                        _ => {
-                                            source.subtitles = SubtitleEvidence::Found {
-                                                tracks: vec![track.clone()],
-                                                warning: None,
-                                            }
-                                        }
-                                    }
-                                }
-                                this.confirm_subtitle(track, true, cx);
-                            }
+                            this.attach_subtitle(path, cx);
                         }
                     }
                     Ok(Ok(None)) => {}
                     Ok(Err(error)) => {
-                        this.subtitle_error = Some(course2md::tr!(
+                        this.import.subtitle_error = Some(course2md::tr!(
                             "无法打开字幕选择器：{}",
                             format!("{error:#}")
                         ))
                     }
-                    Err(error) => this.subtitle_error = Some(error.to_string()),
+                    Err(error) => this.import.subtitle_error = Some(error.to_string()),
                 }
                 cx.notify();
             });
@@ -828,177 +422,150 @@ impl Desktop {
         .detach();
     }
 
+    fn attach_subtitle(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if !course2md::subtitle::is_subtitle_file(&path) {
+            self.import.subtitle_error = Some(course2md::tr!("请选择 SRT 或 VTT 字幕文件").into());
+            return;
+        }
+        let track = course2md::subtitle::file_track(path, None);
+        if let Some(source) = &mut self.import.source_preview {
+            match &mut source.subtitles {
+                SubtitleEvidence::Found { tracks, .. } => {
+                    if !tracks.iter().any(|candidate| candidate.id == track.id) {
+                        tracks.push(track.clone());
+                    }
+                }
+                _ => {
+                    source.subtitles = SubtitleEvidence::Found {
+                        tracks: vec![track.clone()],
+                        warning: None,
+                    }
+                }
+            }
+        }
+        self.confirm_subtitle(track, true, cx);
+    }
+
     fn retry_subtitles(&mut self, cx: &mut Context<Self>) {
-        let Some(source) = self.source_preview.clone() else {
-            return;
+        self.read_subtitles(
+            |this, _| {
+                if let Some(source) = &mut this.import.source_preview {
+                    source.subtitle_read_error = Some(SubtitleReadError::Failed {
+                        message: course2md::tr!("字幕重新读取未完成").into(),
+                    });
+                }
+            },
+            source::refresh_subtitles,
+            || Err(anyhow::anyhow!(course2md::tr!("字幕读取意外中断"))),
+            |this, result, cx| this.finish_subtitle_refresh(result, cx),
+            cx,
+        );
+    }
+
+    fn finish_subtitle_refresh(
+        &mut self,
+        result: anyhow::Result<SubtitleEvidence>,
+        cx: &mut Context<Self>,
+    ) {
+        let mut evidence = match result {
+            Ok(evidence) => evidence,
+            Err(error) => {
+                self.import.subtitle_error = Some(format!("{error:#}"));
+                if let Some(source) = &mut self.import.source_preview {
+                    source.subtitle_read_error = self
+                        .import
+                        .subtitle_error
+                        .clone()
+                        .map(|message| SubtitleReadError::Failed { message });
+                }
+                self.save_current_draft(cx);
+                return;
+            }
         };
-        let generation = self.stop_subtitle_read();
-        let source_generation = self.preview_generation;
-        let identity = source.identity.clone();
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.subtitle_cancel = Some(cancel.clone());
-        self.subtitle_loading = true;
-        self.subtitle_error = None;
-        if let Some(source) = &mut self.source_preview {
-            source.subtitle_read_error = Some(SubtitleReadError::Failed {
-                message: course2md::tr!("字幕重新读取未完成").into(),
-            });
+        if let SubtitleEvidence::Found { tracks, .. } = &mut evidence {
+            let original = self
+                .import
+                .source_preview
+                .as_ref()
+                .and_then(|source| source.original_language.as_deref());
+            course2md::subtitle::sort_tracks(
+                tracks,
+                &self.preferences.generation().preferred_subtitle_languages,
+                course2md::i18n::lang().code(),
+                original,
+            );
         }
-        if !self.save_current_draft(cx) {
-            self.subtitle_loading = false;
-            self.subtitle_cancel = None;
-            return;
-        }
-        let token = self
-            .workspace
+        let old_id = self
+            .import
+            .source_preview
             .as_ref()
-            .and_then(|workspace| workspace.state.draft())
-            .map(|draft| (draft.id.clone(), draft.revision));
-        self.preview_workers += 1;
-        let task = crate::spawn_blocking_io(move || source::refresh_subtitles(&source, cancel));
-        cx.spawn(async move |this, cx| {
-            let result = task
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(course2md::tr!("字幕读取意外中断"))));
-            let _ = this.update(cx, |this, cx| {
-                this.preview_workers = this.preview_workers.saturating_sub(1);
-                if this.subtitle_generation != generation
-                    || this.preview_generation != source_generation
-                    || token.as_ref().is_some_and(|(id, revision)| {
-                        !this
-                            .workspace
-                            .as_ref()
-                            .is_some_and(|workspace| workspace.state.matches_input(id, *revision))
-                    })
-                    || !this
-                        .source_preview
-                        .as_ref()
-                        .is_some_and(|source| source.identity == identity)
-                {
-                    return;
-                }
-                this.subtitle_loading = false;
-                this.subtitle_cancel = None;
-                match result {
-                    Ok(mut evidence) => {
-                        if let SubtitleEvidence::Found { tracks, .. } = &mut evidence {
-                            let original = this
-                                .source_preview
-                                .as_ref()
-                                .and_then(|source| source.original_language.as_deref());
-                            course2md::subtitle::sort_tracks(
-                                tracks,
-                                &this.preferences.generation().preferred_subtitle_languages,
-                                "zh-Hans",
-                                original,
-                            );
-                        }
-                        let old_id = this
-                            .source_preview
-                            .as_ref()
-                            .and_then(|source| source.selected_subtitle.as_ref())
-                            .map(|subtitle| subtitle.track_id.clone());
-                        let track = match &old_id {
-                            Some(id) => evidence.tracks().iter().find(|track| &track.id == id),
-                            None => evidence.tracks().first(),
-                        }
-                        .cloned();
-                        if old_id.is_some() && track.is_none() {
-                            this.subtitle_error = Some(course2md::tr!("原字幕无法重新读取").into());
-                        }
-                        if let Some(source) = &mut this.source_preview {
-                            source.subtitles = evidence;
-                            source.subtitle_read_error = this
-                                .subtitle_error
-                                .clone()
-                                .map(|message| SubtitleReadError::Failed { message });
-                        }
-                        this.save_current_draft(cx);
-                        if let Some(track) = track {
-                            this.confirm_subtitle(track, false, cx);
-                        }
-                    }
-                    Err(error) => {
-                        this.subtitle_error = Some(format!("{error:#}"));
-                        if let Some(source) = &mut this.source_preview {
-                            source.subtitle_read_error = this
-                                .subtitle_error
-                                .clone()
-                                .map(|message| SubtitleReadError::Failed { message });
-                        }
-                        this.save_current_draft(cx);
-                    }
-                }
-                this.advance_conversion_when_ready(cx);
-                cx.notify();
-            });
-        })
-        .detach();
-        cx.notify();
+            .and_then(|source| source.selected_subtitle.as_ref())
+            .map(|subtitle| subtitle.track_id.clone());
+        let track = match &old_id {
+            Some(id) => evidence.tracks().iter().find(|track| &track.id == id),
+            None => evidence.tracks().first(),
+        }
+        .cloned();
+        if old_id.is_some() && track.is_none() {
+            self.import.subtitle_error = Some(course2md::tr!("原字幕无法重新读取").into());
+        }
+        if let Some(source) = &mut self.import.source_preview {
+            source.subtitles = evidence;
+            source.subtitle_read_error = self
+                .import
+                .subtitle_error
+                .clone()
+                .map(|message| SubtitleReadError::Failed { message });
+        }
+        self.save_current_draft(cx);
+        match track {
+            Some(track) if old_id.is_none() => self.confirm_default_subtitle(track, cx),
+            Some(track) => self.confirm_subtitle(track, false, cx),
+            None => {}
+        }
     }
 
     /// Cancel any subtitle read in flight and ignore its late result.
     fn stop_subtitle_read(&mut self) -> u64 {
-        if let Some(cancel) = self.subtitle_cancel.take() {
-            cancel.store(true, Ordering::Relaxed);
-        }
-        self.subtitle_generation = self.subtitle_generation.wrapping_add(1);
-        self.subtitle_loading = false;
-        self.subtitle_generation
+        self.import.stop_subtitle_read()
     }
 
     /// Stop reading subtitles and drop the unfinished request.
     fn abort_subtitle_read(&mut self) {
         self.stop_subtitle_read();
-        if let Some(source) = &mut self.source_preview {
+        if let Some(source) = &mut self.import.source_preview {
             source.subtitle_request = None;
             source.subtitle_read_error = None;
         }
     }
 
-    fn use_speech(&mut self, cx: &mut Context<Self>) {
+    /// The person settled the text source: drop what was in flight and go on.
+    fn settle_text_source(&mut self, mode: TranscriptSource, cx: &mut Context<Self>) {
         self.abort_subtitle_read();
-        self.subtitle_error = None;
-        self.update_task_options(|o| o.source_mode = TranscriptSource::Asr, cx);
+        self.import.subtitle_error = None;
+        self.update_task_options(|o| o.source_mode = mode, cx);
         self.advance_conversion_when_ready(cx);
         cx.notify();
     }
 
+    fn use_speech(&mut self, cx: &mut Context<Self>) {
+        self.settle_text_source(TranscriptSource::Asr, cx);
+    }
+
     fn use_confirmed_subtitle(&mut self, cx: &mut Context<Self>) {
-        if !self
+        if self
+            .import
             .source_preview
             .as_ref()
             .is_some_and(|source| source.selected_subtitle.is_some())
         {
-            return;
+            self.settle_text_source(TranscriptSource::Subtitle, cx);
         }
-        self.abort_subtitle_read();
-        self.subtitle_error = None;
-        self.update_task_options(|o| o.source_mode = TranscriptSource::Subtitle, cx);
-        self.advance_conversion_when_ready(cx);
-        cx.notify();
     }
 
     fn select_source_input(&mut self, input: String, window: &mut Window, cx: &mut Context<Self>) {
         self.inputs[&Field::Source].update(cx, |state, cx| state.set_value(input, window, cx));
         self.inspect_source(window, cx);
-    }
-
-    fn toggle_candidate(&mut self, input: &str, cx: &mut Context<Self>) {
-        if !self.selected_candidates.remove(input) {
-            self.selected_candidates.insert(input.to_owned());
-        }
-        cx.notify();
-    }
-
-    fn set_candidate_selected(&mut self, input: &str, selected: bool, cx: &mut Context<Self>) {
-        if selected {
-            self.selected_candidates.insert(input.to_owned());
-        } else {
-            self.selected_candidates.remove(input);
-        }
-        cx.notify();
     }
 
     pub(crate) fn drop_source_files(
@@ -1007,7 +574,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.online() {
+        if self.online(cx) {
             self.switch_source_kind(false, window, cx);
         }
         match files {
@@ -1020,8 +587,9 @@ impl Desktop {
             [] => {}
             _ => {
                 self.invalidate_source();
-                self.source_collection_title = Some(course2md::tr!("选择要处理的视频").into());
-                self.source_candidates = files
+                self.import.source_collection_title =
+                    Some(course2md::tr!("选择要处理的视频").into());
+                self.import.source_candidates = files
                     .iter()
                     .map(|path| source::SourceCandidate {
                         input: path.display().to_string(),
@@ -1040,28 +608,11 @@ impl Desktop {
         }
     }
 
-    /// Source navigation is separate from the editable surface.
-    fn source_kind_tabs(&self, cx: &mut Context<Self>) -> Div {
-        div().w_full().flex().justify_center().child(
-            SingleChoiceGroup::new("source-kind", course2md::tr!("视频来源"))
-                .options([
-                    ("online", course2md::tr!("视频链接")),
-                    ("local", course2md::tr!("本地文件")),
-                ])
-                .icon("online", icons::link())
-                .icon("local", icons::movie())
-                .selected(if self.online() { "online" } else { "local" })
-                .on_change(cx.listener(|this, value: &SharedString, window, cx| {
-                    this.switch_source_kind(value.as_ref() == "online", window, cx);
-                })),
-        )
-    }
-
-    pub(super) fn subtitle_attention_required(&self) -> bool {
-        self.subtitle_loading
-            || self.subtitle_error.is_some()
-            || self.source_preview.as_ref().is_some_and(|source| {
-                subtitle_needs_confirmation(source, self.task_options().source_mode)
+    pub(super) fn subtitle_attention_required(&self, cx: &App) -> bool {
+        self.import.subtitle_loading
+            || self.import.subtitle_error.is_some()
+            || self.import.source_preview.as_ref().is_some_and(|source| {
+                subtitle_needs_confirmation(source, self.task_options(cx).source_mode)
             })
     }
 
@@ -1074,12 +625,12 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         let saved = self.update_task_options(edit, cx);
-        if !self.task_options().uses_cloud_provider()
+        if !self.task_options(cx).uses_cloud_provider()
             // The options panel shows this model's status.
-            && (self.import_uses_speech()
-                || self.task_options().source_mode != TranscriptSource::Subtitle)
+            && (self.import_uses_speech(cx)
+                || self.task_options(cx).source_mode != TranscriptSource::Subtitle)
         {
-            let (provider, model, root) = self.import_model_request();
+            let (provider, model, root) = self.import_model_request(cx);
             self.ensure_model_diagnostic(provider, Some(&model), &root, cx);
         }
         if saved {
@@ -1088,1039 +639,803 @@ impl Desktop {
         cx.notify();
     }
 
-    /// Visible field, local file target, and status belonging to this source.
-    /// The link field's placeholder names the supported sites when the field,
-    /// as last laid out at the current text scale, can hold it whole;
-    /// otherwise a shorter one, so it is never cut off mid-word.
-    fn fit_source_placeholder(&self, window: &mut Window, cx: &mut Context<Self>) {
-        let input = self.inputs[&Field::Source].clone();
-        let width = f32::from(input.read(cx).input_bounds().size.width);
-        // The field's bounds come from the last layout. After the window or
-        // text scale changed (perhaps while another page was shown), they
-        // are stale for this frame, so ask for one more.
-        let frame = (window.viewport_size(), window.rem_size());
-        if self.source_placeholder_fit.replace(frame) != frame {
-            window.request_animation_frame();
+    /// The link and what can be done with it, or the local file in its place.
+    fn source_input(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+        let local = (!self.online(cx)).then(|| self.local_source_input(cx));
+        if let Some(local) = local {
+            return v_flex()
+                .w_full()
+                .min_w_0()
+                .gap(HERO_HINT_GAP)
+                .child(
+                    h_flex().w_full().justify_center().child(
+                        ConnectedButtonGroup::new("source-kind", course2md::tr!("视频来源"))
+                            .tone(ButtonTone::Neutral)
+                            .options([
+                                ("online", course2md::tr!("视频链接")),
+                                ("local", course2md::tr!("本地文件")),
+                            ])
+                            .icon("online", symbols::link())
+                            .icon("local", symbols::movie())
+                            .selected("local")
+                            .on_change(cx.listener(|this, value: &SharedString, window, cx| {
+                                this.switch_source_kind(value.as_ref() == "online", window, cx);
+                            })),
+                    ),
+                )
+                .children(local);
         }
-        let candidates = [
-            course2md::tr!("粘贴 YouTube 或 Bilibili 视频链接"),
-            course2md::tr!("粘贴视频链接"),
-            course2md::tr!("视频链接"),
-        ];
-        let size = f32::from(SOURCE_FIELD_TEXT.to_pixels(window.rem_size()));
-        let chosen = if width <= 0. {
-            // Not laid out yet: the full text, refined on the next frame.
-            candidates[0]
+        let validation = self
+            .import
+            .source_preview
+            .is_none()
+            .then(|| self.import.source_validation.clone())
+            .flatten();
+        // A collection whose videos are listed did not fail: what it could not confirm
+        // is a note under the list, not an error on the link.
+        let failed = validation.is_some()
+            || (self.import.preview_error.is_some() && self.import.source_candidates.is_empty());
+        // The start action owns the submit focus once it is on screen.
+        let start_shown = self.import.source_preview.is_some() && self.can_start_input(cx);
+        let preview_label = course2md::tr!("预览视频");
+        let preview_disabled = self.import.preview_cancel.is_some()
+            || self.value(Field::Source, cx).is_empty()
+            || self.owning_task(cx).is_some();
+        let preview_click = cx.listener(|this, _, window, cx| this.inspect_source(window, cx));
+        // A narrow window keeps the field's text: the action folds to its icon.
+        let preview = if is_compact(window) {
+            ui::tip_button(
+                "preview-source",
+                symbols::visibility(),
+                preview_label,
+                |button| {
+                    button
+                        .variant(IconButtonVariant::Tonal)
+                        .button_size(ButtonSize::Medium)
+                        .disabled(preview_disabled)
+                        .on_click(preview_click)
+                        .when(!start_shown, |b| b.track_focus(&self.import_submit_focus))
+                },
+            )
+            .into_any_element()
         } else {
-            candidates
-                .into_iter()
-                .find(|text| shaped_width(text, size, FontWeight::NORMAL, window) + 2. <= width)
-                .unwrap_or(candidates[2])
+            material_button("preview-source", ButtonVariant::Tonal)
+                .button_size(ButtonSize::Medium)
+                .icon(symbols::visibility())
+                .child(preview_label)
+                .disabled(preview_disabled)
+                .on_click(preview_click)
+                .when(!start_shown, |b| b.track_focus(&self.import_submit_focus))
+                .into_any_element()
         };
-        if input.read(cx).presentation().placeholder().as_ref() != chosen {
-            input.update(cx, |state, cx| state.set_placeholder(chosen, window, cx));
-        }
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(HERO_HINT_GAP)
+            .child(
+                TextField::new("source-link", &self.inputs[&Field::Source])
+                    .w_full()
+                    .hero(course2md::tr!("视频链接"))
+                    .leading_icon(Icon::from(symbols::link()))
+                    .trailing_icon(preview)
+                    .error(failed)
+                    .when_some(validation, |field, message| field.supporting_text(message)),
+            )
+            .child(
+                h_flex()
+                    .w_full()
+                    .justify_center()
+                    .items_center()
+                    .flex_wrap()
+                    .gap(rem(8.))
+                    .child(
+                        Icon::from(symbols::file_upload())
+                            .size(rem(20.))
+                            .color(color(ColorRole::ON_SURFACE_VARIANT)),
+                    )
+                    .child(supporting(
+                        "import-drop-hint",
+                        course2md::tr!("或把本地视频拖进窗口"),
+                    ))
+                    .child(
+                        material_button("choose-local-video", ButtonVariant::Text)
+                            .child(course2md::tr!("选择文件"))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.switch_source_kind(false, window, cx);
+                                this.pick_video(window, cx);
+                            })),
+                    ),
+            )
     }
 
-    pub fn box_source_input(
-        &self,
-        preview_extra: Option<Div>,
-        options: Option<AnyElement>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let mut view = v_flex().w_full().min_w_0().gap(HERO_GAP);
-        self.fit_source_placeholder(window, cx);
-        let focused = self.inputs[&Field::Source]
-            .read(cx)
-            .focus_handle(cx)
-            .is_focused(window);
-        if self.online() {
-            let validation = self
-                .source_preview
-                .is_none()
-                .then(|| self.source_validation.clone())
-                .flatten();
-            let filled = !self.value(Field::Source, cx).trim().is_empty();
-            let failed = validation.is_some() || self.preview_error.is_some();
-            view = view.child(
-                v_flex()
-                    .gap_2()
-                    // One pill owns the field and its preview action, so the
-                    // action reads as part of the input.
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .min_w_0()
-                            .min_h(rems(72. / 14.))
-                            .py(rems(8. / 14.))
-                            .pl(rems(24. / 14.))
-                            .pr(rems(8. / 14.))
-                            .gap(rems(12. / 14.))
-                            .items_center()
-                            .rounded(RADIUS_PILL)
-                            .bg(color(SURFACE))
-                            // The field's own ring is off inside the pill; the pill
-                            // draws a 2px ring while focused or filled. The ring is
-                            // always laid out so the text never moves.
-                            .border_2()
-                            .border_color(color(if failed {
-                                DANGER
-                            } else if focused || filled {
-                                ACCENT
-                            } else {
-                                SURFACE
-                            }))
-                            .child(
-                                Icon::new(icons::link())
-                                    .size(rems(22. / 14.))
-                                    .flex_shrink_0()
-                                    .text_color(color(GRAY)),
+    /// The local source: a drop target while empty, the file once chosen; the preview
+    /// card takes its place when the file has been read.
+    fn local_source_input(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let input = self.value(Field::Source, cx);
+        let choose = |id: &'static str, variant, label: &'static str, cx: &mut Context<Self>| {
+            material_button(id, variant)
+                .when(variant == ButtonVariant::Outlined, |button| {
+                    button.tone(ButtonTone::Accent)
+                })
+                .icon(symbols::folder_open())
+                .child(label)
+                .on_click(cx.listener(|this, _, window, cx| this.pick_video(window, cx)))
+        };
+        if input.is_empty() {
+            return Some(
+                // The kit's drop target on the tile's surface: dashed at rest, primary
+                // while a file is dragged over it.
+                div().w_full().min_w_0().child(
+                    drop_target("import-drop-zone", course2md::tr!("拖入本地视频"), false)
+                        .w_full()
+                        .min_w_0()
+                        .bg(color(ColorRole::SURFACE))
+                        .rounded(TILE_RADIUS)
+                        .flex()
+                        .flex_col()
+                        .gap(rem(16.))
+                        .p(rem(32.))
+                        .items_center()
+                        .child(
+                            Icon::from(symbols::file_upload())
+                                .size(rem(32.))
+                                .color(color(ColorRole::PRIMARY)),
+                        )
+                        .child(
+                            accessible_text(
+                                "import-drop-instruction",
+                                course2md::tr!("拖入本地视频"),
                             )
-                            .child(
-                                div().flex_1().min_w_0().child(
-                                    text_input(&self.inputs[&Field::Source])
-                                        .appearance(false)
-                                        .aria_label(course2md::tr!("视频链接"))
-                                        .w_full()
-                                        .min_w_0()
-                                        .px_0()
-                                        .text_size(SOURCE_FIELD_TEXT),
-                                ),
-                            )
-                            .when(failed, |row| {
-                                row.child(
-                                    icons::warning()
-                                        .size(rems(22. / 14.))
-                                        .flex_shrink_0()
-                                        .text_color(color(DANGER)),
-                                )
-                            })
-                            .child(self.preview_source_button(preview_field_tight(window), cx)),
-                    )
-                    .when_some(validation, |view, message| {
-                        view.child(issue("import-validation", message).px(rems(24. / 14.)))
-                    }),
+                            .text_size(TEXT_BODY)
+                            .font_weight(FontWeight::MEDIUM),
+                        )
+                        .child(choose(
+                            "choose-video",
+                            ButtonVariant::Filled,
+                            course2md::tr!("选择视频"),
+                            cx,
+                        )),
+                ),
             );
-            view = view.child(self.local_upload_hint(cx));
-        } else {
-            view = self.local_source_input(view, cx);
         }
-        if self.preview_cancel.is_some() {
-            // The reading state keeps the preview card's geometry so the result
-            // replaces it in place.
-            let bar = |width: f32, height: f32| {
-                div()
-                    .w(relative(width))
-                    .h(rems(height / 14.))
-                    .rounded_full()
-                    .bg(color(SURFACE_HIGH))
-            };
-            view = view.child(motion::state_enter(
-                "source-reading-enter",
-                v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .p(rems(16. / 14.))
-                    .gap(rems(16. / 14.))
-                    .rounded(RADIUS_HERO)
-                    .bg(color(SURFACE))
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .min_w_0()
-                            .flex_wrap()
-                            .gap(rems(20. / 14.))
-                            .child(
-                                div()
-                                    .w(rems(if is_compact(window) { 200. } else { 256. } / 14.))
-                                    .max_w_full()
-                                    .flex_shrink_0()
-                                    .aspect_ratio(16. / 9.)
-                                    .rounded(px(18.))
-                                    .bg(color(SECONDARY_CONTAINER)),
+        if self.import.source_preview.is_some() {
+            return None;
+        }
+        let filename = PathBuf::from(&input)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| input.clone());
+        Some(
+            v_flex()
+                .w_full()
+                .min_w_0()
+                .gap(rem(8.))
+                .child(
+                    tile([true; 4])
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap(rem(12.))
+                        .p(rem(16.))
+                        .child(
+                            semantic_label(
+                                "selected-local-video-name",
+                                filename,
+                                Icon::from(symbols::movie()).color(color(ColorRole::PRIMARY)),
                             )
-                            .child(
-                                v_flex()
-                                    .flex_1()
-                                    .min_w(rems(240. / 14.))
-                                    .gap(rems(12. / 14.))
-                                    .child(
-                                        h_flex()
-                                            .w_full()
-                                            .items_start()
-                                            .gap_2()
-                                            .child(
-                                                accessible_text(
-                                                    "import-reading-state",
-                                                    course2md::tr!("正在读取视频信息…"),
-                                                )
-                                                .role(Role::Status)
-                                                .flex_1()
-                                                .min_w_0()
-                                                .text_size(TEXT_LEAD)
-                                                .line_height(rems(28. / 14.))
-                                                .text_color(color(GRAY)),
+                            .flex_1()
+                            .flex_basis(rem(240.)),
+                        )
+                        .child(choose(
+                            "choose-video",
+                            ButtonVariant::Outlined,
+                            course2md::tr!("更换视频"),
+                            cx,
+                        ))
+                        .when(self.can_start_input(cx), |row| {
+                            row.child(
+                                material_button("preview-source", ButtonVariant::Tonal)
+                                    .icon(symbols::visibility())
+                                    .child(course2md::tr!("预览视频"))
+                                    .track_focus(&self.import_submit_focus)
+                                    .disabled(self.import.preview_cancel.is_some())
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.inspect_source(window, cx)
+                                    })),
+                            )
+                        }),
+                )
+                .when_some(self.import.source_validation.clone(), |view, error| {
+                    view.child(error_text("import-preview-error", error).whitespace_normal())
+                }),
+        )
+    }
+
+    /// While the video is read, a card in the shape its result will take.
+    fn source_reading(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let label = course2md::tr!("取消读取视频");
+        let bar = |width: f32| {
+            div()
+                .w(relative(width))
+                .h(rem(16.))
+                .rounded_full()
+                .bg(color(ColorRole::SURFACE_CONTAINER_HIGHEST))
+        };
+        motion::state_enter(
+            "source-reading-enter",
+            tile([true; 4])
+                .rounded(RADIUS_HERO)
+                .flex()
+                .flex_col()
+                .p(rem(16.))
+                .gap(rem(16.))
+                .child(
+                    h_flex()
+                        .w_full()
+                        .min_w_0()
+                        .flex_wrap()
+                        .gap(rem(20.))
+                        .child(
+                            div()
+                                .w(cover_width(window))
+                                .max_w_full()
+                                .flex_shrink_0()
+                                .aspect_ratio(16. / 9.)
+                                .rounded(RADIUS_LARGE)
+                                .bg(color(ColorRole::SECONDARY_CONTAINER)),
+                        )
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w(rem(240.))
+                                .gap(rem(12.))
+                                .child(
+                                    h_flex()
+                                        .w_full()
+                                        .items_center()
+                                        .gap(rem(8.))
+                                        .child(
+                                            accessible_text(
+                                                "import-reading-state",
+                                                course2md::tr!("正在读取视频信息…"),
                                             )
-                                            .child(
-                                                icon_button(
-                                                    "cancel-source-read",
-                                                    CONTROL_HEIGHT,
-                                                    false,
-                                                    cx,
-                                                )
-                                                .icon(crate::icons::close())
-                                                .accessibility_label(course2md::tr!("取消读取视频"))
-                                                .tooltip(course2md::tr!("取消读取视频"))
-                                                .on_click(cx.listener(|this, _, _, cx| {
+                                            .role(Role::Status)
+                                            .flex_1()
+                                            .min_w_0()
+                                            .whitespace_normal(),
+                                        )
+                                        .child(ui::tip_button(
+                                            "cancel-source-read",
+                                            symbols::close(),
+                                            label,
+                                            |button| {
+                                                button.on_click(cx.listener(|this, _, _, cx| {
                                                     this.invalidate_source();
                                                     cx.notify();
-                                                })),
-                                            ),
-                                    )
-                                    .child(bar(0.72, 14.))
-                                    .child(bar(0.45, 12.)),
-                            ),
-                    )
-                    .child(motion::indeterminate_progress(
-                        "source-reading-progress",
-                        cx,
-                    )),
-            ));
-        } else if self.preview_card_shown(cx) {
-            // The options tile joins the bottom of the card it applies to.
-            view = view.child(
-                v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .gap(TILE_GAP)
-                    .child(self.box_selected_video(preview_extra, options.is_some(), window, cx))
-                    .children(options),
-            );
-        }
-        if let Some(title) = &self.source_collection_title {
-            view = self.candidate_list_view(view, title, cx);
-        }
-        view = self.source_preview_error(view, cx);
-        view
+                                                }))
+                                            },
+                                        )),
+                                )
+                                .child(bar(0.7))
+                                .child(bar(0.45)),
+                        ),
+                )
+                .child(LinearProgress::new(
+                    "source-reading-progress",
+                    course2md::tr!("正在读取视频信息…"),
+                )),
+        )
     }
 
-    fn local_upload_hint(&self, cx: &mut Context<Self>) -> Div {
-        h_flex()
-            .w_full()
-            .justify_center()
-            .items_center()
-            .flex_wrap()
-            .gap(rems(8. / 14.))
-            .text_color(color(GRAY))
-            .child(icons::file_upload().size(rems(18. / 14.)))
-            .child(
-                accessible_text("import-drop-hint", course2md::tr!("或把本地视频拖进窗口"))
-                    .text_size(TEXT_BODY),
-            )
-            .child(
-                text_button("choose-local-video", cx)
-                    .h(rems(36. / 14.))
-                    .min_h(rems(36. / 14.))
-                    .label(course2md::tr!("选择文件"))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.switch_source_kind(false, window, cx);
-                        this.pick_video(window, cx);
-                    })),
-            )
-    }
-
-    fn candidate_has_note(&self, candidate: &source::SourceCandidate) -> bool {
+    fn candidate_has_note(&self, candidate: &source::SourceCandidate, cx: &App) -> bool {
         candidate
             .identity
             .as_deref()
-            .is_some_and(|identity| self.notes_for_source(identity).next().is_some())
+            .is_some_and(|identity| self.notes_for_source(identity, cx).next().is_some())
     }
 
     /// Candidates that can be checked for a batch: identified, without a note yet.
-    fn selectable_candidates(&self) -> impl Iterator<Item = &source::SourceCandidate> {
-        let batch = self.online();
-        self.source_candidates.iter().filter(move |candidate| {
-            batch && candidate.identity.is_some() && !self.candidate_has_note(candidate)
-        })
-    }
-
-    /// The candidate list: online sources queue several at once; several dropped local files stay single-choice.
-    /// Only candidates with a confirmed identity can be checked; the rest open one at a time.
-    fn candidate_list_view(&self, view: Div, title: &str, cx: &mut Context<Self>) -> Div {
-        let mut view = view;
-        // Online lists queue several at once; dropped local files stay single-choice (a local identity needs a
-        // content hash, read and confirmed one by one). Only identified candidates can be checked.
-        let batch = self.online();
-        // One pass over the candidates: whether each already has a note, and
-        // the counts the header shows.
-        let mut noted = Vec::with_capacity(self.source_candidates.len());
-        let (mut selectable, mut selectable_selected, mut noted_selected) = (0, 0, 0);
-        let mut any_batchable = false;
-        for candidate in &self.source_candidates {
-            let has_note = self.candidate_has_note(candidate);
-            let selected = self.selected_candidates.contains(&candidate.input);
-            any_batchable |= candidate.identity.is_some();
-            if batch && candidate.identity.is_some() && !has_note {
-                selectable += 1;
-                selectable_selected += usize::from(selected);
-            }
-            // A checked candidate that already has a note gets a new version; say so beside the action.
-            noted_selected += usize::from(has_note && selected);
-            noted.push(has_note);
-        }
-        let selected_count = self.selected_candidates.len();
-        let all_selected = selectable > 0 && selectable_selected == selectable;
-        let list = v_flex()
-            .id("source-candidates")
-            // The viewport scales with the text (about three rows and a glimpse of the fourth); the padding keeps
-            // a row's hover/press layer off the container's hairline.
-            .max_h(rems(20.))
-            .overflow_y_scroll();
-        let mut list = crate::focus_scroll::contain_scroll(list, &self.candidate_scroll)
-            .p_1()
-            .rounded(RADIUS_CARD)
-            .border_1()
-            .border_color(color(CARD_LINE));
-        for (index, candidate) in self.source_candidates.iter().enumerate() {
-            let input = candidate.input.clone();
-            let untitled = candidate.title.trim().is_empty()
-                || candidate.title.trim() == candidate.input.trim();
-            let title = if untitled {
-                course2md::tr!("视频 {}", index + 1)
-            } else {
-                candidate.title.clone()
-            };
-            let (preview, text) = self.candidate_row_parts(candidate, &title, untitled);
-            let batchable = batch && candidate.identity.is_some();
-            if batch {
-                // The same multi-select pattern as the export row: the checkbox is clickable itself (Tab and Space
-                // toggle it), the preview/title area is a sibling target, and rows no longer nest two on_click handlers.
-                // Unidentified candidates cannot be checked: the row shows an arrow and opens the single-source flow.
-                let mut content = h_flex()
-                    .id(("source-candidate-text", index))
-                    .flex_1()
-                    .min_w_0()
-                    .gap(px(12.))
-                    .items_center()
-                    .cursor_pointer();
-                if batchable {
-                    let toggle_input = candidate.input.clone();
-                    content =
-                        content.on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_candidate(&toggle_input, cx)
-                        }));
-                } else {
-                    content = content.on_click(cx.listener(move |this, _, window, cx| {
-                        this.select_source_input(input.clone(), window, cx)
-                    }));
-                }
-                content = content.child(preview).child(text);
-                if batchable {
-                    content = content.when(noted[index], |row| {
-                        row.child(badge(BadgeKind::Success).child(course2md::tr!("已有笔记")))
-                    });
-                } else {
-                    content =
-                        content.child(icons::arrow_forward().size(rems(18. / 14.)).flex_shrink_0());
-                }
-                let mut row = h_flex()
-                    .id(("source-candidate", index))
-                    .w_full()
-                    .min_w_0()
-                    .gap(px(12.))
-                    .items_center()
-                    .py_3()
-                    .px_2()
-                    .rounded(RADIUS_SMALL)
-                    .hover(|style| style.bg(color(INSET)));
-                if batchable {
-                    let selected = self.selected_candidates.contains(&candidate.input);
-                    let check_input = candidate.input.clone();
-                    row = row.child(
-                        Checkbox::new(("source-candidate-check", index))
-                            .debug_selector(move || format!("source-candidate-checkbox-{index}"))
-                            .accessibility_label(course2md::tr!("选择 {}", title))
-                            .checked(selected)
-                            .flex_shrink_0()
-                            .on_click(cx.listener(move |this, value: &bool, _, cx| {
-                                this.set_candidate_selected(&check_input, *value, cx)
-                            })),
-                    );
-                }
-                list = list.child(row.child(content));
-            } else {
-                list = list.child(
-                    quiet(("source-candidate", index))
-                        .w_full()
-                        .h_auto()
-                        .py_3()
-                        .rounded(RADIUS_SMALL)
-                        .justify_start()
-                        .tooltip(candidate.input.clone())
-                        .accessibility_label(course2md::tr!("选择 {}", title))
-                        .child(preview)
-                        .child(text)
-                        .child(icons::arrow_forward().size(rems(18. / 14.)).flex_shrink_0())
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.select_source_input(input.clone(), window, cx)
-                        })),
-                );
-            }
-        }
-        view = view.child(motion::enter(
-            text_id("source-candidates", title),
-            v_flex()
-                .gap_3()
-                .child(
-                    accessible_text("import-collection-title", title)
-                        .font_weight(FontWeight::SEMIBOLD),
-                )
-                .child(list)
-                .when(batch && any_batchable, |view| {
-                    view.child(
-                        h_flex()
-                            .w_full()
-                            .items_center()
-                            .justify_between()
-                            .gap_3()
-                            .child(
-                                h_flex()
-                                    .gap_2()
-                                    .items_center()
-                                    .min_w_0()
-                                    .child(
-                                        quiet("toggle-all-candidates")
-                                            .label(if all_selected {
-                                                course2md::tr!("全不选")
-                                            } else {
-                                                course2md::tr!("全选")
-                                            })
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                if all_selected {
-                                                    this.selected_candidates.clear();
-                                                } else {
-                                                    let inputs: Vec<String> = this
-                                                        .selectable_candidates()
-                                                        .map(|c| c.input.clone())
-                                                        .collect();
-                                                    this.selected_candidates.extend(inputs);
-                                                }
-                                                cx.notify();
-                                            })),
-                                    )
-                                    .when(noted_selected > 0, |row| {
-                                        row.child(
-                                            div()
-                                                .min_w_0()
-                                                .text_size(TEXT_AUX)
-                                                .text_color(color(WARNING))
-                                                .text_ellipsis()
-                                                .child(course2md::tr!(
-                                                    "{} 个已有笔记，将生成新版",
-                                                    noted_selected
-                                                )),
-                                        )
-                                    }),
-                            )
-                            .child(
-                                primary_pill("start-batch-conversion")
-                                    .icon(icons::arrow_forward())
-                                    .label(if selected_count > 0 {
-                                        course2md::tr!("整理选中的 {} 个视频", selected_count)
-                                    } else {
-                                        course2md::tr!("整理选中的视频").to_owned()
-                                    })
-                                    // An empty selection cannot run, as with 开始转换.
-                                    .disabled(selected_count == 0)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.enqueue_selected_candidates(cx)
-                                    })),
-                            ),
-                    )
-                }),
-        ));
-        view
-    }
-
-    /// The candidate rows' shared leading preview and title; batch and single rows differ only in container and click.
-    fn candidate_row_parts(
-        &self,
-        candidate: &source::SourceCandidate,
-        title: &str,
-        untitled: bool,
-    ) -> (Div, Div) {
-        let cover = self.source_candidate_covers.get(&candidate.input).cloned();
-        // One leading preview slot: the cached first frame or cover,
-        // or a movie icon until one is ready, so every row's text starts on the same ruler.
-        let preview = div()
-            .w(rems(5.6))
-            .h(rems(3.15))
-            .flex_shrink_0()
-            .rounded(RADIUS_SMALL)
-            .overflow_hidden()
-            .bg(color(INSET))
-            .flex()
-            .items_center()
-            .justify_center()
-            .when_some(cover, |slot, cover| {
-                slot.child(img(cover).w_full().h_full().object_fit(ObjectFit::Cover))
+    fn selectable_candidates<'a>(
+        &'a self,
+        cx: &'a App,
+    ) -> impl Iterator<Item = &'a source::SourceCandidate> {
+        let batch = self.online(cx);
+        self.import
+            .source_candidates
+            .iter()
+            .filter(move |candidate| {
+                batch && candidate.identity.is_some() && !self.candidate_has_note(candidate, cx)
             })
-            .when(
-                !self.source_candidate_covers.contains_key(&candidate.input),
-                |slot| slot.child(icons::movie().size(rems(18. / 14.)).text_color(color(GRAY))),
-            );
-        let text = v_flex()
-            .flex_1()
+    }
+
+    /// The candidate list. Online lists queue several at once, but only candidates
+    /// with a confirmed identity can be checked; the rest, and dropped local files
+    /// (a local identity needs a content hash), open one at a time.
+    fn candidate_list(&self, title: &str, cx: &mut Context<Self>) -> Stateful<Div> {
+        let batch = self.online(cx);
+        let selectable = self.selectable_candidates(cx).count();
+        let selectable_selected = self
+            .selectable_candidates(cx)
+            .filter(|candidate| self.import.selected_candidates.contains(&candidate.input))
+            .count();
+        // A checked candidate that already has a note gets a new version; say so beside the action.
+        let noted_selected = self
+            .import
+            .source_candidates
+            .iter()
+            .filter(|candidate| {
+                self.candidate_has_note(candidate, cx)
+                    && self.import.selected_candidates.contains(&candidate.input)
+            })
+            .count();
+        let any_batchable = self
+            .import
+            .source_candidates
+            .iter()
+            .any(|candidate| candidate.identity.is_some());
+        let selected_count = self.import.selected_candidates.len();
+        let all_selected = selectable > 0 && selectable_selected == selectable;
+        let rows = self
+            .import
+            .source_candidates
+            .iter()
+            .enumerate()
+            .map(|(index, candidate)| self.candidate_row(index, candidate, batch, cx));
+        let list = contain_scroll(
+            div()
+                .id("source-candidates")
+                .max_h(rem(280.))
+                .overflow_y_scroll(),
+            &self.candidate_scroll,
+        )
+        .child(segmented_list(rows.collect::<Vec<_>>()));
+        v_flex()
+            .id("import-candidates")
+            .w_full()
             .min_w_0()
-            .items_start()
-            .gap_1()
+            .gap(rem(12.))
             .child(
                 div()
-                    .w_full()
-                    .min_w_0()
-                    .whitespace_normal()
-                    .text_ellipsis()
-                    .line_clamp(2)
-                    .font_weight(FontWeight::MEDIUM)
-                    // The title is the row's scanning anchor: primary ink.
-                    .text_color(color(INK))
-                    .child(title.to_owned()),
+                    .px(ITEM_INSET)
+                    .child(section_title("import-collection-title", title.to_owned())),
             )
-            .when(untitled, |view| {
+            .child(list)
+            .when(batch && any_batchable, |view| {
                 view.child(
-                    div()
+                    h_flex()
                         .w_full()
-                        .min_w_0()
-                        .text_size(TEXT_AUX)
-                        .text_color(color(GRAY))
-                        .text_ellipsis()
-                        .child(candidate.input.clone()),
-                )
-            })
-            .when_some(
-                candidate
-                    .duration
-                    .filter(|value| *value > 0. && value.is_finite() && !untitled),
-                |view, seconds| {
-                    view.child(
-                        div()
-                            .w_full()
-                            .min_w_0()
-                            .text_size(TEXT_AUX)
-                            .text_color(color(GRAY))
-                            .text_ellipsis()
-                            .child(course2md::render::fmt_ts(seconds)),
-                    )
-                },
-            );
-        (preview, text)
-    }
-
-    /// Keep source failures beside the field, with retry/login/details still reachable.
-    fn source_preview_error(&self, view: Div, cx: &mut Context<Self>) -> Div {
-        let mut view = view;
-        if let Some(error) = &self.preview_error
-            && !self.source_candidates.is_empty()
-        {
-            view = view.child(help("import-source-error", error.clone()));
-        }
-        if let Some(error) = &self.preview_error
-            && self.source_candidates.is_empty()
-        {
-            let details = motion::disclosure(
-                "source-error-disclosure",
-                self.show_preview_details,
-                v_flex().child(help("import-source-error-details", error.clone())),
-            );
-            view = view.child(motion::state_enter(
-                text_id("source-error", error),
-                v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .p(rems(20. / 14.))
-                    .gap_3()
-                    .rounded(RADIUS_HERO)
-                    .bg(color(SURFACE))
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .items_start()
-                            .child(
-                                crate::icons::error()
-                                    .size(rems(20. / 14.))
-                                    .text_color(color(DANGER))
-                                    .flex_shrink_0(),
-                            )
-                            .child(
-                                issue(
-                                    "import-login-failure",
-                                    if source::legacy_login_failure_from_text(error) {
-                                        course2md::tr!("视频需要登录后读取，请登录后重试预览")
-                                            .to_owned()
+                        .flex_wrap()
+                        .items_center()
+                        .gap(rem(12.))
+                        .child(
+                            material_button("toggle-all-candidates", ButtonVariant::Text)
+                                .child(if all_selected {
+                                    course2md::tr!("全不选")
+                                } else {
+                                    course2md::tr!("全选")
+                                })
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if all_selected {
+                                        this.import.selected_candidates.clear();
                                     } else {
-                                        readable_first_line(error)
-                                            .unwrap_or(course2md::tr!(
-                                                "暂时无法读取这个视频，请检查链接或稍后重试"
-                                            ))
-                                            .to_owned()
-                                    },
+                                        let inputs: Vec<String> = this
+                                            .selectable_candidates(cx)
+                                            .map(|candidate| candidate.input.clone())
+                                            .collect();
+                                        this.import.selected_candidates.extend(inputs);
+                                    }
+                                    cx.notify();
+                                })),
+                        )
+                        .when(noted_selected > 0, |row| {
+                            row.child(
+                                accessible_text(
+                                    "candidates-new-version",
+                                    course2md::tr!("{} 个已有笔记，将生成新版", noted_selected),
                                 )
                                 .flex_1()
-                                .min_w_0(),
-                            ),
+                                .min_w_0()
+                                .text_size(TEXT_AUX)
+                                .text_color(color(ColorRole::WARNING))
+                                .whitespace_normal(),
+                            )
+                        })
+                        .child(
+                            // An empty selection cannot run, as with 开始转换.
+                            material_button("start-batch-conversion", ButtonVariant::Filled)
+                                .ml_auto()
+                                .icon(symbols::arrow_forward())
+                                .child(if selected_count > 0 {
+                                    course2md::tr!("整理选中的 {} 个视频", selected_count)
+                                } else {
+                                    course2md::tr!("整理选中的视频").to_owned()
+                                })
+                                // The component check decides whether these can run at all.
+                                .disabled(selected_count == 0 || self.environment.is_none())
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.enqueue_selected_candidates(cx)
+                                })),
+                        ),
+                )
+            })
+    }
+
+    fn candidate_row(
+        &self,
+        index: usize,
+        candidate: &source::SourceCandidate,
+        batch: bool,
+        cx: &mut Context<Self>,
+    ) -> ListItem {
+        let input = candidate.input.clone();
+        let untitled =
+            candidate.title.trim().is_empty() || candidate.title.trim() == candidate.input.trim();
+        let title = if untitled {
+            course2md::tr!("视频 {}", index + 1)
+        } else {
+            candidate.title.clone()
+        };
+        let duration = candidate
+            .duration
+            .filter(|value| *value > 0. && value.is_finite() && !untitled)
+            .map(course2md::render::fmt_ts);
+        let cover = self
+            .import
+            .source_candidate_covers
+            .get(&candidate.input)
+            .cloned();
+        let thumbnail = match cover {
+            Some(cover) => img(cover)
+                .size_full()
+                .object_fit(ObjectFit::Cover)
+                .into_any_element(),
+            None => h_flex()
+                .size_full()
+                .justify_center()
+                .child(cover_placeholder(rem(20.)))
+                .into_any_element(),
+        };
+        let row = ListItem::new(("source-candidate", index), title)
+            .leading(ListLeading::Video(Some(thumbnail)))
+            .supporting(duration.unwrap_or_else(|| candidate.input.clone()));
+        if batch && candidate.identity.is_some() {
+            let selected = self.import.selected_candidates.contains(&input);
+            row.when(self.candidate_has_note(candidate, cx), |row| {
+                row.trailing_text(course2md::tr!("已有笔记"))
+            })
+            .trailing(ListTrailing::Checkbox(selected))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if !this.import.selected_candidates.remove(&input) {
+                    this.import.selected_candidates.insert(input.clone());
+                }
+                cx.notify();
+            }))
+        } else {
+            row.trailing(ListTrailing::Icon(symbols::arrow_forward().into()))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.select_source_input(input.clone(), window, cx)
+                }))
+        }
+    }
+
+    /// A source failure beside the field, with retry, login and details still reachable.
+    fn source_preview_error(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let error = self.import.preview_error.as_ref()?;
+        if !self.import.source_candidates.is_empty() {
+            return Some(supporting("import-source-error", error.clone()).into_any_element());
+        }
+        let needs_login = source::legacy_login_failure_from_text(error);
+        let message = if needs_login {
+            course2md::tr!("视频需要登录后读取，请登录后重试预览")
+        } else {
+            readable_first_line(error)
+                .unwrap_or(course2md::tr!("暂时无法读取这个视频，请检查链接或稍后重试"))
+        };
+        let open = self.import.show_preview_details;
+        Some(motion::state_enter(
+            "source-error",
+            v_flex()
+                .w_full()
+                .min_w_0()
+                .gap(rem(8.))
+                .child(
+                    notice_banner(
+                        "import-source-failure",
+                        NoticeKind::Danger,
+                        message.to_owned(),
                     )
                     .child(
                         h_flex()
-                            .gap_2()
+                            .gap(rem(8.))
                             .flex_wrap()
                             .child(
-                                outline_pill("retry-source", cx)
-                                    .icon(icons::refresh())
-                                    .label(course2md::tr!("重试预览"))
+                                material_button("retry-source", ButtonVariant::Outlined)
+                                    .tone(ButtonTone::Accent)
+                                    .icon(symbols::refresh())
+                                    .child(course2md::tr!("重试预览"))
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.inspect_source(window, cx)
                                     })),
                             )
                             .when(
-                                self.online()
-                                    && source::legacy_login_failure_from_text(error)
+                                self.online(cx)
+                                    && needs_login
                                     && course2md::auth::is_bilibili_url(
                                         &self.value(Field::Source, cx),
                                     ),
                                 |row| {
                                     row.child(
-                                        outline_pill("source-login-repair", cx)
-                                            .icon(icons::bilibili())
-                                            .label(course2md::tr!("登录 Bilibili"))
-                                            .on_click(cx.listener(|this, _, window, cx| {
+                                        material_button(
+                                            "source-login-repair",
+                                            ButtonVariant::Outlined,
+                                        )
+                                        .tone(ButtonTone::Accent)
+                                        .icon(symbols::bilibili())
+                                        .child(course2md::tr!("登录 Bilibili"))
+                                        .on_click(
+                                            cx.listener(|this, _, window, cx| {
                                                 this.open_account_dialog(window, cx)
-                                            })),
+                                            }),
+                                        ),
+                                    )
+                                },
+                            )
+                            .when(
+                                self.online(cx)
+                                    && needs_login
+                                    && course2md::auth::is_youtube_url(
+                                        &self.value(Field::Source, cx),
+                                    ),
+                                |row| {
+                                    row.child(
+                                        material_button(
+                                            "source-youtube-repair",
+                                            ButtonVariant::Outlined,
+                                        )
+                                        .tone(ButtonTone::Accent)
+                                        .icon(symbols::smart_display())
+                                        .child(course2md::tr!("连接 YouTube"))
+                                        .on_click(
+                                            cx.listener(|this, _, window, cx| {
+                                                this.open_youtube_dialog(window, cx)
+                                            }),
+                                        ),
                                     )
                                 },
                             )
                             .child(
-                                quiet("source-error-details")
-                                    .icon(if self.show_preview_details {
-                                        crate::icons::chevron_up()
-                                    } else {
-                                        crate::icons::chevron_down()
-                                    })
-                                    .label(if self.show_preview_details {
-                                        course2md::tr!("收起技术详情")
-                                    } else {
-                                        course2md::tr!("技术详情")
-                                    })
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.show_preview_details = !this.show_preview_details;
-                                        cx.notify();
-                                    })),
+                                details_toggle("source-error-details", open)
+                                    .on_click(cx.listener(Self::toggle_preview_details)),
                             ),
-                    )
-                    .child(details),
-            ));
-        }
-        view
+                    ),
+                )
+                .child(motion::disclosure(
+                    "source-error-disclosure",
+                    open,
+                    v_flex().child(supporting_info(
+                        "import-source-error-details",
+                        error.clone(),
+                    )),
+                )),
+        ))
     }
 
-    /// The local source input: a drop zone while empty, a file card once a file is chosen.
-    fn local_source_input(&self, view: Div, cx: &mut Context<Self>) -> Div {
-        let mut view = view;
-        let input = self.value(Field::Source, cx);
-        if input.is_empty() {
-            view = view.child(
-                v_flex()
-                    .id("video-drop-zone")
-                    .gap_4()
-                    .p(rems(32. / 14.))
-                    .items_center()
-                    .rounded(RADIUS_HERO)
-                    .bg(color(SURFACE))
-                    .border_2()
-                    .border_dashed()
-                    .border_color(color(CONTROL))
-                    .child(
-                        icons::file_upload()
-                            .size(rems(32. / 14.))
-                            .text_color(color(ACCENT)),
-                    )
-                    .child(
-                        accessible_text("import-drop-instruction", course2md::tr!("拖入本地视频"))
-                            .text_size(TEXT_BODY)
-                            .font_weight(FontWeight::MEDIUM),
-                    )
-                    .child(
-                        primary_pill("choose-video")
-                            .icon(crate::icons::folder_open())
-                            .label(course2md::tr!("选择视频"))
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.pick_video(window, cx)),
-                            ),
-                    )
-                    .on_drop(
-                        cx.listener(|this, paths: &gpui::ExternalPaths, window, cx| {
-                            this.drop_source_files(paths.paths(), window, cx)
-                        }),
-                    ),
-            );
-        } else if self.source_preview.is_none() {
-            // Once previewed, the preview card names the file and replaces it.
-            let filename = PathBuf::from(&input)
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .filter(|name| !name.is_empty())
-                .unwrap_or_else(|| input.clone());
-            view = view.child(
-                h_flex()
-                    .id("selected-local-video")
-                    .w_full()
-                    .min_w_0()
-                    .items_center()
-                    .flex_wrap()
-                    .gap_3()
-                    .py(rems(12. / 14.))
-                    .pl(rems(24. / 14.))
-                    .pr(rems(12. / 14.))
-                    .rounded(RADIUS_HERO)
-                    .bg(color(SURFACE))
-                    .child(
-                        semantic_label(
-                            "selected-local-video-name",
-                            filename,
-                            icons::movie()
-                                .size(rems(20. / 14.))
-                                .text_color(color(ACCENT)),
-                        )
-                        .flex_1()
-                        .min_w(rems(18.))
-                        .max_w_full(),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .flex_wrap()
-                            .items_center()
-                            .child(
-                                outline_pill("choose-video", cx)
-                                    .icon(crate::icons::folder_open())
-                                    .label(course2md::tr!("更换视频"))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.pick_video(window, cx)
-                                    })),
-                            )
-                            // Once the preview is on screen its own 「开始转换」
-                            // is the one primary action.
-                            .when(
-                                self.can_start_input(cx) && self.source_preview.is_none(),
-                                |row| row.child(self.preview_source_button(false, cx)),
-                            ),
-                    )
-                    .on_drop(
-                        cx.listener(|this, paths: &gpui::ExternalPaths, window, cx| {
-                            this.drop_source_files(paths.paths(), window, cx)
-                        }),
-                    ),
-            );
-            if self.source_preview.is_none()
-                && let Some(error) = &self.source_validation
-            {
-                view = view.child(issue("import-preview-error", error.clone()));
-            }
-        }
-        view
+    fn toggle_preview_details(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.import.show_preview_details = !self.import.show_preview_details;
+        cx.notify();
     }
 
-    /// The previewed video: cover, identity, text-source status and the one
-    /// action that submits it. Decisions about this source (`extra`) stay
-    /// inside the same card, beside the action they affect.
-    fn box_selected_video(
-        &self,
-        extra: Option<Div>,
-        attached: bool,
+    /// The previewed video: cover, identity, what its text will come from and the one
+    /// action that submits it. Decisions about this source stay in the card.
+    fn selected_video(
+        &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Div {
-        let Some(source) = &self.source_preview else {
-            return v_flex();
-        };
-        let compact = is_compact(window);
+    ) -> Option<AnyElement> {
+        let source = self.import.source_preview.clone()?;
+        // First, so the start action below sees this frame's plan.
+        let recovery = self.conversion_recovery(cx);
         let duration = (source.duration.is_finite() && source.duration > 0.)
             .then(|| course2md::render::fmt_ts(source.duration));
-        let pending = source.subtitle_request.is_some()
-            || source.subtitle_read_error.is_some()
-            || self.subtitle_error.is_some();
-        let speech = self.import_uses_speech();
-        let confirmed_subtitle =
-            !self.subtitle_loading && !pending && !speech && source.selected_subtitle.is_some();
-        let subtitle_status = if self.subtitle_loading {
-            badge(BadgeKind::Progress).child(course2md::tr!("正在读取字幕…"))
-        } else if pending {
-            badge(BadgeKind::Warning).child(course2md::tr!("文字来源待确认"))
-        } else if speech {
-            badge(BadgeKind::Tonal)
-                .child(icons::mic().size(rems(16. / 14.)))
-                .child(course2md::tr!("将使用语音识别"))
-        } else if confirmed_subtitle {
-            badge(BadgeKind::Success).child(course2md::tr!("有字幕，将直接使用"))
-        } else {
-            badge(BadgeKind::Warning).child(course2md::tr!("文字来源待确认"))
-        };
-        let platform = if !source.online {
-            course2md::tr!("本地视频").to_owned()
-        } else {
-            match crate::views::video_site_name(&source.input) {
-                Some(name) => name.to_owned(),
-                None => url::Url::parse(&source.input)
-                    .ok()
-                    .and_then(|url| url.host_str().map(str::to_owned))
-                    .unwrap_or_default(),
-            }
-        };
-        let metadata = [platform, source.author.clone()]
-            .into_iter()
-            .filter(|part| !part.trim().is_empty())
-            .collect::<Vec<_>>()
-            .join(" · ");
-        let cover_radius = px(18.);
-        let mut cover = cover_frame(cover_radius, source.cover.clone())
-            .relative()
-            .w(rems(if compact { 200. / 14. } else { 256. / 14. }))
-            .max_w_full()
-            .self_start();
-        if source.cover.is_none() {
-            cover = cover.child(cover_placeholder(rems(32. / 14.)));
-        }
-        if let Some(duration) = duration {
-            cover = cover.child(
-                div()
-                    .absolute()
-                    .right(px(10.))
-                    .bottom(px(10.))
-                    .px(px(8.))
-                    .py(px(2.))
-                    .rounded(px(6.))
-                    .bg(color(INK))
-                    .text_color(color(CANVAS))
-                    .text_size(rems(12. / 14.))
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(duration),
-            );
-        }
+        let details_open = self.import.show_preview_details;
+        let metadata = source_metadata(&source);
+        let cover = video_cover(source.cover.clone(), cover_width(window))
+            .self_start()
+            .when_some(duration, |cover, duration| {
+                cover.child(
+                    media_label("import-source-duration", duration)
+                        .absolute()
+                        .right(rem(8.))
+                        .bottom(rem(8.)),
+                )
+            });
         let details = v_flex()
-            .gap_3()
-            .pt(rems(16. / 14.))
-            .child(help("import-source-input", source.input.clone()))
+            .gap(rem(12.))
+            .pt(rem(16.))
+            .child(supporting_info("import-source-input", source.input.clone()))
             .when(
                 source.online && course2md::auth::is_bilibili_url(&source.input),
-                |view| view.child(self.source_account_row(cx)),
-            );
-        let can_start = self.can_start_input(cx);
-        let start_disabled = self.pending_conversion.is_some() || self.preview_cancel.is_some();
-        let actions =
-            h_flex()
-                .w_full()
-                .min_w_0()
-                .mt_auto()
-                .pt(rems(6. / 14.))
-                .gap(rems(8. / 14.))
-                .items_center()
-                .flex_wrap()
-                .when(self.online(), |row| {
-                    row.child(
-                        icon_button("reread-source", CONTROL_HEIGHT, false, cx)
-                            .icon(icons::refresh())
-                            .accessibility_label(course2md::tr!("重新读取"))
-                            .tooltip(course2md::tr!("重新读取"))
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.inspect_source(window, cx)),
-                            ),
+                |view| {
+                    view.child(
+                        self.accounts
+                            .update(cx, |accounts, cx| accounts.source_account_row(cx)),
                     )
-                })
-                .child(div().flex_1())
-                // The trailing actions wrap together and stay at the end.
-                .child(
-                    h_flex()
-                        .ml_auto()
-                        .gap(rems(8. / 14.))
-                        .items_center()
-                        .child(
-                            outline_pill("replace-source", cx)
-                                .h(BUTTON_MEDIUM)
-                                .min_h(BUTTON_MEDIUM)
-                                .px(rems(20. / 14.))
-                                .label_text_size(rems(15. / 14.))
-                                .label(course2md::tr!("更换视频"))
+                },
+            );
+        let actions = h_flex()
+            .w_full()
+            .min_w_0()
+            .mt_auto()
+            .gap(rem(8.))
+            .items_center()
+            .flex_wrap()
+            .when(self.online(cx), |row| {
+                row.child(ui::tip_button(
+                    "reread-source",
+                    symbols::refresh(),
+                    course2md::tr!("重新读取"),
+                    |button| {
+                        button.on_click(
+                            cx.listener(|this, _, window, cx| this.inspect_source(window, cx)),
+                        )
+                    },
+                ))
+            })
+            // The trailing actions wrap together and stay at the end.
+            .child(
+                h_flex()
+                    .ml_auto()
+                    .gap(rem(8.))
+                    .items_center()
+                    .child(
+                        material_button("replace-source", ButtonVariant::Outlined)
+                            .tone(ButtonTone::Accent)
+                            .child(course2md::tr!("更换视频"))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                if this.online(cx) {
+                                    // A new link replaces this preview once it is read.
+                                    this.inputs[&Field::Source]
+                                        .update(cx, |input, cx| input.focus(window, cx));
+                                } else {
+                                    this.pick_video(window, cx);
+                                }
+                            })),
+                    )
+                    .when(self.can_start_input(cx), |row| {
+                        row.child(
+                            material_button("start-conversion", ButtonVariant::Filled)
+                                .button_size(ButtonSize::Medium)
+                                .icon(symbols::play_arrow())
+                                .child(course2md::tr!("开始转换"))
+                                .track_focus(&self.import_submit_focus)
+                                .disabled(
+                                    self.import.pending_conversion.is_some()
+                                        || self.import.preview_cancel.is_some(),
+                                )
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    if this.online() {
-                                        // A new link replaces this preview once it is read.
-                                        this.inputs[&Field::Source]
-                                            .update(cx, |input, cx| input.focus(window, cx));
-                                    } else {
-                                        this.pick_video(window, cx);
-                                    }
+                                    this.start_conversion(window, cx)
                                 })),
                         )
-                        .when(can_start, |row| {
-                            row.child(
-                                theme::disabled_when(
-                                    primary_pill("start-conversion"),
-                                    start_disabled,
-                                    cx,
-                                )
-                                .h(BUTTON_LARGE)
-                                .min_h(BUTTON_LARGE)
-                                .pl(rems(22. / 14.))
-                                .pr(rems(28. / 14.))
-                                .gap(rems(10. / 14.))
-                                .label_text_size(TEXT_LEAD)
-                                .icon(icons::play_arrow())
-                                .label(course2md::tr!("开始转换"))
-                                .track_focus(&self.import_submit_focus)
-                                .disabled(start_disabled)
-                                .on_click(cx.listener(
-                                    |this, _, window, cx| this.start_conversion(window, cx),
-                                )),
-                            )
-                        }),
-                );
+                    }),
+            );
         let info = v_flex()
             .flex_1()
-            .min_w(rems(240. / 14.))
-            .gap(rems(10. / 14.))
+            .flex_basis(rem(240.))
+            .min_w_0()
+            .gap(rem(8.))
             .child(
                 h_flex()
                     .w_full()
                     .min_w_0()
                     .items_start()
-                    .gap_2()
+                    .gap(rem(8.))
                     .child(
                         v_flex()
                             .flex_1()
                             .min_w_0()
-                            .gap_1()
-                            .child(
-                                accessible_text("import-selected-title", source.title.clone())
-                                    .text_size(rems(20. / 14.))
-                                    .line_height(rems(28. / 14.))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .whitespace_normal()
-                                    .text_ellipsis()
-                                    .line_clamp(2),
-                            )
+                            .gap(rem(4.))
+                            .child(video_title(
+                                "import-selected-title".to_owned(),
+                                source.title.clone(),
+                            ))
                             .child(
                                 h_flex()
                                     .min_w_0()
-                                    .gap_1()
+                                    .gap(rem(4.))
                                     .items_center()
                                     .when(!metadata.is_empty(), |row| {
-                                        row.child(
-                                            div()
-                                                .min_w_0()
-                                                .text_size(TEXT_BODY)
-                                                .text_color(color(GRAY))
-                                                .child(metadata),
-                                        )
+                                        row.child(supporting("import-source-meta", metadata))
                                     })
-                                    .child(
-                                        input_action("source-details")
-                                            .icon(if self.show_preview_details {
-                                                crate::icons::chevron_up()
-                                            } else {
-                                                crate::icons::chevron_down()
-                                            })
-                                            .accessibility_label(course2md::tr!("来源详情"))
-                                            .tooltip(course2md::tr!("来源详情"))
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.show_preview_details =
-                                                    !this.show_preview_details;
-                                                cx.notify();
-                                            })),
-                                    ),
+                                    .child(ui::tip_button(
+                                        "source-details",
+                                        if details_open {
+                                            symbols::keyboard_arrow_up()
+                                        } else {
+                                            symbols::keyboard_arrow_down()
+                                        },
+                                        course2md::tr!("来源详情"),
+                                        |button| {
+                                            button
+                                                .button_size(ButtonSize::ExtraSmall)
+                                                .on_click(cx.listener(Self::toggle_preview_details))
+                                        },
+                                    )),
                             ),
                     )
-                    .child(
-                        icon_button("clear-source-preview", CONTROL_HEIGHT, false, cx)
-                            .icon(icons::close())
-                            .tooltip(course2md::tr!("移除预览"))
-                            .accessibility_label(course2md::tr!("移除预览"))
-                            .on_click(cx.listener(|this, _, _, cx| {
+                    .child(ui::tip_button(
+                        "clear-source-preview",
+                        symbols::close(),
+                        course2md::tr!("移除预览"),
+                        |button| {
+                            button.on_click(cx.listener(|this, _, _, cx| {
                                 this.invalidate_source();
                                 this.save_current_draft(cx);
                                 cx.notify();
-                            })),
-                    ),
+                            }))
+                        },
+                    )),
             )
-            .child(
-                h_flex()
-                    .min_w_0()
-                    .child(subtitle_status.min_h(px(32.)).px(px(12.))),
-            )
+            .child(self.text_source_control(&source, window, cx))
             .child(actions);
-        v_flex().w_full().min_w_0().child(motion::state_enter(
+        Some(motion::state_enter(
             "import-selected-source-enter",
-            v_flex()
+            tile([true, true, false, false])
+                .rounded_t(RADIUS_HERO)
                 .id("import-selected-source")
-                .w_full()
-                .min_w_0()
-                .p(rems(16. / 14.))
-                .rounded(RADIUS_HERO)
-                .when(attached, |card| {
-                    card.rounded_bl(TILE_INNER_RADIUS)
-                        .rounded_br(TILE_INNER_RADIUS)
-                })
-                .bg(color(SURFACE))
-                .on_drop(
-                    cx.listener(|this, paths: &gpui::ExternalPaths, window, cx| {
-                        this.drop_source_files(paths.paths(), window, cx)
-                    }),
-                )
+                .flex()
+                .flex_col()
+                .p(rem(16.))
                 .child(
                     h_flex()
                         .w_full()
                         .min_w_0()
                         .flex_wrap()
                         .items_stretch()
-                        .gap(rems(20. / 14.))
+                        .gap(rem(20.))
                         .child(cover)
                         .child(info),
                 )
                 .child(motion::disclosure(
                     "source-details-disclosure",
-                    self.show_preview_details,
+                    details_open,
                     details,
                 ))
-                .when_some(extra, |card, extra| card.child(extra.pt(rems(20. / 14.)))),
+                .children(recovery.map(|recovery| recovery.pt(rem(16.)))),
         ))
     }
 
-    fn text_source_view(&self, cx: &mut Context<Self>) -> Div {
-        let Some(source) = &self.source_preview else {
-            return v_flex();
+    /// What this video's text will come from, and everything that changes it, in one
+    /// chip and its menu; a read in flight or a failure takes over beneath it.
+    fn text_source_control(
+        &self,
+        source: &source::Source,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let speech = self.import_uses_speech(cx);
+        let mode = self.task_options(cx).source_mode;
+        // A read error of this input, or the source's own failed read.
+        let read_error = self.import.subtitle_error.as_deref();
+        let source_failure = match &source.subtitles {
+            SubtitleEvidence::Failed { message } => Some(message.as_str()),
+            _ => None,
         };
-        let speech = self.import_uses_speech();
-        let failure = self.subtitle_error.as_deref().or_else(|| {
-            if subtitle_needs_confirmation(source, self.task_options().source_mode)
-                && let SubtitleEvidence::Failed { message } = &source.subtitles
-            {
-                Some(message.as_str())
-            } else {
-                None
-            }
-        });
-        let needs_text_choice =
-            subtitle_needs_confirmation(source, self.task_options().source_mode)
-                || failure.is_some();
-        let description = if self.subtitle_loading {
-            course2md::tr!("正在读取字幕…").to_owned()
-        } else if !speech
-            && (source.subtitle_request.is_some() || source.subtitle_read_error.is_some())
-        {
+        let failure =
+            read_error.or(source_failure.filter(|_| subtitle_needs_confirmation(source, mode)));
+        let pending = source.subtitle_request.is_some() || source.subtitle_read_error.is_some();
+        let value: SharedString = if self.import.subtitle_loading {
+            course2md::tr!("正在读取字幕…").into()
+        } else if !speech && failure.is_some() {
+            // The failure beneath says what happened; the chip does not also say
+            // the read is still going.
+            course2md::tr!("尚未选择文字来源").into()
+        } else if !speech && pending {
             course2md::tr!("字幕还没读取完成").into()
         } else if speech {
             course2md::tr!("语音识别").into()
         } else if let Some(subtitle) = &source.selected_subtitle {
-            // An automatic choice resolves to the current value; like an explicit one, only the subtitle name shows.
-            subtitle.label.clone()
+            subtitle.label.clone().into()
         } else {
             match &source.subtitles {
                 SubtitleEvidence::Unchecked => course2md::tr!("未检查字幕").into(),
@@ -2131,260 +1446,277 @@ impl Desktop {
                 SubtitleEvidence::Failed { .. } => course2md::tr!("字幕还没读取完成").into(),
             }
         };
-        let mut view = v_flex().w_full().min_w_0().gap_3().child(
-            h_flex()
-                .gap_3()
-                .items_center()
-                .child(if self.subtitle_loading {
-                    motion::spinner("subtitle-reading-spinner", cx)
-                } else {
-                    (if speech {
-                        icons::mic()
-                    } else {
-                        icons::subtitles()
-                    })
-                    .size(rems(20. / 14.))
-                    .text_color(color(GRAY))
-                    .into_any_element()
-                })
-                .child(
-                    accessible_text("import-text-source-state", description)
-                        .font_weight(FontWeight::MEDIUM)
-                        // The value and its 「更换」 action form one row instead of being pinned to opposite edges by flex_1.
-                        .min_w_0()
-                        .whitespace_normal(),
-                )
-                .when(!needs_text_choice, |row| {
-                    row.child(
-                        quiet("change-text-source")
-                            .icon(if self.show_options {
-                                crate::icons::chevron_up()
-                            } else {
-                                crate::icons::chevron_down()
-                            })
-                            .label(if self.show_options {
-                                course2md::tr!("收起")
-                            } else {
-                                course2md::tr!("更换")
-                            })
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.show_options = !this.show_options;
-                                cx.notify();
-                            })),
-                    )
-                }),
+        let trigger = AssistChip::new("text-source", value).icon(if speech {
+            symbols::mic()
+        } else {
+            symbols::subtitles()
+        });
+        let chip = ui::menu(
+            "text-source-menu",
+            trigger,
+            self.text_source_menu(source, cx),
+            window,
+            cx,
         );
-        if self.subtitle_loading {
-            view = view.child(
-                quiet("cancel-subtitle-read")
-                    .icon(crate::icons::close())
-                    .self_start()
-                    .label(course2md::tr!("取消读取字幕"))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.pending_conversion = None;
-                        this.abort_subtitle_read();
-                        this.save_current_draft(cx);
-                        cx.notify();
-                    })),
-            );
-        }
-        if let Some(error) = failure {
-            let failure_details = self.subtitle_issue("subtitle-read", error, cx);
-            view = view.child(motion::enter(
-                text_id("subtitle-failure", error),
-                v_flex()
-                    .gap_3()
-                    .p_4()
-                    .rounded(RADIUS_CARD)
-                    .bg(color(WARNING_BG))
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .items_start()
-                            .child(
-                                crate::icons::warning()
-                                    .size(rems(20. / 14.))
-                                    .text_color(color(WARNING))
-                                    .flex_shrink_0(),
-                            )
-                            .child(
-                                accessible_text(
-                                    "subtitle-failed",
-                                    course2md::tr!("字幕未读取成功"),
-                                )
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(color(WARNING)),
-                            ),
-                    )
-                    .child(failure_details),
-            ));
-            if let Some(old) = &source.selected_subtitle {
-                view = view.child(
-                    outline_pill("use-previous-subtitle", cx)
-                        .self_start()
-                        .icon(icons::subtitles())
-                        .label(course2md::tr!("继续使用之前的字幕"))
-                        .tooltip(old.label.clone())
-                        .on_click(cx.listener(|this, _, _, cx| this.use_confirmed_subtitle(cx))),
-                );
+        let login = source.online
+            && course2md::auth::is_bilibili_url(&source.input)
+            && read_error
+                .or(source_failure)
+                .is_some_and(source::legacy_login_failure_from_text);
+        let notice = match &source.subtitles {
+            _ if !speech || self.import.subtitle_loading => None,
+            SubtitleEvidence::NoneFound => Some(course2md::tr!("未找到字幕").to_owned()),
+            SubtitleEvidence::Unsupported { message } => Some(message.clone()),
+            _ => None,
+        };
+        let warning = match &source.subtitles {
+            SubtitleEvidence::Found {
+                warning: Some(message),
+                ..
+            } if self.import.subtitle_error.is_none() => {
+                Some(course2md::tr!("部分字幕无法读取：{}", message))
             }
-        }
-        let show_text_choices = self.show_options || needs_text_choice;
-        if speech && !show_text_choices {
-            match &source.subtitles {
-                SubtitleEvidence::NoneFound => {
-                    view = view.child(help("import-no-subtitles", course2md::tr!("未找到字幕")))
-                }
-                SubtitleEvidence::Unsupported { message } => {
-                    view = view.child(help("import-subtitle-message", message.clone()))
-                }
-                _ => {}
-            }
-        }
-        {
-            let mut tracks = source.subtitles.tracks().to_vec();
-            if let Some(pending) = &source.subtitle_request
-                && !tracks.iter().any(|track| track.id == pending.id)
-            {
-                tracks.push(pending.clone());
-            }
-            let cached_id = source
-                .selected_subtitle
-                .as_ref()
-                .map(|subtitle| subtitle.track_id.clone());
-            let mut choices: Vec<_> = tracks
-                .iter()
-                .map(|track| (format!("track:{}", track.id), track.label()))
-                .collect();
-            if let Some(cached) = &source.selected_subtitle
-                && !tracks.iter().any(|track| track.id == cached.track_id)
-            {
-                choices.push((format!("track:{}", cached.track_id), cached.label.clone()));
-            }
-            choices.push(("speech".into(), course2md::tr!("语音识别").into()));
-            let selected = if speech {
-                Some("speech".to_owned())
-            } else {
-                source
-                    .subtitle_request
-                    .as_ref()
-                    .map(|track| track.id.as_str())
-                    .or(cached_id.as_deref())
-                    .map(|id| format!("track:{id}"))
-            };
-            let mut options = v_flex().gap_2().child(
-                div().child(
-                    SingleChoiceGroup::new("import-text-source", course2md::tr!("笔记的文字来源"))
-                        .map(|group| {
-                            choices.iter().fold(group, |group, (value, _)| {
-                                group.icon(
-                                    value.clone(),
-                                    if value == "speech" {
-                                        icons::mic()
-                                    } else {
-                                        icons::subtitles()
-                                    },
-                                )
-                            })
-                        })
-                        .options(choices)
-                        .when_some(selected, |group, value| group.selected(value))
-                        .on_change(cx.listener(move |this, value: &SharedString, _, cx| {
-                            if value.as_ref() == "speech" {
-                                this.use_speech(cx);
-                            } else if let Some(id) = value.strip_prefix("track:") {
-                                if cached_id.as_deref() == Some(id) {
-                                    this.use_confirmed_subtitle(cx);
-                                } else if let Some(track) =
-                                    tracks.iter().find(|track| track.id == id)
-                                {
-                                    this.confirm_subtitle(track.clone(), true, cx);
-                                }
-                            }
-                        })),
-                ),
-            );
-            if self.subtitle_error.is_none()
-                && let SubtitleEvidence::Found {
-                    warning: Some(message),
-                    ..
-                } = &source.subtitles
-            {
-                options = options.child(self.subtitle_issue(
-                    "subtitle-warning",
-                    &course2md::tr!("部分字幕无法读取：{}", message),
+            _ => None,
+        };
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(rem(8.))
+            .child(h_flex().min_w_0().child(chip))
+            // A confirmed subtitle is good news, in the success role as before (U16).
+            .when(
+                !speech
+                    && !pending
+                    && !self.import.subtitle_loading
+                    && failure.is_none()
+                    && source.selected_subtitle.is_some(),
+                |view| {
+                    view.children(ui::async_status(
+                        "subtitle-confirmed",
+                        &ui::AsyncStatus::Success(course2md::tr!("有字幕，将直接使用").into()),
+                        None,
+                        cx,
+                    ))
+                },
+            )
+            .when_some(notice, |view, notice| {
+                view.child(supporting_info("import-subtitle-message", notice))
+            })
+            .when(self.import.subtitle_loading, |view| {
+                view.children(ui::async_status(
+                    "subtitle-reading",
+                    &ui::AsyncStatus::Busy(course2md::tr!("正在读取字幕…").into()),
+                    None,
                     cx,
-                ));
-            }
-            if let SubtitleEvidence::Unsupported { message } = &source.subtitles {
-                options = options.child(help("import-option-subtitle-message", message.clone()));
-            }
-            if matches!(source.subtitles, SubtitleEvidence::NoneFound) {
-                options = options.child(help(
-                    "import-option-no-subtitles",
-                    course2md::tr!("未找到字幕"),
-                ));
-            }
-            options = options.child(
+                ))
+                .child(
+                    material_button("cancel-subtitle-read", ButtonVariant::Text)
+                        .icon(symbols::close())
+                        .self_start()
+                        .child(course2md::tr!("取消读取字幕"))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.import.pending_conversion = None;
+                            this.abort_subtitle_read();
+                            this.save_current_draft(cx);
+                            cx.notify();
+                        })),
+                )
+            })
+            .when_some(failure.map(str::to_owned).or(warning), |view, message| {
+                view.child(self.subtitle_issue(&message, failure.is_some(), source, login, cx))
+            })
+    }
+
+    /// The tracks, speech recognition, and the ways to get more subtitles.
+    fn text_source_menu(&self, source: &source::Source, cx: &mut Context<Self>) -> MaterialMenu {
+        let speech = self.import_uses_speech(cx);
+        let cached = source
+            .selected_subtitle
+            .as_ref()
+            .map(|subtitle| subtitle.track_id.clone());
+        let mut tracks = source.subtitles.tracks().to_vec();
+        if let Some(pending) = &source.subtitle_request
+            && !tracks.iter().any(|track| track.id == pending.id)
+        {
+            tracks.push(pending.clone());
+        }
+        let selected = source
+            .subtitle_request
+            .as_ref()
+            .map(|track| track.id.clone())
+            .or_else(|| cached.clone())
+            .filter(|_| !speech);
+        let mut items: Vec<MaterialMenuItem> = tracks
+            .into_iter()
+            .map(|track| {
+                let id = track.id.clone();
+                let label = course2md::subtitle::track_label(&track);
+                let confirmed = cached.as_ref() == Some(&id);
+                MaterialMenuItem::new(label)
+                    .leading(Icon::from(symbols::subtitles()))
+                    .selected(selected.as_ref() == Some(&id))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if confirmed {
+                            this.use_confirmed_subtitle(cx);
+                        } else {
+                            this.confirm_subtitle(track.clone(), true, cx);
+                        }
+                    }))
+            })
+            .collect();
+        if let Some(subtitle) = source.selected_subtitle.as_ref().filter(|subtitle| {
+            !source
+                .subtitles
+                .tracks()
+                .iter()
+                .any(|track| track.id == subtitle.track_id)
+        }) {
+            items.push(
+                MaterialMenuItem::new(subtitle.label.clone())
+                    .leading(Icon::from(symbols::subtitles()))
+                    .selected(selected.as_ref() == Some(&subtitle.track_id))
+                    .on_click(cx.listener(|this, _, _, cx| this.use_confirmed_subtitle(cx))),
+            );
+        }
+        items.push(
+            MaterialMenuItem::new(course2md::tr!("语音识别"))
+                .leading(Icon::from(symbols::mic()))
+                .selected(speech)
+                .divider(true)
+                .on_click(cx.listener(|this, _, _, cx| this.use_speech(cx))),
+        );
+        items.push(
+            MaterialMenuItem::new(course2md::tr!("重新读取字幕"))
+                .leading(Icon::from(symbols::refresh()))
+                .disabled(self.import.subtitle_loading)
+                .on_click(cx.listener(|this, _, _, cx| this.retry_subtitles(cx))),
+        );
+        if !source.online {
+            items.push(
+                MaterialMenuItem::new(course2md::tr!("选择字幕文件"))
+                    .leading(Icon::from(symbols::file_upload()))
+                    .on_click(
+                        cx.listener(|this, _, window, cx| {
+                            this.choose_attached_subtitle(window, cx)
+                        }),
+                    ),
+            );
+        }
+        MaterialMenu::new("text-source-items").items(items)
+    }
+
+    /// A subtitle that could not be read: what it means, and the ways on from here.
+    fn subtitle_issue(
+        &self,
+        message: &str,
+        failed: bool,
+        source: &source::Source,
+        login: bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let summary = if source::legacy_login_failure_from_text(message) {
+            course2md::tr!("字幕需要登录，或改用语音识别")
+        } else {
+            readable_first_line(message)
+                .unwrap_or(course2md::tr!("无法读取字幕，可重试或改用语音识别"))
+        };
+        let open = self.import.subtitle_issue_open;
+        let details = (summary != message).then(|| message.to_owned());
+        let retry = material_button("retry-subtitles", ButtonVariant::Text)
+            .icon(symbols::refresh())
+            .child(course2md::tr!("重新读取字幕"))
+            .disabled(self.import.subtitle_loading)
+            .on_click(cx.listener(|this, _, _, cx| this.retry_subtitles(cx)))
+            .into_any_element();
+        let status = if failed {
+            ui::AsyncStatus::Warning(course2md::tr!("字幕未读取成功：{}", summary).into())
+        } else {
+            ui::AsyncStatus::Warning(summary.to_owned().into())
+        };
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(rem(8.))
+            .children(ui::async_status("subtitle-issue", &status, Some(retry), cx))
+            .child(
                 h_flex()
-                    .gap_2()
+                    .gap(rem(8.))
                     .flex_wrap()
-                    .child(
-                        outline_pill("retry-subtitles", cx)
-                            .icon(icons::refresh())
-                            .label(course2md::tr!("重新读取字幕"))
-                            .disabled(self.subtitle_loading)
-                            .on_click(cx.listener(|this, _, _, cx| this.retry_subtitles(cx))),
+                    .when_some(
+                        source.selected_subtitle.as_ref().filter(|_| failed),
+                        |row, previous| {
+                            row.child(
+                                MaterialTooltip::plain(
+                                    "use-previous-subtitle-tooltip",
+                                    previous.label.clone(),
+                                )
+                                .trigger(
+                                    material_button(
+                                        "use-previous-subtitle",
+                                        ButtonVariant::Outlined,
+                                    )
+                                    .tone(ButtonTone::Accent)
+                                    .icon(symbols::subtitles())
+                                    .child(course2md::tr!("继续使用之前的字幕"))
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| {
+                                            this.use_confirmed_subtitle(cx)
+                                        }),
+                                    ),
+                                ),
+                            )
+                        },
                     )
-                    .when(!source.online, |view| {
-                        view.child(
-                            outline_pill("attach-subtitles", cx)
-                                .icon(icons::file_upload())
-                                .label(course2md::tr!("选择字幕文件"))
+                    .when(login, |row| {
+                        row.child(
+                            material_button("login-for-subtitles", ButtonVariant::Outlined)
+                                .tone(ButtonTone::Accent)
+                                .icon(symbols::bilibili())
+                                .child(course2md::tr!("登录 Bilibili"))
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    this.choose_attached_subtitle(window, cx)
+                                    this.open_account_dialog(window, cx)
                                 })),
                         )
                     })
-                    .when(
-                        source.online
-                            && course2md::auth::is_bilibili_url(&source.input)
-                            && self
-                                .subtitle_error
-                                .as_deref()
-                                .or(match &source.subtitles {
-                                    SubtitleEvidence::Failed { message } => Some(message.as_str()),
-                                    _ => None,
-                                })
-                                .is_some_and(source::legacy_login_failure_from_text),
-                        |view| {
-                            view.child(
-                                outline_pill("login-for-subtitles", cx)
-                                    .icon(icons::bilibili())
-                                    .label(course2md::tr!("登录 Bilibili"))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.open_account_dialog(window, cx)
-                                    })),
-                            )
-                        },
-                    ),
-            );
-            view = view.child(motion::disclosure(
-                "text-source-choices",
-                show_text_choices,
-                options,
-            ));
-        }
-        view
+                    .when(details.is_some(), |row| {
+                        row.child(details_toggle("subtitle-issue-details", open).on_click(
+                            cx.listener(move |this, _, _, cx| {
+                                this.import.subtitle_issue_open = !open;
+                                cx.notify();
+                            }),
+                        ))
+                    }),
+            )
+            .when_some(details, |view, details| {
+                view.child(motion::disclosure(
+                    "subtitle-technical",
+                    open,
+                    v_flex().child(supporting_info("import-subtitle-issue-details", details)),
+                ))
+            })
     }
 
-    /// 文字来源: the route selector with a line saying what it will use, and
-    /// the speech recognition route beneath it when speech may be used.
-    fn import_text_mode_options(&self, window: &mut Window, cx: &mut Context<Self>) -> TileGroup {
-        let mode = self.task_options().source_mode;
+    /// 文字来源: the route, and the speech recognition route beneath it when speech
+    /// may be used. The hint describes the mode; the video card says what this video
+    /// will actually use.
+    fn import_text_mode_options(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> ui::FieldTable {
+        let mode = self.task_options(cx).source_mode;
+        let hint = match mode {
+            TranscriptSource::Subtitle => course2md::tr!("只使用视频自带的字幕"),
+            TranscriptSource::Asr => course2md::tr!("将使用语音识别"),
+            TranscriptSource::Auto => {
+                course2md::tr!("有字幕时直接用字幕，没有字幕时使用语音识别")
+            }
+        };
         let selector =
-            SingleChoiceGroup::new("conversion-text-mode", course2md::tr!("文字来源方式"))
-                .segmented()
+            ConnectedButtonGroup::new("conversion-text-mode", course2md::tr!("文字来源方式"))
+                .tone(ButtonTone::Neutral)
+                .button_size(ButtonSize::Medium)
+                .full_width()
                 .options(text_source_choices().map(|(mode, label)| (text_source_id(mode), label)))
                 .selected(text_source_id(mode))
                 .on_change(cx.listener(|this, value: &SharedString, _, cx| {
@@ -2401,136 +1733,139 @@ impl Desktop {
                         this.set_task_option(|o| o.source_mode = mode, cx);
                     }
                 }));
-        // The hint describes the mode; the video card states what this
-        // video will actually use.
-        let hint = match mode {
-            TranscriptSource::Subtitle => course2md::tr!("只使用视频自带的字幕"),
-            TranscriptSource::Asr => course2md::tr!("将使用语音识别"),
-            TranscriptSource::Auto => {
-                course2md::tr!("有字幕时直接用字幕，没有字幕时使用语音识别")
-            }
-        };
         // Speech settings matter only when this video may need speech:
         // a previewed video whose subtitles will be used does not.
         let speech_relevant = mode == TranscriptSource::Asr
             || (mode == TranscriptSource::Auto
-                && self.source_preview.as_ref().is_none_or(|source| {
-                    self.subtitle_loading || subtitle_needs_confirmation(source, mode)
+                && self.import.source_preview.as_ref().is_none_or(|source| {
+                    self.import.subtitle_loading || subtitle_needs_confirmation(source, mode)
                 }));
-        let mut tiles = vec![
+        let mut fields = vec![ui::Field::content(
+            "conversion-text-mode-field",
             v_flex()
-                .p(rems(16. / 14.))
-                .gap(rems(12. / 14.))
+                .w_full()
+                .min_w_0()
+                .gap(rem(8.))
                 .child(selector)
-                .child(
-                    div()
-                        .px(rems(4. / 14.))
-                        .child(supporting_info("conversion-text-mode-hint", hint)),
-                ),
-        ];
+                .child(supporting_info("conversion-text-mode-hint", hint)),
+        )];
         if speech_relevant {
-            tiles.push(
-                v_flex()
-                    .p(rems(16. / 14.))
-                    .child(self.import_speech_options(window, cx)),
-            );
+            fields.extend(self.import_speech_options(window, cx));
         }
-        option_group(
+        ui::field_table(
             "conversion-text-mode-label",
             course2md::tr!("文字来源"),
-            tiles,
+            fields,
         )
     }
 
-    /// AI 处理: one switch tile per step, then the translation target and
-    /// the service the text is sent to.
-    fn import_ai_options(&self, cx: &mut Context<Self>) -> TileGroup {
-        let custom_rule = self.task_options().llm
+    /// AI 处理: one switch per step, then the translation target and the service
+    /// the text is sent to.
+    fn import_ai_options(&self, window: &mut Window, cx: &mut Context<Self>) -> ui::FieldTable {
+        let custom_rule = self.task_options(cx).llm
             && self
-                .import_base_config()
+                .import_base_config(cx)
                 .llm
                 .prompt
                 .as_ref()
                 .is_some_and(|prompt| !prompt.trim().is_empty());
-        let mut tiles = Vec::new();
-        for (index, option) in [
+        let mut fields: Vec<ui::Field> = [
             ConversionAiOption::Proofread,
             ConversionAiOption::Summary,
             ConversionAiOption::Vision,
         ]
         .into_iter()
-        .enumerate()
-        {
-            let hint = (option == ConversionAiOption::Proofread && custom_rule)
-                .then(|| course2md::tr!("使用自定义校对规则"));
-            tiles.push(option_switch_tile(
-                ("import-ai-option-label", index),
+        .map(|option| {
+            let vision_off = option == ConversionAiOption::Vision && !self.task_options(cx).llm;
+            let hint = if option == ConversionAiOption::Proofread && custom_rule {
+                course2md::tr!("使用自定义校对规则")
+            } else if vision_off {
+                // Disabled, it says why, as on the settings page.
+                course2md::tr!("打开「校对文字和标点」后可用")
+            } else {
+                ""
+            };
+            ui::Field::switch(
+                format!("import-ai-option-{option:?}"),
                 conversion_ai_option_label(option),
-                hint,
-                processing_switch(Switch::new(("import-ai-option", index)))
-                    .checked(conversion_ai_option_enabled(self.task_options(), option))
-                    .disabled(option == ConversionAiOption::Vision && !self.task_options().llm)
-                    .on_click(cx.listener(move |this, enabled, _, cx| {
-                        let enabled = *enabled;
-                        this.set_task_option(
-                            |o| apply_conversion_ai_option(o, option, enabled),
-                            cx,
-                        );
-                    })),
-            ));
-        }
+                conversion_ai_option_enabled(self.task_options(cx), option),
+                cx.listener(move |this, enabled: &bool, _, cx| {
+                    let enabled = *enabled;
+                    this.set_task_option(|o| apply_conversion_ai_option(o, option, enabled), cx);
+                }),
+            )
+            .hint(hint)
+            .disabled(vision_off)
+        })
+        .collect();
         // Bilingual translation is a per-task choice; the global default is only
         // the starting value inherited by this input.
         let translated = self
-            .task_options()
+            .task_options(cx)
             .translate
             .as_deref()
             .and_then(course2md::language::target);
-        let mut translate = self.translation_select(
-            "import-ai-translate",
-            translated,
-            |this, code, cx| {
-                this.set_task_option(|o| o.translate = code.map(str::to_owned), cx);
-            },
-            cx,
+        let targets = std::iter::once((None, course2md::tr!("不翻译"))).chain(
+            course2md::language::TARGETS
+                .iter()
+                .map(|(code, _)| (Some(*code), course2md::language::native_name(code))),
         );
-        if translated.is_some() {
-            translate = translate.detail(course2md::tr!(
-                "每段文字下方附上译文；已是该语言的视频不翻译"
-            ));
-        }
-        tiles.push(v_flex().p(rems(16. / 14.)).child(translate));
-        if self.task_uses_ai() {
-            let mut service = v_flex()
-                .w_full()
-                .min_w_0()
-                .gap_2()
-                .child(self.task_service_picker(ServicePurpose::Ai, cx));
-            if let Some(selected) = self.selected_task_service(ServicePurpose::Ai) {
-                service = service.child(aux_text(course2md::tr!(
-                    "{}会发送到 {}",
-                    if self.task_options().llm && self.task_options().vision {
-                        course2md::tr!("文字及对应截图")
-                    } else {
-                        course2md::tr!("文字")
-                    },
-                    selected.config.host()
-                )));
-            }
-            tiles.push(v_flex().p(rems(16. / 14.)).child(
-                // The service select carries its own floating label.
-                if self.selected_task_service(ServicePurpose::Ai).is_some() {
-                    service
-                } else {
-                    import_option_label(
-                        "import-ai-service-label",
-                        course2md::tr!("AI 服务"),
-                        service,
+        fields.push(
+            ui::Field::menu(
+                "import-ai-translate",
+                course2md::tr!("双语翻译"),
+                translated
+                    .map(course2md::language::native_name)
+                    .unwrap_or(course2md::tr!("不翻译")),
+                MaterialMenu::new("import-ai-translate-items").items(ui::choice_items(
+                    targets,
+                    &translated,
+                    cx.listener(|this, code: &Option<&'static str>, _, cx| {
+                        let code = *code;
+                        this.set_task_option(|o| o.translate = code.map(str::to_owned), cx);
+                    }),
+                )),
+            )
+            .hint(if translated.is_some() {
+                course2md::tr!("每段文字下方附上译文；已是该语言的视频不翻译")
+            } else {
+                ""
+            }),
+        );
+        if self.task_uses_ai(cx) {
+            let consequence = self
+                .selected_task_service(ServicePurpose::Ai, cx)
+                .map(|selected| {
+                    course2md::tr!(
+                        "{}会发送到 {}",
+                        if self.task_options(cx).llm && self.task_options(cx).vision {
+                            course2md::tr!("文字及对应截图")
+                        } else {
+                            course2md::tr!("文字")
+                        },
+                        selected.config.host()
                     )
-                },
-            ));
+                });
+            fields.push(
+                ui::Field::below(
+                    "import-ai-service",
+                    course2md::tr!("AI 服务"),
+                    self.task_service_picker(ServicePurpose::Ai, window, cx),
+                )
+                .hint(consequence.unwrap_or_default()),
+            );
         }
-        option_group("import-ai-label", course2md::tr!("AI 处理"), tiles)
+        fields.push(ui::Field::inline(
+            "reset-task-overrides-field",
+            course2md::tr!("恢复 AI 默认"),
+            // A quiet reset: ink, not the primary of the panel's actions (G4).
+            material_button("reset-task-overrides", ButtonVariant::Text)
+                .tone(ButtonTone::Neutral)
+                .icon(symbols::restart_alt())
+                .child(course2md::tr!("恢复默认"))
+                .on_click(cx.listener(|this, _, _, cx| this.reset_task_ai_overrides(cx))),
+        ));
+        ui::field_table("import-ai-label", course2md::tr!("AI 处理"), fields)
     }
 
     fn reset_task_ai_overrides(&mut self, cx: &mut Context<Self>) {
@@ -2538,46 +1873,43 @@ impl Desktop {
             return;
         }
         let defaults = ConversionOptions::from_config(&self.preferences.defaults_config());
-        let Some(workspace) = &mut self.workspace else {
-            return;
-        };
-        if let Err(error) = workspace.transaction(|state| {
-            state
-                .draft_mut()
-                .context(course2md::tr!("当前视频输入暂时不可用"))?
-                .reset_ai_overrides(&defaults);
-            Ok(())
-        }) {
-            self.workspace_error = Some(course2md::tr!(
-                "本次选项尚未恢复默认：{}",
-                format!("{error:#}")
-            ));
-            cx.notify();
-            return;
+        if self
+            .transact(
+                course2md::tr!("本次选项尚未恢复默认：{}"),
+                |state| {
+                    state
+                        .draft_mut()
+                        .context(course2md::tr!("当前视频输入暂时不可用"))?
+                        .reset_ai_overrides(&defaults);
+                    Ok(())
+                },
+                cx,
+            )
+            .is_some()
+        {
+            self.advance_conversion_when_ready(cx);
         }
-        self.advance_conversion_when_ready(cx);
         cx.notify();
     }
 
-    fn import_speech_options(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
-        let cloud = self.task_options().uses_cloud_provider();
-        let label = if cloud {
+    /// Where speech recognition runs, and the service or model that takes.
+    fn import_speech_options(&self, window: &mut Window, cx: &mut Context<Self>) -> Vec<ui::Field> {
+        use course2md::config::AsrProvider;
+        let cloud = self.task_options(cx).uses_cloud_provider();
+        let (provider, model, root) = self.import_model_request(cx);
+        let shown = if cloud {
             course2md::tr!("语音识别服务").to_owned()
         } else {
-            let (_, model, _) = self.import_model_request();
-            course2md::tr!("本机 · {}", course2md::config::model_label(&model))
+            format!(
+                "{} · {}",
+                course2md::tr!("本机 · {}", course2md::config::model_label(&model)),
+                self.local_engine_name(cx)
+            )
         };
-        let engine = if cloud {
-            String::new()
-        } else {
-            self.local_engine_name().to_owned()
-        };
-        let current = self.task_options().provider;
-        let entity = cx.entity().downgrade();
-        let providers: Vec<_> = providers()
+        let current = self.task_options(cx).provider;
+        let locations: Vec<_> = crate::providers()
             .iter()
             .filter_map(|(id, label)| {
-                use course2md::config::AsrProvider;
                 let provider = crate::provider_from_id(id);
                 // Automatic, CPU and the cloud service are always offered.
                 (matches!(provider, None | Some(AsrProvider::Cpu | AsrProvider::Api))
@@ -2588,404 +1920,266 @@ impl Desktop {
                 .then_some((provider, *label))
             })
             .collect();
-        let selector = SelectField::new("import-speech-location", label, move |menu, _, _| {
-            providers.iter().fold(menu, |menu, &(provider, label)| {
-                let entity = entity.clone();
-                menu.item(
-                    PopupMenuItem::new(label)
-                        .checked(provider == current)
-                        .on_click(move |_, _, cx| {
-                            let _ = entity.update(cx, |this, cx| {
-                                this.set_task_option(|o| o.provider = provider, cx);
-                            });
-                        }),
-                )
-            })
-        })
-        .label(course2md::tr!("语音识别"))
-        .when(!engine.is_empty(), |field| field.trailing(engine));
-        let mut view = v_flex().w_full().min_w_0().gap_2().child(selector);
-        if cloud {
-            view = view
-                .child(self.task_service_picker(ServicePurpose::Speech, cx))
-                .child(aux_text(course2md::tr!("音频会发送到所选语音识别服务")));
+        let location = ui::Field::menu(
+            "import-speech-location",
+            course2md::tr!("语音识别"),
+            shown,
+            MaterialMenu::new("import-speech-location-items").items(ui::choice_items(
+                locations,
+                &current,
+                cx.listener(|this, provider: &Option<AsrProvider>, _, cx| {
+                    let provider = *provider;
+                    this.set_task_option(|o| o.provider = provider, cx);
+                }),
+            )),
+        );
+        let route = if cloud {
+            ui::Field::below(
+                "import-speech-service",
+                course2md::tr!("语音识别服务"),
+                self.task_service_picker(ServicePurpose::Speech, window, cx),
+            )
+            .hint(course2md::tr!("音频会发送到所选语音识别服务"))
         } else {
-            let (provider, model, root) = self.import_model_request();
-            let snapshot = self.setup_model_snapshot(provider, Some(&model), &root);
-            let ready = snapshot.device_issue.is_none()
-                && !snapshot.preparing
-                && snapshot.result.as_ref().is_some_and(|result| {
-                    result.as_ref().is_ok_and(|status| {
-                        matches!(
-                            status.state,
-                            course2md::models::status::CacheState::Cached
-                                | course2md::models::status::CacheState::Loaded
-                        )
-                    })
-                });
-            if ready {
-                view = view.child(aux_text(course2md::tr!(
-                    "模型已下载 · {}",
-                    course2md::config::model_label(&model)
-                )));
-            } else if snapshot.device_issue.is_none()
-                && !snapshot.checking
-                && !snapshot.preparing
-                && snapshot.notice.is_none()
-                && !snapshot.cancelled
-                && snapshot.result.as_ref().is_some_and(|result| {
-                    result.as_ref().is_ok_and(|status| {
-                        status.state == course2md::models::status::CacheState::Missing
-                            && status.can_prepare
-                            && status.last_error.is_none()
-                    })
-                })
-            {
-                // A routine first download needs one status line and one action.
-                // Checks, failures and active transfers use the status line below.
-                let prepare_model = model.clone();
-                let prepare_root = root.clone();
-                let details = cx.weak_entity();
-                view = view
+            // One quiet status line and its action; Settings keeps the table.
+            ui::Field::below(
+                "import-speech-model",
+                course2md::config::model_label(&model).to_owned(),
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(rem(8.))
+                    .child(self.model_status_line(provider, Some(&model), &root, window, cx))
                     .child(
-                        h_flex()
-                            .w_full()
-                            .min_w_0()
-                            .gap_2()
-                            .flex_wrap()
-                            .items_center()
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .text_size(TEXT_AUX)
-                                    .text_color(color(GRAY))
-                                    .child(course2md::tr!(
-                                        "{} · 待下载",
-                                        course2md::config::model_label(&model)
-                                    )),
-                            )
-                            .child(
-                                outline_pill("import-prepare-model", cx)
-                                    .icon(icons::download())
-                                    .label(course2md::tr!("下载模型"))
-                                    .disabled(self.job.is_some())
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.prepare_setup_model(
-                                            provider,
-                                            Some(&prepare_model),
-                                            &prepare_root,
-                                            cx,
-                                        );
-                                    })),
-                            )
-                            .child(
-                                quiet("import-model-details")
-                                    .icon(icons::more_vertical())
-                                    .w(CONTROL_HEIGHT)
-                                    .px_0()
-                                    .accessibility_label(course2md::tr!("模型检查与设置"))
-                                    .tooltip(course2md::tr!("模型检查与设置"))
-                                    .dropdown_menu(move |menu, _, _| {
-                                        let recheck = details.clone();
-                                        let settings = details.clone();
-                                        menu.item(
-                                            PopupMenuItem::new(course2md::tr!("重新检查模型"))
-                                                .icon(icons::refresh())
-                                                .on_click(move |_, _, cx| {
-                                                    let _ = recheck.update(cx, |this, cx| {
-                                                        this.refresh_model_diagnostics(cx)
-                                                    });
-                                                }),
-                                        )
-                                        .item(
-                                            PopupMenuItem::new(course2md::tr!("模型设置"))
-                                                .icon(icons::settings())
-                                                .on_click(move |_, window, cx| {
-                                                    let _ = settings.update(cx, |this, cx| {
-                                                        this.open_settings(window, cx)
-                                                    });
-                                                }),
-                                        )
-                                    }),
+                        material_button("import-model-settings", ButtonVariant::Text)
+                            .self_start()
+                            .icon(symbols::settings())
+                            .child(course2md::tr!("模型设置"))
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.open_settings(window, cx)),
                             ),
-                    )
-                    .when(self.job.is_some(), |view| {
-                        view.child(aux_text(course2md::tr!("当前任务完成后才能下载模型")))
-                    });
-            } else {
-                // One quiet status line and its action; Settings keeps the table.
-                // On the source hint's ruler.
-                view = view.child(div().px(rems(4. / 14.)).child(self.model_status_line(
-                    provider,
-                    Some(&model),
-                    &root,
-                    window,
-                    cx,
-                )));
-            }
-        }
-        view
+                    ),
+            )
+        };
+        vec![location, route]
     }
 
-    fn import_uses_speech(&self) -> bool {
-        self.source_preview
+    fn import_uses_speech(&self, cx: &App) -> bool {
+        self.import
+            .source_preview
             .as_ref()
-            .is_some_and(|source| uses_speech(source, self.task_options().source_mode))
+            .is_some_and(|source| uses_speech(source, self.task_options(cx).source_mode))
     }
 
     /// Proofreading, a summary or a bilingual translation sends text to the AI service.
-    fn task_uses_ai(&self) -> bool {
-        self.task_options().llm
-            || self.task_options().summarize
+    fn task_uses_ai(&self, cx: &App) -> bool {
+        self.task_options(cx).llm
+            || self.task_options(cx).summarize
             || self
-                .task_options()
+                .task_options(cx)
                 .translate
                 .as_deref()
                 .and_then(course2md::language::target)
                 .is_some()
     }
 
-    fn missing_import_service(&self) -> Option<ServicePurpose> {
-        let separate_subtitle = self.task_options().source_mode != TranscriptSource::Asr
+    fn missing_import_service(&self, cx: &App) -> Option<ServicePurpose> {
+        let separate_subtitle = self.task_options(cx).source_mode != TranscriptSource::Asr
             && self
-                .workspace
-                .as_ref()
+                .workspace(cx)
                 .and_then(|workspace| workspace.state.draft())
                 .is_some_and(|draft| draft.subtitle.is_some());
         [
             (
                 ServicePurpose::Speech,
-                self.task_options().uses_cloud_provider()
-                    && self.import_uses_speech()
+                self.task_options(cx).uses_cloud_provider()
+                    && self.import_uses_speech(cx)
                     && !separate_subtitle,
             ),
-            (ServicePurpose::Ai, self.task_uses_ai()),
+            (ServicePurpose::Ai, self.task_uses_ai(cx)),
         ]
         .into_iter()
         .find_map(|(purpose, required)| {
             (required
-                && self.selected_task_service(purpose).is_none_or(|version| {
-                    self.preferences
-                        .service_retired_in_snapshot(&version.service_id)
-                }))
+                && self
+                    .selected_task_service(purpose, cx)
+                    .is_none_or(|version| {
+                        self.preferences
+                            .service_retired_in_snapshot(&version.service_id)
+                    }))
             .then_some(purpose)
         })
     }
 
-    fn import_model_request(&self) -> (course2md::config::AsrProvider, String, PathBuf) {
-        let provider = self.actual_local_provider();
-        let mut config = self.import_base_config();
+    fn import_model_request(&self, cx: &App) -> (course2md::config::AsrProvider, String, PathBuf) {
+        let provider = self.actual_local_provider(cx);
+        let mut config = self.import_base_config(cx);
         // The plan builders' rule: an empty model takes the engine's default (NPU resolves its own).
-        crate::task_runner::fill_default_asr_model(&mut config, provider);
+        desktop_tasks::plan::fill_default_asr_model(&mut config, provider);
         let model = config.defaults.asr_model.unwrap_or_default();
         let root = course2md::config::model_dir_from(config.defaults.model_dir.as_deref());
         (provider, model, root)
     }
 
-    fn actual_local_provider(&self) -> course2md::config::AsrProvider {
+    fn actual_local_provider(&self, cx: &App) -> course2md::config::AsrProvider {
         use course2md::config::AsrProvider;
-        self.task_options()
+        self.task_options(cx)
             .provider
             .filter(|provider| *provider != AsrProvider::Api)
             .unwrap_or_else(|| self.recommended_local_provider())
     }
-    fn local_engine_name(&self) -> &'static str {
-        crate::provider_label(Some(self.actual_local_provider()))
+
+    fn local_engine_name(&self, cx: &App) -> &'static str {
+        crate::provider_label(Some(self.actual_local_provider(cx)))
     }
 
     /// 保存: the library, the note's name and folder, extra exports and
     /// whether the original video is kept.
-    fn import_destination(&self, cx: &mut Context<Self>) -> TileGroup {
-        let current = self
-            .workspace
-            .as_ref()
-            .and_then(|workspace| workspace.state.draft())
-            .map(|draft| draft.library_id.clone());
+    fn import_destination(&self, cx: &mut Context<Self>) -> ui::FieldTable {
+        let current = self.draft(cx).map(|draft| draft.library_id.clone());
         let libraries = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .map(|workspace| workspace.state.libraries.clone())
             .unwrap_or_default();
-        let selected = libraries
+        let library_name = libraries
             .iter()
             .find(|library| Some(&library.id) == current.as_ref())
-            .cloned();
-        let library_name: SharedString = selected
-            .as_ref()
-            .map(|library| library.name.clone().into())
-            .unwrap_or_else(|| course2md::tr!("选择保存位置").into());
-        let mut tiles: Vec<Div> = Vec::new();
-        let library_label = v_flex()
-            .flex_1()
-            .min_w_0()
-            .gap(rems(2. / 14.))
-            .child(TileScale::Compact.label("import-library-label", course2md::tr!("笔记库")))
-            .child(
-                TileScale::Compact
-                    .support("import-library-name", library_name.clone())
-                    .whitespace_nowrap()
-                    .text_ellipsis(),
-            );
-        if libraries.len() > 1 {
-            let entity = cx.entity().downgrade();
-            tiles.push(
-                div().child(
-                    TileScale::Compact
-                        .button("import-library", [true, true, false, false], cx)
-                        .accessibility_label(course2md::tr!("笔记库"))
-                        .child(
-                            TileScale::Compact
-                                .row()
-                                .child(library_label)
-                                .child(tile_chevron()),
-                        )
-                        .dropdown_menu(move |menu, _, _| {
-                            libraries.iter().fold(menu, |menu, library| {
-                                let id = library.id.clone();
-                                let entity = entity.clone();
-                                menu.item(
-                                    PopupMenuItem::new(format!(
-                                        "{} · {}",
-                                        library.name,
-                                        library.root.display()
-                                    ))
-                                    .checked(current.as_ref() == Some(&id))
-                                    .on_click(
-                                        move |_, _, cx| {
-                                            let _ = entity.update(cx, |this, cx| {
-                                                this.set_import_library(id.clone(), cx)
-                                            });
-                                        },
-                                    ),
-                                )
-                            })
-                        }),
-                ),
-            );
-        } else {
-            tiles.push(
-                h_flex()
-                    .min_h(rems(68. / 14.))
-                    .pl(rems(20. / 14.))
-                    .pr(rems(16. / 14.))
-                    .py(rems(12. / 14.))
-                    .items_center()
-                    .child(library_label),
-            );
-        }
-        if self.source_preview.is_some() {
-            tiles.push(v_flex().p(rems(16. / 14.)).child(import_option_label(
-                "import-title-label",
+            .map(|library| library.label())
+            .unwrap_or_else(|| course2md::tr!("选择保存位置").to_owned());
+        let library_items = libraries.iter().map(|library| {
+            (
+                Some(library.id.clone()),
+                format!("{} · {}", library.label(), library.root.display()),
+            )
+        });
+        let mut fields = vec![
+            ui::Field::menu(
+                "import-library",
+                course2md::tr!("笔记库"),
+                library_name,
+                MaterialMenu::new("import-library-items").items(ui::choice_items(
+                    library_items,
+                    &current,
+                    cx.listener(|this, id: &Option<String>, _, cx| {
+                        if let Some(id) = id {
+                            this.set_import_library(id.clone(), cx);
+                        }
+                    }),
+                )),
+            )
+            .disabled(libraries.len() < 2),
+        ];
+        if self.import.source_preview.is_some() {
+            fields.push(ui::Field::below(
+                "import-title",
                 course2md::tr!("笔记名称"),
-                crate::focus_scroll::RevealFocus::new(
-                    ("import-title-focus", self.validation_attempt),
-                    text_input(&self.inputs[&Field::Title]).w_full(),
+                RevealFocus::new(
+                    ("import-title-focus", self.import.validation_attempt),
+                    TextField::new("import-title-field", &self.inputs[&Field::Title])
+                        .w_full()
+                        .outlined()
+                        .shape(TextFieldShape::Rounded)
+                        .error(self.import.title_required)
+                        .when_some(
+                            self.import
+                                .source_validation
+                                .clone()
+                                .filter(|_| self.import.title_required),
+                            |field, message| field.supporting_text(message),
+                        ),
                     self.scrolls[Page::New as usize].clone(),
                 ),
-            )));
+            ));
         }
-        tiles.push(
+        fields.push(ui::Field::below(
+            "import-folder",
+            course2md::tr!("文件夹"),
             h_flex()
-                .p(rems(16. / 14.))
-                .gap_2()
-                // Centered on the outlined field, below its floating label.
-                .items_end()
+                .w_full()
+                .min_w_0()
+                .gap(rem(8.))
+                .items_center()
                 .child(div().flex_1().min_w_0().child(self.folder_picker(cx)))
-                .child(
-                    icon_button("import-new-folder", HERO_CONTROL, true, cx)
-                        .icon(icons::folder_plus())
-                        .mb(rems(4. / 14.))
-                        .accessibility_label(course2md::tr!("新建文件夹"))
-                        .tooltip(course2md::tr!("新建文件夹"))
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.begin_folder(None, window, cx)),
-                        ),
-                ),
-        );
-        tiles.push(self.import_exports(cx));
-        if self.online() {
-            tiles.push(option_switch_tile(
-                "import-keep-video-label",
-                course2md::tr!("保留原视频"),
-                Some(course2md::tr!("供离线播放，会占用更多磁盘空间")),
-                processing_switch(Switch::new("import-keep-video"))
-                    .checked(self.task_options().keep_video)
-                    .on_click(cx.listener(|this, value, _, cx| {
+                .child(ui::tip_button(
+                    "import-new-folder",
+                    symbols::create_new_folder(),
+                    course2md::tr!("新建文件夹"),
+                    |button| {
+                        button
+                            .variant(IconButtonVariant::Tonal)
+                            .tone(ButtonTone::Neutral)
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.begin_folder(window, cx)),
+                            )
+                    },
+                )),
+        ));
+        let chips = ["Markdown", course2md::tr!("网页"), "JSON"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, label)| {
+                ChipSetItem::new(
+                    ("import-export-item", index),
+                    FilterChip::new(("import-export", index), label)
+                        .selected(self.task_options(cx).formats[index])
+                        .on_toggle(cx.listener(move |this, on: &bool, _, cx| {
+                            let on = *on;
+                            this.update_task_options(|o| o.formats[index] = on, cx);
+                            cx.notify();
+                        })),
+                )
+            });
+        fields.push(ui::Field::below(
+            "import-exports",
+            course2md::tr!("同时导出"),
+            ChipSet::new("import-export-chips", course2md::tr!("同时导出")).items(chips),
+        ));
+        if self.online(cx) {
+            fields.push(
+                ui::Field::switch(
+                    "import-keep-video",
+                    course2md::tr!("保留原视频"),
+                    self.task_options(cx).keep_video,
+                    cx.listener(|this, value: &bool, _, cx| {
                         let value = *value;
                         this.update_task_options(|o| o.keep_video = value, cx);
                         cx.notify();
-                    })),
-            ));
+                    }),
+                )
+                .hint(course2md::tr!("供离线播放，会占用更多磁盘空间")),
+            );
         }
-        option_group("import-save-label", course2md::tr!("保存"), tiles)
+        ui::field_table("import-save-label", course2md::tr!("保存"), fields)
     }
 
     fn set_import_library(&mut self, id: String, cx: &mut Context<Self>) {
         if !self.save_current_draft(cx) {
             return;
         }
-        if let Some(workspace) = &mut self.workspace {
-            match workspace.transaction(|state| {
-                if let Some(draft) = state.draft_mut() {
-                    draft.library_id = id.clone();
-                    draft.folder = None;
-                }
-                Ok(())
-            }) {
-                Ok(()) => {
-                    self.advance_conversion_when_ready(cx);
-                }
-                Err(error) => {
-                    self.workspace_error =
-                        Some(course2md::tr!("保存位置尚未更新：{}", format!("{error:#}")))
-                }
-            }
+        if self
+            .transact(
+                course2md::tr!("保存位置尚未更新：{}"),
+                |state| {
+                    if let Some(draft) = state.draft_mut() {
+                        draft.library_id = id;
+                        draft.folder = None;
+                    }
+                    Ok(())
+                },
+                cx,
+            )
+            .is_some()
+        {
+            self.advance_conversion_when_ready(cx);
         }
         cx.notify();
     }
 
-    fn import_exports(&self, cx: &mut Context<Self>) -> Div {
-        let mut choices = h_flex().w_full().min_w_0().gap_2().flex_wrap();
-        for (index, label) in ["Markdown", course2md::tr!("网页"), "JSON"]
-            .into_iter()
-            .enumerate()
-        {
-            choices = choices.child(
-                filter_chip(
-                    ("import-export", index),
-                    self.task_options().formats[index],
-                    cx,
-                )
-                .label(label)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.update_task_options(|o| o.formats[index] = !o.formats[index], cx);
-                    cx.notify();
-                })),
-            );
-        }
-        v_flex()
-            .pl(rems(20. / 14.))
-            .pr(rems(16. / 14.))
-            .py(rems(1.))
-            .gap(rems(10. / 14.))
-            .child(TileScale::Compact.label("import-exports-label", course2md::tr!("同时导出")))
-            .child(choices)
-    }
-
     /// The preview card is on screen (not replaced by reading or a task).
     fn preview_card_shown(&self, cx: &App) -> bool {
-        self.preview_cancel.is_none()
-            && self.source_preview.is_some()
+        self.import.preview_cancel.is_none()
+            && self.import.source_preview.is_some()
             && self.workbench_linked_task(cx).is_none()
-    }
-
-    /// The current input's submitted task while it still owns that input.
-    /// Its plan was fixed at submission, so the options are not editable
-    /// until the next video replaces the input.
-    fn locked_input_task(&self, cx: &App) -> Option<&workspace::TaskRecord> {
-        let state = &self.workspace.as_ref()?.state;
-        locked_input_task(state.draft()?, &state.tasks, &self.value(Field::Source, cx))
     }
 
     /// Show or hide the processing options and remember the choice.
@@ -3013,88 +2207,18 @@ impl Desktop {
     /// The submitted task that owns the current input: still in flight, or
     /// shown in the video card's place (its result opening, or a result that
     /// needs attention). Its options were fixed when it was submitted.
-    fn owning_task(&self, cx: &App) -> Option<&workspace::TaskRecord> {
-        self.locked_input_task(cx)
+    fn owning_task<'a>(&'a self, cx: &'a App) -> Option<&'a workspace::TaskRecord> {
+        let state = &self.workspace(cx)?.state;
+        let input = self.value(Field::Source, cx);
+        state
+            .draft()
+            .and_then(|draft| locked_input_task(draft, &state.tasks, &input))
             .or_else(|| self.workbench_linked_task(cx))
     }
 
-    /// What a submitted task was planned with, read from its saved plan.
-    fn submitted_options_summary(&self, task: &workspace::TaskRecord) -> Div {
-        let options = task.plan.options();
-        let source = crate::task_ui::task_text_source(task);
-        let mut ai: Vec<String> = [
-            ConversionAiOption::Proofread,
-            ConversionAiOption::Summary,
-            ConversionAiOption::Vision,
-        ]
-        .into_iter()
-        .filter(|option| conversion_ai_option_enabled(&options, *option))
-        .map(|option| conversion_ai_option_label(option).to_owned())
-        .collect();
-        if options.translate.is_some() {
-            ai.push(course2md::tr!("双语翻译").to_owned());
-        }
-        let ai = if ai.is_empty() {
-            course2md::tr!("不使用 AI").to_owned()
-        } else {
-            ai.join(course2md::tr!("、"))
-        };
-        let library = self
-            .workspace
-            .as_ref()
-            .and_then(|workspace| workspace.state.library(&task.plan.library_id));
-        let folder = task
-            .plan
-            .folder
-            .and_then(|id| {
-                library
-                    .and_then(|library| self.library_indexes.get(&library.root))
-                    .and_then(|index| index.folders.get(&id))
-                    .cloned()
-            })
-            .unwrap_or_else(|| course2md::tr!("未分类").to_owned());
-        let destination = match library {
-            Some(library) => format!("{} · {folder}", library.name),
-            None => folder,
-        };
-        let row = |id: &'static str, label: &'static str, value: String| {
-            v_flex()
-                .w_full()
-                .min_w_0()
-                .pl(SETTING_ITEM_INSET)
-                .pr(rems(16. / 14.))
-                .py(rems(10. / 14.))
-                .gap(rems(2. / 14.))
-                .child(TileScale::Compact.label(id, label))
-                .child(
-                    accessible_text(SharedString::from(format!("{id}-value")), value)
-                        .text_size(TEXT_BODY)
-                        .text_color(color(INK))
-                        .whitespace_normal(),
-                )
-        };
-        v_flex()
-            .w_full()
-            .min_w_0()
-            .py(rems(6. / 14.))
-            .child(row(
-                "submitted-text-source",
-                course2md::tr!("文字来源"),
-                source.to_owned(),
-            ))
-            .child(row("submitted-ai", course2md::tr!("AI 处理"), ai))
-            .child(row(
-                "submitted-destination",
-                course2md::tr!("保存到"),
-                destination,
-            ))
-    }
-
-    /// The processing options as one panel: a header row that shows or hides
-    /// them, then the options. Under a video card it joins the card's bottom
-    /// (2px apart, inner corners), so the options read as that video's.
-    /// While a submitted task owns the input, the panel shows what that task
-    /// was planned with, read-only, and always offers the next video.
+    /// The processing options: a header tile that shows or hides them, joined to the
+    /// video card above so they read as that video's, then one section per subject.
+    /// A submitted task's options are its saved plan, read-only.
     fn workbench_options(
         &self,
         attached: bool,
@@ -3103,349 +2227,164 @@ impl Desktop {
     ) -> Div {
         let open = self.desktop_settings.home_options;
         let owner = self.owning_task(cx).cloned();
-        let applies_to: SharedString = match (&owner, &self.source_preview) {
+        let applies_to: SharedString = match (&owner, &self.import.source_preview) {
             (Some(_), _) => course2md::tr!("提交时已确定，不能再更改").into(),
             (None, Some(source)) if attached => {
                 course2md::tr!("仅对「{}」生效", source.title).into()
             }
             _ => course2md::tr!("仅对下一个视频生效").into(),
         };
-        let toggle_label = if open {
-            course2md::tr!("收起处理选项")
-        } else {
-            course2md::tr!("展开处理选项")
-        };
         let top = !attached;
-        let header_bottom = !open && owner.as_ref().is_none_or(task_runs_in_card);
-        let header = TileScale::Compact
-            .button(
-                "generation-options-toggle",
-                [top, top, header_bottom, header_bottom],
-                cx,
-            )
-            .accessibility_label(toggle_label)
+        let scale = TileScale::Regular;
+        let header = scale
+            .button("generation-options-toggle", [top, top, false, false])
+            .accessibility_label(if open {
+                course2md::tr!("收起处理选项")
+            } else {
+                course2md::tr!("展开处理选项")
+            })
             .on_click(cx.listener(move |this, _, _, cx| this.set_home_options(!open, cx)))
             .child(
-                TileScale::Compact
+                scale
                     .row()
-                    .child(
-                        icons::tune()
-                            .size(rems(22. / 14.))
-                            .flex_shrink_0()
-                            .text_color(color(GRAY)),
-                    )
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap(rems(2. / 14.))
-                            .child(
-                                accessible_text(
-                                    "generation-options-title",
-                                    course2md::tr!("处理选项"),
-                                )
-                                .role(Role::Heading)
-                                .text_size(TileScale::Compact.label_size())
-                                .line_height(TileScale::Compact.label_line_height())
-                                .font_weight(FontWeight::MEDIUM),
-                            )
-                            .child(
-                                TileScale::Compact
-                                    .support("generation-options-applies-to", applies_to)
-                                    .text_ellipsis()
-                                    .line_clamp(2),
-                            ),
-                    )
-                    .child(
-                        if open {
-                            icons::chevron_up()
-                        } else {
-                            icons::chevron_down()
-                        }
-                        .size(rems(20. / 14.))
-                        .flex_shrink_0()
-                        .text_color(color(GRAY)),
-                    ),
+                    .child(Icon::from(symbols::tune()).color(color(ColorRole::ON_SURFACE_VARIANT)))
+                    .child(scale.text(
+                        "generation-options-title",
+                        course2md::tr!("处理选项"),
+                        Some(applies_to),
+                    ))
+                    .child(disclosure_chevron(open)),
             );
-        let divider = || div().h(px(1.)).mx(SETTING_ITEM_INSET).bg(color(HAIRLINE));
-        let panel = tile([top, top, true, true])
-            .flex()
-            .flex_col()
-            .overflow_hidden()
-            .child(header);
-        if let Some(task) = owner {
-            // The way to the next video stays visible whether or not the
-            // summary is open: a running task's card carries it; otherwise it
-            // sits right under this header.
-            let summary = motion::disclosure(
-                "generation-options-body",
-                open,
+        let hairline = |id: &'static str| {
+            MaterialDivider::new(id)
+                .variant(DividerVariant::MiddleInset)
+                .inset_start(ITEM_INSET)
+                .inset_end(ITEM_INSET)
+        };
+        // The way to the next video stays visible whether or not the plan is open: a
+        // running task's card carries it; otherwise it sits right under this header.
+        let next = owner
+            .as_ref()
+            .filter(|task| !desktop_tasks::task_view::runs_in_card(task))
+            .map(|_| {
                 v_flex()
                     .w_full()
                     .min_w_0()
-                    .child(divider())
-                    .child(self.submitted_options_summary(&task)),
-            );
-            if task_runs_in_card(&task) {
-                return panel.child(summary);
-            }
-            let next = TileScale::Compact
-                .button("set-up-next-video", [false, false, true, true], cx)
-                .on_click(cx.listener(|this, _, window, cx| this.set_up_next_video(window, cx)))
-                .child(
-                    TileScale::Compact
-                        .row()
-                        .child(
-                            icons::plus()
-                                .size(rems(22. / 14.))
-                                .flex_shrink_0()
-                                .text_color(color(ACCENT)),
-                        )
-                        .child(TileScale::Compact.text(
-                            "set-up-next-video-label",
-                            course2md::tr!("设置下一个视频"),
-                            Some(course2md::tr!("清空链接，选项恢复为默认设置").into()),
-                        )),
-                );
-            return panel.child(divider()).child(next).child(summary);
-        }
+                    .child(hairline("options-next-divider"))
+                    .child(
+                        scale
+                            .button("set-up-next-video", [false, false, false, false])
+                            .accessibility_label(course2md::tr!("设置下一个视频"))
+                            .on_click(
+                                cx.listener(|this, _, window, cx| {
+                                    this.set_up_next_video(window, cx)
+                                }),
+                            )
+                            .child(
+                                scale
+                                    .row()
+                                    .child(
+                                        Icon::from(symbols::add()).color(color(ColorRole::PRIMARY)),
+                                    )
+                                    .child(scale.text(
+                                        "set-up-next-video-label",
+                                        course2md::tr!("设置下一个视频"),
+                                        Some(course2md::tr!("清空链接，选项恢复为默认设置").into()),
+                                    )),
+                            ),
+                    )
+            });
+        // One surface: a hairline under the header, then quiet sections inside it.
         let body = v_flex()
             .w_full()
             .min_w_0()
-            .pb(rems(8. / 14.))
-            .child(divider())
-            .child(
-                div()
-                    .pt(rems(16. / 14.))
-                    .child(self.import_text_mode_options(window, cx)),
-            )
-            .child(div().py(rems(16. / 14.)).child(divider()))
-            .child(self.import_ai_options(cx))
-            .child(div().py(rems(16. / 14.)).child(divider()))
-            .child(self.import_destination(cx))
-            .child(
-                h_flex().w_full().justify_end().px(rems(8. / 14.)).child(
-                    text_button("reset-task-overrides", cx)
-                        .icon(icons::restart())
-                        .label(course2md::tr!("恢复 AI 默认"))
-                        .on_click(cx.listener(|this, _, _, cx| this.reset_task_ai_overrides(cx))),
-                ),
-            );
-        panel.child(motion::disclosure("generation-options-body", open, body))
-    }
-
-    /// The current input's own task while it runs, in the video card's place:
-    /// cover, title, live status and cancel, with its options attached below.
-    fn box_running_task(
-        &self,
-        task: &workspace::TaskRecord,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let compact = is_compact(window);
-        let source = &task.plan.source;
-        let mut cover = cover_frame(px(18.), source.cover.clone())
-            .w(rems(if compact { 200. / 14. } else { 256. / 14. }))
-            .max_w_full()
-            .self_start();
-        if source.cover.is_none() {
-            cover = cover.child(cover_placeholder(rems(32. / 14.)));
-        }
-        let platform = if !source.online {
-            course2md::tr!("本地视频").to_owned()
-        } else {
-            crate::views::video_site_name(&source.input)
-                .map(str::to_owned)
-                .unwrap_or_default()
-        };
-        let metadata = [platform, source.author.clone()]
-            .into_iter()
-            .filter(|part| !part.trim().is_empty())
-            .collect::<Vec<_>>()
-            .join(" · ");
-        let title = if task.plan.title.trim().is_empty() {
-            source.title.clone()
-        } else {
-            task.plan.title.clone()
-        };
-        let id = task.id.clone();
-        let cancelling = task.intent == workspace::Intent::Cancel;
-        let details_id = task.id.clone();
-        let info = v_flex()
-            .flex_1()
-            .min_w(rems(240. / 14.))
-            .gap(rems(10. / 14.))
-            .child(
-                h_flex().w_full().min_w_0().items_start().gap_2().child(
-                    v_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .gap_1()
-                        .child(
-                            accessible_text("running-task-title", title)
-                                .text_size(rems(20. / 14.))
-                                .line_height(rems(28. / 14.))
-                                .font_weight(FontWeight::MEDIUM)
-                                .whitespace_normal()
-                                .text_ellipsis()
-                                .line_clamp(2),
-                        )
-                        .when(!metadata.is_empty(), |view| {
-                            view.child(
-                                div()
-                                    .text_size(TEXT_BODY)
-                                    .text_color(color(GRAY))
-                                    .child(metadata),
-                            )
-                        }),
-                ),
-            )
-            .children(self.task_status_lines(task, "running-task", window, cx))
-            .child(
-                h_flex()
+            .child(hairline("options-header-divider"))
+            .child(match &owner {
+                Some(task) => v_flex()
                     .w_full()
                     .min_w_0()
-                    .mt_auto()
-                    .pt(rems(6. / 14.))
-                    .gap(rems(8. / 14.))
-                    .items_center()
-                    .flex_wrap()
-                    .child(
-                        quiet("running-task-cancel")
-                            .h(BUTTON_MEDIUM)
-                            .min_h(BUTTON_MEDIUM)
-                            .icon(icons::close())
-                            .label(course2md::tr!("取消任务"))
-                            .disabled(cancelling)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.set_task_intent(id.clone(), workspace::Intent::Cancel, cx);
-                            })),
-                    )
-                    .child(div().flex_1())
-                    // The trailing actions wrap together and stay at the end.
-                    .child(
-                        h_flex()
-                            .ml_auto()
-                            .gap(rems(8. / 14.))
-                            .items_center()
-                            .child(
-                                text_button("running-task-details", cx)
-                                    .h(BUTTON_MEDIUM)
-                                    .min_h(BUTTON_MEDIUM)
-                                    .label_text_size(rems(15. / 14.))
-                                    .label(course2md::tr!("查看任务"))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.select_task(&details_id, cx);
-                                        this.navigate(Page::Task, cx);
-                                    })),
-                            )
-                            // The work continues in the background; the next
-                            // video starts from the saved defaults.
-                            .child(
-                                primary_pill("set-up-next-video")
-                                    .h(BUTTON_MEDIUM)
-                                    .min_h(BUTTON_MEDIUM)
-                                    .px(rems(20. / 14.))
-                                    .label_text_size(rems(15. / 14.))
-                                    .icon(icons::plus())
-                                    .label(course2md::tr!("设置下一个视频"))
-                                    .tooltip(course2md::tr!("清空链接，选项恢复为默认设置"))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.set_up_next_video(window, cx)
-                                    })),
-                            ),
-                    ),
-            );
-        v_flex()
-            .w_full()
-            .min_w_0()
-            .p(rems(16. / 14.))
-            .rounded(RADIUS_HERO)
-            .bg(color(SURFACE))
-            .child(
-                h_flex()
+                    .gap(rem(12.))
+                    .p(ITEM_INSET)
+                    .children(self.tasks.read(cx).task_plan_rows(task, true, cx)),
+                None => v_flex()
                     .w_full()
                     .min_w_0()
-                    .flex_wrap()
-                    .items_stretch()
-                    .gap(rems(20. / 14.))
-                    .child(cover)
-                    .child(info),
-            )
+                    .pt(rem(8.))
+                    .pb(rem(12.))
+                    .gap(rem(16.))
+                    .child(self.import_text_mode_options(window, cx))
+                    .child(self.import_ai_options(window, cx))
+                    .child(self.import_destination(cx)),
+            });
+        tile([top, top, true, true])
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .rounded_b(RADIUS_HERO)
+            .when(top, |panel| panel.rounded_t(RADIUS_HERO))
+            .child(header)
+            .children(next)
+            .child(motion::disclosure("generation-options-body", open, body))
     }
 
-    fn existing_source_note(&self) -> Option<&Course> {
-        let source = self.source_preview.as_ref()?;
+    fn existing_source_note<'a>(&self, cx: &'a App) -> Option<&'a Course> {
+        let source = self.import.source_preview.as_ref()?;
         let preferred = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .and_then(|workspace| {
                 workspace
                     .state
                     .draft()
                     .and_then(|draft| workspace.state.library(&draft.library_id))
             })
-            .map(|library| &library.root);
-        self.notes_for_source(&source.identity)
-            .min_by_key(|course| !preferred.is_some_and(|root| course.dir.starts_with(root)))
+            .map(|library| library.root.as_path());
+        self.library(cx).preferred_note(&source.identity, preferred)
     }
 
     fn can_start_input(&self, cx: &App) -> bool {
         // While candidates show, batch and single actions live in the list's own action area; the input row's
         // 「开始转换」 would always fail for a collection link, so two primary actions never share the screen.
-        self.source_collection_title.is_none()
-            && (self.online() || !self.value(Field::Source, cx).is_empty())
-            && self.preview_error.is_none()
-            && self.existing_source_note().is_none()
+        self.import.source_collection_title.is_none()
+            && (self.online(cx) || !self.value(Field::Source, cx).is_empty())
+            && self.import.preview_error.is_none()
+            && self.existing_source_note(cx).is_none()
+            && !self.has_matching_task(cx)
             && self.current_input_task(cx).is_none_or(|task| {
                 matches!(
                     task.state,
                     workspace::TaskState::Complete | workspace::TaskState::Cancelled
-                ) && !(self.reading
+                ) && !(self.opened(cx).reading
                     && self
+                        .import
                         .following_conversion
                         .as_ref()
-                        .is_some_and(|follow| follow.follows(&task.id, self.preview_generation)))
+                        .is_some_and(|follow| {
+                            follow.follows(&task.id, self.import.preview_generation)
+                        }))
             })
     }
 
-    /// The input's own action only reads metadata; conversion starts from
-    /// the preview card's 「开始转换」.
-    fn preview_source_button(&self, compact: bool, cx: &mut Context<Self>) -> Div {
-        let disabled = self.preview_cancel.is_some()
-            || self.value(Field::Source, cx).is_empty()
-            || self.owning_task(cx).is_some();
-        let label = course2md::tr!("预览视频");
-        let start_shown = self.source_preview.is_some() && self.can_start_input(cx);
-        h_flex().flex_shrink_0().items_center().child(
-            theme::disabled_when(tonal_pill("preview-source", cx), disabled, cx)
-                .h(BUTTON_LARGE)
-                .min_h(BUTTON_LARGE)
-                .pl(rems(18. / 14.))
-                .pr(rems(22. / 14.))
-                .label_text_size(rems(15. / 14.))
-                .icon(icons::eye())
-                .when(!compact, |button| button.label(label))
-                .when(compact, |button| button.w(BUTTON_LARGE).px_0())
-                .accessibility_label(label)
-                .tooltip(label)
-                // The start action owns the submit focus once it is on screen.
-                .when(!start_shown, |button| {
-                    button.track_focus(&self.import_submit_focus)
-                })
-                .disabled(disabled)
-                .on_click(cx.listener(|this, _, window, cx| this.inspect_source(window, cx))),
-        )
+    /// Whether the plan shown has a task already doing its work: then 查看任务 is the
+    /// one way forward, and starting again would only lead there.
+    fn has_matching_task(&self, cx: &App) -> bool {
+        self.import
+            .preview_plan_cache
+            .as_ref()
+            .and_then(|(_, plan)| plan.as_ref().ok())
+            .is_some_and(|plan| self.matching_task(plan, cx).is_some())
     }
 
-    pub(super) fn current_input_task(&self, cx: &App) -> Option<&workspace::TaskRecord> {
-        let state = &self.workspace.as_ref()?.state;
+    pub(super) fn current_input_task<'a>(
+        &'a self,
+        cx: &'a App,
+    ) -> Option<&'a workspace::TaskRecord> {
+        let state = &self.workspace(cx)?.state;
         submitted_input_task(state.draft()?, &state.tasks, &self.value(Field::Source, cx))
     }
 
     /// The source card and hero share one definition of the submitted task.
-    fn workbench_linked_task(&self, cx: &App) -> Option<&workspace::TaskRecord> {
-        let opening_result = self.reading && self.following_conversion.is_some();
+    fn workbench_linked_task<'a>(&'a self, cx: &'a App) -> Option<&'a workspace::TaskRecord> {
+        let opening_result = self.opened(cx).reading && self.import.following_conversion.is_some();
         self.current_input_task(cx).filter(|task| {
             (opening_result
                 && matches!(
@@ -3455,7 +2394,7 @@ impl Desktop {
                 || !task.state.finished()
                 || (task.state == workspace::TaskState::Partial
                     && task.artifact.is_some()
-                    && !crate::task_ui::task_component_failures(task).is_empty())
+                    && !desktop_tasks::task_view::task_component_failures(task).is_empty())
         })
     }
 
@@ -3463,6 +2402,7 @@ impl Desktop {
     /// once at startup and previews it, so preview states can be rendered.
     #[cfg(feature = "capture")]
     fn capture_source(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use std::sync::atomic::Ordering;
         static DONE: AtomicBool = AtomicBool::new(false);
         let Ok(link) = std::env::var("COURSE2MD_CAPTURE_SOURCE") else {
             return;
@@ -3484,11 +2424,11 @@ impl Desktop {
     ) -> bool {
         #[cfg(feature = "capture")]
         self.capture_source(window, cx);
-        if self.pending_conversion.is_some() || self.following_conversion.is_some() {
+        if self.import.pending_conversion.is_some() || self.import.following_conversion.is_some() {
             return true;
         }
         let input = self.value(Field::Source, cx);
-        let has_old_result = self.workspace.as_ref().is_some_and(|workspace| {
+        let has_old_result = self.workspace(cx).is_some_and(|workspace| {
             workspace.state.draft().is_some_and(|draft| {
                 retired_input_task(draft, &workspace.state.tasks, &input).is_some()
             })
@@ -3500,8 +2440,8 @@ impl Desktop {
             return false;
         }
         let defaults = ConversionOptions::from_config(&self.preferences.defaults_config());
-        let online = self.online();
-        let Some(workspace) = &mut self.workspace else {
+        let online = self.online(cx);
+        let Some(workspace) = &self.records.read(cx).workspace else {
             return true;
         };
         let Some(draft) = workspace.state.draft() else {
@@ -3517,26 +2457,22 @@ impl Desktop {
                     .map(|folder| (draft.library_id.clone(), folder))
             })
             .flatten();
-        match workspace.transaction(|state| {
-            state.reset_input(online, defaults, destination);
-            Ok(())
-        }) {
-            Ok(()) => {
-                self.completed_source = None;
-                self.invalidate_source();
-                self.restore_draft(window, cx);
-                self.source_editor_open = true;
-                true
-            }
-            Err(error) => {
-                self.workspace_error = Some(course2md::tr!(
-                    "新的视频输入尚未建立：{}",
-                    format!("{error:#}")
-                ));
-                cx.notify();
-                false
-            }
+        let reset = self.transact(
+            course2md::tr!("新的视频输入尚未建立：{}"),
+            |state| {
+                state.reset_input(online, defaults, destination);
+                Ok(())
+            },
+            cx,
+        );
+        if reset.is_none() {
+            cx.notify();
+            return false;
         }
+        self.invalidate_source();
+        self.restore_draft(window, cx);
+        self.import.source_editor_open = true;
+        true
     }
 
     pub fn new_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -3549,181 +2485,121 @@ impl Desktop {
         {
             self.scrolls[Page::New as usize].set_offset(point(px(0.), px(-offset)));
         }
-        let opening_result = self.reading && self.following_conversion.is_some();
-        let linked_state = self.workbench_linked_task(cx).map(|task| task.state);
-        let cancelled_notice = self
+        let compact = is_compact(window);
+        let opening_result = self.opened(cx).reading && self.import.following_conversion.is_some();
+        let linked_task = self.workbench_linked_task(cx).cloned();
+        let cancelled = self
             .current_input_task(cx)
             .filter(|task| task.state == workspace::TaskState::Cancelled)
-            .map(|task| (task.id.clone(), course2md::tr!("任务已取消").to_owned()));
-        let compact = is_compact(window);
-        let has_linked_task = linked_state.is_some();
-        let text_required = !has_linked_task && self.subtitle_attention_required();
-        // Text-source decisions and submission obstacles belong to the
-        // previewed video, so they sit inside its card.
-        let preview_extra = if !has_linked_task && self.source_preview.is_some() {
-            let recovery = self.conversion_recovery(cx);
-            (text_required || recovery.is_some()).then(|| {
-                v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .gap_4()
-                    .when(text_required, |extra| {
-                        extra.child(
-                            v_flex()
-                                .w_full()
-                                .min_w_0()
-                                .gap_3()
-                                .pt_4()
-                                .border_t_1()
-                                .border_color(color(HAIRLINE))
-                                .child(section_title(
-                                    "import-text-source-title",
-                                    course2md::tr!("文字来源"),
-                                ))
-                                .child(self.text_source_view(cx)),
-                        )
-                    })
-                    .children(recovery)
-            })
-        } else {
-            None
+            .map(|task| task.id.clone());
+        // The current input's own task takes the preview card's place and shape: a
+        // running task shows its live status, a settled one what it needs or what opens.
+        let card = match linked_task {
+            Some(task) if opening_result && task.state.finished() => {
+                Some(self.task_opening_result(&task, cx))
+            }
+            Some(task) => Some(self.tasks.update(cx, |page, cx| {
+                page.task_card(&task, CardPlace::Home, window, cx)
+            })),
+            None if self.preview_card_shown(cx) => self.selected_video(window, cx),
+            None => None,
         };
-        // The current input's own task takes the preview card's place and
-        // shape: a running task shows its live status, a settled one what it
-        // needs or what opens.
-        let linked_task = self.workbench_linked_task(cx).cloned();
-        let task_card = linked_task.map(|task| {
-            let card = match task.state {
-                _ if task_runs_in_card(&task) => self.box_running_task(&task, window, cx),
-                workspace::TaskState::Complete | workspace::TaskState::Partial
-                    if opening_result =>
-                {
-                    self.box_task_opening_result(&task, cx)
-                        .p(rems(24. / 14.))
-                        .rounded(RADIUS_HERO)
-                        .bg(color(SURFACE))
-                }
-                _ => self
-                    .box_task_attention(&task, cx)
-                    .p(rems(24. / 14.))
-                    .rounded(RADIUS_HERO)
-                    .bg(color(SURFACE)),
-            };
-            motion::state_enter(
-                SharedString::from(format!("workbench-task-{}", task.id)),
-                card.rounded_bl(TILE_INNER_RADIUS)
-                    .rounded_br(TILE_INNER_RADIUS),
-            )
-        });
-        // The options belong to one input: joined to its video card (the
-        // preview or the task in its place), otherwise at the end of the hero.
-        let preview_card = self.preview_card_shown(cx);
-        let attached = preview_card || task_card.is_some();
+        let reading = self
+            .import
+            .preview_cancel
+            .is_some()
+            .then(|| self.source_reading(window, cx));
+        let attached = card.is_some();
         let options = motion::state_enter(
             "generation-options-panel",
             self.workbench_options(attached, window, cx),
         );
-        let (preview_options, options) = if preview_card {
-            (Some(options), None)
-        } else {
-            (None, Some(options))
-        };
-        let input = v_flex()
-            .w_full()
-            .min_w_0()
+        let candidates = self
+            .import
+            .source_collection_title
+            .clone()
+            .map(|title| self.candidate_list(&title, cx));
+        let title = TypeRole::DisplaySmall.scale();
+        let hero = workbench_column()
             .gap(HERO_GAP)
-            .when(!self.online(), |input| {
-                input.child(self.source_kind_tabs(cx))
-            })
-            .child(self.box_source_input(preview_extra, preview_options, window, cx));
-        let mut view = v_flex()
-            .gap(HERO_GAP)
-            .w_full()
-            .min_w_0()
-            .max_w(rems(WORKBENCH_WIDTH / 14.))
-            .mx_auto()
             .child(
-                h_flex().w_full().justify_center().pb(rems(4. / 14.)).child(
-                    accessible_text("workbench-title", course2md::tr!("把视频整理成笔记"))
-                        .role(Role::Heading)
-                        .text_center()
-                        .text_size(rems(if compact { 32. / 14. } else { 40. / 14. }))
-                        .line_height(rems(if compact { 40. / 14. } else { 48. / 14. }))
-                        .font_weight(FontWeight::NORMAL),
-                ),
+                accessible_text("workbench-title", course2md::tr!("把视频整理成笔记"))
+                    .role(Role::Heading)
+                    .w_full()
+                    .text_center()
+                    .text_size(title.font_size)
+                    .line_height(title.line_height),
             )
-            .child(input);
-        if let Some((id, message)) = cancelled_notice {
-            view = view.child(info_callout(
-                SharedString::from(format!("cancelled-input-task-{id}")),
-                message,
-            ));
-        }
-        view = match task_card {
-            Some(card) => view.child(
+            .child(self.source_input(window, cx))
+            .children(reading)
+            .children(candidates)
+            .children(self.source_preview_error(cx))
+            .child(
+                // The options belong to one input: joined to its video card (the
+                // preview or the task in its place), otherwise on their own.
                 v_flex()
                     .w_full()
                     .min_w_0()
                     .gap(TILE_GAP)
-                    .child(card)
-                    .children(options),
-            ),
-            None => view.children(options),
-        };
+                    .children(card)
+                    .child(options),
+            )
+            .when_some(cancelled, |view, id| {
+                view.child(info_callout(
+                    SharedString::from(format!("cancelled-input-task-{id}")),
+                    course2md::tr!("任务已取消"),
+                ))
+            });
         let active = self.workbench_active_tasks_section(window, cx);
         let recent = self
             .recent_notes_section(cx)
             .map(|recent| motion::enter("home-recent-notes", recent));
         // With nothing below it, the input moves toward the optical center.
         let quiet = recent.is_none() && active.is_none() && !self.desktop_settings.home_options;
-        // Below the hero, everything shares its column, so the options stay
-        // with the video they apply to rather than beside the recent notes.
-        let lower_width = WORKBENCH_WIDTH;
-        let lower = v_flex()
+        let top = motion::value("home-hero-top", hero_top(quiet, compact), window, cx);
+        v_flex()
             .w_full()
             .min_w_0()
-            .max_w(rems(lower_width / 14.))
-            .mx_auto()
-            .children(recent);
-        let hero_top = motion::value("home-hero-top", hero_top(quiet, compact), window, cx);
-        let mut view = v_flex()
-            .w_full()
-            .min_w_0()
-            .pt(rems(hero_top / 14.))
-            .pb(rems(72. / 14.))
-            .gap(rems(if compact { 36. / 14. } else { 48. / 14. }))
-            .child(view)
+            .pt(rem(top))
+            .pb(rem(72.))
+            .gap(rem(if compact { 36. } else { 48. }))
+            .child(hero)
             .when_some(active, |view, active| {
-                view.child(
-                    div()
-                        .w_full()
-                        .min_w_0()
-                        .max_w(rems(lower_width / 14.))
-                        .mx_auto()
-                        .child(active),
-                )
+                view.child(workbench_column().child(active))
             })
-            .child(lower);
-        if let Some(error) = &self.workspace_error {
-            view = view.child(motion::enter(
-                text_id("workspace-error", error),
-                v_flex()
-                    .w_full()
-                    .max_w(rems(lower_width / 14.))
-                    .mx_auto()
-                    .p_4()
-                    .rounded(RADIUS_CARD)
-                    .bg(color(DANGER_BG))
-                    .child(issue("import-start-error", error.clone())),
-            ));
-        }
-        // The whole workbench accepts a dropped video, not just the local tab.
-        view.on_drop(
-            cx.listener(|this, paths: &gpui::ExternalPaths, window, cx| {
+            .children(recent.map(|recent| workbench_column().child(recent)))
+            // The whole workbench accepts a dropped video, not just the local tab.
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
                 this.drop_source_files(paths.paths(), window, cx)
-            }),
+            }))
+            .into_any_element()
+    }
+
+    /// A followed result opening where its task ran.
+    fn task_opening_result(
+        &self,
+        task: &workspace::TaskRecord,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = &task.id;
+        motion::state_enter(
+            SharedString::from(format!("task-opening-result-{id}")),
+            tile([true, true, false, false])
+                .flex()
+                .flex_col()
+                .gap(rem(12.))
+                .p(rem(16.))
+                .child(video_title(
+                    format!("workbench-task-title-{id}"),
+                    task.plan.title.clone(),
+                ))
+                .children(ui::async_status(
+                    SharedString::from(format!("task-opening-{id}")),
+                    &ui::AsyncStatus::Busy(course2md::tr!("正在打开…").into()),
+                    None,
+                    cx,
+                )),
         )
-        .into_any_element()
     }
 
     /// Attach last to the full-window `workbench-drop` group, outside scrolling content.
@@ -3733,93 +2609,91 @@ impl Desktop {
             .absolute()
             .inset_0()
             .invisible()
-            .group_drag_over::<gpui::ExternalPaths>("workbench-drop", |style| style.visible())
-            .bg(color(CANVAS).opacity(0.88))
-            .p(SECTION_GAP)
+            .group_drag_over::<ExternalPaths>("workbench-drop", |style| style.visible())
+            .bg(color(ColorRole::SURFACE_CONTAINER).opacity(0.88))
+            .p(rem(24.))
             .child(
-                v_flex()
-                    .size_full()
-                    .items_center()
-                    .justify_center()
-                    .gap_4()
-                    .rounded(RADIUS_HERO)
-                    .border_2()
-                    .border_dashed()
-                    .border_color(color(ACCENT))
-                    .child(
-                        h_flex()
-                            .size(rems(88. / 14.))
-                            .rounded_full()
-                            .items_center()
-                            .justify_center()
-                            .bg(color(SECONDARY_CONTAINER))
-                            .child(
-                                icons::file_upload()
-                                    .size(rems(40. / 14.))
-                                    .text_color(color(ACCENT)),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .text_size(rems(28. / 14.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(course2md::tr!("松开以添加视频")),
-                    ),
+                // Shown only while a file is over the window, so it draws the
+                // kit's dragged-over look outright.
+                drop_target(
+                    "workbench-drop-target",
+                    course2md::tr!("松开以添加视频"),
+                    true,
+                )
+                .size_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(rem(16.))
+                .rounded(RADIUS_HERO)
+                .child(tinted_icon(symbols::file_upload(), Tint::Teal, rem(88.)))
+                .child(
+                    div()
+                        .text_size(TEXT_HEADLINE)
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(course2md::tr!("松开以添加视频")),
+                ),
             )
-            .on_drop(
-                cx.listener(|this, paths: &gpui::ExternalPaths, window, cx| {
-                    this.drop_source_files(paths.paths(), window, cx);
-                }),
-            )
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                this.drop_source_files(paths.paths(), window, cx);
+            }))
     }
 
-    /// Only unresolved choices interrupt a submitted conversion.
+    /// Derived once per change of what the plan reads, not on every render. A result that
+    /// outlived a check it waited for would turn the wait into a failure in red.
+    fn cached_preview_plan(&mut self, cx: &mut App) -> Result<workspace::TaskPlan, (String, bool)> {
+        let key = PlanKey {
+            workspace: self
+                .workspace(cx)
+                .map_or(0, |workspace| workspace.state.revision),
+            preferences: self
+                .preferences
+                .revision(crate::preferences::PreferenceGroup::Generation),
+            defaults_pending: self.preference_defaults_pending,
+            source: self.import.preview_generation,
+            reading: self.import.reading(),
+            subtitle_failed: self.import.subtitle_error.is_some(),
+            environment_ready: self.environment.is_some(),
+            library: self.library(cx).generation,
+            library_loading: self.library(cx).loading,
+        };
+        if let Some((cached, plan)) = &self.import.preview_plan_cache
+            && *cached == key
+        {
+            return plan.clone();
+        }
+        let plan = self.preview_plan(cx).map_err(|error| {
+            let pending = error
+                .downcast_ref::<desktop_tasks::plan::PlanPending>()
+                .is_some();
+            (format!("{error:#}"), pending)
+        });
+        self.import.preview_plan_cache = Some((key, plan.clone()));
+        plan
+    }
+
+    /// What stands between this video and a conversion, each obstacle with its one
+    /// way forward. Only unresolved choices interrupt a submitted conversion.
     fn conversion_recovery(&mut self, cx: &mut Context<Self>) -> Option<Div> {
-        let busy = self.job.is_some()
-            || self.workspace.as_ref().is_some_and(|workspace| {
+        let busy = self.work.read(cx).job.is_some()
+            || self.workspace(cx).is_some_and(|workspace| {
                 workspace.state.tasks.iter().any(|task| {
                     matches!(
                         task.state,
-                        crate::workspace::TaskState::Queued | crate::workspace::TaskState::Running
+                        workspace::TaskState::Queued | workspace::TaskState::Running
                     )
                 })
             });
-        let reading = self.preview_cancel.is_some() || self.subtitle_loading;
-        // Derived once per draft/preference/source revision, not on every render.
-        let cache_key = (
-            self.workspace
-                .as_ref()
-                .map_or(0, |workspace| workspace.state.revision),
-            self.preferences
-                .revision(crate::preferences::PreferenceGroup::Generation),
-            self.preview_generation,
-        );
-        let preview_plan = match &self.preview_plan_cache {
-            Some((workspace, preferences, source, plan))
-                if (*workspace, *preferences, *source) == cache_key =>
-            {
-                plan.clone()
-            }
-            _ => {
-                let plan = self.preview_plan().map_err(|error| {
-                    let pending = error
-                        .downcast_ref::<crate::task_runner::PlanPending>()
-                        .is_some();
-                    (format!("{error:#}"), pending)
-                });
-                self.preview_plan_cache =
-                    Some((cache_key.0, cache_key.1, cache_key.2, plan.clone()));
-                plan
-            }
-        };
+        let reading = self.import.reading();
+        let preview_plan = self.cached_preview_plan(cx);
         let plan_pending = matches!(&preview_plan, Err((_, true)));
-        let preview_plan = preview_plan.map_err(|(message, _)| anyhow::Error::msg(message));
         let matching_task = preview_plan
             .as_ref()
             .ok()
-            .and_then(|plan| self.matching_task(plan))
+            .and_then(|plan| self.matching_task(plan, cx))
             .map(|task| {
-                let location = self.task_library(task).map(|library| library.name.clone());
+                let location = self.task_library(task, cx).map(|library| library.label());
                 (task.id.clone(), task.plan.title.clone(), location)
             });
         let preferences_issue = self.ordinary_preferences_submit_issue();
@@ -3828,1109 +2702,346 @@ impl Desktop {
             .as_ref()
             .map(|issue| issue.message.clone())
             .or_else(|| {
-                if self.source_preview.is_some() && !reading && !self.subtitle_attention_required()
-                {
-                    preview_plan
-                        .as_ref()
-                        .err()
-                        .map(|error| format!("{error:#}"))
-                } else {
-                    None
-                }
+                let settled = self.import.source_preview.is_some()
+                    && !reading
+                    && !self.subtitle_attention_required(cx);
+                preview_plan
+                    .as_ref()
+                    .err()
+                    .filter(|_| settled)
+                    .map(|(message, _)| message.clone())
             });
         // Waiting for the component or location checks is progress, not a failure.
-        let checking_components = !preferences_blocked
-            && (self.environment.is_none() || plan_pending)
-            && submission_error.is_some();
-        let mut inset = v_flex().w_full().min_w_0().gap_3();
-        // Whether anything needs showing; an empty block would add a gap.
-        let mut any = false;
-        let mut actions = h_flex().gap_2().flex_wrap();
+        let checking = !preferences_blocked && (self.environment.is_none() || plan_pending);
+        let mut facts: Vec<AnyElement> = Vec::new();
+        let mut actions: Vec<MaterialButton> = Vec::new();
+        // An outlined action reads as live: its label is primary (G3).
+        let button = |id: &'static str, variant, icon, label: &'static str| {
+            material_button(id, variant)
+                .when(variant == ButtonVariant::Outlined, |button| {
+                    button.tone(ButtonTone::Accent)
+                })
+                .icon(icon)
+                .child(label)
+        };
         if self.environment.as_ref().is_some_and(|environment| {
             !environment.engine
                 || !environment.ffmpeg
                 || !environment.ffprobe
-                || (self.online() && !environment.ytdlp)
+                || (self.online(cx) && !environment.ytdlp)
         }) {
-            any = true;
-            actions = actions.child(
-                outline_pill("repair-conversion-components", cx)
-                    .icon(icons::settings())
-                    .label(course2md::tr!("检查所需组件"))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.open_settings(window, cx);
-                        this.select_settings_tab(
-                            crate::settings_ui::SettingsTab::Application,
-                            window,
-                            cx,
-                        );
-                    })),
+            actions.push(
+                button(
+                    "repair-conversion-components",
+                    ButtonVariant::Outlined,
+                    symbols::settings(),
+                    course2md::tr!("检查所需组件"),
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.open_settings(window, cx);
+                    this.select_settings_tab(
+                        crate::settings_ui::SettingsTab::Application,
+                        window,
+                        cx,
+                    );
+                })),
             );
         }
         if let Some(issue) = preferences_issue {
-            any = true;
-            actions = actions.child(
-                outline_pill("repair-generation-preferences", cx)
-                    .icon(icons::refresh())
-                    .label(if issue.can_retry {
+            actions.push(
+                button(
+                    "repair-generation-preferences",
+                    ButtonVariant::Outlined,
+                    symbols::refresh(),
+                    if issue.can_retry {
                         course2md::tr!("重试保存处理选项")
                     } else {
                         course2md::tr!("重置处理选项")
-                    })
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        if !this.save_current_draft(cx) {
-                            return;
-                        }
-                        let saved = if issue.can_retry {
-                            this.retry_ordinary_preferences(issue.group, cx)
-                        } else {
-                            this.restore_ordinary_preferences(issue.group, window, cx)
-                        };
-                        if saved {
-                            let focus = this.import_submit_focus.clone();
-                            window.defer(cx, move |window, cx| focus.focus(window, cx));
-                        }
-                    })),
+                    },
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    if !this.save_current_draft(cx) {
+                        return;
+                    }
+                    let saved = if issue.can_retry {
+                        this.retry_ordinary_preferences(issue.group, cx)
+                    } else {
+                        this.restore_ordinary_preferences(issue.group, window, cx)
+                    };
+                    if saved {
+                        let focus = this.import_submit_focus.clone();
+                        window.defer(cx, move |window, cx| focus.focus(window, cx));
+                    }
+                })),
             );
         }
-        let draft_library = self.workspace.as_ref().and_then(|workspace| {
-            workspace
-                .state
-                .draft()
-                .and_then(|draft| workspace.state.library(&draft.library_id))
-        });
-        let reassociate = self.reassociate_action(
-            draft_library,
-            outline_pill("reassociate-import-location", cx),
-            cx,
-        );
-        any |= reassociate.is_some();
-        actions = actions.children(reassociate);
-        if let Some((id, title, location)) = matching_task.clone() {
-            let location = location.unwrap_or_else(|| course2md::tr!("原保存位置").into());
-            inset = inset.child(conversion_fact(
-                "conversion-fact-consequence",
-                course2md::tr!("已有相同处理任务：《{}》（{}）", title, location),
-                true,
-            ));
-            any = true;
-            actions = actions.child(
-                primary_pill("show-matching-task")
-                    .track_focus(&self.import_submit_focus)
-                    .self_start()
-                    .icon(icons::task())
-                    .label(course2md::tr!("查看任务"))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.save_current_draft(cx);
-                        this.select_task(&id, cx);
-                        this.navigate(Page::Task, cx);
-                        cx.notify();
-                    })),
+        if let Some(library) = self
+            .workspace(cx)
+            .and_then(|workspace| {
+                workspace
+                    .state
+                    .library(&workspace.state.draft()?.library_id)
+            })
+            .filter(|library| {
+                self.cached_location_check(library)
+                    .is_some_and(|check| check.needs_reassociation)
+            })
+        {
+            let id = library.id.clone();
+            actions.push(
+                button(
+                    "reassociate-import-location",
+                    ButtonVariant::Outlined,
+                    symbols::database(),
+                    course2md::tr!("重新关联此保存位置"),
+                )
+                .disabled(self.storage_ui.busy)
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.begin_library_reassociation(id.clone(), window, cx)
+                })),
             );
-        } else if let Some(course) = self.existing_source_note().cloned() {
+        }
+        let has_match = matching_task.is_some();
+        if let Some((id, title, location)) = matching_task {
+            let location = location.unwrap_or_else(|| course2md::tr!("原保存位置").into());
+            facts.push(
+                supporting_info(
+                    "conversion-fact-consequence",
+                    course2md::tr!("已有相同处理任务：《{}》（{}）", title, location),
+                )
+                .into_any_element(),
+            );
+            actions.push(
+                button(
+                    "show-matching-task",
+                    ButtonVariant::Filled,
+                    symbols::task(),
+                    course2md::tr!("查看任务"),
+                )
+                .track_focus(&self.import_submit_focus)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.save_current_draft(cx);
+                    this.select_task(&id, cx);
+                    this.navigate(Page::Task, cx);
+                    cx.notify();
+                })),
+            );
+        } else if let Some(course) = self.existing_source_note(cx).cloned() {
             let location = self
-                .course_location(&course)
-                .map(|library| library.name.clone())
+                .course_location(&course, cx)
+                .map(|library| library.label())
                 .unwrap_or_else(|| course2md::tr!("笔记库").into());
-            inset = inset.child(info_callout(
-                "existing-note-notice",
-                course2md::tr!("已有笔记，保存在「{}」", location),
-            ));
-            any = true;
-            actions = actions.child(
-                h_flex()
-                    .gap_2()
-                    .flex_wrap()
-                    .child(
-                        primary_pill("open-existing-note")
-                            .icon(crate::icons::book_open())
-                            .label(course2md::tr!("打开已有笔记"))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.save_current_draft(cx);
-                                this.open_course(course.clone(), cx);
-                            })),
-                    )
-                    .child(
-                        outline_pill("generate-new-version", cx)
-                            .icon(icons::refresh())
-                            .track_focus(&self.import_submit_focus)
-                            .label(course2md::tr!("生成新版笔记"))
-                            .disabled(reading || self.workspace.is_none() || preferences_blocked)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.following_conversion =
-                                    Some(ConversionFollow::Preparing(this.preview_generation));
-                                this.enqueue_current(window, cx);
-                            })),
-                    ),
+            facts.push(
+                supporting_info(
+                    "existing-note-notice",
+                    course2md::tr!("已有笔记，保存在「{}」", location),
+                )
+                .into_any_element(),
             );
             if busy {
-                any = true;
-                inset = inset.child(conversion_fact(
-                    "conversion-fact-queued",
-                    course2md::tr!("将排在当前任务之后"),
-                    false,
-                ));
+                facts.push(
+                    supporting_info(
+                        "conversion-fact-queued",
+                        course2md::tr!("将排在当前任务之后"),
+                    )
+                    .into_any_element(),
+                );
             }
-        } else if let Some(purpose) = self.missing_import_service() {
-            any = true;
-            actions = actions.child(
-                primary_pill("configure-conversion-service")
-                    .icon(icons::settings())
-                    .label(match purpose {
+            actions.push(
+                button(
+                    "open-existing-note",
+                    ButtonVariant::Filled,
+                    symbols::menu_book(),
+                    course2md::tr!("打开已有笔记"),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.save_current_draft(cx);
+                    this.open_course(course.clone(), cx);
+                })),
+            );
+            actions.push(
+                button(
+                    "generate-new-version",
+                    ButtonVariant::Outlined,
+                    symbols::refresh(),
+                    course2md::tr!("生成新版笔记"),
+                )
+                .track_focus(&self.import_submit_focus)
+                .disabled(
+                    reading
+                        || checking
+                        || self.records.read(cx).workspace.is_none()
+                        || preferences_blocked,
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.import.following_conversion =
+                        Some(ConversionFollow::Preparing(this.import.preview_generation));
+                    this.enqueue_current(window, cx);
+                })),
+            );
+        } else if let Some(purpose) = self.missing_import_service(cx) {
+            actions.push(
+                button(
+                    "configure-conversion-service",
+                    ButtonVariant::Filled,
+                    symbols::settings(),
+                    match purpose {
                         ServicePurpose::Speech => course2md::tr!("设置语音识别服务"),
                         ServicePurpose::Ai => course2md::tr!("设置 AI 服务"),
-                    })
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_task_service_editor(purpose, window, cx);
-                    })),
+                    },
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_task_service_editor(purpose, window, cx);
+                })),
             );
         }
-        if self.pending_conversion.is_some()
-            && self.source_validation.is_some()
-            && !reading
-            && self.missing_import_service().is_none()
-            && self.existing_source_note().is_none()
-            && matching_task.is_none()
-        {
-            any = true;
-            actions = actions.child(
-                outline_pill("retry-conversion-validation", cx)
-                    .icon(icons::refresh())
-                    .label(course2md::tr!("重试转换"))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.start_conversion(window, cx);
-                    })),
+        if self.import.pending_conversion.is_some() && !reading {
+            if self.import.source_validation.is_some()
+                && self.missing_import_service(cx).is_none()
+                && self.existing_source_note(cx).is_none()
+                && !has_match
+            {
+                actions.push(
+                    button(
+                        "retry-conversion-validation",
+                        ButtonVariant::Outlined,
+                        symbols::refresh(),
+                        course2md::tr!("重试转换"),
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| this.start_conversion(window, cx))),
+                );
+            }
+            actions.push(
+                button(
+                    "cancel-pending-conversion",
+                    ButtonVariant::Text,
+                    symbols::close(),
+                    course2md::tr!("取消转换"),
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.import.pending_conversion = None;
+                    this.import.following_conversion = None;
+                    cx.notify();
+                })),
             );
         }
-        if self.pending_conversion.is_some() && !reading {
-            any = true;
-            actions = actions.child(
-                quiet("cancel-pending-conversion")
-                    .icon(icons::close())
-                    .label(course2md::tr!("取消转换"))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.pending_conversion = None;
-                        this.following_conversion = None;
-                        cx.notify();
-                    })),
+        if let Some(message) = submission_error {
+            let status = if checking {
+                ui::AsyncStatus::Busy(message.into())
+            } else {
+                ui::AsyncStatus::Failed(message.into())
+            };
+            facts.extend(
+                ui::async_status("import-submit-status", &status, None, cx)
+                    .map(IntoElement::into_any_element),
             );
         }
-        any |= submission_error.is_some();
-        if !any {
+        if facts.is_empty() && actions.is_empty() {
             return None;
         }
         Some(
-            inset
-                .when_some(submission_error, |view, message| {
-                    if checking_components {
-                        view.child(
-                            h_flex()
-                                .min_w_0()
-                                .gap_2()
-                                .items_center()
-                                .child(motion::spinner("import-component-check-spinner", cx))
-                                .child(
-                                    accessible_text("import-component-check", message)
-                                        .role(Role::Status)
-                                        .text_sm()
-                                        .font_weight(FontWeight::NORMAL)
-                                        .whitespace_normal()
-                                        .text_color(color(GRAY)),
-                                ),
-                        )
-                    } else {
-                        view.child(
-                            accessible_text("import-submit-error", message)
-                                .role(Role::Alert)
-                                .text_sm()
-                                .whitespace_normal()
-                                .text_color(color(DANGER)),
-                        )
-                    }
-                })
-                .child(actions),
+            v_flex()
+                .w_full()
+                .min_w_0()
+                .gap(rem(12.))
+                .children(facts)
+                .child(
+                    h_flex()
+                        .w_full()
+                        .gap(rem(8.))
+                        .flex_wrap()
+                        .justify_end()
+                        .children(actions),
+                ),
         )
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{
-        ConversionFollow, ConversionGate, GateInputs, automatic_subtitle_fallback,
-        completed_input_task, conversion_gate, locked_input_task, submitted_input_task,
-        subtitle_needs_confirmation, uses_speech,
-    };
-    use crate::{source, workspace};
-    use course2md::config::TranscriptSource;
-    use course2md::subtitle::{CachedSubtitle, SubtitleEvidence, SubtitleReadError};
-
-    /// A plan's configuration as build_plan writes it from default options.
-    fn planned_config() -> course2md::settings::ConfigFile {
-        let mut config = course2md::settings::ConfigFile::default();
-        crate::ConversionOptions::default().apply_to(&mut config);
-        config
+/// The sign-ins as the workbench needs them: what a failed source preview may retry
+/// once signed in.
+impl Desktop {
+    /// The source preview a sign-in may retry: the workbench's failed online link.
+    fn sign_in_source(&self, subtitles: bool, cx: &App) -> bool {
+        !self.onboarding.active
+            && matches!(self.page, Page::New)
+            && self.online(cx)
+            && (self.import.preview_error.is_some()
+                || (subtitles && self.subtitle_attention_required(cx)))
     }
 
-    /// A pending Start for revision 7 with every prerequisite met.
-    fn ready() -> GateInputs {
-        GateInputs {
-            requested_revision: Some(7),
-            current_revision: 7,
-            reading: false,
-            has_source: true,
-            needs_text_choice: false,
-            environment_ready: true,
-            library_ready: true,
-            existing_note: false,
-        }
-    }
-
-    #[test]
-    fn preview_completion_without_confirmation_never_submits() {
-        for reading in [true, false] {
-            for environment_ready in [true, false] {
-                for library_ready in [true, false] {
-                    let gate = GateInputs {
-                        requested_revision: None,
-                        reading,
-                        environment_ready,
-                        library_ready,
-                        ..ready()
-                    };
-                    assert_eq!(conversion_gate(gate), ConversionGate::Stop);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn confirmed_start_waits_for_remaining_prerequisites() {
-        // The same Start revision survives each independently completing prerequisite.
-        for (reading, has_source, needs_text_choice, environment_ready) in [
-            (true, false, false, false),
-            (true, true, true, true),
-            (false, true, false, false),
-            (false, true, true, true),
-        ] {
-            let gate = GateInputs {
-                reading,
-                has_source,
-                needs_text_choice,
-                environment_ready,
-                ..ready()
-            };
-            assert_eq!(conversion_gate(gate), ConversionGate::Wait);
-        }
-        assert_eq!(conversion_gate(ready()), ConversionGate::Submit);
-        // Source replacement and duplicate content require a fresh intent/choice.
-        let replaced = GateInputs {
-            current_revision: 8,
-            reading: true,
-            has_source: false,
-            ..ready()
-        };
-        assert_eq!(conversion_gate(replaced), ConversionGate::Stop);
-        assert_eq!(
-            conversion_gate(GateInputs {
-                existing_note: true,
-                ..ready()
-            }),
-            ConversionGate::Stop
-        );
-        assert_eq!(
-            conversion_gate(GateInputs {
-                has_source: false,
-                ..ready()
-            }),
-            ConversionGate::Stop
-        );
-    }
-
-    #[test]
-    fn first_start_waits_for_library_scan_before_existing_note_decision() {
-        // A restored source and the environment can be ready before the async
-        // library scan replaces its initially empty (or stale) note list.
-        for existing_note in [false, true] {
-            let gate = GateInputs {
-                library_ready: false,
-                existing_note,
-                ..ready()
-            };
-            assert_eq!(conversion_gate(gate), ConversionGate::Wait);
-        }
-        // The original Start is still pending when the scan reports a result.
-        assert_eq!(
-            conversion_gate(GateInputs {
-                existing_note: true,
-                ..ready()
-            }),
-            ConversionGate::Stop
-        );
-        assert_eq!(conversion_gate(ready()), ConversionGate::Submit);
-        let replaced = GateInputs {
-            current_revision: 8,
-            library_ready: false,
-            ..ready()
-        };
-        assert_eq!(conversion_gate(replaced), ConversionGate::Stop);
-    }
-
-    #[test]
-    fn explicit_new_version_follows_new_task_instead_of_previous_result() {
-        let (mut draft, mut tasks) = submitted_recovery_chain();
-        tasks[0].state = workspace::TaskState::Complete;
-        tasks[0].artifact = Some("versions/previous".into());
-        tasks[0].handled_by = None;
-        tasks[0].error = None;
-        tasks[1].id = "new-version".into();
-        tasks[1].parent = None;
-        tasks[1].plan.operation = Default::default();
-        draft.submitted_task = Some(tasks[1].id.clone());
-        let following = ConversionFollow::Preparing(7)
-            .submitted(7, tasks[1].id.clone())
-            .unwrap();
-        // The old version remains readable but is not the explicit new intent.
-        assert!(
-            following
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .is_none()
-        );
-        tasks[1].state = workspace::TaskState::Complete;
-        tasks[1].artifact = Some("versions/new-version".into());
-        assert_eq!(
-            following
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .unwrap()
-                .id,
-            "new-version",
-        );
-    }
-
-    #[test]
-    fn completion_opens_only_the_result_still_followed_in_the_current_input() {
-        let (draft, mut tasks) = submitted_recovery_chain();
-        let followed = ConversionFollow::Preparing(7)
-            .submitted(7, "recovery".into())
-            .unwrap();
-        assert!(
-            ConversionFollow::Preparing(7)
-                .submitted(8, "recovery".into())
-                .is_none()
-        );
-        assert!(
-            followed
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .is_none()
-        );
-        tasks[1].state = workspace::TaskState::Complete;
-        assert!(
-            followed
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .is_none()
-        );
-        tasks[1].artifact = Some("versions/recovery".into());
-        assert_eq!(
-            followed
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .unwrap()
-                .id,
-            "recovery"
-        );
-        assert!(
-            followed
-                .completed_task(false, 7, &draft, &tasks, &draft.input)
-                .is_none()
-        );
-        assert!(
-            followed
-                .completed_task(true, 8, &draft, &tasks, &draft.input)
-                .is_none()
-        );
-        assert!(
-            followed
-                .completed_task(true, 7, &draft, &tasks, "new video")
-                .is_none()
-        );
-        let other = ConversionFollow::Task {
-            id: "original".into(),
-            source_revision: 7,
-        };
-        assert!(
-            other
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .is_none()
-        );
-        tasks[1].state = workspace::TaskState::Partial;
-        assert!(
-            followed
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .is_some()
-        );
-    }
-
-    #[test]
-    fn reader_repair_opens_the_new_version_only_while_the_original_note_is_still_open() {
-        let (_, mut tasks) = submitted_recovery_chain();
-        let original = std::path::Path::new("versions/original");
-        let follow = ConversionFollow::reader_reprocess(&tasks[1], original, 12).unwrap();
-        // Submitting a recovery is not enough: it must publish a readable result.
-        assert!(!follow.completed_reader_task(&tasks[1], super::Page::Result, 12, Some(original)));
-        tasks[1].artifact = Some("versions/recovery".into());
-        for state in [
-            workspace::TaskState::Complete,
-            workspace::TaskState::Partial,
-        ] {
-            tasks[1].state = state;
-            assert!(follow.completed_reader_task(
-                &tasks[1],
-                super::Page::Result,
-                12,
-                Some(original)
-            ));
-        }
-        for page in [
-            super::Page::New,
-            super::Page::Library,
-            super::Page::Task,
-            super::Page::Settings,
-        ] {
-            assert!(!follow.completed_reader_task(&tasks[1], page, 12, Some(original)));
-        }
-        // Leaving and returning to the same note has a new read generation.
-        assert!(!follow.completed_reader_task(&tasks[1], super::Page::Result, 13, Some(original)));
-        assert!(!follow.completed_reader_task(
-            &tasks[1],
-            super::Page::Result,
-            12,
-            Some(std::path::Path::new("versions/another-note")),
-        ));
-        assert!(!follow.completed_reader_task(&tasks[1], super::Page::Result, 12, None));
-        let mut unrelated = tasks[1].clone();
-        unrelated.id = "another-repair".into();
-        assert!(!follow.completed_reader_task(&unrelated, super::Page::Result, 12, Some(original)));
-        for state in [
-            workspace::TaskState::Running,
-            workspace::TaskState::Paused,
-            workspace::TaskState::Uncertain,
-        ] {
-            tasks[1].state = state;
-            assert!(!follow.completed_reader_task(
-                &tasks[1],
-                super::Page::Result,
-                12,
-                Some(original)
-            ));
-        }
-    }
-
-    #[test]
-    fn reader_repair_guard_excludes_exports_and_rechecks_the_note_when_loading_finishes() {
-        let (_, mut tasks) = submitted_recovery_chain();
-        let original = std::path::Path::new("versions/original");
-        let follow = ConversionFollow::reader_reprocess(&tasks[1], original, 12).unwrap();
-        assert!(follow.context_is_current(super::Page::Result, 99, 12, Some(original)));
-        assert!(!follow.context_is_current(super::Page::Result, 99, 13, Some(original)));
-        assert!(!follow.context_is_current(super::Page::Library, 99, 12, Some(original)));
-        assert!(!follow.context_is_current(
-            super::Page::Result,
-            99,
-            12,
-            Some(std::path::Path::new("versions/other")),
-        ));
-
-        let course2md::execution::Operation::Reprocess { components, .. } =
-            &mut tasks[1].plan.operation
-        else {
-            unreachable!();
-        };
-        *components = vec![course2md::execution::Component::Exports];
-        tasks[1].state = workspace::TaskState::Complete;
-        tasks[1].artifact = Some(original.to_owned());
-        assert!(ConversionFollow::reader_reprocess(&tasks[1], original, 12).is_none());
-        assert!(!follow.completed_reader_task(&tasks[1], super::Page::Result, 12, Some(original)));
-        // Even a spurious new artifact cannot turn an export-only task into navigation.
-        tasks[1].artifact = Some("versions/recovery".into());
-        assert!(!follow.completed_reader_task(&tasks[1], super::Page::Result, 12, Some(original)));
-        tasks[1].plan.operation = Default::default();
-        assert!(ConversionFollow::reader_reprocess(&tasks[1], original, 12).is_none());
-    }
-
-    #[test]
-    fn opening_a_reader_viewer_ends_repair_following_even_if_it_closes_before_the_read_finishes() {
-        let (_, mut tasks) = submitted_recovery_chain();
-        let original = std::path::Path::new("versions/original");
-        let captured = ConversionFollow::reader_reprocess(&tasks[1], original, 12).unwrap();
-        tasks[1].state = workspace::TaskState::Complete;
-        tasks[1].artifact = Some("versions/recovery".into());
-        for read_started in [false, true] {
-            let mut active = Some(captured.clone());
-            if read_started {
-                assert!(active.as_ref().unwrap().completed_reader_task(
-                    &tasks[1],
-                    super::Page::Result,
-                    12,
-                    Some(original),
-                ));
-            }
-            ConversionFollow::interrupt_for_reader_viewer(&mut active);
-            assert!(active.is_none());
-            // Closing the viewer only restores its underlying note. The old
-            // asynchronous callback still has a ticket, but no longer owns intent.
-            assert_ne!(active.as_ref(), Some(&captured));
-            assert!(
-                !active
-                    .as_ref()
-                    .is_some_and(|follow| follow.completed_reader_task(
-                        &tasks[1],
-                        super::Page::Result,
-                        12,
-                        Some(original),
-                    ))
-            );
-        }
-        // A viewer must not cancel a distinct workbench conversion.
-        let mut input = Some(ConversionFollow::Task {
-            id: "conversion".into(),
-            source_revision: 7,
-        });
-        let expected = input.clone();
-        ConversionFollow::interrupt_for_reader_viewer(&mut input);
-        assert_eq!(input, expected);
-    }
-
-    #[test]
-    fn a_submitted_input_locks_its_options_until_the_next_video_replaces_it() {
-        let root = tempfile::tempdir().unwrap();
-        let mut workspace = workspace::Workspace::open_at_inline(
-            root.path().join("workspace.json"),
-            root.path().join("library"),
-            Default::default(),
+    fn source_now(&self, cx: &App) -> (u64, String) {
+        (
+            self.import.preview_generation,
+            self.value(Field::Source, cx),
         )
-        .unwrap();
-        let state = &mut workspace.state;
-        let source = source::Source {
-            input: "https://www.bilibili.com/video/BVfixture".into(),
-            identity: "video-fixture".into(),
-            online: true,
-            ..Default::default()
-        };
-        let plan = workspace::TaskPlan {
-            operation: Default::default(),
-            source: source.clone(),
-            source_id: source.identity.clone(),
-            title: "已提交的标题".into(),
-            library_id: state.default_library.clone(),
-            folder: None,
-            subtitle: None,
-            config: planned_config(),
-            asr_service: None,
-            ai_service: None,
-        };
-        // Before submission the options belong to the form.
-        let draft = state.draft_mut().unwrap();
-        draft.change_source(source.input.clone());
-        draft.source = Some(source.clone());
-        assert!(locked_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_none());
-        let (id, _) = state.enqueue(plan.clone(), None).unwrap();
-        state.draft_mut().unwrap().submitted_task = Some(id.clone());
-        // Leaving for the task list and coming back home keeps an in-flight
-        // input, so the options panel must offer the next video instead of
-        // vanishing.
-        for in_flight in [
-            workspace::TaskState::Queued,
-            workspace::TaskState::Running,
-            workspace::TaskState::Pausing,
-            workspace::TaskState::Paused,
-            workspace::TaskState::NeedsAttention,
-            workspace::TaskState::Uncertain,
-        ] {
-            state.task_mut(&id).unwrap().state = in_flight;
-            let draft = state.draft().unwrap();
-            assert!(super::retired_input_task(draft, &state.tasks, &source.input).is_none());
-            assert_eq!(
-                locked_input_task(draft, &state.tasks, &source.input)
-                    .unwrap()
-                    .id,
-                id
-            );
-        }
-        for finished in [
-            workspace::TaskState::Complete,
-            workspace::TaskState::Partial,
-            workspace::TaskState::Cancelled,
-        ] {
-            state.task_mut(&id).unwrap().state = finished;
-            assert!(
-                locked_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_none()
-            );
-        }
-        // 设置下一个视频 clears the link: the next input starts from the
-        // saved defaults and the submitted task keeps its own plan.
-        state.task_mut(&id).unwrap().state = workspace::TaskState::Running;
-        let defaults = crate::ConversionOptions {
-            summarize: !state.draft().unwrap().options.summarize,
-            ..state.draft().unwrap().options.clone()
-        };
-        assert!(state.prepare_next_import("", defaults.clone()));
-        let next = state.draft().unwrap();
-        assert!(next.submitted_task.is_none());
-        assert!(next.options == defaults);
-        assert!(locked_input_task(next, &state.tasks, "").is_none());
-        let task = state.task(&id).unwrap();
-        assert_eq!(task.state, workspace::TaskState::Running);
-        assert!(task.plan == plan);
     }
 
-    #[test]
-    fn completion_belongs_to_the_submitted_input_and_requires_a_readable_result() {
-        let root = tempfile::tempdir().unwrap();
-        let mut workspace = workspace::Workspace::open_at_inline(
-            root.path().join("workspace.json"),
-            root.path().join("library"),
-            Default::default(),
+    /// The Bilibili sign-in dialog, retrying the source preview it was opened from.
+    pub(crate) fn open_account_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let retry = (self.sign_in_source(true, cx)
+            && course2md::auth::is_bilibili_url(&self.value(Field::Source, cx)))
+        .then(|| self.source_now(cx));
+        self.accounts.update(cx, |accounts, cx| {
+            accounts.open_account_dialog(retry, window, cx)
+        });
+    }
+
+    /// The YouTube connection dialog, retrying the source preview it was opened from.
+    pub(crate) fn open_youtube_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let retry = (self.sign_in_source(false, cx)
+            && course2md::auth::is_youtube_url(&self.value(Field::Source, cx)))
+        .then(|| self.source_now(cx));
+        self.accounts.update(cx, |accounts, cx| {
+            accounts.open_youtube_dialog(retry, window, cx)
+        });
+    }
+
+    /// Whether the Bilibili sign-in can retry the source preview it was opened from.
+    fn can_retry_account_source(&self, cx: &App) -> bool {
+        let (generation, input) = self.source_now(cx);
+        self.accounts.read(cx).account.can_resume_source(
+            generation,
+            &input,
+            self.sign_in_source(true, cx),
         )
-        .unwrap();
-        let state = &mut workspace.state;
-        let source = source::Source {
-            input: "https://www.bilibili.com/video/BVfixture".into(),
-            identity: "video-fixture".into(),
-            online: true,
-            ..Default::default()
-        };
-        let plan = workspace::TaskPlan {
-            operation: Default::default(),
-            source: source.clone(),
-            source_id: source.identity.clone(),
-            title: "已提交的标题".into(),
-            library_id: state.default_library.clone(),
-            folder: None,
-            subtitle: None,
-            config: planned_config(),
-            asr_service: None,
-            ai_service: None,
-        };
-        let (id, _) = state.enqueue(plan.clone(), None).unwrap();
-        let draft = state.draft_mut().unwrap();
-        draft.change_source(source.input.clone());
-        draft.submitted_task = Some(id.clone());
-        assert!(
-            completed_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_none()
-        );
-        state.task_mut(&id).unwrap().state = workspace::TaskState::Complete;
-        assert!(
-            completed_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_none()
-        );
-        state.task_mut(&id).unwrap().artifact = Some(root.path().join("published-version"));
-        assert_eq!(
-            completed_input_task(state.draft().unwrap(), &state.tasks, &source.input)
-                .unwrap()
-                .id,
-            id,
-        );
-        // The text can change before its observer replaces the submitted draft.
-        // That next input must remain visible even during this intermediate state.
-        for next in ["", "https://www.bilibili.com/video/BVnext"] {
-            assert!(completed_input_task(state.draft().unwrap(), &state.tasks, next).is_none());
-        }
-        state.task_mut(&id).unwrap().state = workspace::TaskState::Partial;
-        assert!(
-            completed_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_some()
-        );
-        state.task_mut(&id).unwrap().state = workspace::TaskState::Complete;
-        state.prepare_next_import("https://www.bilibili.com/video/BVnext", Default::default());
-        assert!(
-            completed_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_none()
-        );
-        assert!(state.task(&id).unwrap().plan == plan);
     }
 
-    fn submitted_recovery_chain() -> (workspace::Draft, Vec<workspace::TaskRecord>) {
-        let source = source::Source {
-            input: "https://www.bilibili.com/video/BVfixture".into(),
-            identity: "video-fixture".into(),
-            online: true,
-            ..Default::default()
-        };
-        let mut draft = workspace::Draft::new(true, "library".into(), Default::default());
-        draft.change_source(source.input.clone());
-        draft.source = Some(source.clone());
-        draft.submitted_task = Some("original".into());
-        let mut original = workspace::TaskRecord {
-            id: "original".into(),
-            plan: workspace::TaskPlan {
-                operation: Default::default(),
-                source_id: source.identity.clone(),
-                source,
-                title: "已提交的课程".into(),
-                library_id: "library".into(),
-                folder: None,
-                subtitle: None,
-                config: planned_config(),
-                asr_service: None,
-                ai_service: None,
-            },
-            state: workspace::TaskState::Uncertain,
-            intent: workspace::Intent::Pause,
-            created: 0,
-            updated: 0,
-            parent: None,
-            handled_by: None,
-            work_dir: "work/original".into(),
-            stages: Default::default(),
-            error: Some("原摘要请求结果未确认".into()),
-            artifact: Some("versions/original".into()),
-            outcomes: None,
-            unread: false,
-            logs: Vec::new(),
-            blocked: Vec::new(),
-            resend: Vec::new(),
-        };
-        let mut recovery = original.clone();
-        recovery.id = "recovery".into();
-        recovery.parent = Some(original.id.clone());
-        recovery.state = workspace::TaskState::Queued;
-        recovery.intent = workspace::Intent::Run;
-        recovery.error = None;
-        recovery.artifact = None;
-        recovery.work_dir = "work/recovery".into();
-        recovery.plan.operation = course2md::execution::Operation::Reprocess {
-            base_version_dir: "versions/original".into(),
-            components: vec![course2md::execution::Component::Summary],
-            prior_work_dir: Some(original.work_dir.clone()),
-        };
-        original.handled_by = Some(recovery.id.clone());
-        (draft, vec![original, recovery])
+    /// The Bilibili sign-in dialog, drawn over the page.
+    pub(crate) fn account_dialog(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let ready = self.can_retry_account_source(cx);
+        self.accounts.update(cx, |accounts, cx| {
+            accounts.account_dialog(ready, window, cx)
+        })
     }
 
-    #[test]
-    fn workbench_entry_retires_only_unchanged_terminal_inputs() {
-        let (mut draft, mut tasks) = submitted_recovery_chain();
-        draft.title = tasks[0].plan.title.clone();
-        for state in [
-            workspace::TaskState::Complete,
-            workspace::TaskState::Partial,
-            workspace::TaskState::Cancelled,
-        ] {
-            tasks[1].state = state;
-            tasks[1].artifact = Some("versions/recovery".into());
-            assert_eq!(
-                super::retired_input_task(&draft, &tasks, &draft.input)
-                    .unwrap()
-                    .id,
-                "recovery"
-            );
-        }
-        for state in [
-            workspace::TaskState::Queued,
-            workspace::TaskState::Running,
-            workspace::TaskState::Pausing,
-            workspace::TaskState::Paused,
-            workspace::TaskState::NeedsAttention,
-            workspace::TaskState::Uncertain,
-        ] {
-            tasks[1].state = state;
-            assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
-        }
-        tasks[1].state = workspace::TaskState::Partial;
-        let unchanged = draft.clone();
-        draft.title = "尚未提交的新名称".into();
-        assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
-        draft = unchanged.clone();
-        draft.options.keep_video = !draft.options.keep_video;
-        assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
-        // Vision without proofreading has no effect, so the plan does not record it.
-        draft = unchanged.clone();
-        draft.options.vision = !draft.options.vision;
-        assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_some());
-        draft = unchanged.clone();
-        draft.folder = Some(42);
-        assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
-        draft = unchanged;
-        assert!(super::retired_input_task(&draft, &tasks, "新视频").is_none());
-        tasks[1].blocked.push(workspace::BlockedRequest {
-            reason: course2md::progress::BlockReason::Uncertain,
-            request_id: Some("pending-summary".into()),
-            purpose: Some("summary".into()),
-            description: "摘要".into(),
-            kind: Some(course2md::artifact::FailureKind::Uncertain),
-            message: "结果未知".into(),
-        });
-        assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
-        tasks[1].blocked.clear();
-        tasks[1].artifact = None;
-        assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
+    /// The YouTube connection dialog, drawn over the page.
+    pub(crate) fn youtube_dialog(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        self.accounts
+            .update(cx, |accounts, cx| accounts.youtube_dialog(window, cx))
     }
 
-    #[test]
-    fn workbench_follows_the_same_recovery_for_queued_running_and_completed_results() {
-        let (draft, mut tasks) = submitted_recovery_chain();
-        let original = tasks[0].clone();
-        for state in [workspace::TaskState::Queued, workspace::TaskState::Running] {
-            tasks[1].state = state;
-            assert_eq!(
-                submitted_input_task(&draft, &tasks, &draft.input)
-                    .unwrap()
-                    .id,
-                "recovery"
-            );
-            assert!(completed_input_task(&draft, &tasks, &draft.input).is_none());
-        }
-        tasks[1].state = workspace::TaskState::Complete;
-        assert!(completed_input_task(&draft, &tasks, &draft.input).is_none());
-        tasks[1].artifact = Some("versions/recovery".into());
-        assert_eq!(
-            completed_input_task(&draft, &tasks, &draft.input)
-                .unwrap()
-                .id,
-            "recovery"
-        );
-
-        let mut final_attempt = tasks[1].clone();
-        final_attempt.id = "final-attempt".into();
-        final_attempt.parent = Some("recovery".into());
-        final_attempt.state = workspace::TaskState::Running;
-        final_attempt.artifact = None;
-        tasks[1].state = workspace::TaskState::Uncertain;
-        tasks[1].handled_by = Some(final_attempt.id.clone());
-        tasks.push(final_attempt);
-        assert_eq!(
-            submitted_input_task(&draft, &tasks, &draft.input)
-                .unwrap()
-                .id,
-            "final-attempt"
-        );
-        assert!(completed_input_task(&draft, &tasks, &draft.input).is_none());
-        tasks[2].state = workspace::TaskState::Complete;
-        tasks[2].artifact = Some("versions/final-attempt".into());
-        assert_eq!(
-            completed_input_task(&draft, &tasks, &draft.input)
-                .unwrap()
-                .id,
-            "final-attempt"
-        );
-        // A cancelled recovery still belongs to this input for inline feedback,
-        // but must not fall back to an older readable result or follow new input.
-        tasks[2].state = workspace::TaskState::Cancelled;
-        tasks[2].artifact = None;
-        assert_eq!(
-            submitted_input_task(&draft, &tasks, &draft.input)
-                .unwrap()
-                .id,
-            "final-attempt"
-        );
-        assert!(completed_input_task(&draft, &tasks, &draft.input).is_none());
-        assert!(submitted_input_task(&draft, &tasks, "another-video").is_none());
-        assert!(tasks[0] == original);
-        assert_eq!(draft.submitted_task.as_deref(), Some("original"));
-    }
-
-    #[test]
-    fn recovery_lookup_rejects_broken_cycles_or_unrelated_task_links() {
-        for case in [
-            "missing",
-            "self-cycle",
-            "cycle",
-            "wrong-parent",
-            "other-source",
-            "inconsistent-source",
-            "other-kind",
-            "duplicate-id",
-            "unrelated-submission",
-        ] {
-            let (mut draft, mut tasks) = submitted_recovery_chain();
-            match case {
-                "missing" => tasks[0].handled_by = Some("missing".into()),
-                "self-cycle" => {
-                    tasks[0].handled_by = Some("original".into());
-                    tasks[0].parent = Some("original".into());
+    /// What the sign-ins ask of the window.
+    pub(crate) fn accounts_event(
+        &mut self,
+        _: &Entity<crate::account_ui::AccountsView>,
+        event: &crate::account_ui::AccountsEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::account_ui::AccountsEvent;
+        match event {
+            AccountsEvent::OpenAccount => self.open_account_dialog(window, cx),
+            AccountsEvent::OpenYoutube => self.open_youtube_dialog(window, cx),
+            AccountsEvent::SignedIn { source } => {
+                if self.sign_in_source(true, cx) && *source == self.source_now(cx) {
+                    self.inspect_source(window, cx);
                 }
-                "cycle" => {
-                    tasks[1].handled_by = Some("original".into());
-                    tasks[0].parent = Some("recovery".into());
-                }
-                "wrong-parent" => tasks[1].parent = Some("unrelated".into()),
-                "other-source" => {
-                    tasks[1].plan.source_id = "other-video".into();
-                    tasks[1].plan.source.identity = "other-video".into();
-                }
-                "inconsistent-source" => tasks[1].plan.source.identity = "other-video".into(),
-                "other-kind" => tasks[1].plan.source.online = false,
-                "duplicate-id" => tasks.push(tasks[1].clone()),
-                "unrelated-submission" => {
-                    tasks[1].plan.source_id = "other-video".into();
-                    tasks[1].plan.source.identity = "other-video".into();
-                    draft.submitted_task = Some("recovery".into());
-                }
-                _ => unreachable!(),
             }
-            assert!(
-                submitted_input_task(&draft, &tasks, &draft.input).is_none(),
-                "{case}"
-            );
-            assert!(
-                completed_input_task(&draft, &tasks, &draft.input).is_none(),
-                "{case}"
-            );
+            AccountsEvent::YoutubeConnected { source } => {
+                if *source == self.source_now(cx) {
+                    self.inspect_source(window, cx);
+                }
+            }
         }
-    }
-
-    #[test]
-    fn a_recovered_result_cannot_replace_new_or_changed_input() {
-        let (mut draft, mut tasks) = submitted_recovery_chain();
-        tasks[1].state = workspace::TaskState::Complete;
-        tasks[1].artifact = Some("versions/recovery".into());
-        for input in ["", "https://www.bilibili.com/video/BVnext"] {
-            assert!(submitted_input_task(&draft, &tasks, input).is_none());
-            assert!(completed_input_task(&draft, &tasks, input).is_none());
-        }
-        draft.source.as_mut().unwrap().identity = "newly-inspected-content".into();
-        assert!(submitted_input_task(&draft, &tasks, &draft.input).is_none());
-        draft.source = None;
-        draft.input = "https://www.bilibili.com/video/BVnext".into();
-        assert!(submitted_input_task(&draft, &tasks, &draft.input).is_none());
-    }
-
-    #[test]
-    fn automatic_mode_uses_speech_after_login_or_download_failure() {
-        let track = course2md::subtitle::file_track("lesson.srt".into(), None);
-        for metadata_failed in [true, false] {
-            let mut source = source::Source {
-                subtitles: if metadata_failed {
-                    SubtitleEvidence::Failed {
-                        message: "WARNING: subtitles require login".into(),
-                    }
-                } else {
-                    SubtitleEvidence::Found {
-                        tracks: vec![track.clone()],
-                        warning: None,
-                    }
-                },
-                subtitle_request: (!metadata_failed).then(|| track.clone()),
-                subtitle_read_error: (!metadata_failed).then(|| SubtitleReadError::Failed {
-                    message: "字幕文件没有下载成功".into(),
-                }),
-                ..Default::default()
-            };
-            assert!(automatic_subtitle_fallback(
-                &mut source,
-                TranscriptSource::Auto,
-                None
-            ));
-            assert!(uses_speech(&source, TranscriptSource::Auto));
-            assert!(!subtitle_needs_confirmation(
-                &source,
-                TranscriptSource::Auto
-            ));
-            assert!(source.subtitle_request.is_none());
-            assert!(source.subtitle_read_error.is_none());
-        }
-    }
-
-    #[test]
-    fn explicit_subtitle_and_cancelled_reads_never_fall_back_to_speech() {
-        let mut source = source::Source {
-            subtitles: SubtitleEvidence::Failed {
-                message: "字幕需要登录".into(),
-            },
-            subtitle_read_error: Some(SubtitleReadError::Failed {
-                message: "字幕需要登录".into(),
-            }),
-            ..Default::default()
-        };
-        let original = source.clone();
-        assert!(!automatic_subtitle_fallback(
-            &mut source,
-            TranscriptSource::Subtitle,
-            None
-        ));
-        assert_eq!(source, original);
-        assert!(subtitle_needs_confirmation(
-            &source,
-            TranscriptSource::Subtitle
-        ));
-
-        source.subtitle_read_error = Some(SubtitleReadError::Cancelled);
-        let cancelled = source.clone();
-        assert!(!automatic_subtitle_fallback(
-            &mut source,
-            TranscriptSource::Auto,
-            None
-        ));
-        assert_eq!(source, cancelled);
-        assert!(!uses_speech(&source, TranscriptSource::Auto));
-    }
-
-    #[test]
-    fn pending_or_failed_subtitles_remain_required_even_with_cached_text() {
-        let track = course2md::subtitle::file_track("lesson.srt".into(), None);
-        let mut source = source::Source {
-            identity: "lesson".into(),
-            subtitles: SubtitleEvidence::Found {
-                tracks: vec![track.clone()],
-                warning: None,
-            },
-            ..Default::default()
-        };
-        assert!(subtitle_needs_confirmation(&source, TranscriptSource::Auto));
-        source.selected_subtitle = Some(CachedSubtitle {
-            source_identity: source.identity.clone(),
-            track_id: track.id.clone(),
-            label: "已读取字幕".into(),
-            path: "lesson.srt".into(),
-            events: Vec::new(),
-        });
-        assert!(!subtitle_needs_confirmation(
-            &source,
-            TranscriptSource::Auto
-        ));
-
-        source.subtitle_request = Some(track);
-        assert!(subtitle_needs_confirmation(&source, TranscriptSource::Auto));
-        source.subtitle_request = None;
-        source.subtitle_read_error = Some(SubtitleReadError::Failed {
-            message: "无法读取新字幕，原正文仍保留".into(),
-        });
-        assert!(subtitle_needs_confirmation(&source, TranscriptSource::Auto));
-
-        // Cancelling the replacement or choosing the cached text restores the
-        // confirmed source without opening unrelated generation preferences.
-        source.subtitle_read_error = None;
-        assert!(!subtitle_needs_confirmation(
-            &source,
-            TranscriptSource::Subtitle
-        ));
-        source.selected_subtitle = None;
-        assert!(subtitle_needs_confirmation(
-            &source,
-            TranscriptSource::Subtitle
-        ));
-        assert!(!subtitle_needs_confirmation(&source, TranscriptSource::Asr));
-    }
-
-    #[test]
-    fn caption_intent_and_unconfirmed_reads_never_imply_speech_recognition() {
-        let mut source = source::Source {
-            subtitles: SubtitleEvidence::NoneFound,
-            ..Default::default()
-        };
-        assert!(uses_speech(&source, TranscriptSource::Auto));
-        assert!(!uses_speech(&source, TranscriptSource::Subtitle));
-        source.subtitle_request = Some(course2md::subtitle::file_track("lesson.srt".into(), None));
-        assert!(!uses_speech(&source, TranscriptSource::Auto));
-        assert!(!uses_speech(&source, TranscriptSource::Subtitle));
-        source.subtitle_request = None;
-        source.subtitle_read_error = Some(SubtitleReadError::Failed {
-            message: "字幕文件无法读取".into(),
-        });
-        assert!(!uses_speech(&source, TranscriptSource::Auto));
-        assert!(uses_speech(&source, TranscriptSource::Asr));
-        source.subtitle_read_error = None;
-        source.subtitles = SubtitleEvidence::Unchecked;
-        assert!(!uses_speech(&source, TranscriptSource::Auto));
-        source.subtitles = SubtitleEvidence::Failed {
-            message: "请求失败".into(),
-        };
-        assert!(uses_speech(&source, TranscriptSource::Auto));
-        assert!(!uses_speech(&source, TranscriptSource::Subtitle));
     }
 }

@@ -2,7 +2,7 @@
 //! so native layout can be reviewed without screen-recording permission.
 //!
 //! `COURSE2MD_CAPTURE` lists `page=path.png` pairs separated by `;`. Pages are
-//! `onboarding[:<ai|account|model|cloud>]`, `home[:<state>]`, `library`, `tasks`, `settings:<category>` (appearance, generation,
+//! `onboarding[:<ai|account|model|cloud>]`, `home[:<state>]`, `size:<w>x<h>` (resizes the window, in points), `library`, `tasks`, `settings:<category>` (appearance, generation,
 //! services, storage, application) and `reader[:<title text>][~shots][~shot:<n>][~end]`
 //! (the newest note, or the first whose title contains the text; it opens at
 //! the top, ignoring saved reading positions; `~shots` opens the screenshot
@@ -18,6 +18,8 @@
 //! `COURSE2MD_CAPTURE_CHROME` (`windows` or `linux`) draws that platform's
 //! caption buttons and leading edge instead of this one's, so the Windows and
 //! Linux title bars can be reviewed from a macOS capture.
+//! `COURSE2MD_CAPTURE_RETAINED` draws each shot without refreshing the window, so only
+//! views whose state changed are built again and a stale view shows as stale.
 //!
 //! `input:<steps>` dispatches simulated pointer and keyboard input to the
 //! window as it is (see `simulate_input`), steps joined by `+`, then
@@ -25,30 +27,60 @@
 //!
 //! Dialogs open over their page: `service-editor:<ai|speech|dialog|confirm>`
 //! over Settings › 服务与账号, and `dialog:<name>` for `palette`, `rename`,
-//! `delete` and `image` (the newest note; give it a longer
-//! `COURSE2MD_CAPTURE_DELAY_MS`), `folder`, `storage` and `login`. Each
+//! `delete`, `move`, `confirm` (a `ui::Confirm`) and `image` (the newest note; give it a longer
+//! `COURSE2MD_CAPTURE_DELAY_MS`), `folder`, `storage`, `login` and `youtube`.
+//! `dialog:login~<password|sms|phone>[-captcha|-working|-error|-sent]` and
+//! `dialog:login~success` show the Bilibili login's other methods and steps, and
+//! `dialog:youtube~<checking|signedout|failed|connected|empty>` the YouTube
+//! connection's, with fixture text and no request; `dialog:youtube~check` runs
+//! the real check of the first installed browser, so use it only with a fixture
+//! `HOME`. Each
 //! capture first closes the dialogs an earlier one opened, so one shot shows
 //! one dialog. Nothing a dialog would change is saved unless its action is
 //! taken.
 //!
 //! `dialog:storage` opens the operation dialog without starting a move, so it
-//! shows the idle result state ("操作已完成"). Its progress, cancelling and
-//! failure states only exist while a real move, relocation or cleanup runs
-//! (from Settings › 存储 against a fixture library); the harness does not fake them.
-use crate::{Desktop, Page, palettes::PaletteId, settings_ui::SettingsTab};
+//! shows the idle result state ("操作已完成"). `dialog:storage~move:<folder>` runs a
+//! real move of the first library, and `dialog:storage~link` a real reassociation,
+//! so use them only on a fixture; the harness fakes none of their states.
+use crate::Change as _;
+use crate::{Desktop, Page, settings_ui::SettingsTab};
 use gpui::{App, AsyncWindowContext, WeakEntity, Window};
-use gpui_component::WindowExt as _;
+use gpui_kit::component::WindowExt as _;
+use gpui_kit_material::color::{Appearance, PaletteId, ThemePreferences};
 use std::{cell::Cell, path::PathBuf, time::Duration};
 
 thread_local! {
     static PALETTE: Cell<Option<PaletteId>> = const { Cell::new(None) };
     static SCALE: Cell<Option<f32>> = const { Cell::new(None) };
-    static CAPTION: Cell<Option<crate::window_controls::Caption>> = const { Cell::new(None) };
+    static CAPTION: Cell<Option<gpui_kit_material::components::Caption>> = const { Cell::new(None) };
     /// The saved library presentation (cards, grouped), restored before each
     /// library shot so one shot's state does not leak into the next.
     static LIBRARY_PRESENTATION: Cell<Option<(bool, bool)>> = const { Cell::new(None) };
     /// The saved processing-options visibility, restored before each home shot.
     static HOME_OPTIONS: Cell<Option<bool>> = const { Cell::new(None) };
+}
+
+thread_local! {
+    /// How often each view was built: the shell, the reader and the reader's bar.
+    static RENDERS: Cell<[u64; 3]> = const { Cell::new([0; 3]) };
+}
+
+/// The views whose builds the capture counts.
+#[derive(Clone, Copy)]
+pub enum Counted {
+    Desktop,
+    Reader,
+    ReaderBar,
+}
+
+/// Counts a build of `view`; an input step reports the builds it caused.
+pub fn count_render(view: Counted) {
+    RENDERS.with(|cell| {
+        let mut counts = cell.get();
+        counts[view as usize] += 1;
+        cell.set(counts);
+    });
 }
 
 /// The palette and text scale to paint instead of the saved ones.
@@ -58,19 +90,19 @@ pub fn palette_override() -> Option<PaletteId> {
 
 /// Applies the capture palette to an appearance the way the window paints
 /// it: that palette selected, in its own light or dark mode.
-pub fn override_appearance(appearance: &mut crate::palettes::ThemePreferences) {
+pub fn override_appearance(appearance: &mut ThemePreferences) {
     if let Some(palette) = palette_override() {
         appearance.select(palette);
         appearance.mode = if palette.is_dark() {
-            crate::palettes::Appearance::Dark
+            Appearance::Dark
         } else {
-            crate::palettes::Appearance::Light
+            Appearance::Light
         };
     }
 }
 
 /// The caption buttons to draw instead of this platform's.
-pub fn caption_override() -> Option<crate::window_controls::Caption> {
+pub fn caption_override() -> Option<gpui_kit_material::components::Caption> {
     CAPTION.with(Cell::get)
 }
 
@@ -95,8 +127,8 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
     }
     if let Ok(chrome) = std::env::var("COURSE2MD_CAPTURE_CHROME") {
         let caption = match chrome.as_str() {
-            "windows" => crate::window_controls::Caption::Windows,
-            "linux" => crate::window_controls::Caption::Linux,
+            "windows" => gpui_kit_material::components::Caption::Windows,
+            "linux" => gpui_kit_material::components::Caption::Linux,
             _ => panic!("unknown capture chrome {chrome}"),
         };
         CAPTION.with(|cell| cell.set(Some(caption)));
@@ -122,15 +154,51 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
             for (page, path) in shots {
                 if let Some(steps) = page.strip_prefix("input:") {
                     // Simulated input on whatever the previous shot left open.
+                    // A frame for what came before, then one after each step, as a
+                    // window on screen draws: what the input built, before the capture
+                    // draws everything again.
+                    let draw = |cx: &mut AsyncWindowContext| {
+                        let _ = cx.update(|window, cx| window.draw(cx).clear(cx));
+                    };
+                    draw(cx);
+                    let before = RENDERS.with(Cell::get);
                     for step in steps.split('+') {
                         simulate_input(step, cx).await;
+                        draw(cx);
                     }
+                    let after = RENDERS.with(Cell::get);
+                    eprintln!(
+                        "renders {page}: desktop {} reader {} reader-bar {}",
+                        after[0] - before[0],
+                        after[1] - before[1],
+                        after[2] - before[2]
+                    );
                 } else {
                     let _ = cx.update(|window, cx| {
                         view.update(cx, |this, cx| this.capture_navigate(&page, window, cx))
                     });
                 }
                 cx.background_executor().timer(delay).await;
+                // Draw now: a window hidden behind others gets no frames, and the image would
+                // show whatever it drew last. A first draw only starts an entrance or an exit,
+                // so draw again after it has played. Without frames the theme's next-frame
+                // callback does not run either, so move the theme here.
+                for settle in [true, false] {
+                    let _ = cx.update(|window, cx| {
+                        let _ = view.update(cx, |this, cx| this.prepare_theme(window, cx));
+                        // `COURSE2MD_CAPTURE_RETAINED` draws only what changed, as a window
+                        // on screen does, so a view left stale shows as stale.
+                        if std::env::var_os("COURSE2MD_CAPTURE_RETAINED").is_none() {
+                            window.refresh();
+                        }
+                        window.draw(cx).clear(cx);
+                    });
+                    if settle {
+                        cx.background_executor()
+                            .timer(Duration::from_millis(900))
+                            .await;
+                    }
+                }
                 let _ = cx.update(|window, _| match window.render_to_image() {
                     Ok(image) => {
                         if let Err(error) = image.save(&path) {
@@ -146,7 +214,7 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
 }
 
 /// One simulated input step, `kind~args` with `~`-separated arguments in
-/// window pixels: `move~x~y`, `click~x~y[~count]`, `drag~x1~y1~x2~y2`, `wheel~x~y~dy[~dx]` (positive scrolls
+/// window pixels: `move~x~y`, `click~x~y[~count]`, `rclick~x~y`, `drag~x1~y1~x2~y2`, `wheel~x~y~dy[~dx]` (positive scrolls
 /// the content up or left, as a downward or rightward wheel turn), `key~<keystroke>` (GPUI
 /// syntax, e.g. `escape`, `right`, `cmd-f`; `equal` and `plus` name the
 /// keys the spec reserves) and `wait~ms`. Each platform
@@ -154,7 +222,7 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
 async fn simulate_input(step: &str, cx: &mut AsyncWindowContext) {
     use gpui::{
         Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-        PlatformInput, ScrollDelta, ScrollWheelEvent, TouchPhase, point, px,
+        PlatformInput, ScrollDelta, ScrollEvent, TouchPhase, point, px,
     };
     let mut parts = step.split('~');
     let kind = parts.next().unwrap_or_default();
@@ -167,6 +235,26 @@ async fn simulate_input(step: &str, cx: &mut AsyncWindowContext) {
             modifiers: Modifiers::default(),
         })
     };
+    let press = |down: bool, button, position, click_count| {
+        let modifiers = Modifiers::default();
+        if down {
+            PlatformInput::MouseDown(MouseDownEvent {
+                button,
+                position,
+                modifiers,
+                click_count,
+                first_mouse: false,
+            })
+        } else {
+            PlatformInput::MouseUp(MouseUpEvent {
+                button,
+                position,
+                modifiers,
+                click_count,
+            })
+        }
+    };
+    let (left, right) = (MouseButton::Left, MouseButton::Right);
     let events = match (kind, position) {
         ("move", Some(position)) => vec![moved(position)],
         ("click", Some(position)) => {
@@ -174,53 +262,35 @@ async fn simulate_input(step: &str, cx: &mut AsyncWindowContext) {
             // triple click, counting up as the platform reports it.
             let clicks = numbers.get(2).map_or(1, |count| (*count as usize).max(1));
             let mut events = vec![moved(position)];
-            for click_count in 1..=clicks {
-                events.push(PlatformInput::MouseDown(MouseDownEvent {
-                    button: MouseButton::Left,
-                    position,
-                    modifiers: Modifiers::default(),
-                    click_count,
-                    first_mouse: false,
-                }));
-                events.push(PlatformInput::MouseUp(MouseUpEvent {
-                    button: MouseButton::Left,
-                    position,
-                    modifiers: Modifiers::default(),
-                    click_count,
-                }));
+            for count in 1..=clicks {
+                events.extend([
+                    press(true, left, position, count),
+                    press(false, left, position, count),
+                ]);
             }
             events
         }
+        ("rclick", Some(position)) => vec![
+            moved(position),
+            press(true, right, position, 1),
+            press(false, right, position, 1),
+        ],
         ("drag", Some(from)) if numbers.len() >= 4 => {
             let to = point(px(numbers[2]), px(numbers[3]));
-            let mut events = vec![
-                moved(from),
-                PlatformInput::MouseDown(MouseDownEvent {
-                    button: MouseButton::Left,
-                    position: from,
-                    modifiers: Modifiers::default(),
-                    click_count: 1,
-                    first_mouse: false,
-                }),
-            ];
+            let mut events = vec![moved(from), press(true, left, from, 1)];
             events.extend((1..=8).map(|step| {
                 PlatformInput::MouseMove(MouseMoveEvent {
                     position: from + (to - from) * (step as f32 / 8.),
-                    pressed_button: Some(MouseButton::Left),
+                    pressed_button: Some(left),
                     modifiers: Modifiers::default(),
                 })
             }));
-            events.push(PlatformInput::MouseUp(MouseUpEvent {
-                button: MouseButton::Left,
-                position: to,
-                modifiers: Modifiers::default(),
-                click_count: 1,
-            }));
+            events.push(press(false, left, to, 1));
             events
         }
         ("wheel", Some(position)) if numbers.len() >= 3 => vec![
             moved(position),
-            PlatformInput::ScrollWheel(ScrollWheelEvent {
+            PlatformInput::Scroll(ScrollEvent {
                 position,
                 delta: ScrollDelta::Pixels(point(
                     px(-numbers.get(3).copied().unwrap_or(0.)),
@@ -228,6 +298,7 @@ async fn simulate_input(step: &str, cx: &mut AsyncWindowContext) {
                 )),
                 modifiers: Modifiers::default(),
                 touch_phase: TouchPhase::Moved,
+                source: Default::default(),
             }),
         ],
         ("key", _) => {
@@ -237,12 +308,19 @@ async fn simulate_input(step: &str, cx: &mut AsyncWindowContext) {
                 "plus" => "+",
                 key => key,
             };
-            match Keystroke::parse(key) {
-                Ok(keystroke) => {
-                    let _ = cx.update(|window, cx| window.dispatch_keystroke(keystroke, cx));
+            let _ = cx.update(|window, cx| {
+                match Keystroke::parse_with_os(key, cx.platform_info().os) {
+                    Ok(keystroke) => {
+                        window.dispatch_keystroke(keystroke.clone(), cx);
+                        // Controls that act on release need the key to come up too.
+                        window.dispatch_event(
+                            PlatformInput::KeyUp(gpui::KeyUpEvent { keystroke }),
+                            cx,
+                        );
+                    }
+                    Err(error) => eprintln!("capture input {step}: {error}"),
                 }
-                Err(error) => eprintln!("capture input {step}: {error}"),
-            }
+            });
             Vec::new()
         }
         ("wait", _) if !numbers.is_empty() => {
@@ -274,6 +352,12 @@ impl Desktop {
         let (page, category) = page.split_once(':').unwrap_or((page, ""));
         // One dialog per shot: close whatever the previous capture opened.
         window.close_all_dialogs(cx);
+        self.library_ui.name_dialog = None;
+        self.library_ui.move_dialog = None;
+        self.reader
+            .change(cx, |reader, cx| reader.close_reader_image(cx));
+        self.close_settings_dialogs(cx);
+        self.close_storage_dialog();
         // First use is reviewed on its own; captured pages show the app behind it.
         if page != "onboarding" {
             self.onboarding.active = false;
@@ -294,6 +378,26 @@ impl Desktop {
                 self.capture_library_state(category, window, cx);
             }
             "tasks" => self.navigate(Page::Task, cx),
+            // `size:<w>x<h>` resizes the window, in points, and stays on the page.
+            "size" => {
+                let (width, height) = category
+                    .split_once('x')
+                    .and_then(|(w, h)| Some((w.parse::<f32>().ok()?, h.parse::<f32>().ok()?)))
+                    .unwrap_or_else(|| panic!("capture size is <w>x<h>, not {category}"));
+                window.resize(gpui::size(gpui::px(width), gpui::px(height)));
+            }
+            // `language:<code>` chooses an interface language the way settings does,
+            // on whatever page is open.
+            "language" => {
+                let language: crate::preferences::InterfaceLanguage =
+                    serde_json::from_value(serde_json::Value::String(category.into()))
+                        .unwrap_or_else(|_| panic!("unknown capture language {category}"));
+                let mut next = self.application_edit_base();
+                next.language = language;
+                if self.commit_application(next, cx) {
+                    self.apply_interface_language(language, window, cx);
+                }
+            }
             "settings" => {
                 self.open_settings(window, cx);
                 let tab = match category {
@@ -326,6 +430,7 @@ impl Desktop {
                     }
                 }
                 let course = self
+                    .library(cx)
                     .courses
                     .iter()
                     .find(|course| title.is_empty() || course.title.contains(title))
@@ -336,9 +441,7 @@ impl Desktop {
                 // positions so an earlier `~end` shot or a review session does
                 // not leak in.
                 self.save_reading_position(cx);
-                if let Some(workspace) = &mut self.workspace {
-                    workspace.state.positions.clear();
-                }
+                self.with_workspace(cx, |workspace| workspace.state.positions.clear());
                 if let Some(course) = course {
                     self.open_course(course, cx);
                 }
@@ -349,7 +452,9 @@ impl Desktop {
                             .timer(Duration::from_millis(1200))
                             .await;
                         let _ = this.update_in(cx, |this, window, cx| {
-                            this.capture_reader_view(shots, shot, end, window, cx)
+                            this.reader.change(cx, |reader, cx| {
+                                reader.capture_reader_view(shots, shot, end, window, cx)
+                            })
                         });
                     })
                     .detach();
@@ -363,6 +468,8 @@ impl Desktop {
     /// Opens one dialog over the page it belongs to, once the page has
     /// loaded what the dialog acts on (the notes and their folders).
     fn capture_dialog(&mut self, name: &str, window: &mut Window, cx: &mut gpui::Context<Self>) {
+        let (name, detail) = name.split_once('~').unwrap_or((name, ""));
+        let detail = detail.to_owned();
         match name {
             "palette" | "storage" => {
                 self.open_settings(window, cx);
@@ -374,6 +481,10 @@ impl Desktop {
                 self.select_settings_tab(tab, window, cx);
             }
             "login" => self.navigate(Page::New, cx),
+            "youtube" => {
+                self.open_settings(window, cx);
+                self.select_settings_tab(SettingsTab::Services, window, cx);
+            }
             "image" => {}
             _ => self.navigate(Page::Library, cx),
         }
@@ -383,17 +494,48 @@ impl Desktop {
                 .timer(Duration::from_millis(900))
                 .await;
             let _ = this.update_in(cx, |this, window, cx| {
-                let newest = this.courses.first().map(|course| (**course).clone());
+                let newest = this
+                    .library(cx)
+                    .courses
+                    .first()
+                    .map(|course| (**course).clone());
                 match name.as_str() {
-                    "palette" => this.open_palette_picker(false, window, cx),
-                    "storage" => this.open_storage_dialog(window, cx),
-                    "login" => this.open_account_dialog(window, cx),
+                    "palette" => this.open_palette_picker(false, cx),
+                    "storage" => this.capture_storage_operation(&detail, window, cx),
+                    "login" => {
+                        this.open_account_dialog(window, cx);
+                        this.accounts.update(cx, |accounts, cx| {
+                            accounts.capture_login_state(&detail, window, cx)
+                        });
+                    }
+                    "youtube" => {
+                        this.open_youtube_dialog(window, cx);
+                        this.accounts.update(cx, |accounts, cx| {
+                            accounts.capture_youtube_state(&detail, cx)
+                        });
+                    }
                     "image" => {
                         if let Some(course) = newest {
                             this.open_course(course, cx);
                         }
                     }
-                    "folder" => this.begin_folder(None, window, cx),
+                    "confirm" => {
+                        crate::ui::Confirm::new("Delete note", "Keep note", "Move to Trash")
+                            .danger()
+                            .text("The note moves to the Trash. You can restore it from there.")
+                            .ask(|_, _, _| {}, window, cx)
+                    }
+                    "folder" => this.begin_folder(window, cx),
+                    "move" => {
+                        if let Some(course) = newest {
+                            let root = this.folder_context(Some(course.dir.clone()), cx).root;
+                            this.begin_move(
+                                root,
+                                crate::library_ui::Moving::Note(course.storage_dir()),
+                                cx,
+                            );
+                        }
+                    }
                     "rename" => {
                         if let Some(course) = newest {
                             this.begin_course_rename(course, window, cx);
@@ -412,8 +554,10 @@ impl Desktop {
                 cx.background_executor()
                     .timer(Duration::from_millis(1500))
                     .await;
-                let _ =
-                    this.update_in(cx, |this, window, cx| this.open_reader_image(0, window, cx));
+                let _ = this.update_in(cx, |this, window, cx| {
+                    this.reader
+                        .change(cx, |reader, cx| reader.open_reader_image(0, window, cx))
+                });
             }
         })
         .detach();
@@ -466,7 +610,7 @@ impl Desktop {
             self.desktop_settings.library_cards,
             self.desktop_settings.library_group_folders,
         ) = saved;
-        let root = self.library_root.clone();
+        let root = self.library(cx).root.clone();
         self.select_library_scope(root, crate::FolderFilter::All, cx);
         self.inputs[&crate::Field::Search].update(cx, |input, cx| input.set_value("", window, cx));
         for state in states.split(',').filter(|state| !state.is_empty()) {
@@ -475,12 +619,12 @@ impl Desktop {
                 "list" => self.desktop_settings.library_cards = false,
                 "group" => self.desktop_settings.library_group_folders = true,
                 "unfiled" => {
-                    let root = self.library_root.clone();
+                    let root = self.library(cx).root.clone();
                     self.select_library_scope(root, crate::FolderFilter::Unfiled, cx);
                 }
                 "folder" => {
-                    let root = self.library_root.clone();
-                    let found = self.library_indexes.get(&root).and_then(|library| {
+                    let root = self.library(cx).root.clone();
+                    let found = self.library(cx).indexes.get(&root).and_then(|library| {
                         library
                             .folders
                             .iter()

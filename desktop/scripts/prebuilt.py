@@ -7,6 +7,9 @@
   GPUs through their standard drivers and falls back to the CPU without a
   Vulkan driver. CUDA, ROCm and SYCL builds are 150-400 MB each and stay a
   separate install. macOS uses the Apple speech module instead.
+- aria2 downloads speech models over several connections. Package managers
+  supply it on macOS and Linux; Windows archives bundle the official static
+  build, which is GPL-2.0 and ships beside the app with its license.
 
 Each archive is pinned by sha256 from its GitHub release (`gh release view
 <tag> --json assets`), and so is each license fetched from the tagged source.
@@ -21,6 +24,7 @@ from ffmpeg_bundle import download
 
 UV_VERSION = "0.13.5"
 LLAMA_VERSION = "b11925"
+ARIA2_VERSION = "1.37.0"
 _UV = f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}"
 _UV_SOURCE = f"https://raw.githubusercontent.com/astral-sh/uv/{UV_VERSION}"
 _LLAMA = f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_VERSION}"
@@ -66,6 +70,10 @@ PREBUILT = {
                  subdir="llama.cpp",
                  licenses={"LICENSE-llama.cpp": _LLAMA_LICENSE,
                            "LICENSE-llvm-openmp": "LICENSE-LLVM-OpenMP"}),
+        Prebuilt("aria2", f"https://github.com/aria2/aria2/releases/download/release-{ARIA2_VERSION}/"
+                          f"aria2-{ARIA2_VERSION}-win-64bit-build1.zip",
+                 "67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288",
+                 keep=("aria2c.exe",), licenses={"LICENSE-aria2": "COPYING"}),
     ],
     ("Linux", "x86_64"): [
         Prebuilt("uv", f"{_UV}/uv-x86_64-unknown-linux-gnu.tar.gz",

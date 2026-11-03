@@ -1,39 +1,9 @@
 //! Local Ollama discovery: probe the local service and downloaded models as address and model candidates for the Ollama service form.
 //! Ollama's OpenAI-compatible endpoint needs no credential; "signing in" is discovery plus configuration (see core login/ollama).
-use super::*;
+use crate::Desktop;
 use crate::preferences::{ServiceProtocol, ServicePurpose};
 use crate::settings_ui::service_form::{FormField, FormOwner};
-
-#[derive(Default)]
-pub(crate) struct OllamaUi {
-    generation: u64,
-    working: bool,
-    /// Ok((address, models)) when found; Err(explanation) when not; None before the first check.
-    status: Option<Result<(String, Vec<String>), String>>,
-}
-
-impl OllamaUi {
-    /// A found service is reused; a failed check is retried on the next form.
-    fn found(&self) -> bool {
-        matches!(self.status, Some(Ok(_)))
-    }
-
-    /// What the check established, for the Ollama entry of the type select.
-    pub(crate) fn status_line(&self) -> Option<String> {
-        if self.working {
-            return Some(course2md::tr!("正在检查本机的 Ollama…").into());
-        }
-        match &self.status {
-            Some(Ok((host, models))) => Some(course2md::tr!(
-                "已在 {} 检测到 {} 个模型",
-                host,
-                models.len()
-            )),
-            Some(Err(message)) => Some(message.clone()),
-            None => None,
-        }
-    }
-}
+use gpui::{prelude::*, *};
 
 impl Desktop {
     /// Probe the local Ollama service. Blocking requests stay off the GPUI executor (see spawn_blocking_io).
@@ -42,8 +12,6 @@ impl Desktop {
             return;
         }
         self.ollama.working = true;
-        self.ollama.generation = self.ollama.generation.wrapping_add(1);
-        let generation = self.ollama.generation;
         // The engine error names `ollama serve`; the page offers its own action.
         let task = crate::spawn_blocking_io(|| {
             course2md::login::ollama::discover_for_desktop()
@@ -51,13 +19,9 @@ impl Desktop {
         });
         cx.spawn(async move |this, cx| {
             let result = task
-                .recv()
                 .await
-                .unwrap_or_else(|_| Err(crate::interrupted().to_owned()));
+                .unwrap_or_else(|| Err(crate::interrupted().to_owned()));
             let _ = this.update(cx, |this, cx| {
-                if this.ollama.generation != generation {
-                    return;
-                }
                 this.ollama.working = false;
                 this.ollama.status = Some(result);
                 this.ollama_apply_catalog(cx);

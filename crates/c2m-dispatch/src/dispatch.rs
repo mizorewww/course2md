@@ -1,0 +1,1336 @@
+//! Durable external-request receipts. A lost response is never permission to resend.
+
+use crate::outcome::FailureKind;
+pub use crate::outcome::{Failure, HttpResponse, NetworkFailure};
+use crate::{
+    digest::{digest, json_digest},
+    fsio::atomic_write,
+    progress::{BlockReason, Event},
+};
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+};
+
+/// Durable receipts describe a service snapshot without a stored configuration.
+pub const SNAPSHOT_PREFIX: &str = "snapshot:";
+
+fn snapshot_id(digest: &str) -> String {
+    format!("{SNAPSHOT_PREFIX}{digest}")
+}
+
+/// 任务运行意图：桌面端写入 control.json，引擎在每个安全边界读取。
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Intent {
+    #[default]
+    Run,
+    Pause,
+    Cancel,
+    Quit,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Control {
+    pub intent: Intent,
+    pub stopped_services: Vec<String>,
+    /// IDs identify an exact previous attempt, so persistent authorization is consumed once.
+    pub resend: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum State {
+    Sending,
+    Completed,
+    /// DNS or connection establishment failed before the request body could be sent.
+    NotSent,
+    Rejected,
+    Failed,
+    Uncertain,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Receipt {
+    pub schema: u32,
+    pub stable_id: String,
+    pub request_id: String,
+    pub purpose: String,
+    #[serde(default)]
+    pub description: String,
+    pub service_version: String,
+    pub attempt: u32,
+    pub state: State,
+    pub http_status: Option<u16>,
+    pub response: Option<Value>,
+    pub message: Option<String>,
+    /// A reviewed compatibility rejection; never stores the provider's error body.
+    #[serde(default)]
+    pub unsupported_response_format: bool,
+    /// Explicit component reprocessing permits this exact known-failed attempt once.
+    /// Sending/uncertain attempts still require Control::resend authorization.
+    #[serde(default)]
+    pub retry_authorized: Option<String>,
+}
+
+/// What identifies one service request in the ledger, and how it may be resent.
+pub struct RequestSpec<'a> {
+    /// The configured service ("llm", "asr"), resolved to its version.
+    pub service: &'a str,
+    /// Ledger purpose, shared by retries of the same work.
+    pub purpose: &'a str,
+    /// Shown to the person when the request needs a decision.
+    pub description: &'a str,
+    pub endpoint: &'a str,
+    /// The request content that identifies a repeat of the same request.
+    pub identity: &'a Value,
+    /// Identities earlier versions gave this same request. A receipt saved under one
+    /// of them is this request's, and the request continues under that receipt's id,
+    /// so an upgrade never pays for a request an older version already sent.
+    pub former: &'a [Value],
+    pub resend: Resend,
+}
+
+/// A service response, and whether it was received now or replayed from a
+/// completed receipt (callers that report live usage skip replays).
+#[derive(Debug)]
+pub struct Reply {
+    pub value: Value,
+    pub replayed: bool,
+}
+
+fn rejection_message(status: u16) -> String {
+    match status {
+        401 => crate::tr!("服务未接受此任务保存的凭据，请检查对应服务的 API Key。 / The service rejected the saved credentials; check the API key for that service.").into(),
+        403 => crate::tr!("此任务使用的凭据没有访问该服务或模型的权限。 / The credentials used by this task cannot access that service or model.").into(),
+        404 => crate::tr!("服务未找到此任务指定的接口或模型，请检查服务地址和模型。 / The service does not have the endpoint or model this task names; check the base URL and model.").into(),
+        429 => crate::tr!("服务请求次数达到限制，请稍后重试。 / The service rate limit was reached; try again later.").into(),
+        400 | 422 => {
+            crate::tr!("服务拒绝了请求参数（HTTP {}），请检查此任务使用的模型与服务设置。 / The service rejected the request parameters (HTTP {}); check the model and service settings for this task.", status, status)
+        }
+        _ => crate::tr!("服务未完成此请求（HTTP {}）。 / The service did not complete this request (HTTP {}).", status, status),
+    }
+}
+
+/// A status alone is not evidence that changing the payload will help. Classify
+/// only an explicit rejection of response_format, without retaining error text.
+fn rejects_response_format(status: u16, value: Option<&Value>) -> bool {
+    if !matches!(status, 400 | 422) {
+        return false;
+    }
+    let Some(error) = value.and_then(|v| v.get("error")) else {
+        return false;
+    };
+    let message = error
+        .get("message")
+        .and_then(Value::as_str)
+        .or_else(|| error.as_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let param = error
+        .get("param")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let code = error
+        .get("code")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let named = param == "response_format" || message.contains("response_format");
+    named
+        && (matches!(
+            code,
+            "unsupported_parameter" | "unknown_parameter" | "unrecognized_parameter"
+        ) || [
+            "not supported",
+            "unsupported",
+            "unknown parameter",
+            "unrecognized",
+            "not recognized",
+            "does not support",
+            crate::tr!("不支持"),
+        ]
+        .iter()
+        .any(|term| message.contains(term)))
+}
+
+struct Ledger {
+    /// Where receipts are kept, so a later run sees them. A plain CLI request has none:
+    /// a lost response is classified the same way, and nothing outlives the call.
+    receipts: Option<PathBuf>,
+    control_path: Option<PathBuf>,
+    service_versions: BTreeMap<String, String>,
+    parent: Option<ParentProcess>,
+    locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// Sending/Uncertain receipts by stable id: read from disk once, then kept in step by `save`.
+    unresolved: Mutex<Option<HashMap<String, Receipt>>>,
+}
+
+/// How often safe boundaries re-read the task control file.
+pub const CONTROL_POLL: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Whether an unconfirmed request may be sent again without asking: only when
+/// the service has no per-request billing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Resend {
+    AskUser,
+    Free,
+}
+
+/// The process that started a task. If it goes away (the app was killed
+/// rather than quit), the task stops at its next safe boundary as on quit, so
+/// no orphaned worker keeps changing a task the next app instance shows.
+#[derive(Clone, Copy, Debug)]
+pub struct ParentProcess {
+    #[cfg(unix)]
+    pid: u32,
+}
+
+impl ParentProcess {
+    /// The current parent. Record it when the command starts, before the parent
+    /// has had a chance to go away.
+    pub fn current() -> Self {
+        Self {
+            #[cfg(unix)]
+            pid: std::os::unix::process::parent_id(),
+        }
+    }
+
+    fn gone(&self) -> bool {
+        #[cfg(unix)]
+        {
+            std::os::unix::process::parent_id() != self.pid
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
+    }
+}
+
+/// What a task's control handle answers to, besides its work directory.
+#[derive(Clone, Debug, Default)]
+pub struct ControlSource {
+    /// The control file the desktop app writes; without one the task always runs.
+    pub control_path: Option<PathBuf>,
+    /// Configured services by name, resolved to the versions this task uses.
+    pub service_versions: BTreeMap<String, String>,
+    /// Stop as on quit once this process is gone.
+    pub parent: Option<ParentProcess>,
+}
+
+/// A task's request ledger and control file, passed to every safe boundary.
+/// The default handle has no task context: checks always pass, and each
+/// request is classified through its own in-memory ledger.
+#[derive(Clone, Default)]
+pub struct TaskControl(Option<Arc<Ledger>>);
+
+impl TaskControl {
+    /// The control of a task whose receipts live in `work_dir/requests`.
+    pub fn open(work_dir: &Path, source: ControlSource) -> Result<Self> {
+        let mut ledger = Ledger::new(
+            work_dir,
+            source.control_path.as_deref(),
+            &source.service_versions,
+        )?;
+        ledger.parent = source.parent;
+        Ok(Self(Some(Arc::new(ledger))))
+    }
+
+    /// Safe boundaries for local work. Unknown cloud receipts do not prevent saving local work.
+    pub fn check(&self) -> Result<()> {
+        if let Some(ledger) = &self.0 {
+            ledger.check_intent(None).map_err(anyhow::Error::new)?;
+        }
+        Ok(())
+    }
+
+    /// 轮询任务控制文件，意图不再是 run 时返回 Err。配合 `tokio::select!` 打断
+    /// 长时间运行的分支：子进程句柄的 kill_on_drop 随分支 drop 生效；spawn_blocking
+    /// 里的工作不会因 drop 停止，要靠它自己在安全边界调用 check。
+    /// 没有任务上下文时 check 恒 Ok，此 future 永不完成，不影响 CLI 独立调用。
+    pub async fn watch(&self) -> anyhow::Error {
+        loop {
+            tokio::time::sleep(CONTROL_POLL).await;
+            if let Err(e) = self.check() {
+                return e;
+            }
+        }
+    }
+
+    /// Sends one service request through this task's ledger.
+    pub fn request(
+        &self,
+        spec: &RequestSpec,
+        send: impl FnOnce() -> std::result::Result<HttpResponse, NetworkFailure>,
+        validate: impl FnOnce(&Value) -> Result<()>,
+    ) -> std::result::Result<Reply, Failure> {
+        match &self.0 {
+            Some(ledger) => ledger.send_described(spec, send, validate),
+            // Outside a task there is no durable context, so one in-memory ledger per
+            // request classifies the response by the same rules without keeping it.
+            None => Ledger::with_receipts(None, None, &BTreeMap::new())
+                .send_described(spec, send, validate),
+        }
+    }
+}
+
+/// Exposes unresolved attempts for task state reconciliation even if the process crashed.
+pub fn receipts(work_dir: &Path) -> Result<Vec<Receipt>> {
+    read_receipts(&work_dir.join("requests"))
+}
+fn is_unresolved(receipt: &Receipt) -> bool {
+    matches!(receipt.state, State::Sending | State::Uncertain)
+}
+fn read_receipts(dir: &Path) -> Result<Vec<Receipt>> {
+    if !dir.is_dir() {
+        return Ok(vec![]);
+    }
+    let mut result = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.extension().is_some_and(|e| e == "json") {
+            result.push(serde_json::from_slice(&std::fs::read(path)?).context(crate::tr!("已保存的服务请求记录已损坏；为避免重复扣费，没有重新发送 / A saved service request record is damaged; nothing was resent to avoid duplicate charges"))?);
+        }
+    }
+    Ok(result)
+}
+
+impl Ledger {
+    fn new(
+        work_dir: &Path,
+        control_path: Option<&Path>,
+        versions: &BTreeMap<String, String>,
+    ) -> Result<Self> {
+        let dir = work_dir.join("requests");
+        std::fs::create_dir_all(&dir)?;
+        Ok(Self::with_receipts(Some(dir), control_path, versions))
+    }
+    fn with_receipts(
+        receipts: Option<PathBuf>,
+        control_path: Option<&Path>,
+        versions: &BTreeMap<String, String>,
+    ) -> Self {
+        Self {
+            receipts,
+            control_path: control_path.map(Path::to_path_buf),
+            service_versions: versions.clone(),
+            parent: None,
+            locks: Mutex::new(HashMap::new()),
+            unresolved: Mutex::new(None),
+        }
+    }
+    fn control(&self) -> Result<Control> {
+        let Some(path) = &self.control_path else {
+            return Ok(Control::default());
+        };
+        match std::fs::read(path) {
+            Ok(bytes) => serde_json::from_slice(&bytes).context(crate::tr!(
+                "任务状态无法识别，已暂停 / Task state is unreadable; paused"
+            )),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Control::default()),
+            Err(error) => Err(error.into()),
+        }
+    }
+    fn load(&self, stable_id: &str) -> std::result::Result<Option<Receipt>, Failure> {
+        let Some(dir) = &self.receipts else {
+            return Ok(None);
+        };
+        let path = dir.join(format!("{stable_id}.json"));
+        if !path.exists() {
+            return Ok(None);
+        }
+        serde_json::from_slice(&std::fs::read(&path).map_err(Failure::local)?)
+            .map(Some)
+            .map_err(Failure::local)
+    }
+    fn block(&self, reason: BlockReason, request: Option<&Receipt>, message: &str) -> Failure {
+        let request_id = request.map(|r| r.request_id.clone());
+        let message = request.filter(|r| !r.description.is_empty()).map_or_else(
+            || message.to_string(),
+            |r| crate::tr!("{}：{}", r.description, message),
+        );
+        let kind = if reason == BlockReason::Uncertain {
+            FailureKind::Uncertain
+        } else {
+            FailureKind::Other
+        };
+        crate::progress::emit(&Event::Blocked {
+            reason,
+            request_id,
+            purpose: request.map(|r| r.purpose.clone()),
+            description: request.map(|r| r.description.clone()),
+            kind,
+            message: message.clone(),
+        });
+        Failure {
+            kind,
+            ..Failure::local(message)
+        }
+    }
+    fn check_intent(&self, service_version: Option<&str>) -> std::result::Result<Control, Failure> {
+        let control = self.control().map_err(Failure::local)?;
+        let intent = if self.parent.is_some_and(|parent| parent.gone()) {
+            &Intent::Quit
+        } else {
+            &control.intent
+        };
+        let reason = match intent {
+            Intent::Run => None,
+            Intent::Pause => Some((
+                BlockReason::Paused,
+                crate::tr!("生成已暂停，进度已保留 / Generation paused; progress retained"),
+            )),
+            Intent::Cancel => Some((
+                BlockReason::Cancelled,
+                crate::tr!("任务已取消，已有成果已保留 / Task cancelled; saved results retained"),
+            )),
+            Intent::Quit => Some((
+                BlockReason::Quit,
+                crate::tr!("已保存进度，等待下次继续 / Progress saved; waiting to continue"),
+            )),
+        };
+        if let Some((reason, message)) = reason {
+            return Err(self.block(reason, None, message));
+        }
+        if service_version
+            .is_some_and(|version| control.stopped_services.iter().any(|v| v == version))
+        {
+            return Err(self.block(
+                BlockReason::ServiceStopped,
+                None,
+                crate::tr!("此服务已删除，没有发送新请求 / Service deleted; no new request sent"),
+            ));
+        }
+        Ok(control)
+    }
+    fn save(&self, receipt: &Receipt) -> std::result::Result<(), Failure> {
+        if let Some(dir) = &self.receipts {
+            atomic_write(
+                &dir.join(format!("{}.json", receipt.stable_id)),
+                &serde_json::to_vec_pretty(receipt).map_err(Failure::local)?,
+            )
+            .map_err(Failure::local)?;
+        }
+        if let Some(index) = self.unresolved.lock().map_err(Failure::local)?.as_mut() {
+            if is_unresolved(receipt) {
+                index.insert(receipt.stable_id.clone(), receipt.clone());
+            } else {
+                index.remove(&receipt.stable_id);
+            }
+        }
+        Ok(())
+    }
+    fn unresolved_receipts(&self) -> std::result::Result<Vec<Receipt>, Failure> {
+        let mut index = self.unresolved.lock().map_err(Failure::local)?;
+        if index.is_none() {
+            let all = match &self.receipts {
+                Some(dir) => read_receipts(dir).map_err(Failure::local)?,
+                None => Vec::new(),
+            };
+            let loaded = all
+                .into_iter()
+                .filter(is_unresolved)
+                .map(|receipt| (receipt.stable_id.clone(), receipt))
+                .collect();
+            *index = Some(loaded);
+        }
+        Ok(index
+            .as_ref()
+            .map_or_else(Vec::new, |index| index.values().cloned().collect()))
+    }
+    fn send_described(
+        &self,
+        spec: &RequestSpec,
+        send: impl FnOnce() -> std::result::Result<HttpResponse, NetworkFailure>,
+        validate: impl FnOnce(&Value) -> Result<()>,
+    ) -> std::result::Result<Reply, Failure> {
+        let RequestSpec {
+            service,
+            purpose,
+            description,
+            endpoint,
+            identity,
+            former,
+            resend,
+        } = *spec;
+        let service_version = self
+            .service_versions
+            .get(service)
+            .cloned()
+            .unwrap_or_else(|| snapshot_id(&digest(endpoint.as_bytes())));
+        let id_of = |payload: &Value| {
+            json_digest(&serde_json::json!({"service_version":service_version,"purpose":purpose,"endpoint":endpoint,"payload":payload})).map_err(Failure::local)
+        };
+        let mut stable_id = id_of(identity)?;
+        if self.load(&stable_id)?.is_none() {
+            for payload in former {
+                let id = id_of(payload)?;
+                if self.load(&id)?.is_some() {
+                    stable_id = id;
+                    break;
+                }
+            }
+        }
+        let lock = self
+            .locks
+            .lock()
+            .map_err(Failure::local)?
+            .entry(stable_id.clone())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone();
+        let _lock = lock.lock().map_err(Failure::local)?;
+        let old = self.load(&stable_id)?;
+        if let Some(old) = &old
+            && old.state == State::Completed
+        {
+            let value = old.response.clone().ok_or_else(|| {
+                Failure::local(crate::tr!(
+                    "已完成请求缺少保存结果；没有重新发送 / Saved request result is missing"
+                ))
+            })?;
+            validate(&value).map_err(Failure::local)?;
+            return Ok(Reply {
+                value,
+                replayed: true,
+            });
+        }
+        let control = self.check_intent(Some(&service_version))?;
+        let authorized = old.as_ref().is_some_and(|receipt| {
+            (resend == Resend::Free && matches!(receipt.state, State::Sending | State::Uncertain))
+                || control.resend.contains(&receipt.request_id)
+                || (matches!(receipt.state, State::Failed | State::Rejected)
+                    && receipt.retry_authorized.as_ref() == Some(&receipt.request_id))
+        });
+        if let Some(old) = &old {
+            if matches!(old.state, State::Sending | State::Uncertain) && !authorized {
+                let mut uncertain = old.clone();
+                uncertain.state = State::Uncertain;
+                self.save(&uncertain)?;
+                return Err(self.block(BlockReason::Uncertain, Some(old), crate::tr!("未收到服务的确定结果。服务可能已处理这部分，再次提交可能产生额外费用 / Service result is uncertain; resending may incur additional charges")));
+            }
+            let settled = match old.state {
+                State::Failed => Some(crate::tr!("此请求未完成 / Request failed")),
+                State::Rejected if old.http_status != Some(429) => Some(crate::tr!(
+                    "服务拒绝了此请求 / Service rejected this request"
+                )),
+                _ => None,
+            };
+            if let Some(fallback) = settled
+                && !authorized
+            {
+                return Err(Failure {
+                    unsupported_response_format: old.unsupported_response_format,
+                    ..Failure::with_status(
+                        old.http_status,
+                        false,
+                        old.message.clone().unwrap_or_else(|| fallback.into()),
+                    )
+                });
+            }
+        }
+        // An unknown prerequisite cannot be bypassed by splitting/relaxing the payload
+        // or by beginning downstream summary requests. Unrelated local work remains possible.
+        // A free service resends unresolved requests when it reaches them, so
+        // overlapping or downstream requests cost nothing extra either.
+        for unresolved in self
+            .unresolved_receipts()?
+            .into_iter()
+            .filter(|_| resend == Resend::AskUser)
+        {
+            if unresolved.stable_id != stable_id {
+                // Live in-flight requests may run concurrently; only stale Sending from another
+                // process is unknown. A lock currently held in this context proves it is live.
+                let live = self
+                    .locks
+                    .lock()
+                    .map_err(Failure::local)?
+                    .get(&unresolved.stable_id)
+                    .cloned()
+                    .is_some_and(|lock| lock.try_lock().is_err());
+                if unresolved.state == State::Uncertain || !live {
+                    return Err(self.block(BlockReason::Uncertain, Some(&unresolved), crate::tr!("前一步请求结果尚不确定；已保留进度，没有继续发送 / A previous request is unresolved; progress retained")));
+                }
+            }
+        }
+        let attempt = old.as_ref().map_or(1, |r| r.attempt + 1);
+        let mut receipt = Receipt {
+            schema: 1,
+            stable_id: stable_id.clone(),
+            request_id: format!("{stable_id}.{attempt}"),
+            purpose: purpose.into(),
+            description: description.into(),
+            service_version,
+            attempt,
+            state: State::Sending,
+            http_status: None,
+            response: None,
+            message: None,
+            unsupported_response_format: false,
+            retry_authorized: None,
+        };
+        // This durable write happens before the only call that can send network bytes.
+        self.save(&receipt)?;
+        let response = match send() {
+            Ok(response) => response,
+            Err(error) => {
+                if error.definitely_unsent {
+                    receipt.state = State::NotSent;
+                    receipt.message = Some(error.message.clone());
+                    self.save(&receipt)?;
+                    return Err(Failure::with_status(None, true, error.message));
+                }
+                receipt.state = State::Uncertain;
+                receipt.message = Some(error.message.clone());
+                self.save(&receipt)?;
+                // Without per-request billing (a ChatGPT plan, a local server) a
+                // stalled or unfinished response costs nothing to send again, so
+                // the caller's bounded retry loop resends it instead of stopping
+                // every later request behind an uncertain result.
+                if resend == Resend::Free {
+                    tracing::warn!(
+                        "AI 响应中断，将重新发送 / AI response was interrupted; sending again"
+                    );
+                    return Err(Failure::with_status(None, true, error.message));
+                }
+                return Err(self.block(BlockReason::Uncertain, Some(&receipt), crate::tr!("未收到服务的确定结果。服务可能已处理这部分，再次提交可能产生额外费用 / Service result is uncertain; resending may incur additional charges")));
+            }
+        };
+        receipt.http_status = Some(response.status);
+        let value = serde_json::from_slice::<Value>(&response.body);
+        if (400..500).contains(&response.status) {
+            let unsupported = rejects_response_format(response.status, value.as_ref().ok());
+            let message = rejection_message(response.status);
+            receipt.state = State::Rejected;
+            receipt.unsupported_response_format = unsupported;
+            receipt.message = Some(message.clone());
+            // Error bodies may echo credentials. Keep status, not the untrusted body.
+            self.save(&receipt)?;
+            // Each caller bounds its retry loop; a later task continuation may retry
+            // a confirmed rejection without requiring uncertain-request authorization.
+            return Err(Failure {
+                unsupported_response_format: unsupported,
+                ..Failure::with_status(Some(response.status), response.status == 429, message)
+            });
+        }
+        if !(200..300).contains(&response.status) {
+            receipt.state = State::Uncertain;
+            self.save(&receipt)?;
+            // As for a lost response above: without per-request billing, a server
+            // error costs nothing to send again, so no one needs to be asked.
+            if resend == Resend::Free {
+                return Err(Failure::with_status(
+                    Some(response.status),
+                    true,
+                    rejection_message(response.status),
+                ));
+            }
+            return Err(self.block(BlockReason::Uncertain, Some(&receipt), crate::tr!("服务返回错误，无法确认是否已处理。再次提交可能产生额外费用 / Service processing is uncertain")));
+        }
+        let value = match value {
+            Ok(value) => value,
+            Err(_) => {
+                receipt.state = State::Failed;
+                receipt.message = Some(
+                    crate::tr!("服务返回的内容无法读取 / The service response could not be read")
+                        .into(),
+                );
+                self.save(&receipt)?;
+                return Err(Failure::local(receipt.message.unwrap()));
+            }
+        };
+        if let Err(error) = validate(&value) {
+            receipt.state = State::Failed;
+            receipt.message = Some(format!("{error:#}"));
+            self.save(&receipt)?;
+            return Err(Failure::local(receipt.message.unwrap()));
+        }
+        receipt.state = State::Completed;
+        receipt.response = Some(value.clone());
+        self.save(&receipt)?;
+        Ok(Reply {
+            value,
+            replayed: false,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    impl Ledger {
+        fn send(
+            &self,
+            service: &str,
+            purpose: &str,
+            endpoint: &str,
+            identity: &Value,
+            send: impl FnOnce() -> std::result::Result<HttpResponse, NetworkFailure>,
+            validate: impl FnOnce(&Value) -> Result<()>,
+        ) -> std::result::Result<Reply, Failure> {
+            self.send_described(
+                &RequestSpec {
+                    service,
+                    purpose,
+                    description: purpose,
+                    endpoint,
+                    identity,
+                    former: &[],
+                    resend: Resend::AskUser,
+                },
+                send,
+                validate,
+            )
+        }
+    }
+
+    #[test]
+    fn a_request_left_sending_by_a_dead_process_is_never_resent_silently() {
+        let dir = tempfile::tempdir().unwrap();
+        let payload = serde_json::json!({"text":"paid"});
+        let first = Ledger::new(dir.path(), None, &Default::default()).unwrap();
+        // The process died inside `send`: the receipt says Sending and nothing else.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = first.send(
+                "llm",
+                "summary",
+                "https://example.test",
+                &payload,
+                || panic!("the process died here"),
+                |_| Ok(()),
+            );
+        }));
+        assert_eq!(receipts(dir.path()).unwrap()[0].state, State::Sending);
+        let restarted = Ledger::new(dir.path(), None, &Default::default()).unwrap();
+        let blocked = restarted
+            .send(
+                "llm",
+                "summary",
+                "https://example.test",
+                &payload,
+                || panic!("an unconfirmed paid request was sent again"),
+                |_| Ok(()),
+            )
+            .unwrap_err();
+        assert!(blocked.uncertain());
+        // Later requests wait for that decision too.
+        let later = restarted
+            .send(
+                "llm",
+                "summary",
+                "https://example.test",
+                &serde_json::json!({"text":"next"}),
+                || panic!("a later request went out past an unconfirmed one"),
+                |_| Ok(()),
+            )
+            .unwrap_err();
+        assert!(later.uncertain());
+        assert_eq!(receipts(dir.path()).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn response_format_fallback_requires_explicit_provider_evidence() {
+        for status in [400, 422] {
+            assert!(rejects_response_format(
+                status,
+                Some(
+                    &serde_json::json!({"error":{"param":"response_format","code":"unsupported_parameter"}})
+                )
+            ));
+            assert!(rejects_response_format(
+                status,
+                Some(
+                    &serde_json::json!({"error":{"message":"This model does not support response_format"}})
+                )
+            ));
+            for error in [
+                serde_json::json!({"error":{"message":"Invalid request parameters"}}),
+                serde_json::json!({"error":{"param":"model","code":"unsupported_parameter"}}),
+                serde_json::json!({"error":{"param":"response_format","message":"Request quota exhausted"}}),
+            ] {
+                assert!(!rejects_response_format(status, Some(&error)));
+            }
+        }
+        assert!(!rejects_response_format(
+            500,
+            Some(&serde_json::json!({"error":{"message":"response_format is unsupported"}}))
+        ));
+    }
+
+    #[test]
+    fn explicit_failed_component_authorization_is_consumed_before_sending() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = Ledger::new(dir.path(), None, &Default::default()).unwrap();
+        let payload = serde_json::json!({"text":"lesson"});
+        let calls = AtomicUsize::new(0);
+        let reject = || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(HttpResponse {
+                status: 400,
+                body: br#"{"error":{"message":"invalid model"}}"#.to_vec(),
+            })
+        };
+        assert!(
+            ledger
+                .send(
+                    "llm",
+                    "summary",
+                    "http://example.test",
+                    &payload,
+                    reject,
+                    |_| Ok(())
+                )
+                .is_err()
+        );
+        let mut receipt = receipts(dir.path()).unwrap().remove(0);
+        receipt.retry_authorized = Some(receipt.request_id.clone());
+        ledger.save(&receipt).unwrap();
+        assert!(
+            ledger
+                .send(
+                    "llm",
+                    "summary",
+                    "http://example.test",
+                    &payload,
+                    reject,
+                    |_| Ok(())
+                )
+                .is_err()
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        let mut receipt = receipts(dir.path()).unwrap().remove(0);
+        assert!(receipt.retry_authorized.is_none());
+        assert!(
+            ledger
+                .send(
+                    "llm",
+                    "summary",
+                    "http://example.test",
+                    &payload,
+                    || panic!("same task may not repeat a rejected attempt"),
+                    |_| Ok(())
+                )
+                .is_err()
+        );
+        // Even a stale/forged known-failure authorization never authorizes an unknown result.
+        receipt.state = State::Uncertain;
+        receipt.retry_authorized = Some(receipt.request_id.clone());
+        ledger.save(&receipt).unwrap();
+        assert!(
+            ledger
+                .send(
+                    "llm",
+                    "summary",
+                    "http://example.test",
+                    &payload,
+                    || panic!("unknown requires Control::resend"),
+                    |_| Ok(())
+                )
+                .unwrap_err()
+                .uncertain()
+        );
+    }
+    fn success() -> std::result::Result<HttpResponse, NetworkFailure> {
+        Ok(HttpResponse {
+            status: 200,
+            body: br#"{"text":"saved"}"#.to_vec(),
+        })
+    }
+    /// Reads one request, then runs `answer` on its connection. Counts requests.
+    fn answering_server(
+        answer: impl Fn(&mut std::net::TcpStream) + Send + 'static,
+    ) -> (String, Arc<AtomicUsize>) {
+        use std::io::Read;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let count = Arc::new(AtomicUsize::new(0));
+        let seen = count.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                let mut request = Vec::new();
+                let mut chunk = [0u8; 4096];
+                while !request.windows(1).any(|b| b == b"}") {
+                    match stream.read(&mut chunk) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => request.extend_from_slice(&chunk[..n]),
+                    }
+                }
+                seen.fetch_add(1, Ordering::SeqCst);
+                answer(&mut stream);
+            }
+        });
+        (url, count)
+    }
+
+    fn body() -> Value {
+        serde_json::json!({"text":"paid"})
+    }
+
+    #[test]
+    fn a_lost_connection_after_sending_is_never_resent_silently() {
+        // The server takes the request and goes away before answering.
+        let (url, requests) = answering_server(|_| {});
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = Ledger::new(dir.path(), None, &Default::default()).unwrap();
+        let client = crate::runtime::http_agent_keeping_errors(std::time::Duration::from_secs(5));
+        let send = || crate::runtime::receive(client.post(&url).send_json(body()));
+        let failure = ledger
+            .send("asr", "transcription", &url, &body(), send, |_| Ok(()))
+            .unwrap_err();
+        assert!(failure.uncertain(), "{}", failure.message);
+        assert!(
+            ledger
+                .send("asr", "transcription", &url, &body(), send, |_| Ok(()))
+                .unwrap_err()
+                .uncertain()
+        );
+        // Neither the client library nor the ledger sent it a second time.
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+        assert_eq!(receipts(dir.path()).unwrap()[0].state, State::Uncertain);
+    }
+
+    #[test]
+    fn redirects_are_answers_not_followed() {
+        use std::io::Write;
+        let (target, target_requests) = answering_server(|_| {});
+        let location = target.clone();
+        let (url, requests) = answering_server(move |stream| {
+            let _ = write!(
+                stream,
+                "HTTP/1.1 307 Temporary Redirect\r\nLocation: {location}/moved\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+        });
+        for client in [
+            crate::runtime::http_agent(std::time::Duration::from_secs(5)),
+            crate::runtime::http_agent_keeping_errors(std::time::Duration::from_secs(5)),
+        ] {
+            let response = crate::runtime::receive(client.post(&url).send_json(body()))
+                .ok()
+                .unwrap();
+            assert_eq!(response.status, 307);
+        }
+        assert_eq!(requests.load(Ordering::SeqCst), 2);
+        assert_eq!(target_requests.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn error_bodies_are_kept_for_classification() {
+        use std::io::Write;
+        let (url, _) = answering_server(|stream| {
+            let body = r#"{"error":{"param":"response_format","code":"unsupported_parameter"}}"#;
+            let _ = write!(
+                stream,
+                "HTTP/1.1 400 Bad Request\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        });
+        let client = crate::runtime::http_agent_keeping_errors(std::time::Duration::from_secs(5));
+        let response = crate::runtime::receive(client.post(&url).send_json(body()))
+            .ok()
+            .unwrap();
+        assert_eq!(response.status, 400);
+        let value = serde_json::from_slice(&response.body).unwrap();
+        assert!(rejects_response_format(400, Some(&value)));
+        // An agent reporting statuses as errors still gives the status.
+        let client = crate::runtime::http_agent(std::time::Duration::from_secs(5));
+        let response = crate::runtime::receive(client.post(&url).send_json(body()))
+            .ok()
+            .unwrap();
+        assert_eq!(response.status, 400);
+    }
+
+    #[test]
+    fn confirmed_connection_failure_can_resume_without_resend_authorization() {
+        // Nothing can listen on port 0, so the connection always fails before
+        // a byte is sent; a freed ephemeral port could be reused meanwhile.
+        let endpoint = "http://127.0.0.1:0".to_owned();
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = Ledger::new(dir.path(), None, &Default::default()).unwrap();
+        let payload = serde_json::json!({"text":"lesson"});
+        let client = crate::runtime::http_agent(std::time::Duration::from_secs(2));
+        let failure = ledger
+            .send(
+                "llm",
+                "summary",
+                &endpoint,
+                &payload,
+                || crate::runtime::receive(client.post(&endpoint).send_json(&payload)),
+                |_| Ok(()),
+            )
+            .unwrap_err();
+        assert!(failure.retryable);
+        assert!(!failure.uncertain());
+        assert_eq!(receipts(dir.path()).unwrap()[0].state, State::NotSent);
+        ledger
+            .send("llm", "summary", &endpoint, &payload, success, |_| Ok(()))
+            .unwrap();
+        let receipt = &receipts(dir.path()).unwrap()[0];
+        assert_eq!(receipt.state, State::Completed);
+        assert_eq!(receipt.attempt, 2);
+    }
+    #[test]
+    fn free_services_resend_unconfirmed_requests_without_asking() {
+        let dir = tempfile::tempdir().unwrap();
+        let control = dir.path().join("control.json");
+        let ledger = Ledger::new(dir.path(), Some(&control), &Default::default()).unwrap();
+        let send = |payload: &Value, resend, ok: bool| {
+            ledger.send_described(
+                &RequestSpec {
+                    service: "llm",
+                    purpose: "proofreading",
+                    description: "segment",
+                    endpoint: "https://example.test",
+                    identity: payload,
+                    former: &[],
+                    resend,
+                },
+                || {
+                    if ok {
+                        Ok(HttpResponse {
+                            status: 200,
+                            body: br#"{"ok":true}"#.to_vec(),
+                        })
+                    } else {
+                        Err(NetworkFailure {
+                            message: "stalled".into(),
+                            definitely_unsent: false,
+                        })
+                    }
+                },
+                |_| Ok(()),
+            )
+        };
+        let first = serde_json::json!({"text":"one"});
+        let second = serde_json::json!({"text":"two"});
+        // A free service's lost response is a plain retryable failure for the
+        // caller's bounded loop; the receipt still records it as unresolved.
+        let lost = send(&first, Resend::Free, false).unwrap_err();
+        assert!(lost.retryable && !lost.uncertain());
+        assert!(receipts(dir.path()).unwrap().iter().any(is_unresolved));
+        // A billed service still stops at the unresolved request.
+        assert!(send(&second, Resend::AskUser, true).is_err());
+        // A free one carries on, and resends the unconfirmed request itself.
+        assert!(send(&second, Resend::Free, true).is_ok());
+        assert!(send(&first, Resend::Free, true).is_ok());
+        assert!(
+            receipts(dir.path())
+                .unwrap()
+                .iter()
+                .all(|r| !is_unresolved(r))
+        );
+    }
+
+    #[test]
+    fn free_service_server_errors_resend_without_blocking_later_requests() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = Ledger::new(dir.path(), None, &Default::default()).unwrap();
+        let payload = serde_json::json!({"text":"one"});
+        let spec = RequestSpec {
+            service: "llm",
+            purpose: "proofreading",
+            description: "segment",
+            endpoint: "https://example.test",
+            identity: &payload,
+            former: &[],
+            resend: Resend::Free,
+        };
+        let failed = || {
+            Ok(HttpResponse {
+                status: 502,
+                body: b"bad gateway".to_vec(),
+            })
+        };
+        let first = ledger
+            .send_described(&spec, failed, |_| Ok(()))
+            .unwrap_err();
+        assert!(first.retryable && !first.uncertain());
+        // The body of a failed response is never kept; the attempt stays unresolved
+        // so a later billed request still sees it.
+        let receipt = &receipts(dir.path()).unwrap()[0];
+        assert_eq!(receipt.state, State::Uncertain);
+        assert_eq!(receipt.http_status, Some(502));
+        assert!(receipt.response.is_none());
+        let resent = ledger.send_described(&spec, success, |_| Ok(())).unwrap();
+        assert!(!resent.replayed);
+        assert_eq!(receipts(dir.path()).unwrap()[0].attempt, 2);
+    }
+
+    #[test]
+    fn uncertain_attempt_requires_exact_single_use_authorization() {
+        let dir = tempfile::tempdir().unwrap();
+        let control = dir.path().join("control.json");
+        let ledger = Ledger::new(dir.path(), Some(&control), &Default::default()).unwrap();
+        let payload = serde_json::json!({"model":"test","audio":"hash"});
+        let calls = AtomicUsize::new(0);
+        let fail = || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Err(NetworkFailure {
+                message: "lost".into(),
+                definitely_unsent: false,
+            })
+        };
+        assert!(
+            ledger
+                .send(
+                    "asr",
+                    "transcription",
+                    "https://example.test",
+                    &payload,
+                    fail,
+                    |_| Ok(())
+                )
+                .unwrap_err()
+                .uncertain()
+        );
+        let first = receipts(dir.path()).unwrap()[0].request_id.clone();
+        assert!(
+            ledger
+                .send(
+                    "asr",
+                    "transcription",
+                    "https://example.test",
+                    &payload,
+                    fail,
+                    |_| Ok(())
+                )
+                .is_err()
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        atomic_write(
+            &control,
+            &serde_json::to_vec(&Control {
+                resend: vec![first],
+                ..Default::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            ledger
+                .send(
+                    "asr",
+                    "transcription",
+                    "https://example.test",
+                    &payload,
+                    fail,
+                    |_| Ok(())
+                )
+                .is_err()
+        );
+        assert!(
+            ledger
+                .send(
+                    "asr",
+                    "transcription",
+                    "https://example.test",
+                    &payload,
+                    fail,
+                    |_| Ok(())
+                )
+                .is_err()
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        let second = receipts(dir.path()).unwrap()[0].request_id.clone();
+        atomic_write(
+            &control,
+            &serde_json::to_vec(&Control {
+                resend: vec![second],
+                ..Default::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let result = ledger
+            .send(
+                "asr",
+                "transcription",
+                "https://example.test",
+                &payload,
+                success,
+                |_| Ok(()),
+            )
+            .unwrap();
+        assert!(!result.replayed);
+        let cached = ledger
+            .send(
+                "asr",
+                "transcription",
+                "https://example.test",
+                &payload,
+                || panic!("completed request must not send again"),
+                |_| Ok(()),
+            )
+            .unwrap();
+        // The replay is the saved result, marked as not received now.
+        assert!(cached.replayed);
+        assert_eq!(cached.value, result.value);
+    }
+    #[test]
+    fn durable_sending_and_protocol_failure_are_not_automatic_retries() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = Ledger::new(dir.path(), None, &Default::default()).unwrap();
+        let payload = serde_json::json!({"text":"lesson"});
+        let result = ledger.send(
+            "llm",
+            "proofreading",
+            "https://example.test",
+            &payload,
+            || {
+                assert_eq!(receipts(dir.path()).unwrap()[0].state, State::Sending);
+                Ok(HttpResponse {
+                    status: 200,
+                    body: br#"{"error":"invalid"}"#.to_vec(),
+                })
+            },
+            |_| anyhow::bail!("协议错误"),
+        );
+        assert!(result.is_err());
+        assert!(
+            ledger
+                .send(
+                    "llm",
+                    "proofreading",
+                    "https://example.test",
+                    &payload,
+                    || panic!("protocol errors must not resend"),
+                    |_| Ok(())
+                )
+                .is_err()
+        );
+    }
+    #[test]
+    fn paused_or_revoked_service_sends_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("control.json");
+        let versions = BTreeMap::from([("llm".into(), "service-v1".into())]);
+        let ledger = Ledger::new(dir.path(), Some(&path), &versions).unwrap();
+        for control in [
+            Control {
+                intent: Intent::Pause,
+                ..Default::default()
+            },
+            Control {
+                stopped_services: vec!["service-v1".into()],
+                ..Default::default()
+            },
+        ] {
+            atomic_write(&path, &serde_json::to_vec(&control).unwrap()).unwrap();
+            assert!(
+                ledger
+                    .send(
+                        "llm",
+                        "summary",
+                        "https://example.test",
+                        &Value::Null,
+                        || panic!("blocked request sent"),
+                        |_| Ok(())
+                    )
+                    .is_err()
+            );
+        }
+        assert!(receipts(dir.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn each_task_answers_only_to_its_own_control_file() {
+        let (paused, running) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let open = |dir: &Path| {
+            TaskControl::open(
+                dir,
+                ControlSource {
+                    control_path: Some(dir.join("control.json")),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+        };
+        let (first, second) = (open(paused.path()), open(running.path()));
+        atomic_write(
+            &paused.path().join("control.json"),
+            &serde_json::to_vec(&Control {
+                intent: Intent::Pause,
+                ..Default::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(first.check().is_err());
+        assert!(first.clone().check().is_err());
+        second.check().unwrap();
+        TaskControl::default().check().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod ephemeral_tests {
+    use super::*;
+
+    fn request(status: u16, body: &[u8], resend: Resend) -> std::result::Result<Reply, Failure> {
+        let body = body.to_vec();
+        TaskControl::default().request(
+            &RequestSpec {
+                service: "llm",
+                purpose: "summary",
+                description: "summary",
+                endpoint: "https://example.test",
+                identity: &serde_json::json!({"n":1}),
+                former: &[],
+                resend,
+            },
+            move || Ok(HttpResponse { status, body }),
+            |_| Ok(()),
+        )
+    }
+
+    #[test]
+    fn requests_outside_a_task_are_classified_by_the_same_rules() {
+        assert_eq!(
+            request(200, br#"{"ok":true}"#, Resend::AskUser)
+                .unwrap()
+                .value["ok"],
+            true
+        );
+        let rejected = request(401, b"{}", Resend::AskUser).unwrap_err();
+        assert_eq!(rejected.kind, FailureKind::Authentication);
+        assert!(!rejected.retryable && !rejected.uncertain());
+        assert!(request(429, b"{}", Resend::AskUser).unwrap_err().retryable);
+        let unknown = request(503, b"", Resend::AskUser).unwrap_err();
+        assert!(unknown.uncertain() && !unknown.retryable);
+        // A free service's server error is an ordinary retryable failure, not a
+        // question about charges: the transport branch already treats it so.
+        let free = request(503, b"", Resend::Free).unwrap_err();
+        assert!(free.retryable && !free.uncertain());
+        assert_eq!(free.status, Some(503));
+        assert_eq!(free.kind, FailureKind::Service);
+        // Nothing persists between calls: the same payload sends again.
+        assert!(request(200, br#"{"ok":true}"#, Resend::AskUser).is_ok());
+        let lost = TaskControl::default()
+            .request(
+                &RequestSpec {
+                    service: "llm",
+                    purpose: "summary",
+                    description: "summary",
+                    endpoint: "https://example.test",
+                    identity: &serde_json::json!({"n":2}),
+                    former: &[],
+                    resend: Resend::Free,
+                },
+                || {
+                    Err(NetworkFailure {
+                        message: "stalled".into(),
+                        definitely_unsent: false,
+                    })
+                },
+                |_| Ok(()),
+            )
+            .unwrap_err();
+        assert!(lost.retryable && !lost.uncertain());
+    }
+}

@@ -1,5 +1,5 @@
 {
-  "originHash" : "802e8e2553858ae3807c7e42be6e062306f71cebb87a7f6451952d0320337f5d",
+  "originHash" : "16a6d4b9ea4fa4aedfbb994610ab0b05341337e48ec936e4978d967a3157f358",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -69,7 +69,6 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/soniqo/speech-swift",
       "state" : {
-        "branch" : "main",
         "revision" : "6f5aa4d0bca49c10d378723178465afaf813624c"
       }
     },

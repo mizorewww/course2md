@@ -1,0 +1,33 @@
+[package]
+name = "desktop-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The course2md desktop's workspace: tasks, libraries, their folders and published notes"
+publish = false
+
+[features]
+# Workspace and note fixtures that other crates' tests build on.
+test-support = []
+
+[dependencies]
+c2m-artifact = { path = "../../crates/c2m-artifact" }
+c2m-config = { path = "../../crates/c2m-config" }
+c2m-core = { path = "../../crates/c2m-core" }
+c2m-dispatch = { path = "../../crates/c2m-dispatch" }
+c2m-engine = { path = "../../crates/c2m-engine" }
+c2m-i18n = { path = "../../crates/c2m-i18n" }
+c2m-process = { path = "../../crates/c2m-process" }
+c2m-protocol = { path = "../../crates/c2m-protocol" }
+c2m-source = { path = "../../crates/c2m-source" }
+desktop-prefs = { path = "../prefs" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+smol.workspace = true
+tempfile.workspace = true
+walkdir.workspace = true
+same-file.workspace = true
+image = { workspace = true, features = ["webp"] }
+pulldown-cmark.workspace = true
+trash.workspace = true

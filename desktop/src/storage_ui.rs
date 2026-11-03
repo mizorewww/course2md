@@ -1,284 +1,45 @@
 //! Controlled library migration and explicit cleanup of verified old-location backups.
-use super::*;
+use crate::Change as _;
 use crate::{
-    storage::{self, Journal, Phase, Progress},
-    theme::*,
+    Desktop,
+    course_library::CommandsButton,
+    folder_tree::{Command, command_context_menu},
+    storage::{self, Phase, Progress},
+    symbols,
+    ui::{self, AsyncStatus, Resource},
+    workspace,
 };
 use anyhow::{Context as _, Result, ensure};
-use gpui_component::{
-    button::*,
-    menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem},
-};
+use desktop_store::locations::*;
+use gpui::{prelude::*, *};
+use gpui_base::{h_flex, v_flex};
+use gpui_kit_material::prelude::*;
 use std::{
-    collections::BTreeMap,
-    path::Path,
+    path::{Path, PathBuf},
+    rc::Rc,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    time::{Duration, Instant},
 };
-
-/// The storage operation the dialog and status panel describe.
-#[derive(Clone, Default, PartialEq)]
-enum StorageOp {
-    #[default]
-    Move,
-    /// Pointing a library id at the folder it was moved to outside the app.
-    Relocate(String),
-    Reassociate,
-    Cleanup,
-}
 
 /// Progress reports reach the view at most this often.
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 /// How long a move waits for the running task to pause.
 const TASK_STOP_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[derive(Default)]
-pub struct State {
-    pub busy: bool,
-    op: StorageOp,
-    cancel: Option<Arc<AtomicBool>>,
-    generation: u64,
-    progress: Progress,
-    error: Option<String>,
-    pending: Vec<(PathBuf, Journal)>,
-    /// Move records that could not be read; their files are left in place.
-    corrupt_records: Vec<PathBuf>,
-    records_generation: u64,
-    resume_task: Option<String>,
-    /// Closed or signalled when the job a move waits for exits.
-    job_exit: Option<smol::channel::Sender<()>>,
-    location_checks: LocationChecks,
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct LocationCheck {
-    pub available: bool,
-    pub needs_reassociation: bool,
-    pub problem: Option<String>,
-}
-
-#[derive(Default)]
-struct LocationChecks {
-    generation: u64,
-    expected: BTreeMap<String, PathBuf>,
-    results: BTreeMap<String, (PathBuf, LocationCheck)>,
-}
-
-fn backup_list_stale() -> &'static str {
-    course2md::tr!("备份已删除，但列表尚未更新，请重启应用后检查")
-}
-fn library_removed() -> &'static str {
-    course2md::tr!("这个笔记库已被移除")
-}
-fn registry_unavailable() -> &'static str {
-    course2md::tr!("笔记库列表暂时无法读取，请重启应用后重试")
-}
-
-fn location_paths(locations: &[workspace::LibraryLocation]) -> BTreeMap<String, PathBuf> {
-    locations
-        .iter()
-        .map(|location| (location.id.clone(), location.root.clone()))
-        .collect()
-}
-
-impl LocationChecks {
-    fn begin(&mut self, generation: u64, locations: &[workspace::LibraryLocation]) {
-        self.generation = generation;
-        self.expected = location_paths(locations);
-        // A refresh can keep useful facts about the same path. A new path must
-        // remain unknown until its own check returns.
-        self.results
-            .retain(|id, (root, _)| self.expected.get(id) == Some(root));
-    }
-
-    /// None while any location has not been checked yet: it is shown as
-    /// checking, never as an offline or empty library.
-    fn access(&self, locations: &[workspace::LibraryLocation]) -> Option<storage::LibraryAccess> {
-        let mut access = storage::LibraryAccess {
-            available: Vec::new(),
-            unavailable: Vec::new(),
-        };
-        for location in locations {
-            let check = self.get(location)?;
-            if access.available.contains(&location.root)
-                || access.unavailable.contains(&location.root)
-            {
-                continue;
-            }
-            if check.available {
-                access.available.push(location.root.clone());
-            } else {
-                access.unavailable.push(location.root.clone());
-            }
-        }
-        Some(access)
-    }
-
-    fn get(&self, location: &workspace::LibraryLocation) -> Option<&LocationCheck> {
-        self.results
-            .get(&location.id)
-            .filter(|(root, _)| root == &location.root)
-            .map(|(_, check)| check)
-    }
-
-    fn finish(
-        &mut self,
-        generation: u64,
-        current: &[workspace::LibraryLocation],
-        checks: Vec<(workspace::LibraryLocation, LocationCheck)>,
-    ) -> bool {
-        if generation != self.generation
-            || location_paths(current) != self.expected
-            || checks.len() != self.expected.len()
-            || checks
-                .iter()
-                .any(|(location, _)| self.expected.get(&location.id) != Some(&location.root))
-        {
-            return false;
-        }
-        self.results = checks
-            .into_iter()
-            .map(|(location, check)| (location.id, (location.root, check)))
-            .collect();
-        true
-    }
-}
-
-fn inspect_location(location: &workspace::LibraryLocation) -> LocationCheck {
-    let available = std::fs::read_dir(&location.root).is_ok();
-    let mut check = LocationCheck {
-        available,
-        needs_reassociation: false,
-        problem: None,
-    };
-    if !available || location.id.is_empty() {
-        return check;
-    }
-    match std::fs::read_to_string(location.root.join(storage::LIBRARY_ID_FILE)) {
-        Ok(identity) if identity.trim() == location.id => {}
-        Ok(_) => {
-            check.problem = Some(
-                course2md::tr!("这个文件夹属于另一个笔记库，请用「重新定位…」选择正确的文件夹")
-                    .into(),
-            )
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            check.needs_reassociation = true
-        }
-        Err(error) => {
-            check.problem = Some(course2md::tr!(
-                "无法确认这个文件夹是否属于本笔记库：{}",
-                error
-            ))
-        }
-    }
-    check
-}
-
-/// All filesystem probes and the caller's library scan run on the blocking
-/// pool, even when this future is polled by the UI executor.
-pub(super) async fn scan_locations<T, F>(
-    locations: Vec<workspace::LibraryLocation>,
-    scan: F,
-) -> Vec<(workspace::LibraryLocation, LocationCheck, T)>
-where
-    T: Send + 'static,
-    F: Fn(&workspace::LibraryLocation) -> T + Send + 'static,
-{
-    smol::unblock(move || {
-        locations
-            .into_iter()
-            .map(|location| {
-                let check = inspect_location(&location);
-                let result = scan(&location);
-                (location, check, result)
-            })
-            .collect()
-    })
-    .await
-}
-
-impl State {
-    /// Only ask the event loop to poll when the resume request can be consumed;
-    /// while a move is busy, the storage callbacks wake the loop instead.
-    pub fn resume_ready(&self) -> bool {
-        self.resume_task.is_some() && !self.busy
-    }
-
-    pub(super) fn begin_location_checks(
-        &mut self,
-        generation: u64,
-        locations: &[workspace::LibraryLocation],
-    ) {
-        self.location_checks.begin(generation, locations);
-    }
-
-    pub(super) fn finish_location_checks(
-        &mut self,
-        generation: u64,
-        current: &[workspace::LibraryLocation],
-        checks: Vec<(workspace::LibraryLocation, LocationCheck)>,
-    ) -> bool {
-        self.location_checks.finish(generation, current, checks)
-    }
-
-    fn begin(&mut self, op: StorageOp) {
-        self.op = op;
-        self.error = None;
-        self.progress = Progress::default();
-    }
-
-    fn title(&self) -> &'static str {
-        match self.op {
-            StorageOp::Move => course2md::tr!("移动笔记库"),
-            StorageOp::Relocate(_) => course2md::tr!("重新定位笔记库"),
-            StorageOp::Reassociate => course2md::tr!("重新关联笔记库"),
-            StorageOp::Cleanup => course2md::tr!("清理旧位置备份"),
-        }
-    }
-
-    fn cancel_label(&self) -> &'static str {
-        match self.op {
-            StorageOp::Move => course2md::tr!("取消移动"),
-            StorageOp::Relocate(_) => course2md::tr!("取消重新定位"),
-            StorageOp::Reassociate => course2md::tr!("取消重新关联"),
-            StorageOp::Cleanup => course2md::tr!("取消清理"),
-        }
-    }
-
-    fn request_cancel(&mut self) {
-        if let Some(cancel) = &self.cancel {
-            cancel.store(true, Ordering::Relaxed);
-        }
-        // Wakes a move that is still waiting for the task to pause.
-        self.job_exit = None;
-    }
-
-    /// Called when the running job exits.
-    pub(super) fn job_exited(&mut self) {
-        if let Some(exit) = self.job_exit.take() {
-            let _ = exit.try_send(());
-        }
-    }
-}
-
 impl Desktop {
-    pub(super) fn registered_storage_locations(&self) -> Vec<workspace::LibraryLocation> {
-        self.workspace
-            .as_ref()
-            .map(|workspace| workspace.state.libraries.clone())
-            .unwrap_or_else(|| {
-                // Without a workspace record the root has no registered id; an
-                // empty id skips the marker identity check for this placeholder.
-                vec![workspace::LibraryLocation {
-                    id: String::new(),
-                    name: course2md::tr!("笔记库").into(),
-                    root: self.library_root.clone(),
-                    previous_roots: Vec::new(),
-                }]
-            })
+    pub(super) fn registered_storage_locations(&self, cx: &App) -> Vec<workspace::LibraryLocation> {
+        self.records.read(cx).locations()
+    }
+
+    fn registered_library<'a>(
+        &self,
+        id: &str,
+        cx: &'a App,
+    ) -> Option<&'a workspace::LibraryLocation> {
+        self.records.read(cx).library_location(id)
     }
 
     pub(super) fn cached_location_check(
@@ -288,264 +49,73 @@ impl Desktop {
         self.storage_ui.location_checks.get(location)
     }
 
-    pub(super) fn cached_library_access(&self) -> Option<storage::LibraryAccess> {
-        let checks = &self.storage_ui.location_checks;
-        match &self.workspace {
-            Some(workspace) => checks.access(&workspace.state.libraries),
-            None => checks.access(&self.registered_storage_locations()),
-        }
+    pub(super) fn cached_library_access(&self, cx: &App) -> Option<storage::LibraryAccess> {
+        self.storage_ui
+            .location_checks
+            .access(&self.registered_storage_locations(cx))
     }
-}
-
-fn relocate_source(source: &mut source::Source, old: &Path, new: &Path) {
-    if !source.online {
-        let mut path = PathBuf::from(&source.input);
-        storage::relocate_path(&mut path, old, new);
-        source.input = path.display().to_string();
-    }
-    if let Some(path) = &mut source.cover {
-        storage::relocate_path(path, old, new);
-    }
-    if let Some(subtitle) = &mut source.selected_subtitle {
-        storage::relocate_path(&mut subtitle.path, old, new);
-    }
-    fn track(track: &mut course2md::subtitle::SubtitleTrack, old: &Path, new: &Path) {
-        if let course2md::subtitle::SubtitleOrigin::File { path } = &mut track.origin {
-            storage::relocate_path(path, old, new);
-            // Track identity refers to the original confirmed choice. Its content
-            // is stored in the task; relocating a file does not reselect a track.
-        }
-    }
-    if let course2md::subtitle::SubtitleEvidence::Found { tracks, .. } = &mut source.subtitles {
-        for item in tracks {
-            track(item, old, new);
-        }
-    }
-    if let Some(item) = &mut source.subtitle_request {
-        track(item, old, new);
-    }
-}
-
-fn relocate_config(config: &mut course2md::settings::ConfigFile, old: &Path, new: &Path) {
-    if let Some(path) = &mut config.defaults.out {
-        storage::relocate_path(path, old, new);
-    }
-    if let Some(path) = &mut config.defaults.model_dir {
-        storage::relocate_path(path, old, new);
-    }
-}
-
-fn relocate_preview(preview: &mut crate::notes::Preview, old: &Path, new: &Path) {
-    storage::relocate_path(&mut preview.course.dir, old, new);
-    if let Some(path) = &mut preview.course.thumbnail {
-        storage::relocate_path(path, old, new);
-    }
-    for block in &mut preview.blocks {
-        if let crate::notes::PreviewBlock::Image(path) = block {
-            storage::relocate_path(path, old, new);
-        }
-    }
-}
-
-fn validate_registered_destination(
-    state: &workspace::State,
-    library_id: &str,
-    destination: &Path,
-) -> Result<()> {
-    let destination =
-        std::fs::canonicalize(destination).context(course2md::tr!("目标位置暂时无法访问"))?;
-    ensure!(
-        !state
-            .libraries
-            .iter()
-            .filter(|library| library.id != library_id)
-            .any(|library| {
-                let root =
-                    std::fs::canonicalize(&library.root).unwrap_or_else(|_| library.root.clone());
-                root.starts_with(&destination) || destination.starts_with(root)
-            }),
-        course2md::tr!("目标与另一个笔记库重叠，请选择单独的文件夹")
-    );
-    Ok(())
-}
-
-/// Apply only after the destination copy is verified. Keeping the library ID
-/// makes folder IDs, reading positions and all service bindings stable.
-fn publish_location(
-    state: &mut workspace::State,
-    journal: &Journal,
-    journal_path: &Path,
-) -> Result<()> {
-    ensure!(
-        journal.phase == Phase::Verified,
-        course2md::tr!("目标副本尚未核验，不能切换保存位置")
-    );
-    let location = state
-        .libraries
-        .iter()
-        .find(|library| library.id == journal.library_id)
-        .context(library_removed())?;
-    ensure!(
-        std::fs::canonicalize(&location.root)? == journal.source,
-        course2md::tr!("笔记库的位置在移动期间已经变化，尚未切换")
-    );
-    validate_registered_destination(state, &journal.library_id, &journal.destination)?;
-    let roots = [journal.source.clone(), location.root.clone()];
-    rebind_location(state, &journal.library_id, &roots, &journal.destination)?;
-    state.storage_backups.push(storage::BackupRecord {
-        id: journal.id.clone(),
-        library_id: journal.library_id.clone(),
-        path: journal.source.clone(),
-        current_root: journal.destination.clone(),
-        created: journal.created,
-        verified: true,
-        journal_path: journal_path.to_owned(),
-    });
-    Ok(())
-}
-
-/// A library move and locating an already moved library share the same registry
-/// update. Only a verified copy operation creates a backup record.
-fn rebind_location(
-    state: &mut workspace::State,
-    library_id: &str,
-    roots: &[PathBuf],
-    destination: &Path,
-) -> Result<()> {
-    ensure!(state.library(library_id).is_some(), library_removed());
-    for old in roots {
-        for path in state.reader_sources.values_mut() {
-            storage::relocate_path(path, old, destination);
-        }
-        for draft in &mut state.drafts {
-            if let Some(source) = &mut draft.source {
-                let before = source.input.clone();
-                relocate_source(source, old, destination);
-                if !source.online && before != source.input {
-                    draft.input = source.input.clone();
-                }
-            } else if !draft.online {
-                let mut path = PathBuf::from(&draft.input);
-                storage::relocate_path(&mut path, old, destination);
-                draft.input = path.display().to_string();
-            }
-            if let Some(path) = &mut draft.subtitle {
-                storage::relocate_path(path, old, destination);
-            }
-            if let Some(config) = &mut draft.base_config {
-                relocate_config(config, old, destination);
-            }
-        }
-        for task in &mut state.tasks {
-            storage::relocate_path(&mut task.work_dir, old, destination);
-            if let Some(path) = &mut task.artifact {
-                storage::relocate_path(path, old, destination);
-            }
-            if let Some(path) = &mut task.plan.subtitle {
-                storage::relocate_path(path, old, destination);
-            }
-            relocate_source(&mut task.plan.source, old, destination);
-            relocate_config(&mut task.plan.config, old, destination);
-            if let course2md::execution::Operation::Reprocess {
-                base_version_dir,
-                prior_work_dir,
-                ..
-            } = &mut task.plan.operation
-            {
-                storage::relocate_path(base_version_dir, old, destination);
-                if let Some(path) = prior_work_dir {
-                    storage::relocate_path(path, old, destination);
-                }
-            }
-        }
-    }
-    let location = state
-        .libraries
-        .iter_mut()
-        .find(|library| library.id == library_id)
-        .unwrap();
-    for old in roots {
-        if !location.previous_roots.contains(old) {
-            location.previous_roots.push(old.clone());
-        }
-    }
-    location.root = destination.to_owned();
-    for backup in &mut state.storage_backups {
-        if backup.library_id == library_id {
-            backup.current_root = destination.to_owned();
-        }
-    }
-    Ok(())
-}
-
-struct LocatedLibrary {
-    library_id: String,
-    previous_root: PathBuf,
-    destination: PathBuf,
-    stamp: storage::DirectoryStamp,
-}
-
-/// Read only: finding a moved library never creates or repairs its identity.
-fn inspect_relocation(
-    state: &workspace::State,
-    library_id: &str,
-    destination: &Path,
-) -> Result<LocatedLibrary> {
-    let location = state.library(library_id).context(library_removed())?;
-    let destination = destination
-        .canonicalize()
-        .context(course2md::tr!("所选文件夹暂时无法访问"))?;
-    ensure!(
-        destination
-            != location
-                .root
-                .canonicalize()
-                .unwrap_or_else(|_| location.root.clone()),
-        course2md::tr!("所选仍是当前位置，请选择移动后的笔记库文件夹")
-    );
-    validate_registered_destination(state, library_id, &destination)?;
-    let stamp = storage::directory_stamp(&destination)?;
-    let identity = std::fs::read_to_string(destination.join(storage::LIBRARY_ID_FILE)).context(
-        course2md::tr!("无法确认所选文件夹是这个笔记库，请选择移动后的完整笔记库文件夹"),
-    )?;
-    ensure!(
-        identity.trim() == library_id,
-        course2md::tr!("所选文件夹属于另一个笔记库，请选择这个笔记库移动后的文件夹")
-    );
-    ensure!(
-        storage::directory_stamp(&destination)? == stamp,
-        course2md::tr!("所选文件夹已变化，请重新选择")
-    );
-    Ok(LocatedLibrary {
-        library_id: library_id.to_owned(),
-        previous_root: location.root.clone(),
-        destination,
-        stamp,
-    })
-}
-
-fn publish_relocation(state: &mut workspace::State, located: &LocatedLibrary) -> Result<()> {
-    ensure!(
-        state
-            .library(&located.library_id)
-            .is_some_and(|location| location.root == located.previous_root),
-        course2md::tr!("这个笔记库的位置已变化，请重新选择")
-    );
-    // Recheck the actual directory and identity immediately before publication.
-    let current = inspect_relocation(state, &located.library_id, &located.destination)?;
-    ensure!(
-        current.stamp == located.stamp,
-        course2md::tr!("所选文件夹已被替换，请重新选择")
-    );
-    rebind_location(
-        state,
-        &located.library_id,
-        std::slice::from_ref(&located.previous_root),
-        &located.destination,
-    )
 }
 
 impl Desktop {
+    /// An operation that could not start: its dialog, saying why.
+    fn storage_refused(&mut self, op: StorageOp, message: String, cx: &mut Context<Self>) {
+        self.storage_ui.begin(op);
+        self.storage_ui.error = Some(message);
+        self.open_storage_dialog(cx);
+    }
+
+    /// An operation starting: nothing else may run, and a new generation of its results.
+    fn storage_busy(&mut self) -> (u64, Arc<AtomicBool>) {
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.storage_ui.busy = true;
+        self.storage_ui.generation = self.storage_ui.generation.wrapping_add(1);
+        self.storage_ui.cancel = Some(cancel.clone());
+        (self.storage_ui.generation, cancel)
+    }
+
+    /// Asks for a folder off the shell's prompt. A failed prompt reports itself
+    /// in the operation dialog; a dismissed one does nothing.
+    fn pick_folder(
+        &mut self,
+        op: StorageOp,
+        prompt: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        then: impl FnOnce(&mut Self, PathBuf, &mut Window, &mut Context<Self>) + 'static,
+    ) {
+        let answer = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some(prompt.into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let answer = answer.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                match answer {
+                    Ok(Ok(paths)) => {
+                        if let Some(folder) = paths.into_iter().flatten().next() {
+                            then(this, folder, window, cx);
+                        }
+                    }
+                    Ok(Err(error)) => this.storage_refused(
+                        op,
+                        course2md::tr!("无法选择文件夹：{}", format!("{error:#}")),
+                        cx,
+                    ),
+                    Err(error) => this.storage_refused(
+                        op,
+                        course2md::tr!("无法打开文件选择器：{}", error),
+                        cx,
+                    ),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Asks which folder the library now lives in, then links it.
     pub fn begin_library_relocation(
         &mut self,
         library_id: String,
@@ -555,297 +125,176 @@ impl Desktop {
         if self.storage_ui.busy {
             return;
         }
-        self.storage_ui
-            .begin(StorageOp::Relocate(library_id.clone()));
-        if self.job.is_some() || self.preview_workers > 0 {
-            self.storage_ui.error =
-                Some(course2md::tr!("正在处理内容，结束或停止后再重新定位").into());
-            self.open_storage_dialog(window, cx);
-            return;
-        }
-        if !self.save_current_draft(cx) {
-            return;
-        }
-        let Some(state) = self
-            .workspace
-            .as_ref()
-            .map(|workspace| workspace.state.clone())
-        else {
-            return;
-        };
-        self.storage_ui.busy = true;
-        self.storage_ui.generation = self.storage_ui.generation.wrapping_add(1);
-        let generation = self.storage_ui.generation;
-        let prompt = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some(course2md::tr!("选择这个笔记库移动后的文件夹").into()),
-        });
-        cx.spawn_in(window, async move |this, cx| {
-            let answer = prompt.await;
-            let destination = match answer {
-                Ok(Ok(Some(paths))) => paths.into_iter().next(),
-                Ok(Ok(None)) => None,
-                error => {
-                    let message = match error {
-                        Ok(Err(error)) => course2md::tr!("无法选择文件夹：{}", format!("{error:#}")),
-                        Err(error) => course2md::tr!("无法打开文件选择器：{}", error),
-                        _ => unreachable!(),
-                    };
-                    let _ = this.update_in(cx, |this, window, cx| {
-                        this.storage_ui.busy = false;
-                        this.wake_poll();
-                        this.storage_ui.error = Some(message);
-                        this.open_storage_dialog(window, cx);
-                        cx.notify();
-                    });
-                    return;
-                }
-            };
-            let Some(destination) = destination else {
-                let _ = this.update_in(cx, |this, _, cx| {
-                    this.storage_ui.busy = false;
-                    this.wake_poll();
-                    this.start_next_task(cx);
-                    cx.notify();
-                });
-                return;
-            };
-            let cancel = Arc::new(AtomicBool::new(false));
-            let _ = this.update_in(cx, |this, window, cx| {
-                this.storage_ui.cancel = Some(cancel.clone());
-                this.storage_ui.progress.message = course2md::tr!("正在核对所选文件夹…").into();
-                this.open_storage_dialog(window, cx);
-                cx.notify();
-            });
-            let work = crate::spawn_blocking_io(move || {
-                inspect_relocation(&state, &library_id, &destination)
-            });
-            let result = work
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
-            let _ = this.update_in(cx, |this, window, cx| {
-                if this.storage_ui.generation != generation {
-                    return;
-                }
-                let result = result.and_then(|located| {
-                    ensure!(!this.closing && !cancel.load(Ordering::Relaxed), course2md::tr!("已取消重新定位"));
-                    ensure!(this.job.is_none() && this.preview_workers == 0, course2md::tr!("内容仍在处理中，请停止后重新定位"));
-                    this.workspace.as_mut().context(registry_unavailable())?
-                        .transaction(|state| publish_relocation(state, &located))?;
-                    Ok(located)
-                });
-                this.storage_ui.busy = false;
-                this.wake_poll();
-                this.storage_ui.cancel = None;
-                this.storage_ui.progress = Progress::default();
-                match result {
-                    Ok(located) => {
-                        if this.library_root == located.previous_root {
-                            this.library_root = located.destination.clone();
-                        }
-                        this.read_generation = this.read_generation.wrapping_add(1);
-                        this.reading = false;
-                        if let Some(preview) = this.preview.as_mut() {
-                            let was_inside = preview.course.dir.starts_with(&located.previous_root);
-                            relocate_preview(
-                                std::rc::Rc::make_mut(preview),
-                                &located.previous_root,
-                                &located.destination,
-                            );
-                            if was_inside {
-                                this.restore_reading_position(cx);
-                            }
-                        }
-                        let settings = this.relocate_settings_paths(&located.previous_root, &located.destination, cx);
-                        this.storage_ui.error = settings.err().map(|error| course2md::tr!("笔记库已重新定位，模型位置尚未保存。请在生成笔记设置中重试保存：{}", format!("{error:#}")));
-                        this.storage_ui.progress = Progress {
-                            message: course2md::tr!("已重新定位到 {}", located.destination.display()),
-                            completed: 1,
-                            total: 1,
-                        };
-                        this.workspace_error = None;
-                        this.restore_draft(window, cx);
-                        this.refresh_library(cx);
-                        if this.storage_ui.error.is_none() {
-                            window.close_dialog(cx);
-                        }
-                    }
-                    Err(error) => {
-                        this.storage_ui.error = Some(course2md::tr!("尚未重新定位：{}", format!("{error:#}")));
-                    }
-                }
-                this.start_next_task(cx);
-                cx.notify();
-            });
-        }).detach();
-        cx.notify();
+        self.pick_folder(
+            StorageOp::Link(library_id.clone()),
+            course2md::tr!("选择这个笔记库移动后的文件夹"),
+            window,
+            cx,
+            move |this, folder, window, cx| this.link_library(library_id, folder, window, cx),
+        );
     }
 
+    /// The same folder, after it lost its identity.
     pub fn begin_library_reassociation(
         &mut self,
         library_id: String,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(root) = self
+            .registered_library(&library_id, cx)
+            .map(|l| l.root.clone())
+        {
+            self.link_library(library_id, root, window, cx);
+        }
+    }
+
+    /// Points a library at `folder`, asking first if the folder has no identity to prove it.
+    fn link_library(
+        &mut self,
+        library_id: String,
+        folder: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.storage_ui.busy {
             return;
         }
-        let Some(location) = self
-            .workspace
-            .as_ref()
-            .and_then(|workspace| workspace.state.library(&library_id))
-            .cloned()
-        else {
+        let op = StorageOp::Link(library_id.clone());
+        if self.work.read(cx).job.is_some() || self.import.preview_workers > 0 {
+            let message = course2md::tr!("正在处理内容，结束或停止后再重新定位");
+            return self.storage_refused(op, message.into(), cx);
+        }
+        self.storage_ui.begin(op);
+        if !self.save_current_draft(cx) {
+            return;
+        }
+        let Some(state) = self.workspace(cx).map(|w| w.state.clone()) else {
             return;
         };
-        let courses = self
-            .courses
-            .iter()
-            .filter(|course| {
-                self.course_location(course)
-                    .is_some_and(|library| library.id == library_id)
-            })
-            .map(|course| Course::clone(course))
-            .collect::<Vec<_>>();
-        self.storage_ui.begin(StorageOp::Reassociate);
-        self.storage_ui.busy = true;
-        self.storage_ui.progress = Progress {
-            message: course2md::tr!("正在重新读取这个位置中的笔记…").into(),
-            ..Default::default()
-        };
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.storage_ui.cancel = Some(cancel.clone());
-        self.open_storage_dialog(window, cx);
-        let root = location.root.clone();
-        let worker_cancel = cancel.clone();
-        // Scanning reads every note on disk synchronously; see crate::spawn_blocking_io.
-        let worker = crate::spawn_blocking_io(move || {
-            let stamp = storage::directory_stamp(&root)?;
-            let mut names = Vec::new();
-            let mut unreadable = 0;
-            for course in courses {
-                ensure!(
-                    !worker_cancel.load(Ordering::Relaxed),
-                    course2md::tr!("已取消重新关联")
-                );
-                let title = course.title.clone();
-                if crate::notes::read_preview(course).is_ok() {
-                    names.push(title);
-                } else {
-                    unreadable += 1;
-                }
-            }
-            ensure!(
-                storage::directory_stamp(&root)? == stamp,
-                course2md::tr!("保存位置在读取期间已经变化，请重新检查")
-            );
-            ensure!(
-                !worker_cancel.load(Ordering::Relaxed),
-                course2md::tr!("已取消重新关联")
-            );
-            Ok::<_, anyhow::Error>((stamp, names, unreadable))
-        });
+        let (generation, cancel) = self.storage_busy();
+        self.storage_ui.progress.message = course2md::tr!("正在核对所选文件夹…").into();
+        self.open_storage_dialog(cx);
         cx.spawn_in(window, async move |this, cx| {
-            let result = worker
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
-            let Ok((stamp, names, unreadable)) = result else {
-                let message = result.unwrap_err().to_string();
-                let _ = this.update_in(cx, |this, _, cx| {
-                    this.storage_ui.busy = false;
-                    this.wake_poll();
-                    this.storage_ui.cancel = None;
-                    this.storage_ui.progress = Progress::default();
-                    this.storage_ui.error = Some(message);
-                    this.start_next_task(cx);
-                    cx.notify();
-                });
-                return;
-            };
-            let mut detail = course2md::tr!("保存位置：{}\n\n", location.root.display());
-            if names.is_empty() {
-                detail.push_str(course2md::tr!("未读到笔记。\n"));
-            } else {
-                detail.push_str(&course2md::tr!(
-                    "目前可读取 {} 份笔记：\n{}",
-                    names.len(),
-                    names
-                        .iter()
-                        .take(5)
-                        .map(|name| format!("• {name}"))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                ));
-                if names.len() > 5 {
-                    detail.push_str(&course2md::tr!("\n以及另外 {} 份笔记。", names.len() - 5));
-                }
-                detail.push('\n');
-            }
-            if unreadable > 0 {
-                detail.push_str(&course2md::tr!("另有 {} 份笔记无法读取。\n", unreadable));
-            }
-            let detail = detail.trim_end().to_owned();
-            let answer = this.update_in(cx, |this, window, cx| {
-                this.storage_ui.cancel = None;
-                window.close_dialog(cx);
-                window.prompt(
-                    PromptLevel::Info,
-                    course2md::tr!("重新关联此保存位置？"),
-                    Some(&detail),
-                    &[course2md::tr!("重新关联"), course2md::tr!("取消")],
-                    cx,
-                )
-            });
-            let Ok(answer) = answer else {
-                return;
-            };
-            let accepted = answer.await.ok() == Some(0);
-            let _ = this.update_in(cx, |this, window, cx| {
-                this.storage_ui.busy = false;
-                this.wake_poll();
-                this.storage_ui.progress = Progress::default();
-                this.storage_ui.cancel = None;
-                if !accepted {
-                    this.start_next_task(cx);
-                    cx.notify();
-                    return;
-                }
-                let result = (|| -> Result<()> {
-                    let workspace = this.workspace.as_mut().context(registry_unavailable())?;
-                    let current = workspace
-                        .state
-                        .library(&library_id)
-                        .context(library_removed())?;
-                    ensure!(
-                        current.root == location.root
-                            && storage::directory_stamp(&current.root)? == stamp,
-                        course2md::tr!(
-                            "保存位置在确认期间已经变化，尚未重新关联。请重新检查这个位置。"
-                        )
-                    );
-                    workspace.reassociate_library(&library_id)
-                })();
-                match result {
-                    Ok(()) => {
-                        this.storage_ui.error = None;
-                        this.message = Some(course2md::tr!("已重新关联「{}」", location.name));
+            let worker_cancel = cancel.clone();
+            let inspected = crate::spawn_blocking_result(move || {
+                storage::inspect_link(&state, &library_id, &folder, &worker_cancel)
+            })
+            .await;
+            let _ = this.update_in(cx, |this, window, cx| match inspected {
+                Err(error) => this.finish_link(generation, Err(error), cx),
+                Ok(link) => match &link.unmarked {
+                    // The dialog stays open and busy, and asks.
+                    Some(found) => {
+                        let detail = link_confirmation(&link, found);
+                        this.storage_ui.cancel = None;
+                        this.storage_ui.link_question = Some((link, detail));
+                        cx.notify();
                     }
-                    Err(error) => {
-                        this.storage_ui.error =
-                            Some(course2md::tr!("尚未重新关联：{}", format!("{error:#}")));
-                        this.open_storage_dialog(window, cx);
-                    }
-                }
-                this.refresh_library(cx);
-                this.start_next_task(cx);
-                cx.notify();
+                    None => this.publish_library_link(link, generation, cancel, window, cx),
+                },
             });
         })
         .detach();
+        cx.notify();
+    }
+
+    /// The disk half off the UI thread, then the record, then what follows the library.
+    fn publish_library_link(
+        &mut self,
+        link: storage::LibraryLink,
+        generation: u64,
+        cancel: Arc<AtomicBool>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn_in(window, async move |this, cx| {
+            let (link, finished) = crate::spawn_blocking_io(move || {
+                let tasks = storage::finish_link(&link);
+                (link, tasks)
+            })
+            .await
+            .unwrap_or_else(|| unreachable!("the blocking pool outlives this task"));
+            let _ = this.update_in(cx, |this, window, cx| {
+                let result = finished.and_then(|tasks| {
+                    ensure!(
+                        !this.work.read(cx).closing && !cancel.load(Ordering::Relaxed),
+                        course2md::tr!("已取消重新定位")
+                    );
+                    ensure!(
+                        this.work.read(cx).job.is_none() && this.import.preview_workers == 0,
+                        course2md::tr!("内容仍在处理中，请停止后重新定位")
+                    );
+                    this.with_workspace(cx, |workspace| {
+                        workspace.transaction(|state| storage::publish_link(state, &link, tasks))
+                    })
+                    .context(registry_unavailable())??;
+                    Ok(link)
+                });
+                let linked = result.is_ok();
+                if let Ok(link) = &result {
+                    this.apply_link(link, window, cx);
+                }
+                this.finish_link(generation, result.map(|_| ()), cx);
+                if linked && this.storage_ui.error.is_none() {
+                    this.storage_ui.dialog_open = false;
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// What follows a library to its new folder outside the record.
+    fn apply_link(
+        &mut self,
+        link: &storage::LibraryLink,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.library(cx).root == link.previous_root {
+            self.records
+                .change(cx, |records, _| records.library.root = link.folder.clone());
+        }
+        self.reader.change(cx, |reader, cx| {
+            reader.opened.stop_reading();
+            if let Some(preview) = reader.opened.preview.as_mut() {
+                let was_inside = preview.course.dir.starts_with(&link.previous_root);
+                relocate_preview(Rc::make_mut(preview), &link.previous_root, &link.folder);
+                if was_inside {
+                    reader.restore_reading_position(cx);
+                }
+            }
+        });
+        let settings = self.relocate_settings_paths(&link.previous_root, &link.folder, cx);
+        self.storage_ui.error = settings.err().map(|error| {
+            course2md::tr!(
+                "笔记库已重新定位，模型位置尚未保存。请在生成笔记设置中重试保存：{}",
+                format!("{error:#}")
+            )
+        });
+        self.workspace_error = None;
+        self.restore_draft(window, cx);
+        self.message = Some(course2md::tr!("已重新定位到 {}", link.folder.display()));
+    }
+
+    /// Back to idle after an operation: others may run again.
+    fn storage_idle(&mut self, cx: &App) {
+        self.storage_ui.busy = false;
+        self.wake_poll(cx);
+        self.storage_ui.cancel = None;
+    }
+
+    fn finish_link(&mut self, generation: u64, result: Result<()>, cx: &mut Context<Self>) {
+        if self.storage_ui.generation != generation {
+            return;
+        }
+        self.storage_idle(cx);
+        self.storage_ui.progress = Progress::default();
+        if let Err(error) = result {
+            self.storage_ui.error = Some(course2md::tr!("尚未重新定位：{}", format!("{error:#}")));
+        }
+        self.refresh_library(cx);
+        self.start_next_task(cx);
         cx.notify();
     }
 
@@ -853,8 +302,7 @@ impl Desktop {
     pub fn restore_storage_state(&mut self, cx: &mut Context<Self>) {
         let directory = self.preferences.root().join("storage");
         let (libraries, backups) = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .map(|workspace| {
                 (
                     workspace
@@ -867,74 +315,60 @@ impl Desktop {
                 )
             })
             .unwrap_or_default();
-        self.storage_ui.records_generation = self.storage_ui.records_generation.wrapping_add(1);
-        let generation = self.storage_ui.records_generation;
         let task = crate::spawn_blocking_io(move || {
             storage::read_records(&directory, &libraries, &backups)
         });
-        cx.spawn(async move |this, cx| {
-            let Ok(records) = task.recv().await else {
-                return;
-            };
-            let _ = this.update(cx, |this, cx| {
-                if this.storage_ui.records_generation == generation {
-                    this.apply_storage_records(records, cx);
-                }
-            });
-        })
-        .detach();
+        self.storage_records = Some(cx.spawn(async move |this, cx| {
+            if let Some(records) = task.await {
+                let _ = this.update(cx, |this, cx| this.apply_storage_records(records, cx));
+            }
+        }));
     }
 
     fn apply_storage_records(&mut self, records: storage::Records, cx: &mut Context<Self>) {
-        self.storage_ui.pending = records.pending;
-        self.storage_ui.corrupt_records = records.corrupt;
-        let mut relocated = Vec::new();
-        for (path, mut journal) in records.settings_pending {
-            match self.relocate_settings_paths(&journal.source, &journal.destination, cx) {
-                Ok(()) => {
-                    journal.settings_relocated = true;
-                    relocated.push((path, journal));
-                }
-                Err(error) => {
-                    self.storage_ui.error = Some(course2md::tr!(
-                        "笔记库已移动，模型位置尚未保存。旧位置备份已保留：{}",
-                        format!("{error:#}")
-                    ))
-                }
+        self.storage_ui.pending = records.pending.clone();
+        self.storage_ui.corrupt_records = records.corrupt.clone();
+        // Model paths follow a moved library. Repeating this after a crash is harmless,
+        // and once they follow there is nothing left to do.
+        let moved: Vec<_> = self
+            .records
+            .read(cx)
+            .workspace
+            .iter()
+            .flat_map(|workspace| workspace.state.storage_backups.iter())
+            .filter(|backup| self.preferences.references_storage_path(&backup.path))
+            .map(|backup| (backup.path.clone(), backup.current_root.clone()))
+            .collect();
+        for (old, new) in moved {
+            if let Err(error) = self.relocate_settings_paths(&old, &new, cx) {
+                self.storage_ui.error = Some(course2md::tr!(
+                    "笔记库已移动，模型位置尚未保存。旧位置备份已保留：{}",
+                    format!("{error:#}")
+                ))
             }
         }
-        if !relocated.is_empty() {
-            // Updating model paths again is harmless, so a lost flag only
-            // repeats it at the next start.
-            crate::spawn_blocking_io(move || {
-                for (path, journal) in relocated {
-                    let _ = storage::save_journal(&path, &journal);
-                }
-            });
-        }
         if !records.cleaned.is_empty()
-            && let Some(workspace) = &mut self.workspace
-            && workspace
-                .transaction(|state| {
+            && let Some(Err(_)) = self.with_workspace(cx, |workspace| {
+                workspace.transaction(|state| {
                     state
                         .storage_backups
                         .retain(|backup| !records.cleaned.contains(&backup.id));
                     Ok(())
                 })
-                .is_err()
+            })
         {
             self.storage_ui.error = Some(backup_list_stale().into());
         }
+        drop(crate::spawn_blocking_io(move || {
+            storage::settle_records(&records)
+        }));
         cx.notify();
     }
 
     fn abandon_library_move(&mut self, path: PathBuf, cx: &mut Context<Self>) {
-        let task = crate::spawn_blocking_io(move || storage::abandon_move(&path));
+        let task = crate::spawn_blocking_result(move || storage::abandon_move(&path));
         cx.spawn(async move |this, cx| {
-            let result = task
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
+            let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 if let Err(error) = result {
                     this.storage_ui.error =
@@ -948,28 +382,30 @@ impl Desktop {
 
     fn set_default_library(&mut self, id: String, cx: &mut Context<Self>) {
         let Some(root) = self
-            .workspace
-            .as_ref()
-            .and_then(|workspace| workspace.state.library(&id))
+            .registered_library(&id, cx)
             .map(|library| library.root.clone())
         else {
-            self.workspace_error = Some(library_removed().into());
+            self.workspace_error = Some(course2md::tr!("这个笔记库已被移除").into());
             cx.notify();
             return;
         };
         let probe =
             crate::spawn_blocking_io(move || tempfile::NamedTempFile::new_in(&root).map(drop));
         cx.spawn(async move |this, cx| {
-            let writable = matches!(probe.recv().await, Ok(Ok(())));
+            let writable = matches!(probe.await, Some(Ok(())));
             let _ = this.update(cx, |this, cx| {
-                let Some(workspace) = &mut this.workspace else {
-                    return;
-                };
                 let result = if writable {
-                    workspace.transaction(|state| {
-                        state.default_library = id.clone();
-                        Ok(())
-                    })
+                    let Some(result) = this.with_workspace(cx, |workspace| {
+                        workspace.transaction(|state| {
+                            state.default_library = id.clone();
+                            Ok(())
+                        })
+                    }) else {
+                        return;
+                    };
+                    result
+                } else if this.records.read(cx).workspace.is_none() {
+                    return;
                 } else {
                     Err(anyhow::anyhow!(course2md::tr!(
                         "这个文件夹暂时不能写入，请重新连接磁盘或检查访问权限"
@@ -990,12 +426,11 @@ impl Desktop {
 
     pub fn poll_storage(&mut self, cx: &mut Context<Self>) {
         if !self.storage_ui.busy
-            && self.job.is_none()
+            && self.work.read(cx).job.is_none()
             && let Some(id) = self.storage_ui.resume_task.take()
         {
             let can_resume = self
-                .workspace
-                .as_ref()
+                .workspace(cx)
                 .and_then(|workspace| workspace.state.task(&id))
                 .is_some_and(|task| {
                     task.state == workspace::TaskState::Paused
@@ -1020,70 +455,42 @@ impl Desktop {
         if self.storage_ui.busy {
             return;
         }
-        let Some(location) = self
-            .workspace
-            .as_ref()
-            .and_then(|workspace| workspace.state.library(&library_id))
-            .cloned()
-        else {
+        let Some(location) = self.registered_library(&library_id, cx).cloned() else {
             return;
         };
-        let prompt = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some(course2md::tr!("选择空文件夹作为笔记库的新位置").into()),
-        });
-        cx.spawn_in(window, async move |this, cx| {
-            let destination = match prompt.await {
-                Ok(Ok(paths)) => paths.and_then(|paths| paths.into_iter().next()),
-                Ok(Err(error)) => {
-                    let _ = this.update(cx, |this, cx| {
-                        this.storage_ui.error =
-                            Some(course2md::tr!("无法选择保存位置：{}", format!("{error:#}")));
+        self.pick_folder(
+            StorageOp::Move,
+            course2md::tr!("选择空文件夹作为笔记库的新位置"),
+            window,
+            cx,
+            move |_, destination, window, cx| {
+                let root = location.root.clone();
+                // canonicalize and read_dir can stall on a network or removable disk
+                let checked = crate::spawn_blocking_result(move || {
+                    storage::validate_destination(&root, &destination)
+                });
+                cx.spawn_in(window, async move |this, cx| {
+                    let checked = checked.await;
+                    let _ = this.update_in(cx, |this, window, cx| {
+                        match checked {
+                            Ok((source, destination)) => this.start_library_move(
+                                location.id.clone(),
+                                source,
+                                destination,
+                                None,
+                                window,
+                                cx,
+                            ),
+                            Err(error) => {
+                                this.storage_refused(StorageOp::Move, format!("{error:#}"), cx)
+                            }
+                        }
                         cx.notify();
                     });
-                    return;
-                }
-                Err(error) => {
-                    let _ = this.update(cx, |this, cx| {
-                        this.storage_ui.error = Some(error.to_string());
-                        cx.notify();
-                    });
-                    return;
-                }
-            };
-            let Some(destination) = destination else {
-                return;
-            };
-            let root = location.root.clone();
-            // canonicalize and read_dir can stall on a network or removable disk
-            let checked = crate::spawn_blocking_io(move || {
-                storage::validate_destination(&root, &destination)
-            })
-            .recv()
-            .await
-            .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
-            let _ = this.update_in(cx, |this, window, cx| {
-                match checked {
-                    Ok((source, destination)) => this.start_library_move(
-                        location.id.clone(),
-                        source,
-                        destination,
-                        None,
-                        window,
-                        cx,
-                    ),
-                    Err(error) => {
-                        this.storage_ui.begin(StorageOp::Move);
-                        this.storage_ui.error = Some(format!("{error:#}"));
-                        this.open_storage_dialog(window, cx);
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+                })
+                .detach();
+            },
+        );
     }
 
     fn start_library_move(
@@ -1098,34 +505,24 @@ impl Desktop {
         if self.storage_ui.busy || !self.save_current_draft(cx) {
             return;
         }
-        self.storage_ui.begin(StorageOp::Move);
-        let Some(state) = self
-            .workspace
-            .as_ref()
-            .map(|workspace| workspace.state.clone())
-        else {
-            self.storage_ui.error = Some(registry_unavailable().into());
-            self.open_storage_dialog(window, cx);
-            return;
+        let op = StorageOp::Move;
+        let Some(state) = self.workspace(cx).map(|workspace| workspace.state.clone()) else {
+            return self.storage_refused(op, registry_unavailable().into(), cx);
         };
         // Only a conversion task can pause and resume around a move.
-        if self.job.is_some() && self.active_task.is_none() {
-            self.storage_ui.error = Some(course2md::tr!("模型下载完成或停止后再移动笔记库").into());
-            self.open_storage_dialog(window, cx);
-            return;
+        if self.work.read(cx).job.is_some() && self.work.read(cx).active_task.is_none() {
+            let message = course2md::tr!("模型下载完成或停止后再移动笔记库");
+            return self.storage_refused(op, message.into(), cx);
         }
-        self.storage_ui.busy = true;
-        self.storage_ui.generation = self.storage_ui.generation.wrapping_add(1);
-        let generation = self.storage_ui.generation;
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.storage_ui.cancel = Some(cancel.clone());
-        let job_exit = self.job.is_some().then(|| {
+        self.storage_ui.begin(op);
+        let (generation, cancel) = self.storage_busy();
+        let job_exit = self.work.read(cx).job.is_some().then(|| {
             let (exit, exited) = smol::channel::bounded(1);
             self.storage_ui.job_exit = Some(exit);
             self.storage_ui.progress.message = course2md::tr!("正在暂停当前任务…").into();
             exited
         });
-        if let Some(id) = self.active_task.clone() {
+        if let Some(id) = self.work.read(cx).active_task.clone() {
             let running = state
                 .task(&id)
                 .is_some_and(|task| task.intent == workspace::Intent::Run);
@@ -1134,7 +531,7 @@ impl Desktop {
                 self.set_task_intent(id, workspace::Intent::Pause, cx);
             }
         }
-        self.open_storage_dialog(window, cx);
+        self.open_storage_dialog(cx);
         let journal_dir = self.preferences.root().join("storage");
         cx.spawn_in(window, async move |this, cx| {
             if let Some(exited) = job_exit {
@@ -1158,7 +555,7 @@ impl Desktop {
             let (report, reports) = smol::channel::unbounded();
             let worker_cancel = cancel.clone();
             // Moving is a large amount of blocking file I/O; see crate::spawn_blocking_io.
-            let worker = crate::spawn_blocking_io(move || {
+            let worker = crate::spawn_blocking_result(move || {
                 let sent = std::cell::Cell::new(None::<Instant>);
                 let report = |value: Progress| {
                     let now = Instant::now();
@@ -1170,7 +567,7 @@ impl Desktop {
                         let _ = report.try_send(value);
                     }
                 };
-                validate_registered_destination(&state, &library_id, &destination)?;
+                storage::check_overlap(&state, &library_id, &destination)?;
                 match resume {
                     Some(path) => storage::resume_move(&path, &worker_cancel, &report),
                     None => storage::prepare_move(
@@ -1194,17 +591,14 @@ impl Desktop {
                     }
                 });
             }
-            let result = worker
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
+            let result = worker.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 if this.storage_ui.generation != generation {
                     return;
                 }
                 match result {
                     Ok(mut prepared) => {
-                        if this.closing || cancel.load(Ordering::Relaxed) {
+                        if this.work.read(cx).closing || cancel.load(Ordering::Relaxed) {
                             this.finish_storage_error(
                                 course2md::tr!("副本已核验，保存位置尚未切换").into(),
                                 cx,
@@ -1212,14 +606,12 @@ impl Desktop {
                             return;
                         }
                         let committed = this
-                            .workspace
-                            .as_mut()
+                            .with_workspace(cx, |workspace| {
+                                workspace
+                                    .transaction(|state| storage::publish_move(state, &prepared))
+                            })
                             .context(registry_unavailable())
-                            .and_then(|workspace| {
-                                workspace.transaction(|state| {
-                                    publish_location(state, &prepared.journal, &prepared.path)
-                                })
-                            });
+                            .and_then(|committed| committed);
                         if let Err(error) = committed {
                             this.finish_storage_error(
                                 course2md::tr!(
@@ -1230,29 +622,26 @@ impl Desktop {
                             );
                             return;
                         }
-                        if this.library_root == prepared.journal.source {
-                            this.library_root = prepared.journal.destination.clone();
+                        if this.library(cx).root == prepared.journal.source {
+                            this.records.change(cx, |records, _| {
+                                records.library.root = prepared.journal.destination.clone()
+                            });
                         }
                         prepared.journal.phase = Phase::Committed;
                         this.storage_ui.error = None;
-                        match this.relocate_settings_paths(
+                        if let Err(error) = this.relocate_settings_paths(
                             &prepared.journal.source,
                             &prepared.journal.destination,
                             cx,
                         ) {
-                            Ok(()) => prepared.journal.settings_relocated = true,
-                            Err(error) => {
-                                this.storage_ui.error = Some(course2md::tr!(
-                                    "笔记库已移动，模型位置尚未保存。旧位置备份已保留：{}",
-                                    format!("{error:#}")
-                                ))
-                            }
+                            this.storage_ui.error = Some(course2md::tr!(
+                                "笔记库已移动，模型位置尚未保存。旧位置备份已保留：{}",
+                                format!("{error:#}")
+                            ))
                         }
                         // A record left behind is marked committed at the next start.
                         let _ = storage::save_journal(&prepared.path, &prepared.journal);
-                        this.storage_ui.busy = false;
-                        this.wake_poll();
-                        this.storage_ui.cancel = None;
+                        this.storage_idle(cx);
                         this.storage_ui.progress = Progress {
                             message: course2md::tr!(
                                 "笔记库已移动到 {}。旧位置保留为已核验备份。",
@@ -1283,9 +672,7 @@ impl Desktop {
     }
 
     fn finish_storage_error(&mut self, message: String, cx: &mut Context<Self>) {
-        self.storage_ui.busy = false;
-        self.wake_poll();
-        self.storage_ui.cancel = None;
+        self.storage_idle(cx);
         self.storage_ui.error = Some(message);
         self.restore_storage_state(cx);
         self.refresh_library(cx);
@@ -1294,641 +681,544 @@ impl Desktop {
         cx.notify();
     }
 
-    pub(crate) fn open_storage_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let desktop = cx.entity();
-        let content = crate::views::DesktopView::observing(desktop, cx, |desktop, window, cx| {
-            div()
-                .id("storage-dialog-content")
-                .role(Role::Dialog)
-                .aria_label(desktop.storage_ui.title())
-                .child(desktop.storage_operation_view(window, cx))
-                .into_any_element()
-        });
-        let title = self.storage_ui.title();
-        window.open_dialog(cx, move |dialog, window, _| {
-            dialog
-                .material("storage-dialog-title", title)
-                .w(dialog_width(DIALOG_WIDE_WIDTH, window))
-                .overlay_closable(false)
-                .close_button(false)
-                .keyboard(false)
-                .child(content.clone())
-        });
+    pub(crate) fn open_storage_dialog(&mut self, cx: &mut Context<Self>) {
+        self.storage_ui.dialog_open = true;
+        cx.notify();
     }
 
-    fn storage_operation_view(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
-        let cancelling = self
-            .storage_ui
+    /// Capture builds: one shot shows one dialog.
+    #[cfg(feature = "capture")]
+    pub(crate) fn close_storage_dialog(&mut self) {
+        self.storage_ui.dialog_open = false;
+    }
+
+    /// Capture builds: a real operation on the first library, or the dialog at rest.
+    #[cfg(feature = "capture")]
+    pub(crate) fn capture_storage_operation(
+        &mut self,
+        operation: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(library) = self
+            .workspace(cx)
+            .and_then(|workspace| workspace.state.libraries.first().cloned())
+        else {
+            return self.open_storage_dialog(cx);
+        };
+        match operation.split_once(':') {
+            Some(("move", folder)) => {
+                match storage::validate_destination(&library.root, Path::new(folder)) {
+                    Ok((source, destination)) => {
+                        self.start_library_move(library.id, source, destination, None, window, cx)
+                    }
+                    Err(error) => self.storage_refused(StorageOp::Move, format!("{error:#}"), cx),
+                }
+            }
+            _ if operation == "link" => self.begin_library_reassociation(library.id, window, cx),
+            _ => self.open_storage_dialog(cx),
+        }
+    }
+
+    /// The operation dialog: its work, a question, or how it ended. Rendered by the shell.
+    pub(crate) fn storage_dialog(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let storage = &self.storage_ui;
+        let cancelling = storage
             .cancel
             .as_ref()
             .is_some_and(|cancel| cancel.load(Ordering::Relaxed));
-        let mut view = v_flex().gap_4().child(
-            h_flex()
-                .gap_2()
-                .items_center()
-                .when(self.storage_ui.busy, |row| {
-                    row.child(crate::motion::spinner("storage-operation-busy", cx))
-                })
-                .when(!self.storage_ui.busy, |row| {
-                    row.child(
-                        if self.storage_ui.error.is_some() {
-                            icons::warning()
-                        } else {
-                            icons::check_circle()
-                        }
-                        .size_6()
-                        .text_color(color(
-                            if self.storage_ui.error.is_some() {
-                                WARNING
-                            } else {
-                                SUCCESS
-                            },
-                        )),
-                    )
-                })
-                .child(
-                    accessible_text(
-                        "storage-operation-heading",
-                        if cancelling {
-                            course2md::tr!("正在结束操作…")
-                        } else if self.storage_ui.busy {
-                            course2md::tr!("正在处理文件…")
-                        } else if self.storage_ui.error.is_some() {
-                            course2md::tr!("操作未完成")
-                        } else {
-                            course2md::tr!("操作已完成")
-                        },
-                    )
-                    .font_weight(FontWeight::SEMIBOLD),
-                ),
+        let dialog = MaterialDialog::new("storage-dialog")
+            .container(ColorRole::SURFACE)
+            .headline(storage.title())
+            .width(if is_compact(window) { 320. } else { 560. })
+            .dismiss_on_scrim(false)
+            .dismiss_on_escape(false)
+            .modal(storage.dialog_open);
+        if let Some((_, detail)) = &storage.link_question {
+            return dialog
+                .headline(course2md::tr!("重新关联此保存位置？"))
+                .supporting_text(detail.clone())
+                .action(
+                    material_button("decline-library-link", ButtonVariant::Text)
+                        .child(course2md::tr!("取消"))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.storage_ui.link_question = None;
+                            this.storage_ui.dialog_open = false;
+                            this.storage_ui.progress = Progress::default();
+                            this.storage_idle(cx);
+                            this.start_next_task(cx);
+                            cx.notify();
+                        })),
+                )
+                .action(
+                    material_button("accept-library-link", ButtonVariant::Filled)
+                        .child(course2md::tr!("重新关联"))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            if let Some((link, _)) = this.storage_ui.link_question.take() {
+                                let generation = this.storage_ui.generation;
+                                let cancel = Arc::new(AtomicBool::new(false));
+                                this.publish_library_link(link, generation, cancel, window, cx);
+                                cx.notify();
+                            }
+                        })),
+                )
+                .into_any_element();
+        }
+        let message = (!storage.progress.message.is_empty())
+            .then(|| SharedString::from(storage.progress.message.clone()));
+        let status = if storage.busy {
+            AsyncStatus::Busy(if cancelling {
+                course2md::tr!("正在结束操作…").into()
+            } else {
+                message.unwrap_or_else(|| course2md::tr!("正在处理文件…").into())
+            })
+        } else if let Some(error) = &storage.error {
+            AsyncStatus::Failed(error.clone().into())
+        } else {
+            AsyncStatus::Success(message.unwrap_or_else(|| course2md::tr!("操作已完成").into()))
+        };
+        let fraction = (storage.busy && storage.progress.total > 0)
+            .then(|| storage.progress.completed as f32 / storage.progress.total as f32);
+        let dialog = dialog.content(
+            v_flex()
+                .w_full()
+                .min_w_0()
+                .px(rem(24.))
+                .gap(rem(16.))
+                .children(ui::async_status("storage-operation", &status, None, cx))
+                .when_some(fraction, |view, fraction| {
+                    view.child(progress_with_label(
+                        "storage-progress",
+                        storage.title(),
+                        fraction,
+                        window,
+                        cx,
+                    ))
+                }),
         );
-        if !self.storage_ui.progress.message.is_empty() {
-            view = view.child(accessible_text(
-                "storage-operation-state",
-                self.storage_ui.progress.message.clone(),
-            ));
-        }
-        if let Some(error) = &self.storage_ui.error {
-            view = view.child(
-                accessible_text("storage-operation-error", error.clone()).text_color(color(DANGER)),
-            );
-        }
-        if self.storage_ui.busy {
-            let progress = &self.storage_ui.progress;
-            if progress.total > 0 {
-                view = view.child(crate::motion::progress(
-                    "storage-progress",
-                    progress.completed as f32 / progress.total as f32,
-                    window,
-                    cx,
-                ));
-            }
-            view = view.child(
-                dialog_actions().child(
-                    text_button("cancel-library-move", cx)
+        if storage.busy {
+            return dialog
+                .action(
+                    material_button("cancel-library-move", ButtonVariant::Text)
                         .disabled(cancelling)
-                        .loading(cancelling)
-                        .label(if cancelling {
+                        .child(if cancelling {
                             course2md::tr!("正在结束…")
                         } else {
-                            self.storage_ui.cancel_label()
+                            storage.cancel_label()
                         })
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.storage_ui.request_cancel();
                             cx.notify();
                         })),
-                ),
-            );
-        } else {
-            let mut actions = dialog_actions().child(
-                text_button("close-storage-operation", cx)
-                    .label(course2md::tr!("关闭"))
-                    .on_click(|_, window, cx| window.close_dialog(cx)),
-            );
-            if let StorageOp::Relocate(id) = &self.storage_ui.op
-                && self.storage_ui.error.is_some()
-                && self.storage_ui.progress.completed == 0
-            {
-                let id = id.clone();
-                actions = actions.child(
-                    primary_pill("retry-library-relocation")
-                        .label(course2md::tr!("重新选择文件夹…"))
+                )
+                .into_any_element();
+        }
+        let retry = match &storage.op {
+            StorageOp::Link(id) if storage.error.is_some() && storage.progress.completed == 0 => {
+                Some(id.clone())
+            }
+            _ => None,
+        };
+        dialog
+            .action(
+                material_button("close-storage-operation", ButtonVariant::Text)
+                    .child(course2md::tr!("关闭"))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.storage_ui.dialog_open = false;
+                        cx.notify();
+                    })),
+            )
+            .when_some(retry, |dialog, id| {
+                dialog.action(
+                    material_button("retry-library-relocation", ButtonVariant::Filled)
+                        .child(course2md::tr!("重新选择文件夹…"))
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            window.close_dialog(cx);
+                            this.storage_ui.dialog_open = false;
                             this.begin_library_relocation(id.clone(), window, cx);
                         })),
-                );
-            }
-            view = view.child(actions);
-        }
-        view
+                )
+            })
+            .into_any_element()
     }
 
-    pub fn storage_status_panel(&self, cx: &mut Context<Self>) -> Div {
-        let mut view = v_flex().w_full().min_w_0().flex_shrink_0().gap_3();
-        let mut has_content = false;
-        if matches!(self.storage_ui.op, StorageOp::Relocate(_))
-            && !self.storage_ui.busy
-            && self.storage_ui.error.is_none()
-            && self.storage_ui.progress.completed > 0
-            && self.storage_ui.progress.completed == self.storage_ui.progress.total
+    /// What needs attention above the locations; healthy storage shows nothing.
+    fn storage_status_panel(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let storage = &self.storage_ui;
+        let mut lines: Vec<(&str, AsyncStatus)> = Vec::new();
+        if matches!(storage.op, StorageOp::Link(_))
+            && !storage.busy
+            && storage.error.is_none()
+            && storage.progress.completed > 0
+            && storage.progress.completed == storage.progress.total
         {
-            has_content = true;
-            view = view.child(
-                h_flex()
-                    .gap_2()
-                    .items_start()
-                    .child(
-                        icons::check_circle()
-                            .size_4()
-                            .flex_shrink_0()
-                            .text_color(color(SUCCESS)),
-                    )
-                    .child(
-                        accessible_text(
-                            "storage-relocation-success",
-                            self.storage_ui.progress.message.clone(),
-                        )
-                        .flex_1()
-                        .min_w_0()
-                        .whitespace_normal()
-                        .text_sm(),
-                    ),
-            );
-        }
-        if let Some(access) = self.cached_library_access() {
-            if access.coverage() == storage::LibraryCoverage::Unavailable {
-                has_content = true;
-                view = view.child(
-                    accessible_text(
-                        "storage-access-coverage",
-                        course2md::tr!("所有保存位置都暂时无法访问"),
-                    )
-                    .text_sm()
-                    .text_color(color(GRAY)),
-                );
-            }
-        } else {
-            has_content = true;
-            view = view.child(
-                h_flex()
-                    .gap_2()
-                    .child(crate::motion::spinner("storage-locations-checking", cx))
-                    .child(
-                        accessible_text(
-                            "storage-locations-checking-label",
-                            course2md::tr!("正在检查保存位置…"),
-                        )
-                        .text_sm(),
-                    ),
-            );
-        }
-        if let Some(error) = &self.storage_ui.error {
-            has_content = true;
-            view = view.child(
-                accessible_text("storage-status-error", error.clone())
-                    .text_sm()
-                    .text_color(color(DANGER)),
-            );
-        }
-        if !self.storage_ui.corrupt_records.is_empty() {
-            has_content = true;
-            view = view.child(
-                v_flex()
-                    .gap_1()
-                    .child(
-                        accessible_text(
-                            "storage-corrupt-records",
-                            course2md::tr!(
-                                "有 {} 次未完成的移动记录已损坏，相关文件均已保留",
-                                self.storage_ui.corrupt_records.len()
-                            ),
-                        )
-                        .text_sm()
-                        .text_color(color(DANGER)),
-                    )
-                    .child(crate::course_library::IssueDetails::new(
-                        "storage-corrupt-records",
-                        self.storage_ui
-                            .corrupt_records
-                            .iter()
-                            .map(|path| path.display().to_string())
-                            .collect(),
-                    )),
-            );
-        }
-        if !self.storage_ui.pending.is_empty() {
-            view = view.child(semantic_label(
-                "storage-pending-heading",
-                course2md::tr!("未完成的移动"),
-                icons::storage(),
+            lines.push((
+                "storage-relocation-success",
+                AsyncStatus::Success(storage.progress.message.clone().into()),
             ));
         }
-        for (index, (path, journal)) in self.storage_ui.pending.iter().enumerate() {
-            has_content = true;
-            let path = path.clone();
-            let abandoned_path = path.clone();
-            let journal = journal.clone();
-            let destination = journal.destination.clone();
-            view = view.child(
-                card_surface()
-                    .gap_2()
-                    .min_w_0()
-                    .child(accessible_text(
-                        ("storage-pending-description", index),
-                        format!(
-                            "{} → {}",
-                            journal.source.display(),
-                            journal.destination.display()
-                        ),
-                    ))
-                    .child(
-                        control(("resume-library-move", index))
-                            .icon(icons::play_arrow())
-                            .label(course2md::tr!("继续移动"))
-                            .disabled(self.storage_ui.busy)
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.start_library_move(
-                                    journal.library_id.clone(),
-                                    journal.source.clone(),
-                                    journal.destination.clone(),
-                                    Some(path.clone()),
-                                    window,
-                                    cx,
-                                )
-                            })),
-                    )
-                    .child(
-                        control(("open-move-copy", index))
-                            .ghost()
-                            .icon(icons::folder_open())
-                            .label(course2md::tr!("打开目标副本"))
-                            .on_click(move |_, _, cx| cx.open_with_system(&destination)),
-                    )
-                    .child(
-                        control(("abandon-library-move", index))
-                            .ghost()
-                            .icon(icons::close())
-                            .label(course2md::tr!("放弃移动，保留副本"))
-                            .disabled(self.storage_ui.busy)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.abandon_library_move(abandoned_path.clone(), cx)
-                            })),
-                    ),
-            );
+        match self.cached_library_access(cx) {
+            None => lines.push((
+                "storage-locations-checking",
+                AsyncStatus::Busy(course2md::tr!("正在检查保存位置…").into()),
+            )),
+            Some(access) if access.coverage() == storage::LibraryCoverage::Unavailable => lines
+                .push((
+                    "storage-access-coverage",
+                    AsyncStatus::Warning(course2md::tr!("所有保存位置都暂时无法访问").into()),
+                )),
+            Some(_) => {}
         }
-        if let Some(workspace) = &self.workspace {
-            if !workspace.state.storage_backups.is_empty() {
-                view = view.child(semantic_label(
-                    "storage-backups-heading",
-                    course2md::tr!("旧位置备份"),
-                    icons::folder_open(),
-                ));
-            }
-            for (index, backup) in workspace.state.storage_backups.iter().enumerate() {
-                has_content = true;
-                let id = backup.id.clone();
-                let path = backup.path.clone();
-                view = view.child(
-                    card_surface()
-                        .gap_2()
-                        .min_w_0()
-                        .child(accessible_text(
+        if let Some(error) = &storage.error {
+            lines.push((
+                "storage-status-error",
+                AsyncStatus::Failed(error.clone().into()),
+            ));
+        }
+        if !storage.corrupt_records.is_empty() {
+            lines.push((
+                "storage-corrupt-records",
+                AsyncStatus::Failed(
+                    course2md::tr!(
+                        "有 {} 次未完成的移动记录已损坏，相关文件均已保留",
+                        storage.corrupt_records.len()
+                    )
+                    .into(),
+                ),
+            ));
+        }
+        let corrupt = (!storage.corrupt_records.is_empty()).then(|| {
+            let paths = storage
+                .corrupt_records
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            TileScale::Regular
+                .support("storage-corrupt-paths", paths)
+                .pl(ICON_SLOT + ICON_GAP)
+        });
+        let pending = (!storage.pending.is_empty()).then(|| {
+            storage.pending.iter().enumerate().fold(
+                TileGroup::new("storage-pending", course2md::tr!("未完成的移动")),
+                |group, (index, (path, journal))| {
+                    let (resume, abandon, journal) = (path.clone(), path.clone(), journal.clone());
+                    let description = format!(
+                        "{} → {}",
+                        journal.source.display(),
+                        journal.destination.display()
+                    );
+                    let destination = journal.destination.clone();
+                    group.child(storage_item(
+                        ("storage-pending-description", index),
+                        description,
+                        [
+                            material_button(("resume-library-move", index), ButtonVariant::Tonal)
+                                .icon(symbols::play_arrow())
+                                .child(course2md::tr!("继续移动"))
+                                .disabled(storage.busy)
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.start_library_move(
+                                        journal.library_id.clone(),
+                                        journal.source.clone(),
+                                        journal.destination.clone(),
+                                        Some(resume.clone()),
+                                        window,
+                                        cx,
+                                    )
+                                })),
+                            material_button(("open-move-copy", index), ButtonVariant::Text)
+                                .icon(symbols::folder_open())
+                                .child(course2md::tr!("打开目标副本"))
+                                .on_click(move |_, _, cx| cx.open_with_system(&destination)),
+                            material_button(("abandon-library-move", index), ButtonVariant::Text)
+                                .icon(symbols::close())
+                                .child(course2md::tr!("放弃移动，保留副本"))
+                                .disabled(storage.busy)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.abandon_library_move(abandon.clone(), cx)
+                                })),
+                        ],
+                    ))
+                },
+            )
+        });
+        let backups = self
+            .workspace(cx)
+            .map(|workspace| workspace.state.storage_backups.as_slice())
+            .filter(|backups| !backups.is_empty())
+            .map(|backups| {
+                backups.iter().enumerate().fold(
+                    TileGroup::new("storage-backups", course2md::tr!("旧位置备份")),
+                    |group, (index, backup)| {
+                        let (id, path) = (backup.id.clone(), backup.path.clone());
+                        group.child(storage_item(
                             ("storage-backup-description", index),
                             backup.path.display().to_string(),
-                        ))
-                        .child(
-                            h_flex()
-                                .gap_2()
-                                .flex_wrap()
-                                .child(
-                                    control(("open-library-backup", index))
-                                        .icon(icons::folder_open())
-                                        .label(course2md::tr!("打开备份位置"))
-                                        .on_click(move |_, _, cx| cx.open_with_system(&path)),
+                            [
+                                material_button(
+                                    ("open-library-backup", index),
+                                    ButtonVariant::Text,
                                 )
-                                .child(
-                                    quiet(("cleanup-library-backup", index))
-                                        .icon(icons::delete())
-                                        .label(course2md::tr!("清理旧位置备份…"))
-                                        .disabled(self.storage_ui.busy)
-                                        .on_click(cx.listener(move |this, _, window, cx| {
-                                            this.begin_backup_cleanup(id.clone(), window, cx)
-                                        })),
-                                ),
-                        ),
-                );
-            }
+                                .icon(symbols::folder_open())
+                                .child(course2md::tr!("打开备份位置"))
+                                .on_click(move |_, _, cx| cx.open_with_system(&path)),
+                                material_button(
+                                    ("cleanup-library-backup", index),
+                                    ButtonVariant::Text,
+                                )
+                                .icon(symbols::delete())
+                                .child(course2md::tr!("清理旧位置备份…"))
+                                .disabled(storage.busy)
+                                .on_click(cx.listener(
+                                    move |this, _, window, cx| {
+                                        this.begin_backup_cleanup(id.clone(), window, cx)
+                                    },
+                                )),
+                            ],
+                        ))
+                    },
+                )
+            });
+        (!lines.is_empty() || pending.is_some() || backups.is_some()).then(|| {
+            v_flex()
+                .w_full()
+                .min_w_0()
+                .flex_shrink_0()
+                .gap(rem(16.))
+                .children(
+                    lines
+                        .into_iter()
+                        .filter_map(|(id, status)| ui::async_status(id, &status, None, cx)),
+                )
+                .children(corrupt)
+                .children(pending)
+                .children(backups)
+        })
+    }
+
+    /// A location's commands, for its menu and its right-click.
+    fn location_actions(
+        &self,
+        library: &workspace::LibraryLocation,
+        repair: bool,
+        offline: bool,
+        default: bool,
+        cx: &mut Context<Self>,
+    ) -> Vec<Command> {
+        let busy = self.storage_ui.busy;
+        let desktop = cx.weak_entity();
+        let root = library.root.clone();
+        let (default_id, move_id) = (library.id.clone(), library.id.clone());
+        vec![
+            Command::global(
+                course2md::tr!("打开位置"),
+                symbols::folder_open(),
+                move |_, cx| open_location(&root, cx),
+            )
+            .disabled(offline)
+            .ends_group(),
+            Command::new(
+                if default {
+                    course2md::tr!("已是默认保存位置")
+                } else {
+                    course2md::tr!("设为默认保存位置")
+                },
+                symbols::check_circle(),
+                &desktop,
+                move |this, _, cx| this.set_default_library(default_id.clone(), cx),
+            )
+            .disabled(default || repair || busy),
+            Command::new(
+                course2md::tr!("移动笔记库…"),
+                symbols::database(),
+                &desktop,
+                move |this, window, cx| this.begin_library_move(move_id.clone(), window, cx),
+            )
+            .disabled(repair || busy),
+        ]
+    }
+
+    /// One location: its name and state, its path, what is wrong and how to
+    /// repair it, and its actions.
+    fn location_row(
+        &self,
+        index: usize,
+        library: &workspace::LibraryLocation,
+        several: bool,
+        default: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let busy = self.storage_ui.busy;
+        let check = self.cached_location_check(library);
+        let offline = check.is_some_and(|check| !check.available);
+        let relocate = check.is_some_and(|check| !check.available || check.problem.is_some());
+        let reassociate = check.is_some_and(|check| check.needs_reassociation);
+        let repair = reassociate || relocate;
+        let path = course2md::config::simplify_verbatim(library.root.clone());
+        let actions = self.location_actions(library, repair, offline, default, cx);
+        let more = CommandsButton {
+            id: ("storage-location-menu", index).into(),
+            label: course2md::tr!("笔记库操作").into(),
+            subject: Some(course2md::tr!("{} 操作", library.label()).into()),
+            commands: actions.clone(),
+            width: None,
+            tonal: false,
+        };
+        let (id, reassociate_id) = (library.id.clone(), library.id.clone());
+        let repair_button = |name: &'static str, variant, icon, label: &'static str| {
+            material_button((name, index), variant)
+                .when(variant == ButtonVariant::Outlined, |button| {
+                    button.tone(ButtonTone::Accent)
+                })
+                .icon(icon)
+                .child(label)
+                .disabled(busy)
+        };
+        let repairs = repair.then(|| {
+            h_flex()
+                .min_w_0()
+                .pt(rem(4.))
+                .gap(rem(8.))
+                .flex_wrap()
+                .when(reassociate, |row| {
+                    row.child(
+                        repair_button(
+                            "reassociate-storage-location",
+                            ButtonVariant::Tonal,
+                            symbols::database(),
+                            course2md::tr!("重新关联…"),
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.begin_library_reassociation(reassociate_id.clone(), window, cx)
+                            },
+                        )),
+                    )
+                })
+                .when(relocate, |row| {
+                    row.child(
+                        repair_button(
+                            "relocate-storage-location",
+                            if reassociate {
+                                ButtonVariant::Outlined
+                            } else {
+                                ButtonVariant::Tonal
+                            },
+                            symbols::folder_open(),
+                            course2md::tr!("重新定位…"),
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.begin_library_relocation(id.clone(), window, cx)
+                            },
+                        )),
+                    )
+                })
+        });
+        let problem = check
+            .and_then(|check| check.problem.clone())
+            .map(|problem| {
+                (
+                    "storage-location-problem",
+                    AsyncStatus::Failed(problem.into()),
+                )
+            });
+        let unconfirmed = reassociate.then(|| {
+            let message = course2md::tr!("无法确认这是原来的笔记库，请检查后重新关联");
+            (
+                "storage-association-needed",
+                AsyncStatus::Warning(message.into()),
+            )
+        });
+        let notes = problem
+            .into_iter()
+            .chain(unconfirmed)
+            .filter_map(|(id, status)| ui::async_status((id, index), &status, None, cx));
+        let open_root = library.root.clone();
+        let open = material_button(("open-storage-location", index), ButtonVariant::Tonal)
+            .icon(symbols::folder_open())
+            .child(course2md::tr!("打开位置"))
+            .disabled(offline)
+            .on_click(move |_, _, cx| open_location(&open_root, cx));
+        let status = [
+            (default && several).then_some((StatusKind::Tonal, course2md::tr!("默认保存位置"))),
+            offline.then_some((StatusKind::Warning, course2md::tr!("暂时不可访问"))),
+        ];
+        let below = notes
+            .map(IntoElement::into_any_element)
+            .chain(repairs.map(IntoElement::into_any_element))
+            .chain((default && several).then(|| {
+                tile_info(
+                    "storage-policy",
+                    course2md::tr!("更改默认位置只影响后续生成的笔记"),
+                )
+                .into_any_element()
+            }))
+            .collect();
+        let row = Resource {
+            id: format!("storage-location-row-{index}").into(),
+            icon: symbols::folder().into(),
+            tint: Tint::Amber,
+            mono: true,
+            title: library.label().into(),
+            status: status.into_iter().flatten().collect(),
+            busy: false,
+            lines: vec![(path.display().to_string(), false)],
+            below,
+            actions: vec![open.into_any_element(), more.into_any_element()],
         }
-        // An empty flex child still contributes a gap in the settings column.
-        // Healthy storage has no status row and must consume no layout slot.
-        view.when(!has_content, |view| view.hidden())
+        .row(cx);
+        div()
+            .id(("storage-location", index))
+            .relative()
+            .w_full()
+            .min_w_0()
+            .px(ITEM_INSET)
+            .py(rem(16.))
+            .child(command_context_menu(
+                ("storage-location-context", index),
+                None,
+                actions,
+            ))
+            .child(row)
+            .into_any_element()
     }
 
     /// Storage locations listed in the settings page; per-location operations
     /// live in this module alongside the migration flow.
     pub(super) fn storage_settings_page(&self, cx: &mut Context<Self>) -> AnyElement {
-        let view = v_flex()
+        let mut locations =
+            TileGroup::new("storage-locations-heading", course2md::tr!("笔记库位置"));
+        if let Some(workspace) = &self.records.read(cx).workspace {
+            let libraries = workspace.state.libraries.clone();
+            let default_library = workspace.state.default_library.clone();
+            // The default is only a choice once there is more than one location.
+            let several = libraries.len() > 1;
+            for (index, library) in libraries.iter().enumerate() {
+                let default = default_library == library.id;
+                locations =
+                    locations.child(self.location_row(index, library, several, default, cx));
+            }
+        }
+        let add = cx.listener(|this, _, window, cx| this.register_storage_location(window, cx));
+        let locations = locations.tile(move |outer| {
+            ui::add_row(
+                "register-storage-location",
+                course2md::tr!("添加笔记库位置"),
+                None,
+                false,
+                outer,
+                add,
+            )
+        });
+        v_flex()
             .w_full()
             .min_w_0()
             .flex_shrink_0()
-            .gap(px(28.))
-            .child(self.storage_status_panel(cx));
-        let mut locations = crate::settings_ui::SettingsGroup::new(
-            "storage-locations-heading",
-            course2md::tr!("笔记库位置"),
-        );
-
-        // The default is only a choice once there is more than one location.
-        let several = self
-            .workspace
-            .as_ref()
-            .is_some_and(|workspace| workspace.state.libraries.len() > 1);
-        if let Some(workspace) = &self.workspace {
-            for (index, library) in workspace.state.libraries.iter().enumerate() {
-                let root = library.root.clone();
-                let id = library.id.clone();
-                let move_id = id.clone();
-                let relocate_id = id.clone();
-                let reassociate_id = id.clone();
-                let default = workspace.state.default_library == id;
-                let check = self.cached_location_check(library);
-                let offline = check.is_some_and(|check| !check.available);
-                let needs_relocation =
-                    check.is_some_and(|check| !check.available || check.problem.is_some());
-                let needs_reassociation = check.is_some_and(|check| check.needs_reassociation);
-                // A healthy location: 打开位置 and the ⋯ menu at the row's end,
-                // as on the canvas. A location that needs repair says why
-                // under its path and puts the repair first, as the tonal
-                // action on the text ruler; 打开位置 follows it as a text button.
-                let repair = needs_reassociation || needs_relocation;
-                let open_location = {
-                    let root = root.clone();
-                    move |button: gpui_component::button::Button| {
-                        let root = root.clone();
-                        button
-                            .settings_text()
-                            .icon(icons::folder_open())
-                            .label(course2md::tr!("打开位置"))
-                            .disabled(offline)
-                            .on_click(move |_, _, cx| {
-                                cx.open_with_system(&course2md::config::simplify_verbatim(
-                                    root.clone(),
-                                ))
-                            })
-                    }
-                };
-                let trailing = h_flex().gap_2().items_center().when(!repair, |row| {
-                    row.child(open_location(
-                        tonal_pill(("open-storage-location", index), cx).pl(rems(12. / 14.)),
-                    ))
-                });
-                let repair_actions = repair.then(|| {
-                    h_flex()
-                        .pt(rems(8. / 14.))
-                        .gap_2()
-                        .items_center()
-                        .flex_wrap()
-                        .when(needs_reassociation, |row| {
-                            row.child(
-                                tonal_pill(("reassociate-storage-location", index), cx)
-                                    .settings_text()
-                                    .pl(rems(12. / 14.))
-                                    .icon(icons::storage())
-                                    .label(course2md::tr!("重新关联…"))
-                                    .disabled(self.storage_ui.busy)
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.begin_library_reassociation(
-                                            reassociate_id.clone(),
-                                            window,
-                                            cx,
-                                        )
-                                    })),
-                            )
-                        })
-                        .when(needs_relocation, |row| {
-                            let relocate = if needs_reassociation {
-                                outline_pill(("relocate-storage-location", index), cx)
-                            } else {
-                                tonal_pill(("relocate-storage-location", index), cx)
-                                    .pl(rems(12. / 14.))
-                            };
-                            row.child(
-                                relocate
-                                    .settings_text()
-                                    .icon(icons::folder_open())
-                                    .label(course2md::tr!("重新定位…"))
-                                    .disabled(self.storage_ui.busy)
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.begin_library_relocation(
-                                            relocate_id.clone(),
-                                            window,
-                                            cx,
-                                        )
-                                    })),
-                            )
-                        })
-                        .child(open_location(text_button(
-                            ("open-storage-location", index),
-                            cx,
-                        )))
-                });
-                let menu = {
-                    let entity = cx.weak_entity();
-                    let root = root.clone();
-                    let busy = self.storage_ui.busy;
-                    let can_default =
-                        !default && !needs_relocation && !needs_reassociation && !busy;
-                    let can_move = !needs_relocation && !needs_reassociation && !busy;
-                    Rc::new(
-                        move |menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>| {
-                            let root = root.clone();
-                            let set_default = entity.clone();
-                            let default_id = id.clone();
-                            let relocate = entity.clone();
-                            let move_id = move_id.clone();
-                            menu.item(
-                                PopupMenuItem::new(course2md::tr!("打开位置"))
-                                    .icon(icons::folder_open())
-                                    .disabled(offline)
-                                    .on_click(move |_, _, cx| {
-                                        cx.open_with_system(&course2md::config::simplify_verbatim(
-                                            root.clone(),
-                                        ))
-                                    }),
-                            )
-                            .separator()
-                            .item(
-                                PopupMenuItem::new(if default {
-                                    course2md::tr!("已是默认保存位置")
-                                } else {
-                                    course2md::tr!("设为默认保存位置")
-                                })
-                                .icon(icons::check_circle())
-                                .disabled(!can_default)
-                                .on_click(move |_, _, cx| {
-                                    let _ = set_default.update(cx, |this, cx| {
-                                        this.set_default_library(default_id.clone(), cx)
-                                    });
-                                }),
-                            )
-                            .item(
-                                PopupMenuItem::new(course2md::tr!("移动笔记库…"))
-                                    .icon(icons::storage())
-                                    .disabled(!can_move)
-                                    .on_click(move |_, window, cx| {
-                                        let _ = relocate.update(cx, |this, cx| {
-                                            this.begin_library_move(move_id.clone(), window, cx)
-                                        });
-                                    }),
-                            )
-                        },
-                    )
-                };
-                let row_menu = menu.clone();
-                let trailing = trailing.child(
-                    crate::settings_ui::resource_menu(("storage-location-actions", index), cx)
-                        .accessibility_label(course2md::tr!("{} 操作", library.name))
-                        .tooltip(course2md::tr!("笔记库操作"))
-                        .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, window, cx| {
-                            menu(popup, window, cx)
-                        }),
-                );
-                locations = locations.child(
-                    crate::settings_ui::setting_surface()
-                        .id(("storage-location", index))
-                        .min_w_0()
-                        .min_h(rems(88. / 14.))
-                        .justify_center()
-                        .px(SETTING_ITEM_INSET)
-                        .context_menu(move |popup, window, cx| row_menu(popup, window, cx))
-                        .child(
-                            h_flex()
-                                .w_full()
-                                .min_w_0()
-                                .gap(crate::settings_ui::RESOURCE_GAP)
-                                // A location with a problem has several lines;
-                                // its icon and menu stay with the first.
-                                .map(|row| {
-                                    if repair || offline {
-                                        row.items_start()
-                                    } else {
-                                        row.items_center()
-                                    }
-                                })
-                                .flex_wrap()
-                                .child(crate::settings_ui::resource_icon(
-                                    icons::folder(),
-                                    Tint::Amber,
-                                ))
-                                .child(
-                                    v_flex()
-                                        .flex_1()
-                                        .flex_basis(rems(260. / 14.))
-                                        .min_w_0()
-                                        .gap(rems(4. / 14.))
-                                        .child(
-                                            h_flex()
-                                                .gap(rems(10. / 14.))
-                                                .items_center()
-                                                .flex_wrap()
-                                                .child(tile_label(
-                                                    ("storage-location-name", index),
-                                                    library.name.clone(),
-                                                ))
-                                                .when(default && several, |row| {
-                                                    row.child(
-                                                        badge(BadgeKind::Tonal)
-                                                            .child(course2md::tr!("默认保存位置")),
-                                                    )
-                                                })
-                                                .when(offline, |row| {
-                                                    row.child(
-                                                        badge(BadgeKind::Warning)
-                                                            .child(course2md::tr!("暂时不可访问")),
-                                                    )
-                                                }),
-                                        )
-                                        .child(
-                                            tile_support(
-                                                ("storage-location-path", index),
-                                                course2md::config::simplify_verbatim(root.clone())
-                                                    .display()
-                                                    .to_string(),
-                                            )
-                                            .font_family(
-                                                gpui_component::Theme::global(cx)
-                                                    .mono_font_family
-                                                    .clone(),
-                                            )
-                                            .text_size(rems(13. / 14.)),
-                                        )
-                                        // What is wrong with the location and
-                                        // what changing the default does stay in
-                                        // its text column, under the path, before
-                                        // the actions wrap below.
-                                        .when_some(
-                                            check.and_then(|check| check.problem.clone()),
-                                            |text, problem| {
-                                                text.child(location_status(
-                                                    ("storage-location-problem", index),
-                                                    icons::error(),
-                                                    DANGER,
-                                                    problem,
-                                                ))
-                                            },
-                                        )
-                                        .when(needs_reassociation, |text| {
-                                            text.child(location_status(
-                                                ("storage-association-needed", index),
-                                                icons::warning(),
-                                                WARNING,
-                                                course2md::tr!(
-                                                    "无法确认这是原来的笔记库，请检查后重新关联"
-                                                ),
-                                            ))
-                                        })
-                                        .children(repair_actions)
-                                        .when(default && several, |text| {
-                                            text.child(tile_info(
-                                                "storage-policy",
-                                                course2md::tr!("更改默认位置只影响后续生成的笔记"),
-                                            ))
-                                        }),
-                                )
-                                .child(
-                                    trailing
-                                        .ml_auto()
-                                        .flex_shrink_0()
-                                        .min_h(crate::settings_ui::RESOURCE_ICON),
-                                ),
-                        ),
-                );
-            }
-        }
-        let count = self
-            .workspace
-            .as_ref()
-            .map_or(0, |workspace| workspace.state.libraries.len());
-        let add = tile_button(
-            "register-storage-location",
-            [count == 0, count == 0, true, true],
-            cx,
-        )
-        .min_h(rems(72. / 14.))
-        .accessibility_label(course2md::tr!("添加笔记库位置"))
-        .child(
-            tile_row()
-                .child(crate::settings_ui::add_slot())
-                .child(tile_text(
-                    "register-storage-location-label",
-                    course2md::tr!("添加笔记库位置"),
-                    None,
-                )),
-        )
-        .on_click(cx.listener(|this, _, window, cx| this.register_storage_location(window, cx)));
-        locations = locations.tile(move |_| add.into_any_element());
-        view.child(locations).into_any_element()
+            .gap(rem(28.))
+            .children(self.storage_status_panel(cx))
+            .child(locations)
+            .into_any_element()
     }
 
     fn begin_backup_cleanup(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -1936,8 +1226,7 @@ impl Desktop {
             return;
         }
         let Some(backup) = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .and_then(|workspace| {
                 workspace
                     .state
@@ -1950,76 +1239,70 @@ impl Desktop {
             return;
         };
         if self.preferences.references_storage_path(&backup.path) {
-            self.storage_ui.begin(StorageOp::Cleanup);
-            self.storage_ui.error = Some(
-                course2md::tr!("模型仍在使用旧位置，请先在「生成笔记」中保存模型位置，再清理备份")
-                    .into(),
-            );
-            self.open_storage_dialog(window, cx);
-            return;
+            let message =
+                course2md::tr!("模型仍在使用旧位置，请先在「生成笔记」中保存模型位置，再清理备份");
+            return self.storage_refused(StorageOp::Cleanup, message.into(), cx);
         }
-        let answer = window.prompt(
-            PromptLevel::Warning,
+        let consequence = course2md::tr!(
+            "将删除 {} 中的旧位置备份。当前笔记库仍保留在 {}。",
+            backup.path.display(),
+            backup.current_root.display()
+        );
+        ui::Confirm::new(
             course2md::tr!("清理旧位置备份？"),
-            Some(&course2md::tr!(
-                "将删除 {} 中的旧位置备份。当前笔记库仍保留在 {}。",
-                backup.path.display(),
-                backup.current_root.display()
-            )),
-            &[course2md::tr!("清理备份"), course2md::tr!("保留备份")],
+            course2md::tr!("保留备份"),
+            course2md::tr!("清理备份"),
+        )
+        .danger()
+        .text(consequence)
+        .ask(
+            cx.listener(move |this, _, window, cx| this.cleanup_backup(backup.clone(), window, cx)),
+            window,
             cx,
         );
+    }
+
+    fn cleanup_backup(
+        &mut self,
+        backup: storage::BackupRecord,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.storage_ui.busy {
+            return;
+        }
+        self.storage_ui.begin(StorageOp::Cleanup);
+        let (_, cancel) = self.storage_busy();
+        let worker_cancel = cancel.clone();
+        self.storage_ui.progress.message = course2md::tr!("正在清理备份…").into();
+        self.open_storage_dialog(cx);
+        let roots = self
+            .records
+            .read(cx)
+            .workspace
+            .iter()
+            .flat_map(|workspace| &workspace.state.libraries)
+            .map(|library| library.root.clone())
+            .collect::<Vec<_>>();
+        let id = backup.id.clone();
+        // Cleaning up deletes files synchronously; see crate::spawn_blocking_io.
+        let worker = crate::spawn_blocking_result(move || {
+            storage::cleanup_backup(&backup, &roots, &worker_cancel)
+        });
         cx.spawn_in(window, async move |this, cx| {
-            if answer.await.ok() != Some(0) {
-                return;
-            }
-            let cancel = Arc::new(AtomicBool::new(false));
-            let worker_cancel = cancel.clone();
-            let roots = this
-                .update_in(cx, |this, window, cx| {
-                    this.storage_ui.begin(StorageOp::Cleanup);
-                    this.storage_ui.busy = true;
-                    this.storage_ui.cancel = Some(cancel.clone());
-                    this.storage_ui.progress = Progress {
-                        message: course2md::tr!("正在清理备份…").into(),
-                        completed: 0,
-                        total: 0,
-                    };
-                    this.open_storage_dialog(window, cx);
-                    cx.notify();
-                    this.workspace
-                        .as_ref()
-                        .map(|workspace| {
-                            workspace
-                                .state
-                                .libraries
-                                .iter()
-                                .map(|library| library.root.clone())
-                                .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_default()
-                })
-                .unwrap_or_default();
-            // Cleaning up deletes files synchronously; see crate::spawn_blocking_io.
-            let worker = crate::spawn_blocking_io(move || {
-                storage::cleanup_backup(&backup, &roots, &worker_cancel)
-            });
-            let result = worker
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
-            let _ = this.update_in(cx, |this, _, cx| {
-                this.storage_ui.busy = false;
-                this.wake_poll();
-                this.storage_ui.cancel = None;
+            let result = worker.await;
+            let _ = this.update(cx, |this, cx| {
+                this.storage_idle(cx);
                 this.storage_ui.progress = Progress::default();
                 match result {
                     Ok(()) => {
-                        if let Some(workspace) = &mut this.workspace {
-                            match workspace.transaction(|state| {
+                        if let Some(cleaned) = this.with_workspace(cx, |workspace| {
+                            workspace.transaction(|state| {
                                 state.storage_backups.retain(|backup| backup.id != id);
                                 Ok(())
-                            }) {
+                            })
+                        }) {
+                            match cleaned {
                                 Ok(()) => {
                                     this.storage_ui.progress.message =
                                         course2md::tr!("旧位置备份已清理").into();
@@ -2039,693 +1322,32 @@ impl Desktop {
             });
         })
         .detach();
+        cx.notify();
     }
 }
 
-/// A location's problem under its path: the status icon on the first line,
-/// then the text in the status color.
-fn location_status(
+fn open_location(root: &Path, cx: &mut App) {
+    cx.open_with_system(&course2md::config::simplify_verbatim(root.to_owned()));
+}
+
+/// A resource row of the status panel: what it is, then what can be done with it.
+fn storage_item<const N: usize>(
     id: impl Into<ElementId>,
-    icon: Icon,
-    tone: crate::theme::ColorToken,
-    text: impl Into<SharedString>,
+    description: impl Into<SharedString>,
+    actions: [MaterialButton; N],
 ) -> Div {
-    h_flex()
+    v_flex()
         .w_full()
         .min_w_0()
-        .items_start()
-        .gap(rems(6. / 14.))
+        .gap(rem(8.))
+        .px(ITEM_INSET)
+        .py(rem(16.))
+        .child(TileScale::Regular.support(id, description))
         .child(
-            div()
-                .h(rems(20. / 14.))
-                .flex()
-                .items_center()
-                .flex_shrink_0()
-                .child(icon.size(rems(16. / 14.)).text_color(color(tone))),
+            h_flex()
+                .min_w_0()
+                .gap(rem(8.))
+                .flex_wrap()
+                .children(actions),
         )
-        .child(tile_support(id, text).flex_1().text_color(color(tone)))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        LocationChecks, inspect_location, inspect_relocation, publish_location, publish_relocation,
-        relocate_preview, scan_locations, validate_registered_destination,
-    };
-    use crate::{ConversionOptions, source, storage, workspace};
-    use std::{path::PathBuf, sync::atomic::AtomicBool};
-
-    fn test_location(root: PathBuf) -> workspace::LibraryLocation {
-        workspace::LibraryLocation {
-            id: "test-library".into(),
-            name: "笔记库".into(),
-            root,
-            previous_roots: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn locating_a_moved_library_reopens_notes_and_preserves_task_intent() {
-        let directory = tempfile::tempdir().unwrap();
-        let old = directory.path().join("old");
-        let new = directory.path().join("moved");
-        std::fs::create_dir_all(&old).unwrap();
-        std::fs::write(old.join("video.mp4"), "original video").unwrap();
-        let work = old.join("note-work");
-        std::fs::create_dir_all(&work).unwrap();
-        let target = course2md::artifact::Target {
-            task_id: "task-relocate".into(),
-            course_id: "course-relocate".into(),
-            source_id: "local:original-video".into(),
-            version_id: "v1".into(),
-            course_dir: old.join("note"),
-        };
-        let sections = vec![course2md::timeline::Section {
-            t: 0.,
-            end: 1.,
-            image: String::new(),
-            speech: vec![course2md::timeline::TranscriptEvent {
-                start: 0.,
-                end: 1.,
-                text: "Relocation must preserve this body.".into(),
-                raw: None,
-                translation: None,
-            }],
-        }];
-        let meta = course2md::fetch::VideoMeta {
-            title: "Original title".into(),
-            uploader: String::new(),
-            duration: 0.,
-            webpage_url: String::new(),
-            extractor: "local".into(),
-            id: "original-video".into(),
-        };
-        course2md::artifact::publish_blocking(
-            &target,
-            &work,
-            &meta,
-            &sections,
-            None,
-            &[],
-            Default::default(),
-        )
-        .unwrap();
-        std::fs::remove_dir_all(&work).unwrap();
-        let old = old.canonicalize().unwrap();
-        let record = directory.path().join("workspace.json");
-        let mut workspace = workspace::Workspace::open_at_inline(
-            record.clone(),
-            old.clone(),
-            ConversionOptions::default(),
-        )
-        .unwrap();
-        let id = workspace.state.default_library.clone();
-        let source = source::Source {
-            input: old.join("video.mp4").display().to_string(),
-            identity: "local:original-video".into(),
-            title: "Original title".into(),
-            online: false,
-            ..Default::default()
-        };
-        let draft = workspace.state.draft_mut().unwrap();
-        draft.input = source.input.clone();
-        draft.online = false;
-        draft.source = Some(source.clone());
-        draft.title = "Keep my custom title".into();
-        draft.custom_title = true;
-        draft.folder = Some(7);
-        let draft_id = draft.id.clone();
-        let plan = workspace::TaskPlan {
-            operation: course2md::execution::Operation::Generate,
-            source: source.clone(),
-            source_id: source.identity.clone(),
-            title: "Frozen task".into(),
-            library_id: id.clone(),
-            folder: Some(7),
-            subtitle: None,
-            config: course2md::settings::ConfigFile::default(),
-            asr_service: Some("fixed-service-version".into()),
-            ai_service: None,
-        };
-        let (task_id, _) = workspace.state.enqueue(plan, None).unwrap();
-        let task = workspace.state.task_mut(&task_id).unwrap();
-        task.state = workspace::TaskState::Uncertain;
-        task.intent = workspace::Intent::Pause;
-        let work = task.work_dir.clone();
-        workspace
-            .state
-            .reader_sources
-            .insert("inside".into(), old.join("video.mp4"));
-        let external = directory.path().join("external.mp4");
-        workspace
-            .state
-            .reader_sources
-            .insert("outside".into(), external.clone());
-        let mut preview =
-            crate::notes::read_preview(crate::notes::scan_library(&old).unwrap().courses.remove(0))
-                .unwrap();
-        let original_text = preview.plain_text.clone();
-        workspace.state.task_mut(&task_id).unwrap().artifact = Some(preview.course.dir.clone());
-        workspace.transaction(|_| Ok(())).unwrap();
-        let binding = br#"{"task_id":"kept","source_id":"kept"}"#;
-        std::fs::write(work.join("task-identity.json"), binding).unwrap();
-        std::fs::write(
-            work.join("control.json"),
-            br#"{"intent":"pause","resend":[]}"#,
-        )
-        .unwrap();
-        std::fs::rename(&old, &new).unwrap();
-        let new = new.canonicalize().unwrap();
-        assert!(!old.exists());
-
-        let located = inspect_relocation(&workspace.state, &id, &new).unwrap();
-        workspace
-            .transaction(|state| publish_relocation(state, &located))
-            .unwrap();
-        let state = &workspace.state;
-        assert_eq!(state.library(&id).unwrap().root, new);
-        assert_eq!(state.default_library, id);
-        assert_eq!(state.current_draft, draft_id);
-        assert_eq!(state.draft().unwrap().title, "Keep my custom title");
-        assert_eq!(state.draft().unwrap().folder, Some(7));
-        assert_eq!(
-            state.draft().unwrap().input,
-            new.join("video.mp4").display().to_string()
-        );
-        let task = state.task(&task_id).unwrap();
-        assert_eq!(task.state, workspace::TaskState::Uncertain);
-        assert_eq!(task.intent, workspace::Intent::Pause);
-        assert_eq!(
-            task.plan.asr_service.as_deref(),
-            Some("fixed-service-version")
-        );
-        assert_eq!(state.reader_sources["inside"], new.join("video.mp4"));
-        assert_eq!(state.reader_sources["outside"], external);
-        assert!(
-            state.storage_backups.is_empty(),
-            "locating must not invent a verified backup"
-        );
-        assert_eq!(
-            std::fs::read(task.work_dir.join("task-identity.json")).unwrap(),
-            binding
-        );
-        assert_eq!(
-            std::fs::read(task.work_dir.join("control.json")).unwrap(),
-            br#"{"intent":"pause","resend":[]}"#
-        );
-        assert_eq!(
-            std::fs::read_to_string(new.join(".course2md-library-id")).unwrap(),
-            id
-        );
-        relocate_preview(&mut preview, &old, &new);
-        assert_eq!(preview.plain_text, original_text);
-        assert!(preview.course.dir.starts_with(&new));
-        let reread = crate::notes::read_preview(preview.course).unwrap();
-        assert_eq!(reread.plain_text, original_text);
-        let reopened =
-            workspace::Workspace::open_at_inline(record, old.clone(), ConversionOptions::default())
-                .unwrap();
-        assert_eq!(reopened.state.library(&id).unwrap().root, new);
-        assert!(
-            reopened
-                .state
-                .library(&id)
-                .unwrap()
-                .previous_roots
-                .contains(&old)
-        );
-        assert!(
-            !old.exists(),
-            "recovery must not recreate the missing original directory"
-        );
-    }
-
-    #[test]
-    fn locating_rejects_missing_wrong_and_overlapping_library_identity_without_writes() {
-        let directory = tempfile::tempdir().unwrap();
-        let old = directory.path().join("old");
-        let target = directory.path().join("target");
-        std::fs::create_dir(&old).unwrap();
-        std::fs::create_dir(&target).unwrap();
-        let workspace = workspace::Workspace::open_at_inline(
-            directory.path().join("workspace.json"),
-            old,
-            ConversionOptions::default(),
-        )
-        .unwrap();
-        workspace.save().unwrap();
-        let id = workspace.state.default_library.clone();
-        let before = std::fs::read(workspace.storage_path()).unwrap();
-        assert!(inspect_relocation(&workspace.state, &id, &target).is_err());
-        assert!(!target.join(".course2md-library-id").exists());
-        std::fs::write(target.join(".course2md-library-id"), "another-library").unwrap();
-        assert!(inspect_relocation(&workspace.state, &id, &target).is_err());
-        assert_eq!(
-            std::fs::read_to_string(target.join(".course2md-library-id")).unwrap(),
-            "another-library"
-        );
-        std::fs::write(target.join(".course2md-library-id"), &id).unwrap();
-        let mut state = workspace.state.clone();
-        state.libraries.push(workspace::LibraryLocation {
-            id: "other".into(),
-            name: "Other".into(),
-            root: target.clone(),
-            previous_roots: Vec::new(),
-        });
-        assert!(inspect_relocation(&state, &id, &target).is_err());
-        assert_eq!(std::fs::read(workspace.storage_path()).unwrap(), before);
-    }
-
-    #[test]
-    fn locating_rechecks_registry_and_selected_directory_before_publication() {
-        let directory = tempfile::tempdir().unwrap();
-        let old = directory.path().join("old");
-        let target = directory.path().join("target");
-        std::fs::create_dir(&old).unwrap();
-        std::fs::create_dir(&target).unwrap();
-        let mut workspace = workspace::Workspace::open_at_inline(
-            directory.path().join("workspace.json"),
-            old,
-            ConversionOptions::default(),
-        )
-        .unwrap();
-        let id = workspace.state.default_library.clone();
-        std::fs::write(target.join(".course2md-library-id"), &id).unwrap();
-        let located = inspect_relocation(&workspace.state, &id, &target).unwrap();
-        let mut changed = workspace.state.clone();
-        changed.libraries[0].root = directory.path().join("another-location");
-        let before = changed.clone();
-        assert!(publish_relocation(&mut changed, &located).is_err());
-        assert!(changed == before);
-        std::fs::rename(&target, directory.path().join("original-selected")).unwrap();
-        std::fs::create_dir(&target).unwrap();
-        std::fs::write(target.join(".course2md-library-id"), &id).unwrap();
-        let before = workspace.state.clone();
-        assert!(
-            workspace
-                .transaction(|state| publish_relocation(state, &located))
-                .is_err()
-        );
-        assert!(workspace.state == before);
-        let located = inspect_relocation(&workspace.state, &id, &target).unwrap();
-        std::fs::write(target.join(".course2md-library-id"), "different-library").unwrap();
-        assert!(
-            workspace
-                .transaction(|state| publish_relocation(state, &located))
-                .is_err()
-        );
-        assert!(workspace.state == before);
-    }
-
-    #[test]
-    fn locating_keeps_the_original_registry_when_publication_cannot_be_saved() {
-        let directory = tempfile::tempdir().unwrap();
-        let old = directory.path().join("old");
-        let target = directory.path().join("target");
-        std::fs::create_dir(&old).unwrap();
-        let record = directory.path().join("workspace.json");
-        let mut workspace = workspace::Workspace::open_at_inline(
-            record.clone(),
-            old.clone(),
-            ConversionOptions::default(),
-        )
-        .unwrap();
-        workspace.save().unwrap();
-        let id = workspace.state.default_library.clone();
-        let before = workspace.state.clone();
-        let record_bytes = std::fs::read(&record).unwrap();
-        std::fs::rename(&old, &target).unwrap();
-        let located = inspect_relocation(&workspace.state, &id, &target).unwrap();
-        // A directory at the output file is a portable publication failure, not
-        // a chmod assertion that would silently pass under a privileged runner.
-        std::fs::rename(&record, directory.path().join("original-record.json")).unwrap();
-        std::fs::create_dir(&record).unwrap();
-        assert!(
-            workspace
-                .transaction(|state| publish_relocation(state, &located))
-                .is_err()
-        );
-        assert!(workspace.state == before);
-        assert_eq!(
-            std::fs::read(directory.path().join("original-record.json")).unwrap(),
-            record_bytes
-        );
-        assert_eq!(
-            std::fs::read_to_string(target.join(".course2md-library-id")).unwrap(),
-            id
-        );
-        assert!(!old.exists());
-    }
-
-    #[test]
-    fn slow_library_scan_runs_outside_the_calling_thread() {
-        let directory = tempfile::tempdir().unwrap();
-        let location = test_location(directory.path().to_owned());
-        std::fs::write(directory.path().join(".course2md-library-id"), &location.id).unwrap();
-        let (started_tx, started_rx) = std::sync::mpsc::channel();
-        let (release_tx, release_rx) = std::sync::mpsc::channel();
-        let caller = std::thread::current().id();
-        smol::block_on(async {
-            let mut scan = Box::pin(scan_locations(vec![location.clone()], move |_| {
-                started_tx.send(std::thread::current().id()).unwrap();
-                release_rx
-                    .recv_timeout(std::time::Duration::from_secs(2))
-                    .unwrap();
-            }));
-            // Polling the real scan boundary returns while the worker remains
-            // blocked. This checks thread isolation, not a native hang fixture.
-            assert!(smol::future::poll_once(&mut scan).await.is_none());
-            let worker = started_rx
-                .recv_timeout(std::time::Duration::from_secs(2))
-                .unwrap();
-            assert_ne!(worker, caller);
-            let mut cache = LocationChecks::default();
-            cache.begin(1, std::slice::from_ref(&location));
-            assert!(cache.get(&location).is_none());
-            release_tx.send(()).unwrap();
-            let result = scan.await;
-            assert!(result[0].1.available);
-            assert!(!result[0].1.needs_reassociation);
-        });
-    }
-
-    #[test]
-    fn disconnected_libraries_keep_search_coverage_unknown_until_reconnected() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut first = test_location(directory.path().join("first"));
-        first.id = "first".into();
-        let mut second = test_location(directory.path().join("second"));
-        second.id = "second".into();
-        let locations = [first.clone(), second.clone()];
-        for location in &locations {
-            std::fs::create_dir(&location.root).unwrap();
-        }
-        let mut generation = 0;
-        let mut coverage = || {
-            generation += 1;
-            let mut checks = LocationChecks::default();
-            checks.begin(generation, &locations);
-            assert!(
-                checks.finish(
-                    generation,
-                    &locations,
-                    locations
-                        .iter()
-                        .map(|location| (location.clone(), inspect_location(location)))
-                        .collect()
-                )
-            );
-            checks.access(&locations).unwrap().coverage()
-        };
-        assert_eq!(coverage(), storage::LibraryCoverage::Complete);
-        std::fs::rename(&first.root, directory.path().join("first-away")).unwrap();
-        assert_eq!(coverage(), storage::LibraryCoverage::Partial);
-        std::fs::rename(&second.root, directory.path().join("second-away")).unwrap();
-        assert_eq!(coverage(), storage::LibraryCoverage::Unavailable);
-        std::fs::rename(directory.path().join("first-away"), &first.root).unwrap();
-        assert_eq!(coverage(), storage::LibraryCoverage::Partial);
-        let unchecked = LocationChecks::default();
-        assert!(unchecked.access(&locations).is_none());
-    }
-
-    #[test]
-    fn location_checks_reject_old_generations_and_changed_paths() {
-        let directory = tempfile::tempdir().unwrap();
-        let old = test_location(directory.path().join("old"));
-        let new = test_location(directory.path().join("new"));
-        std::fs::create_dir(&old.root).unwrap();
-        std::fs::create_dir(&new.root).unwrap();
-        std::fs::write(old.root.join(".course2md-library-id"), &old.id).unwrap();
-        let mut cache = LocationChecks::default();
-        cache.begin(1, std::slice::from_ref(&old));
-        assert!(cache.finish(
-            1,
-            std::slice::from_ref(&old),
-            vec![(old.clone(), inspect_location(&old))]
-        ));
-        assert!(cache.get(&old).unwrap().available);
-        cache.begin(2, std::slice::from_ref(&old));
-        assert!(
-            cache.get(&old).is_some(),
-            "same-path refresh keeps the last checked result"
-        );
-        assert!(!cache.finish(
-            1,
-            std::slice::from_ref(&old),
-            vec![(old.clone(), inspect_location(&old))]
-        ));
-        assert!(!cache.finish(
-            2,
-            std::slice::from_ref(&new),
-            vec![(old.clone(), inspect_location(&old))]
-        ));
-        assert!(
-            cache.get(&new).is_none(),
-            "a new path is pending, not offline"
-        );
-        cache.begin(3, std::slice::from_ref(&new));
-        assert!(cache.get(&old).is_none());
-        assert!(!cache.finish(
-            2,
-            std::slice::from_ref(&new),
-            vec![(old.clone(), inspect_location(&old))]
-        ));
-        assert!(cache.finish(
-            3,
-            std::slice::from_ref(&new),
-            vec![(new.clone(), inspect_location(&new))]
-        ));
-        assert!(cache.get(&new).unwrap().needs_reassociation);
-    }
-
-    #[test]
-    fn registry_commit_preserves_ids_and_moves_only_library_owned_paths() {
-        let directory = tempfile::tempdir().unwrap();
-        let old = directory.path().join("old");
-        let new = directory.path().join("new");
-        std::fs::create_dir_all(old.join("media")).unwrap();
-        std::fs::create_dir_all(&new).unwrap();
-        std::fs::write(old.join("media/video.mp4"), "fixture video content").unwrap();
-        let old = std::fs::canonicalize(old).unwrap();
-        let new = std::fs::canonicalize(new).unwrap();
-        let record_path = directory.path().join("workspace.json");
-        let mut workspace = workspace::Workspace::open_at_inline(
-            record_path.clone(),
-            old.clone(),
-            ConversionOptions::default(),
-        )
-        .unwrap();
-        let library_id = workspace.state.default_library.clone();
-        let mut source = source::Source {
-            input: old.join("media/video.mp4").display().to_string(),
-            title: "My confirmed title".into(),
-            identity: "local:content-stays-the-same".into(),
-            online: false,
-            cover: Some(old.join("media/cover.png")),
-            ..Default::default()
-        };
-        let draft = workspace.state.draft_mut().unwrap();
-        draft.online = false;
-        draft.input = source.input.clone();
-        draft.source = Some(source.clone());
-        draft.title = "My custom title".into();
-        draft.custom_title = true;
-        draft.folder = Some(17);
-        let original_draft_id = draft.id.clone();
-        let mut config = course2md::settings::ConfigFile::default();
-        config.defaults.model_dir = Some(old.join("models"));
-        let plan = workspace::TaskPlan {
-            operation: course2md::execution::Operation::Reprocess {
-                base_version_dir: old.join("note/versions/old-version"),
-                components: vec![course2md::execution::Component::Summary],
-                prior_work_dir: Some(old.join(".course2md/work/old-task")),
-            },
-            source: source.clone(),
-            source_id: source.identity.clone(),
-            title: "Frozen title".into(),
-            library_id: library_id.clone(),
-            folder: Some(17),
-            subtitle: Some(old.join("subtitles/selected.srt")),
-            config,
-            asr_service: Some("fixed-asr-version".into()),
-            ai_service: Some("fixed-ai-version".into()),
-        };
-        let (task_id, _) = workspace.state.enqueue(plan, None).unwrap();
-        let old_task_work = workspace.state.task(&task_id).unwrap().work_dir.clone();
-        source.input = directory.path().join("outside.mp4").display().to_string();
-        let outside_input = source.input.clone();
-        let mut outside_draft =
-            workspace::Draft::new(false, library_id.clone(), ConversionOptions::default());
-        outside_draft.input = outside_input.clone();
-        outside_draft.source = Some(source);
-        workspace
-            .state
-            .reader_sources
-            .insert("local:relocated-video".into(), old.join("media/video.mp4"));
-        workspace
-            .state
-            .reader_sources
-            .insert("local:outside-video".into(), PathBuf::from(&outside_input));
-        workspace.transaction(|_| Ok(())).unwrap();
-        let prepared = storage::prepare_move(
-            library_id.clone(),
-            &old,
-            &new,
-            &directory.path().join("journals"),
-            &AtomicBool::new(false),
-            &|_| {},
-        )
-        .unwrap();
-        assert_eq!(workspace.state.library(&library_id).unwrap().root, old);
-        // Exercise an external current input separately: the workbench now has
-        // one form, and reopening must not revive a second managed draft.
-        let mut external_input_state = workspace.state.clone();
-        external_input_state.current_draft = outside_draft.id.clone();
-        external_input_state.drafts = vec![outside_draft];
-        publish_location(&mut external_input_state, &prepared.journal, &prepared.path).unwrap();
-        assert_eq!(external_input_state.draft().unwrap().input, outside_input);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let permissions = std::fs::metadata(directory.path()).unwrap().permissions();
-            std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o555))
-                .unwrap();
-            let failed = workspace
-                .transaction(|state| publish_location(state, &prepared.journal, &prepared.path));
-            std::fs::set_permissions(directory.path(), permissions).unwrap();
-            assert!(failed.is_err());
-            assert_eq!(workspace.state.library(&library_id).unwrap().root, old);
-        }
-        let before_commit = workspace::Workspace::open_at_inline(
-            record_path.clone(),
-            old.clone(),
-            ConversionOptions::default(),
-        )
-        .unwrap();
-        assert_eq!(before_commit.state.library(&library_id).unwrap().root, old);
-        assert_eq!(
-            before_commit.state.task(&task_id).unwrap().work_dir,
-            old_task_work
-        );
-        workspace
-            .transaction(|state| publish_location(state, &prepared.journal, &prepared.path))
-            .unwrap();
-        let mut reopened = workspace::Workspace::open_at_inline(
-            record_path,
-            old.clone(),
-            ConversionOptions::default(),
-        )
-        .unwrap();
-        let state = &reopened.state;
-        let lagging: storage::Journal =
-            serde_json::from_slice(&std::fs::read(&prepared.path).unwrap()).unwrap();
-        assert_eq!(lagging.phase, storage::Phase::Verified);
-        assert_eq!(state.library(&library_id).unwrap().root, new);
-        assert_eq!(
-            state.reader_sources["local:relocated-video"],
-            new.join("media/video.mp4")
-        );
-        assert_eq!(
-            state.reader_sources["local:outside-video"],
-            PathBuf::from(&outside_input)
-        );
-        let draft = state
-            .drafts
-            .iter()
-            .find(|draft| draft.id == original_draft_id)
-            .unwrap();
-        assert_eq!(draft.library_id, library_id);
-        assert_eq!(draft.folder, Some(17));
-        assert_eq!(draft.title, "My custom title");
-        assert_eq!(
-            draft.input,
-            new.join("media/video.mp4").display().to_string()
-        );
-        assert_eq!(
-            draft.source.as_ref().unwrap().identity,
-            "local:content-stays-the-same"
-        );
-        assert_eq!(state.drafts.len(), 1);
-        let task = state.task(&task_id).unwrap();
-        assert_eq!(task.plan.title, "Frozen title");
-        assert_eq!(task.plan.asr_service.as_deref(), Some("fixed-asr-version"));
-        assert_eq!(
-            task.plan.config.defaults.model_dir,
-            Some(new.join("models"))
-        );
-        assert_eq!(
-            task.work_dir,
-            new.join(old_task_work.strip_prefix(&old).unwrap())
-        );
-        assert!(
-            matches!(&task.plan.operation, course2md::execution::Operation::Reprocess {base_version_dir, prior_work_dir:Some(work),..}
-            if base_version_dir.starts_with(&new) && work.starts_with(&new))
-        );
-        assert_eq!(state.storage_backups[0].path, old);
-        assert!(
-            state
-                .library(&library_id)
-                .unwrap()
-                .previous_roots
-                .contains(&old)
-        );
-        assert!(old.join("media/video.mp4").is_file());
-        let final_root = directory.path().join("third");
-        std::fs::create_dir(&final_root).unwrap();
-        let second_move = storage::prepare_move(
-            library_id.clone(),
-            &new,
-            &final_root,
-            &directory.path().join("journals"),
-            &AtomicBool::new(false),
-            &|_| {},
-        )
-        .unwrap();
-        reopened
-            .transaction(|state| publish_location(state, &second_move.journal, &second_move.path))
-            .unwrap();
-        let location = reopened.state.library(&library_id).unwrap();
-        assert!(location.previous_roots.contains(&old) && location.previous_roots.contains(&new));
-        assert_eq!(
-            reopened.state.reader_sources["local:relocated-video"],
-            location.root.join("media/video.mp4")
-        );
-        assert!(
-            reopened
-                .state
-                .storage_backups
-                .iter()
-                .all(|backup| backup.current_root == location.root)
-        );
-    }
-
-    #[test]
-    fn another_registered_library_is_rejected_even_when_empty() {
-        let directory = tempfile::tempdir().unwrap();
-        let first = directory.path().join("first");
-        let second = directory.path().join("second");
-        std::fs::create_dir_all(&first).unwrap();
-        std::fs::create_dir_all(&second).unwrap();
-        let mut workspace = workspace::Workspace::open_at_inline(
-            directory.path().join("workspace.json"),
-            first,
-            ConversionOptions::default(),
-        )
-        .unwrap();
-        workspace.state.libraries.push(workspace::LibraryLocation {
-            id: "other".into(),
-            name: "Other library".into(),
-            root: second.clone(),
-            previous_roots: Vec::new(),
-        });
-        assert!(
-            validate_registered_destination(
-                &workspace.state,
-                &workspace.state.default_library,
-                &second
-            )
-            .is_err()
-        );
-        assert!(std::fs::read_dir(second).unwrap().next().is_none());
-    }
 }

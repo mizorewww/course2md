@@ -1,11 +1,16 @@
-[package]
-name = "course2md"
-version = "2.0.1"
+[workspace]
+resolver = "3"
+members = ["crates/*", "desktop", "desktop/accounts", "desktop/prefs", "desktop/reader-core", "desktop/store", "desktop/tasks", "desktop/ui"]
+# A plain `cargo build` or `cargo test` covers the engine and the CLI, which build on
+# machines without the desktop's native libraries. `--workspace` adds the desktop.
+default-members = ["crates/*"]
+
+[workspace.package]
+version = "3.0.0-alpha.1"
 edition = "2024"
-description = "Turn online course videos (YouTube/Bilibili) into image+transcript markdown notes"
 license = "MIT"
 
-[dependencies]
+[workspace.dependencies]
 ratex-layout = "0.1.15"
 ratex-parser = "0.1.15"
 ratex-svg = { version = "0.1.15", features = ["embed-fonts"] }
@@ -18,25 +23,70 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "fs
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.10"
-zip = { version = "8.6", default-features = false }
+sha2 = "0.11"
+zip = { version = "9", default-features = false }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
-ureq = { version = "2", features = ["json"] }
-base64 = "0.22"
-getrandom = "0.2"
-toml = "0.8"
+ureq = { version = "3", features = ["json"] }
+base64 = "0.23"
+getrandom = "0.4"
+strum = { version = "0.27", features = ["derive"] }
+thiserror = "2"
+open = "5"
+toml = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-indicatif = "0.17"
-image-compare = "0.5.0"
+indicatif = "0.18"
+hound = "3.5"
+indexmap = { version = "2", features = ["serde"] }
 libc = "0.2"
 dialoguer = "0.12.0"
+walkdir = "2"
+whatlang = "0.18"
 which = "8.0.6"
 sys-locale = "0.3"
+# The desktop. Its GPUI stack is the one gpui-kit-material pins, at one revision of that
+# repository; members add the features they use.
+gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1bc3ea75b4b41a616ad3877ea2de30ed2cc9e89d", features = ["gpui-fast"] }
+gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1bc3ea75b4b41a616ad3877ea2de30ed2cc9e89d" }
+gpui-kit-material = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1bc3ea75b4b41a616ad3877ea2de30ed2cc9e89d", default-features = false, features = ["serde", "gpui-fast"] }
+gpui-kit-material-color = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1bc3ea75b4b41a616ad3877ea2de30ed2cc9e89d", features = ["serde"] }
+# The revision gpui-kit-material pins.
+gpui-material-symbols = { git = "https://github.com/mizorewww/gpui-material-symbols", rev = "593aa15a46076f3e2870c23c0e4fd79f94f105bd", default-features = false }
+smol = "2"
+chrono = "0.4"
+uuid = "1"
+same-file = "1.0.6"
+zeroize = "1"
+pulldown-cmark = "0.13"
+unicode-segmentation = "1"
+trash = "5"
+keyring = "4"
+security-framework = "3.7"
+embed-resource = "3.0"
+model-fetch = { version = "0.1", git = "https://github.com/mizorewww/model-fetch", rev = "b7e06822400edb4ed1042ad1b07daa24a880c287", features = ["ip-lookup"] }
+slide-detect = { version = "0.1", git = "https://github.com/mizorewww/slide-detect", rev = "87f8b78a8a70d8330a4bf1cb09924fe845c6c4ab" }
+subtitle-parse = { version = "0.1", git = "https://github.com/mizorewww/subtitle-parse", rev = "048299ffbe1c23a132a89857038c547df338f618", features = ["serde"] }
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package.gpui-pre]
+opt-level = 3
+
+[profile.dev.package.gpui-fast]
+opt-level = 3
 
 [profile.release]
 lto = "thin"
 strip = true
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(apple_native)'] }
+# Only the workspace root's patches count, so the desktop's stack is pinned here.
+[patch.crates-io]
+gpui-fast = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1bc3ea75b4b41a616ad3877ea2de30ed2cc9e89d" }
+gpui-fast-apple = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1bc3ea75b4b41a616ad3877ea2de30ed2cc9e89d" }
+gpui-fast-macos = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1bc3ea75b4b41a616ad3877ea2de30ed2cc9e89d" }
+gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1bc3ea75b4b41a616ad3877ea2de30ed2cc9e89d" }
+
+[patch."https://github.com/longbridge/gpui-kit"]
+gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1bc3ea75b4b41a616ad3877ea2de30ed2cc9e89d" }
+gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1bc3ea75b4b41a616ad3877ea2de30ed2cc9e89d" }

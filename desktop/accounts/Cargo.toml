@@ -1,0 +1,16 @@
+[package]
+name = "desktop-accounts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The course2md desktop's sign-ins: Bilibili, YouTube, Codex and Ollama"
+publish = false
+
+[dependencies]
+c2m-ai = { path = "../../crates/c2m-ai" }
+c2m-i18n = { path = "../../crates/c2m-i18n" }
+c2m-source = { path = "../../crates/c2m-source" }
+anyhow.workspace = true
+
+[dev-dependencies]
+desktop-prefs = { path = "../prefs" }

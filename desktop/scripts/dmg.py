@@ -74,8 +74,8 @@ def verify_install_dmg(image, app_name):
             resources = mount / app_name / "Contents/Resources"
             if (resources / "course2md.icns").read_bytes() != (ASSETS / "icon.icns").read_bytes():
                 raise ValueError("Packaged app has a stale icon")
-            for name in ("LICENSE", "LICENSE-material-icons", "LICENSE-lucide-icons",
-                         "design-licenses", "sources.lock.json"):
+            for name in ("LICENSE", "LICENSE-material-icons",
+                         "design-licenses"):
                 if not (resources / name).exists():
                     raise ValueError(f"App is missing {name}")
             subprocess.run(["codesign", "--verify", "--deep", "--strict", str(mount / app_name)], check=True)

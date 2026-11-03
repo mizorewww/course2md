@@ -1,0 +1,23 @@
+[package]
+name = "desktop-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The course2md desktop's shared compositions on gpui-kit-material, without page state"
+publish = false
+
+[dependencies]
+c2m-artifact = { path = "../../crates/c2m-artifact" }
+c2m-i18n = { path = "../../crates/c2m-i18n" }
+gpui-kit.workspace = true
+gpui-base.workspace = true
+gpui-kit-material = { workspace = true, features = ["buttons", "containment", "dialogs", "feedback", "inputs", "menus", "progress", "selection", "window-chrome"] }
+anyhow.workspace = true
+
+[build-dependencies]
+# Its fonts stay in the build script: build.rs renders what assets/symbols.txt lists,
+# and the app keeps `embedded-symbols` off.
+gpui-material-symbols = { workspace = true, features = ["embed-assets"] }
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }

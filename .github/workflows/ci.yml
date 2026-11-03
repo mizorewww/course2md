@@ -2,10 +2,11 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, split/workspace]
     paths-ignore: ['**.md', 'docs/**', '.agents/**', 'desktop/**', 'packaging/**', 'install.sh']
   pull_request:
     paths-ignore: ['**.md', 'docs/**', '.agents/**', 'desktop/**', 'packaging/**', 'install.sh']
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -20,15 +21,11 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-26, windows-latest]
-    # macOS jobs run on the maintainer's self-hosted Mac. Pull requests from
-    # forks never reach it; they use GitHub's macos-26 runner instead.
-    runs-on: ${{ matrix.os != 'macos-26' && matrix.os || ((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "macOS", "ARM64", "course2md"]') || 'macos-26') }}
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
+      - uses: ./.github/actions/rust-toolchain
 
       - uses: Swatinem/rust-cache@v2
 
@@ -51,10 +48,15 @@ jobs:
       - name: Unit tests
         run: cargo test --lib
 
-      - name: Integration tests (task protocol, CLI)
-        run: cargo test --test cli_ux --test login_cli --test task_execution --test i18n_catalog
+      - name: Integration tests (task protocol, CLI, request identity)
+        run: cargo test --test cli_ux --test login_cli --test task_execution --test i18n_catalog --test prompt_identity
 
       - name: Integration tests (synthetic video)
         if: runner.os != 'Windows'
         run: cargo test --test scene_synthetic
 
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2

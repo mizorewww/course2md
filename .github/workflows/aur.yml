@@ -21,6 +21,9 @@ concurrency:
 
 permissions:
   contents: read
+  # A dry-run release succeeds with its `release` job skipped; release-version.py
+  # reads the run's jobs so that it publishes nothing here.
+  actions: read
 
 jobs:
   update-aur:
@@ -42,6 +45,7 @@ jobs:
           REQUESTED_VERSION: ${{ inputs.version }}
           RELEASE_BRANCH: ${{ github.event.workflow_run.head_branch }}
           RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          RELEASE_RUN_ID: ${{ github.event.workflow_run.id }}
         run: python3 packaging/release-version.py
 
       - name: Setup AUR SSH (builder)

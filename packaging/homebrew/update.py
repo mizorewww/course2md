@@ -17,6 +17,7 @@ ASSETS = {
     "SHA_ARM": "course2md-macos-arm64",
     "SHA_INTEL": "course2md-macos-x86_64",
     "SHA_MLX": "mlx-macos-arm64.metallib",
+    "SHA_NOTICES": "course2md-third-party-licenses.txt",
     "SHA_LINUX_X86": "course2md-linux-x86_64",
     "SHA_LINUX_ARM": "course2md-linux-aarch64",
     "SHA_DMG": "course2md-gui-macos-arm64.dmg",

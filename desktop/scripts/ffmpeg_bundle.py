@@ -16,9 +16,12 @@ packaging job takes them from the cache that a Linux job fills.
 To update, take each source's sha256 from its upstream checksum (cross-check
 the ffmpeg tarball with Homebrew's ffmpeg formula) and llvm-mingw's from its
 GitHub release (`gh release view <tag> -R mstorsjo/llvm-mingw --json assets`).
+The ffmpeg mirrors in `MIRRORS` follow the version by name; a mirror that does
+not carry it yet answers 404 and is skipped.
 """
 import argparse
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
@@ -26,6 +29,8 @@ import platform
 import shutil
 import subprocess
 import tarfile
+import time
+import urllib.error
 import urllib.request
 
 FFMPEG_VERSION = "9.0.2"
@@ -50,6 +55,31 @@ WINDOWS_PREFIX = "x86_64-w64-mingw32-"
 ZLIB_VERSION = "1.3.2"
 ZLIB_SOURCE = (f"https://zlib.net/fossils/zlib-{ZLIB_VERSION}.tar.gz",
                "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16")
+
+
+def _gentoo(name):
+    """A file's place on Gentoo's distfiles mirror (GLEP 75: the first byte of its name's BLAKE2b)."""
+    return f"https://distfiles.gentoo.org/distfiles/{hashlib.blake2b(name.encode()).hexdigest()[:2]}/{name}"
+
+
+# Copies of a source tried after its own URL, which stays the one the notice names.
+# Debian's and Gentoo's copies are the upstream tarball byte for byte; the pinned
+# sha256 verifies whichever answers, so a mirror cannot change what is built.
+MIRRORS = {
+    FFMPEG_SOURCE[0]: (
+        f"https://deb.debian.org/debian/pool/main/f/ffmpeg/ffmpeg_{FFMPEG_VERSION}.orig.tar.xz",
+        _gentoo(f"ffmpeg-{FFMPEG_VERSION}.tar.xz"),
+    ),
+    # zlib's own release asset on GitHub, the same file as zlib.net's.
+    ZLIB_SOURCE[0]: (
+        f"https://github.com/madler/zlib/releases/download/v{ZLIB_VERSION}/zlib-{ZLIB_VERSION}.tar.gz",
+    ),
+}
+# Each URL is tried this many times, waiting RETRY_DELAY seconds, then twice that.
+ATTEMPTS = 3
+RETRY_DELAY = 5
+# Seconds a connection may stall (connecting, or between reads) before the attempt fails.
+STALL_TIMEOUT = 60
 MACOS_DEPLOYMENT_TARGET = "15.0"
 BUILD_REVISION = 4
 BUILD_ENVIRONMENT = {"PATH", "HOME", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "DEVELOPER_DIR",
@@ -101,18 +131,48 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
-def download(url, sha256, dest):
-    """Fetch url to dest once, verifying its sha256; a cached file is re-verified."""
+class ChecksumMismatch(OSError):
+    """A source answered with other bytes than the pin; asking it again won't help."""
+
+
+def download(url, sha256, dest, attempts=ATTEMPTS, delay=RETRY_DELAY):
+    """Fetch url to dest once, verifying its sha256; a cached file is re-verified.
+
+    A failed transfer is retried with a growing pause, then the source's mirrors are
+    tried the same way. A wrong checksum or a client error (404) moves straight on to
+    the next mirror, as does a missing local file (a file: URL, in tests).
+    """
     if dest.is_file() and sha256_file(dest) == sha256:
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
+    failures = []
+    for source in (url, *MIRRORS.get(url, ())):
+        for attempt in range(1 if source.startswith("file:") else attempts):
+            if attempt:
+                time.sleep(delay * 2 ** (attempt - 1))
+            try:
+                return _fetch(source, sha256, dest)
+            except urllib.error.HTTPError as error:
+                failures.append(f"{source}: {error}")
+                if error.code < 500 and error.code != 429:
+                    break
+            except ChecksumMismatch as error:
+                failures.append(str(error))
+                break
+            except (OSError, http.client.HTTPException) as error:
+                failures.append(f"{source}: {error}")
+            print(f"warning: download failed ({failures[-1]})", flush=True)
+    raise OSError("; ".join(failures))
+
+
+def _fetch(url, sha256, dest):
     tmp = dest.with_name(dest.name + ".download")
     try:
-        with urllib.request.urlopen(url, timeout=300) as response, tmp.open("wb") as out:
+        with urllib.request.urlopen(url, timeout=STALL_TIMEOUT) as response, tmp.open("wb") as out:
             shutil.copyfileobj(response, out)
         digest = sha256_file(tmp)
         if digest != sha256:
-            raise OSError(f"{url} checksum mismatch: {digest}")
+            raise ChecksumMismatch(f"{url} checksum mismatch: {digest}")
         tmp.replace(dest)
     finally:
         tmp.unlink(missing_ok=True)

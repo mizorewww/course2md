@@ -1,0 +1,5 @@
+[toolchain]
+# Same toolchain as gpui-kit-material, whose vendored GPUI this builds.
+channel = "1.99.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

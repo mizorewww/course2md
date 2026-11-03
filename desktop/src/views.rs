@@ -1,15 +1,165 @@
 //! Native pages: stable navigation and actions surround independently scrolling content.
 use super::*;
-use crate::theme::*;
-use gpui_component::button::*;
+use crate::symbols;
+use gpui_kit::component::scroll::Scrollbar;
+use gpui_kit_material::{
+    color::{ColorRole, Scheme},
+    components::{
+        ButtonTone, ButtonVariant, CaptionLabels, IconButton, MaterialTooltip, NoticeKind,
+        Snackbar, SnackbarPosition, TitleBar as AppBar, material_button, notice_banner, spinner,
+        title_bar_control,
+    },
+    icons::SymbolIcon,
+    motion,
+    prelude::{ButtonSize, CaptionButtons, accessible_text, color, is_compact, rem},
+    theme::{advance_component_theme, init_component_theme, system_dark},
+};
 
 const SHELL_GUTTER: f32 = 24.;
 const SETTINGS_SHELL_WIDTH: f32 = 1108.;
+/// The reading column of a page without a wider one of its own.
+const COLUMN: f32 = 920.;
 
-/// The app bar marks the current destination with a tonal pill; TitleBar's
-/// default bottom hairline would be unused chrome.
-pub(crate) fn apply_shell_title_bar_chrome(bar: TitleBar) -> TitleBar {
-    bar.pl_0().bg(color(CANVAS)).border_b_0()
+/// The height the window opens for: the traffic lights sit centred on it.
+pub(crate) const APP_BAR_HEIGHT: Pixels = px(56.);
+
+/// Where the title bar's content starts, after the macOS traffic lights.
+pub(crate) fn title_bar_leading(window: &Window) -> f32 {
+    gpui_kit_material::components::title_bar_leading(APP_BAR_HEIGHT, window)
+}
+
+/// Where the title bar's content ends, before any caption buttons.
+pub(crate) fn title_bar_trailing(window: &Window) -> f32 {
+    CaptionButtons::trailing(window)
+}
+
+/// The window's title bar on the page's ground. It moves the window and draws what
+/// caption buttons the platform lacks; children call `title_bar_control` to take their
+/// presses. The Linux close button asks first, as the window manager's close does.
+pub(crate) fn app_bar(height: Pixels, window: &Window, cx: &mut Context<Desktop>) -> AppBar {
+    let view = cx.weak_entity();
+    let bar = AppBar::new(
+        "app-bar",
+        height,
+        CaptionLabels {
+            minimize: course2md::tr!("最小化").into(),
+            maximize: course2md::tr!("最大化").into(),
+            restore: course2md::tr!("还原").into(),
+            close: course2md::tr!("关闭").into(),
+        },
+    )
+    .w_full()
+    .bg(color(ColorRole::SURFACE_CONTAINER))
+    .on_close(move |_, cx| {
+        view.update(cx, |this, cx| this.request_close(cx))
+            .unwrap_or(true)
+    });
+    // A capture can ask for another platform's caption buttons.
+    #[cfg(feature = "capture")]
+    let bar = bar.caption(
+        crate::capture::caption_override()
+            .unwrap_or_else(|| gpui_kit_material::components::Caption::detect(window)),
+    );
+    #[cfg(not(feature = "capture"))]
+    let _ = window;
+    bar
+}
+
+/// The course2md mark, with the wordmark when there is room.
+fn brand(wordmark: bool) -> Div {
+    h_flex()
+        .items_center()
+        .gap(rem(10.))
+        // The mark carries its own rounded square, as on 关于, so nothing clips it.
+        .child(img("images/course2md.png").size(rem(32.)).flex_shrink_0())
+        .when(wordmark, |brand| {
+            brand.child(
+                div()
+                    // 20 between title medium and title large: the existing wordmark,
+                    // which no type role matches.
+                    .text_size(rem(20.))
+                    .text_color(color(ColorRole::ON_SURFACE))
+                    .font_weight(FontWeight::MEDIUM)
+                    .child("course2md"),
+            )
+        })
+}
+
+/// One app bar destination, tonal when current. `shown` is its label, or a shorter
+/// form (a task count) or nothing when the bar cannot hold labels; then the full
+/// label is its tooltip. It always names the button.
+fn nav_destination(
+    id: &'static str,
+    selected: bool,
+    icon: SymbolIcon,
+    label: impl Into<SharedString>,
+    shown: Option<SharedString>,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    let label = label.into();
+    let collapsed = shown.as_ref() != Some(&label);
+    let button = title_bar_control(
+        material_button(
+            id,
+            if selected {
+                ButtonVariant::Tonal
+            } else {
+                ButtonVariant::Text
+            },
+        )
+        // Neutral at rest, so the current destination's secondary container is the one
+        // tint in the bar.
+        .tone(if selected {
+            ButtonTone::Standard
+        } else {
+            ButtonTone::Neutral
+        })
+        .button_size(ButtonSize::Small)
+        .icon(icon)
+        .accessibility_label(label.clone())
+        .children(shown)
+        .on_click(on_click),
+    );
+    if collapsed {
+        MaterialTooltip::plain(SharedString::from(format!("{id}-tip")), label)
+            .trigger(button)
+            .into_any_element()
+    } else {
+        button.into_any_element()
+    }
+}
+
+/// The width of `text` as the window would shape it.
+fn shaped_width(text: &str, size: f32, weight: FontWeight, window: &Window) -> f32 {
+    let mut style = window.text_style();
+    style.font_weight = weight;
+    let text = SharedString::from(text.to_owned());
+    f32::from(
+        window
+            .text_system()
+            .shape_line(text.clone(), px(size), &[style.to_run(text.len())], None)
+            .width,
+    )
+}
+
+/// The height of the app bar at the current text scale.
+pub(crate) fn title_bar_height(window: &Window) -> Pixels {
+    rem(40.).to_pixels(window.rem_size()) + px(16.)
+}
+
+/// The width of a `nav_destination` showing `shown`, from `ButtonSize::Small`'s
+/// geometry and the shaped text at the current scale.
+fn nav_destination_width(shown: Option<&str>, window: &Window) -> f32 {
+    let scaled = |value: f32| value * f32::from(window.rem_size()) / 14.;
+    let padding_and_icon = scaled(16. + 20. + 16.);
+    match shown {
+        None => padding_and_icon,
+        Some(text) => {
+            padding_and_icon
+                + scaled(8.)
+                + shaped_width(text, scaled(14.), FontWeight::MEDIUM, window)
+        }
+    }
 }
 
 fn shell_column_for(page: Page) -> Div {
@@ -24,17 +174,7 @@ fn shell_column_width(page: Page) -> AbsoluteLength {
         Page::New => rems(1200. / 14.).into(),
         // Sections set the screenshot beside the text, as on the canvas.
         Page::Result => rems(1180. / 14.).into(),
-        _ => COLUMN.into(),
-    }
-}
-
-/// Where the title bar's content starts: macOS draws the traffic lights
-/// inside its leading edge.
-pub(crate) fn title_bar_leading() -> f32 {
-    if crate::window_controls::traffic_lights() {
-        88.
-    } else {
-        12.
+        _ => rem(COLUMN).into(),
     }
 }
 
@@ -52,14 +192,6 @@ pub(super) fn shell_content_width(page: Page, window: &Window) -> f32 {
         .max(0.)
 }
 
-/// Entrance motion replays when the notice text changes, not on every frame.
-fn notice_key(text: &str) -> usize {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    text.hash(&mut hasher);
-    hasher.finish() as usize
-}
-
 /// How much text the app bar can hold, from most to least.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AppBarDensity {
@@ -71,19 +203,14 @@ enum AppBarDensity {
     Mark,
 }
 
-/// The fullest app bar that fits, measured from the shaped text at the
-/// current scale: the brand (mark, wordmark, padding), each destination as
-/// `nav_destination` draws it, the gaps, and a little open space. `tasks` is
-/// the task destination's label and its count, when it is shown.
-fn app_bar_density(
-    leading: f32,
-    tasks: Option<(&str, Option<&str>)>,
-    window: &Window,
-) -> AppBarDensity {
+/// The fullest app bar that fits, measured from the shaped text at the current scale:
+/// the brand, each destination, the gaps, and a little open space. `tasks` is the task
+/// destination's label and its count, when it is shown.
+fn app_bar_density(tasks: Option<(&str, Option<&str>)>, window: &Window) -> AppBarDensity {
     let scaled = |value: f32| value * f32::from(window.rem_size()) / 14.;
     let available = f32::from(window.viewport_size().width)
-        - leading
-        - crate::window_controls::title_bar_trailing(window);
+        - title_bar_leading(window)
+        - title_bar_trailing(window);
     let fits = |density: AppBarDensity| {
         let brand = match density {
             AppBarDensity::Mark => scaled(4. + 32. + 4.),
@@ -100,7 +227,7 @@ fn app_bar_density(
         ]
         .into_iter()
         .flatten()
-        .map(|shown| nav_destination_width(shown, !labels, window) + 4.)
+        .map(|shown| nav_destination_width(shown, window) + 4.)
         .sum::<f32>();
         brand + destinations + scaled(24.) <= available
     };
@@ -119,36 +246,36 @@ fn shell_column_at(width: AbsoluteLength) -> Div {
         .px(px(SHELL_GUTTER))
 }
 
+/// The running theme transition's frames.
+#[derive(Default)]
+pub(crate) struct ThemeFrame {
+    /// One pending next-frame callback advances a running theme transition.
+    pub pending: bool,
+}
+
 impl Desktop {
     /// Keep task results reachable while the user is on another page.
-    fn shell_topbar(
-        &self,
-        reader_tools: Option<AnyElement>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> TitleBar {
+    fn shell_topbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AppBar {
         let (task_count, tasks_need_attention) =
-            self.workspace.as_ref().map_or((0, false), |workspace| {
-                crate::task_ui::task_navigation_summary(&workspace.state.tasks)
+            self.workspace(cx).map_or((0, false), |workspace| {
+                desktop_tasks::task_view::task_navigation_summary(&workspace.state.tasks)
             });
-        let leading = title_bar_leading();
         let page = self.page;
-        // TitleBar wraps its children in a box that grows to their content, so
-        // the bar takes the window's width explicitly; otherwise nothing in it
-        // (the note title, the reader's search) would ever shrink.
         let bar = h_flex()
-            .w(window.viewport_size().width)
+            .flex_1()
             .min_w_0()
             .h_full()
-            .pl(px(leading))
-            .pr(px(crate::window_controls::title_bar_trailing(window)))
             .gap(px(4.))
             .items_center();
         if page == Page::Settings {
-            return self.settings_title_bar(bar, window, cx);
+            // Settings is a place of its own: window controls and dragging only; the way
+            // back and its title lead its navigation pane instead.
+            return app_bar(title_bar_height(window), window, cx).child(bar);
         }
-        if let (Page::Result, Some(tools)) = (page, reader_tools) {
-            return self.reader_title_bar(bar, tools, window, cx);
+        if page == Page::Result {
+            // The reader draws its own part, so the shell does not read it.
+            let height = crate::reader_ui::TITLE_BAR_HEIGHT.to_pixels(window.rem_size());
+            return app_bar(height, window, cx).child(self.reader_bar.clone());
         }
         // The brand leads the bar and returns to the workbench, as on the M3
         // canvas; destinations follow on the trailing edge with icon and label.
@@ -163,56 +290,45 @@ impl Desktop {
         // current text, cannot hold them, every destination becomes its icon
         // (the label as its tooltip), and then the wordmark goes.
         let density = app_bar_density(
-            leading,
             show_tasks.then_some((task_label.as_str(), task_count_text.as_deref())),
             window,
         );
         let labels = density == AppBarDensity::Labels;
         let wordmark = density != AppBarDensity::Mark;
         let shown = |label: &str| labels.then(|| SharedString::from(label.to_owned()));
-        let home = nav_action("nav-home", false, cx)
-            .pl(px(4.))
-            .pr(px(if wordmark { 12. } else { 4. }))
-            .accessibility_label(course2md::tr!("主页"))
-            .when(!wordmark, |home| home.tooltip(course2md::tr!("主页")))
-            .child(
-                h_flex()
-                    .items_center()
-                    .gap(px(10.))
-                    .child(
-                        // The mark scales with the wordmark beside it.
-                        img("images/course2md.png")
-                            .size(rems(32. / 14.))
-                            .rounded(rems(10. / 14.))
-                            .flex_shrink_0(),
-                    )
-                    .when(wordmark, |brand| {
-                        brand.child(
-                            div()
-                                .text_size(rems(20. / 14.))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(color(INK))
-                                .child("course2md"),
-                        )
-                    }),
-            )
-            .on_click(cx.listener(|this, _, window, cx| {
-                if this.prepare_workbench_input(window, cx) {
-                    this.navigate(Page::New, cx);
-                }
-            }));
+        let home_button = title_bar_control(
+            material_button("nav-home", ButtonVariant::Text)
+                .button_size(ButtonSize::Small)
+                .px(rem(4.))
+                .pr(rem(if wordmark { 12. } else { 4. }))
+                .accessibility_label(course2md::tr!("主页"))
+                .child(brand(wordmark))
+                .on_click(cx.listener(|this, _, window, cx| {
+                    if this.prepare_workbench_input(window, cx) {
+                        this.navigate(Page::New, cx);
+                    }
+                })),
+        );
+        let home = if wordmark {
+            home_button.into_any_element()
+        } else {
+            MaterialTooltip::plain("nav-home-tip", course2md::tr!("主页"))
+                .trigger(home_button)
+                .into_any_element()
+        };
         let library = nav_destination(
             "nav-library",
             matches!(page, Page::Library | Page::Result),
-            icons::library(),
+            symbols::library_books(),
             course2md::tr!("笔记库"),
             shown(course2md::tr!("笔记库")),
-            cx,
-        )
-        .on_click(cx.listener(|this, _, _, cx| {
-            this.folder_filter = crate::FolderFilter::All;
-            this.navigate(Page::Library, cx);
-        }));
+            cx.listener(|this, _, _, cx| {
+                this.records.change(cx, |records, _| {
+                    records.library.folder_filter = crate::FolderFilter::All
+                });
+                this.navigate(Page::Library, cx);
+            }),
+        );
         // Tasks stay reachable, but only claim space once there is work to
         // show. Without room for labels the count stays beside the icon.
         let tasks = show_tasks.then(|| {
@@ -225,45 +341,42 @@ impl Desktop {
                 "nav-tasks",
                 page == Page::Task,
                 if tasks_need_attention {
-                    icons::warning()
+                    symbols::warning()
                 } else {
-                    icons::list_checks()
+                    symbols::checklist()
                 },
                 task_label.clone(),
                 shown,
-                cx,
+                cx.listener(|this, _, _, cx| this.navigate(Page::Task, cx)),
             )
-            .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Task, cx)))
         });
         let settings = nav_destination(
             "nav-settings",
             page == Page::Settings,
             if self.settings_have_problem() {
-                icons::warning()
+                symbols::warning()
             } else {
-                icons::settings()
+                symbols::settings()
             },
             course2md::tr!("设置"),
             shown(course2md::tr!("设置")),
-            cx,
-        )
-        .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx)));
+            cx.listener(|this, _, window, cx| this.open_settings(window, cx)),
+        );
         // The bar between them stays a place to move the window from.
-        use crate::window_controls::title_bar_control;
-        let bar = bar
-            .child(title_bar_control(home))
-            .child(div().flex_1())
-            .child(title_bar_control(library))
-            .children(tasks.map(title_bar_control))
-            .child(title_bar_control(settings));
-        apply_shell_title_bar_chrome(TitleBar::new().h(title_bar_height(window))).child(bar)
+        app_bar(title_bar_height(window), window, cx).child(
+            bar.child(home)
+                .child(div().flex_1())
+                .child(library)
+                .children(tasks)
+                .child(settings),
+        )
     }
 
     fn task_result_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         // A new result can briefly announce itself. Historical unresolved work
         // remains in Tasks; it must not consume every unrelated page's height.
-        let (announced_id, shown) = self.transient_task_result.as_ref()?;
-        if shown.elapsed() >= std::time::Duration::from_secs(8) {
+        let (announced_id, shown) = self.work.read(cx).result_shown.as_ref()?;
+        if shown.elapsed() >= desktop_tasks::job::RESULT_SHOWN {
             return None;
         }
         let visible_task = if self.page == Page::New {
@@ -272,8 +385,7 @@ impl Desktop {
             None
         };
         let task = self
-            .workspace
-            .as_ref()?
+            .workspace(cx)?
             .state
             .tasks
             .iter()
@@ -282,11 +394,15 @@ impl Desktop {
                     && task.unread
                     && task.handled_by.is_none()
                     && visible_task != Some(task.id.as_str())
-                    && !(self.reading
-                        && self.page == Page::New
-                        && self.following_conversion.as_ref().is_some_and(|follow| {
-                            follow.follows(&task.id, self.preview_generation)
-                        }))
+                    && !(self.page == Page::New
+                        && self.opened(cx).reading
+                        && self
+                            .import
+                            .following_conversion
+                            .as_ref()
+                            .is_some_and(|follow| {
+                                follow.follows(&task.id, self.import.preview_generation)
+                            }))
             })
             .max_by_key(|task| task.updated)?;
         let id = task.id.clone();
@@ -312,7 +428,7 @@ impl Desktop {
             workspace::TaskState::Uncertain => course2md::tr!("查看结果"),
             _ => course2md::tr!("查看任务"),
         };
-        Some(crate::motion::enter(
+        Some(motion::enter(
             SharedString::from(format!("task-result-notice-{}", task.id)),
             shell_column_for(self.page).py_2().flex_shrink_0().child(
                 notice_banner(
@@ -329,9 +445,9 @@ impl Desktop {
                     ),
                 )
                 .child(
-                    control("open-task-result")
-                        .icon(icons::arrow_forward())
-                        .label(action)
+                    material_button("open-task-result", ButtonVariant::Tonal)
+                        .icon(symbols::arrow_forward())
+                        .child(action)
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if exports_only {
                                 this.open_task_export_location(id.clone(), cx);
@@ -344,121 +460,147 @@ impl Desktop {
                         })),
                 )
                 .child(
-                    control("dismiss-task-result")
-                        .ghost()
-                        .icon(crate::icons::close())
-                        .accessibility_label(course2md::tr!("关闭提示"))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.transient_task_result = None;
-                            if let Some(workspace) = &mut this.workspace
-                                && let Err(error) = workspace.transaction(|state| {
-                                    if let Some(task) = state.task_mut(&dismiss_id) {
-                                        task.unread = false;
-                                    }
-                                    Ok(())
-                                })
-                            {
-                                this.workspace_error = Some(course2md::tr!(
-                                    "提示关闭状态未能保存：{}",
-                                    format!("{error:#}")
-                                ));
-                            }
-                            cx.notify();
-                        })),
+                    IconButton::new(
+                        "dismiss-task-result",
+                        symbols::close(),
+                        course2md::tr!("关闭提示"),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.work.change(cx, |work, _| work.result_shown = None);
+                        if let Some(Err(error)) = this.with_workspace(cx, |workspace| {
+                            workspace.transaction(|state| {
+                                if let Some(task) = state.task_mut(&dismiss_id) {
+                                    task.unread = false;
+                                }
+                                Ok(())
+                            })
+                        }) {
+                            this.workspace_error = Some(course2md::tr!(
+                                "提示关闭状态未能保存：{}",
+                                format!("{error:#}")
+                            ));
+                        }
+                        cx.notify();
+                    })),
                 ),
             ),
         ))
     }
 }
 
-impl Render for Desktop {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+impl Desktop {
+    /// What just happened, told in passing; it goes by itself or with its close button.
+    fn message_snackbar(&self, message: String, cx: &mut Context<Self>) -> impl IntoElement {
+        let desktop = cx.weak_entity();
+        let dismiss = move |_: &mut Window, cx: &mut App| {
+            let _ = desktop.update(cx, |this, cx| {
+                this.message = None;
+                cx.notify();
+            });
+        };
+        let close = dismiss.clone();
+        // Keyed by its text, so entrance motion replays when the text changes.
+        Snackbar::new(
+            SharedString::from(format!("app-message-{message}")),
+            message,
+        )
+        .position(SnackbarPosition::default())
+        .close(course2md::tr!("关闭提示"), move |_, window, cx| {
+            close(window, cx)
+        })
+        .on_dismiss(dismiss)
+    }
+}
+
+impl Desktop {
+    /// What the window should paint: the saved appearance against the system's, or a capture's.
+    fn theme_target(&self, cx: &App) -> (Scheme, f32) {
+        let application = self.preferences.application();
         #[allow(unused_mut)]
-        let mut appearance = self.preferences.application().appearance.clone();
-        #[allow(unused_mut)]
-        let mut font_scale = self.preferences.application().font_scale;
+        let (mut appearance, mut scale) = (application.appearance.clone(), application.font_scale);
         #[cfg(feature = "capture")]
         {
-            if let Some(palette) = crate::capture::palette_override() {
-                appearance.select(palette);
-                appearance.mode = if palette.is_dark() {
-                    crate::palettes::Appearance::Dark
-                } else {
-                    crate::palettes::Appearance::Light
-                };
-            }
-            font_scale = crate::capture::scale_override().unwrap_or(font_scale);
+            crate::capture::override_appearance(&mut appearance);
+            scale = crate::capture::scale_override().unwrap_or(scale);
         }
-        theme::apply_preference(&appearance, window, cx);
-        theme::apply_scale(font_scale, window, cx);
+        (
+            Scheme::from_palette(appearance.resolve(system_dark(cx))),
+            scale,
+        )
+    }
+
+    /// Starts the theme at its target, with no transition, before Root's first render.
+    pub(crate) fn init_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (scheme, scale) = self.theme_target(cx);
+        init_component_theme(scheme, scale, cx);
+        self.prepare_theme(window, cx);
+    }
+
+    /// Moves the theme toward its target. One next-frame callback carries a running
+    /// transition; the kit refreshes the window for each step.
+    pub(crate) fn prepare_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (scheme, scale) = self.theme_target(cx);
+        let running = advance_component_theme(scheme, scale, window, cx);
+        if running && !self.theme_frame.pending {
+            self.theme_frame.pending = true;
+            let view = cx.weak_entity();
+            window.on_next_frame(move |window, cx| {
+                let _ = view.update(cx, |this, cx| {
+                    this.theme_frame.pending = false;
+                    this.prepare_theme(window, cx);
+                });
+            });
+        }
+    }
+}
+
+impl Render for Desktop {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(feature = "capture")]
+        crate::capture::count_render(crate::capture::Counted::Desktop);
         if self.onboarding.active {
             let content = self.onboarding_page(window, cx);
+            // The shell's brand, without its destinations: setup is modal, so the
+            // mark is not a way home here.
+            let bar = app_bar(title_bar_height(window), window, cx).child(brand(true));
             return div()
                 .id("onboarding-action-root")
                 .track_focus(&self.root_focus)
                 .tab_stop(false)
                 .size_full()
-                .child(a11y::ModalBackground::new(
+                .child(
                     v_flex()
                         .size_full()
-                        .bg(color(CANVAS))
-                        .text_color(color(INK))
-                        .text_size(TEXT_BODY)
-                        // The shell's brand, without its destinations: setup is
-                        // modal, so the mark is not a way home here.
-                        .child(
-                            apply_shell_title_bar_chrome(
-                                TitleBar::new().h(title_bar_height(window)),
-                            )
-                            .child(
-                                h_flex()
-                                    .w(window.viewport_size().width)
-                                    .h_full()
-                                    // The traffic lights, then the home action's inset.
-                                    .pl(px(if crate::window_controls::traffic_lights() {
-                                        92.
-                                    } else {
-                                        16.
-                                    }))
-                                    .gap(px(10.))
-                                    .items_center()
-                                    .child(
-                                        img("images/course2md.png")
-                                            .size(px(32.))
-                                            .rounded(px(10.))
-                                            .flex_shrink_0(),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_size(rems(20. / 14.))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(color(INK))
-                                            .child("course2md"),
-                                    ),
-                            ),
-                        )
+                        .bg(color(ColorRole::SURFACE_CONTAINER))
+                        .text_color(color(ColorRole::ON_SURFACE))
+                        .text_size(rems(1.))
+                        .child(bar)
                         .child(content),
-                    window.has_active_dialog(cx),
-                ))
-                .children(Root::render_dialog_layer(window, cx))
-                .children(self.caption_buttons(title_bar_height(window), window, cx))
+                )
+                .children(self.settings_dialogs(window, cx))
+                .children(crate::ui::confirm_host(cx))
                 .into_any_element();
         }
-        let mut reader_tools = None;
+        // The task cards show on Tasks, the workbench and the library.
+        let facts = self.shell_facts(cx);
+        self.tasks.update(cx, |page, cx| page.set_facts(facts, cx));
         let content = match self.page {
             Page::New => self.new_page(window, cx),
-            Page::Task => self.queue_page(window, cx),
+            Page::Task => self.tasks.clone().into_any_element(),
             Page::Library => self.library_page(window, cx),
             Page::Settings => self.settings_page(window, cx),
-            Page::Result => {
-                let (page, tools) = self.reader_page(window, cx);
-                reader_tools = tools;
-                page
-            }
+            // Drawn cached: it is built again when it, the records or the exports
+            // change, not with every frame of the shell around it.
+            Page::Result => self
+                .reader
+                .clone()
+                .cached(StyleRefinement::default().size_full())
+                .into_any_element(),
         };
         // Task and library content virtualize their long lists: the list owns
         // scrolling for the page instead of the shared page-scroll container.
         let self_scrolling = matches!(self.page, Page::Task | Page::Library);
+        let page_scrolls = !matches!(self.page, Page::Result | Page::Settings) && !self_scrolling;
         let content = v_flex()
             .gap_4()
             .when(
@@ -467,19 +609,24 @@ impl Render for Desktop {
             )
             .when(
                 // The workbench card already shows a followed result opening.
-                self.reading
-                    && !matches!(self.page, Page::Library | Page::Result)
-                    && !(self.page == Page::New && self.following_conversion.is_some()),
+                // The reader page does not read the reader: it is drawn on its own.
+                !matches!(self.page, Page::Library | Page::Result)
+                    && !(self.page == Page::New && self.import.following_conversion.is_some())
+                    && self.opened(cx).reading,
                 |v| {
                     v.child(
                         h_flex()
                             .items_center()
                             .gap(px(8.))
-                            .child(crate::motion::spinner("opening-note-spinner", cx))
+                            .child(spinner(
+                                "opening-note-spinner",
+                                course2md::tr!("正在打开笔记…"),
+                                cx,
+                            ))
                             .child(
                                 accessible_text("opening-note", course2md::tr!("正在打开笔记…"))
                                     .role(Role::Status)
-                                    .text_color(color(GRAY)),
+                                    .text_color(color(ColorRole::ON_SURFACE_VARIANT)),
                             ),
                     )
                 },
@@ -491,14 +638,9 @@ impl Render for Desktop {
         let content = if self.page == Page::Settings {
             content.into_any_element()
         } else {
-            crate::motion::page_enter(("page-content", self.page as usize), content)
+            motion::page_enter(("page-content", self.page as usize), content)
         };
-        let title_bar_height = if self.page == Page::Result && reader_tools.is_some() {
-            crate::reader_ui::reader_title_bar_height(window)
-        } else {
-            title_bar_height(window)
-        };
-        let topbar = self.shell_topbar(reader_tools, window, cx);
+        let topbar = self.shell_topbar(window, cx);
         let task_notice = self.task_result_notice(cx);
         let model_notice = self.onboarding_background_notice(cx);
         let body = v_flex()
@@ -516,110 +658,87 @@ impl Render for Desktop {
                         .settings_group_notice(crate::preferences::PreferenceGroup::Application)
                         .is_some_and(|(_, error)| error),
                 |v| {
-                    v.child(
-                        shell_column_for(self.page).pb_3().flex_shrink_0().child(
-                            div()
-                                .id("library-settings-feedback")
-                                .w_full()
-                                .min_w_0()
-                                .p_3()
-                                .rounded(RADIUS_CARD)
-                                .bg(color(DANGER_BG))
-                                .child(self.group_feedback(
-                                    crate::preferences::PreferenceGroup::Application,
-                                    cx,
-                                )),
-                        ),
-                    )
+                    v.child(shell_column_for(self.page).pb_3().flex_shrink_0().child(
+                        self.group_feedback(crate::preferences::PreferenceGroup::Application, cx),
+                    ))
                 },
             )
             .when_some(self.workspace_error.clone(), |v, message| {
-                v.child(crate::motion::enter(
-                    ("workspace-error", notice_key(&message)),
+                v.child(motion::enter(
+                    SharedString::from(format!("workspace-error-{message}")),
                     shell_column_for(self.page).pb_3().child(
                         notice_banner("workspace-error", NoticeKind::Danger, message)
                             .child(
-                                control("retry-workspace-records")
-                                    .icon(icons::refresh())
-                                    .label(course2md::tr!("重试"))
-                                    .disabled(self.job.is_some() || self.storage_ui.busy)
+                                material_button("retry-workspace-records", ButtonVariant::Tonal)
+                                    .icon(symbols::refresh())
+                                    .child(course2md::tr!("重试"))
+                                    .disabled(
+                                        self.work.read(cx).job.is_some() || self.storage_ui.busy,
+                                    )
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.retry_workspace_records(window, cx)
                                     })),
                             )
-                            .when(self.workspace.is_none(), |row| {
+                            .when(self.records.read(cx).workspace.is_none(), |row| {
                                 row.child(
-                                    control("rebuild-workspace-records")
-                                        .icon(icons::restart())
-                                        .label(course2md::tr!("备份并重建任务记录"))
-                                        .disabled(self.job.is_some() || self.storage_ui.busy)
-                                        .on_click(cx.listener(|this, _, window, cx| {
+                                    material_button(
+                                        "rebuild-workspace-records",
+                                        ButtonVariant::Text,
+                                    )
+                                    .icon(symbols::restart_alt())
+                                    .child(course2md::tr!("备份并重建任务记录"))
+                                    .disabled(
+                                        self.work.read(cx).job.is_some() || self.storage_ui.busy,
+                                    )
+                                    .on_click(cx.listener(
+                                        |this, _, window, cx| {
                                             this.rebuild_workspace_records(window, cx)
-                                        })),
+                                        },
+                                    )),
                                 )
                             }),
                     ),
                 ))
             })
-            .when_some(self.message.clone(), |v, message| {
-                v.child(crate::motion::state_enter(
-                    ("app-message", notice_key(&message)),
-                    shell_column_for(self.page).pb_3().child(
-                        notice_banner("app-message", NoticeKind::Info, message).child(
-                            control("dismiss-message")
-                                .ghost()
-                                .icon(crate::icons::close())
-                                .accessibility_label(course2md::tr!("关闭提示"))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.message = None;
-                                    cx.notify();
-                                })),
-                        ),
-                    ),
-                ))
-            })
             .child(
                 div()
-                    .id(("page-scroll", self.page as usize))
+                    .relative()
                     .flex_1()
                     .min_h_0()
                     .min_w_0()
                     .w_full()
-                    .when(
-                        !matches!(self.page, Page::Result | Page::Settings) && !self_scrolling,
-                        |view| {
-                            view.overflow_y_scroll()
-                                .track_scroll(&self.scrolls[self.page as usize])
-                        },
-                    )
                     .child(
-                        shell_column_for(self.page)
-                            .when(self.page == Page::Settings, |v| v.max_w_full())
-                            .when(
-                                matches!(self.page, Page::New | Page::Settings)
-                                    && is_compact(window),
-                                |v| v.px(px(16.)),
-                            )
-                            .when(
-                                matches!(self.page, Page::Result | Page::Settings)
-                                    || self_scrolling,
-                                |v| v.h_full().min_h_0(),
-                            )
-                            // Lists that scroll themselves keep their trailing
-                            // space inside the list, so their last surface is
-                            // never cut off above the window edge.
-                            .when(
-                                !matches!(self.page, Page::Result | Page::Settings)
-                                    && !self_scrolling,
-                                |v| v.pb_6(),
-                            )
-                            .child(content),
-                    ),
+                        div()
+                            .id(("page-scroll", self.page as usize))
+                            .size_full()
+                            .when(page_scrolls, |view| {
+                                view.overflow_y_scroll()
+                                    .track_scroll(&self.scrolls[self.page as usize])
+                            })
+                            .child(
+                                shell_column_for(self.page)
+                                    .when(self.page == Page::Settings, |v| v.max_w_full())
+                                    .when(
+                                        matches!(self.page, Page::New | Page::Settings)
+                                            && is_compact(window),
+                                        |v| v.px(px(16.)),
+                                    )
+                                    .when(!page_scrolls, |v| v.h_full().min_h_0())
+                                    // Lists that scroll themselves keep their trailing
+                                    // space inside the list, so their last surface is
+                                    // never cut off above the window edge.
+                                    .when(page_scrolls, |v| v.pb(rem(24.)))
+                                    .child(content),
+                            ),
+                    )
+                    .when(page_scrolls, |view| {
+                        view.child(Scrollbar::vertical(&self.scrolls[self.page as usize]))
+                    }),
             );
         let background = v_flex()
             .size_full()
-            .bg(color(CANVAS))
-            .text_color(color(INK))
+            .bg(color(ColorRole::SURFACE_CONTAINER))
+            .text_color(color(ColorRole::ON_SURFACE))
             .text_size(rems(1.))
             .child(topbar)
             .child(body);
@@ -631,89 +750,37 @@ impl Render for Desktop {
             .tab_stop(false)
             .size_full()
             .on_action(cx.listener(|this, _: &ImportVideo, window, cx| {
-                if !window.has_active_dialog(cx) {
+                if !crate::ui::modal_open(window, cx) {
                     this.import_video_from_action(window, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &SearchContent, window, cx| {
-                if !window.has_active_dialog(cx) {
+                if !crate::ui::modal_open(window, cx) {
                     this.search_content(window, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
-                if !window.has_active_dialog(cx) {
+                if !crate::ui::modal_open(window, cx) {
                     this.open_settings(window, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &OpenAbout, window, cx| {
-                if !window.has_active_dialog(cx) {
+                if !crate::ui::modal_open(window, cx) {
                     this.open_about(window, cx);
                 }
             }))
-            .child(a11y::ModalBackground::new(
-                background,
-                window.has_active_dialog(cx),
-            ))
+            .child(background)
             .when(self.page == Page::New, |view| {
                 view.child(self.workbench_drop_overlay(cx))
             })
-            .children(Root::render_dialog_layer(window, cx))
-            // Last, so the caption buttons stay usable over a dialog.
-            .children(self.caption_buttons(title_bar_height, window, cx))
+            .when_some(self.message.clone(), |view, message| {
+                view.child(self.message_snackbar(message, cx))
+            })
+            .children(self.name_dialog_view(window, cx))
+            .children(self.move_dialog_view(cx))
+            .children(self.settings_dialogs(window, cx))
+            .children(crate::ui::confirm_host(cx))
+            .child(self.storage_dialog(window, cx))
             .into_any_element()
-    }
-}
-
-/// Display name of a known video site, shared by the workbench preview and the
-/// reader header.
-pub fn video_site_name(url: &str) -> Option<&'static str> {
-    match course2md::config::known_video_site(url) {
-        Some("bilibili") => Some("Bilibili"),
-        Some("youtube") => Some("YouTube"),
-        _ => None,
-    }
-}
-
-/// A dialog part drawn from the desktop's state. Dialog contents live in
-/// their own entity, so each one re-enters the desktop to render.
-pub(crate) struct DesktopView<F> {
-    desktop: Entity<Desktop>,
-    render: F,
-    _observation: Option<Subscription>,
-}
-
-impl<F> DesktopView<F>
-where
-    F: FnMut(&mut Desktop, &mut Window, &mut Context<Desktop>) -> AnyElement + 'static,
-{
-    /// Repaints whenever the desktop changes.
-    pub(crate) fn observing(desktop: Entity<Desktop>, cx: &mut App, render: F) -> Entity<Self> {
-        cx.new(|cx| Self {
-            _observation: Some(cx.observe(&desktop, |_, _, cx| cx.notify())),
-            desktop,
-            render,
-        })
-    }
-
-    /// Repaints only when notified directly, for parts whose state changes
-    /// far less often than the desktop.
-    pub(crate) fn notified(desktop: Entity<Desktop>, cx: &mut App, render: F) -> Entity<Self> {
-        cx.new(|_| Self {
-            _observation: None,
-            desktop,
-            render,
-        })
-    }
-}
-
-impl<F> Render for DesktopView<F>
-where
-    F: FnMut(&mut Desktop, &mut Window, &mut Context<Desktop>) -> AnyElement + 'static,
-{
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let Self {
-            desktop, render, ..
-        } = self;
-        desktop.update(cx, |desktop, cx| render(desktop, window, cx))
     }
 }

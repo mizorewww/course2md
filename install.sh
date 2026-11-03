@@ -22,7 +22,7 @@ case "$os-$arch" in
   linux-x86_64|linux-amd64) ASSET="course2md-linux-x86_64"; YTDLP="yt-dlp_linux" ;;
   linux-aarch64|linux-arm64) ASSET="course2md-linux-aarch64"; YTDLP="yt-dlp_linux_aarch64" ;;
   *)
-    warn "暂无 $os/$arch 的预编译版本，请从源码安装：cargo install --path . / No prebuilt binary for $os/$arch; build from source with cargo install --path ."
+    warn "暂无 $os/$arch 的预编译版本，请从源码安装：cargo install --path crates/course2md / No prebuilt binary for $os/$arch; build from source with cargo install --path crates/course2md"
     exit 1
     ;;
 esac
@@ -40,14 +40,20 @@ sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else sh
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-# Verify against the release's SHA256SUMS when it publishes one; older releases do not.
+# Nothing is installed without a matching entry in the release's SHA256SUMS. Every
+# release since v2.0.0 publishes one, and this script installs only the latest.
 sums="$tmp/SHA256SUMS"
-curl -fsSL "$RELEASE/SHA256SUMS" -o "$sums" 2>/dev/null || rm -f "$sums"
+if ! curl -fsSL "$RELEASE/SHA256SUMS" -o "$sums"; then
+  warn "无法下载校验和文件，已停止安装 / Could not download SHA256SUMS; nothing was installed."
+  exit 1
+fi
 verify() {
   local file="$1" name="$2" expected
-  [ -f "$sums" ] || return 0
   expected="$(awk -v n="$name" '$2 == n || $2 == "*" n {print $1}' "$sums")"
-  [ -n "$expected" ] || return 0
+  if [ -z "$expected" ]; then
+    warn "校验和文件中没有 ${name}，已停止安装 / $name is not listed in SHA256SUMS; nothing was installed."
+    exit 1
+  fi
   if [ "$(sha256 "$file")" != "$expected" ]; then
     warn "校验和不匹配：$name / Checksum mismatch: $name"
     exit 1
@@ -69,6 +75,13 @@ if [ "$apple" = 1 ]; then
     warn "警告：Apple 本机语音识别组件下载失败，将无法在本机识别语音。重新运行安装命令即可重试。"
     warn "Warning: the Apple speech component failed to download; local recognition is unavailable. Re-run the installer to retry."
   fi
+fi
+
+# 依赖的许可声明放在程序旁；较早的版本没有这个文件。
+# Dependency license notices sit beside the binary; older releases do not publish them.
+if curl -fsSL "$RELEASE/course2md-third-party-licenses.txt" -o "$tmp/licenses.txt"; then
+  verify "$tmp/licenses.txt" "course2md-third-party-licenses.txt"
+  install -m 644 "$tmp/licenses.txt" "$BIN_DIR/course2md-third-party-licenses.txt"
 fi
 
 # 在线视频需要 yt-dlp：PATH 中已有就沿用，否则在程序旁安装官方独立版本。

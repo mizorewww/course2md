@@ -4,6 +4,8 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest import mock
+import urllib.error
+import urllib.request
 
 import ffmpeg_bundle
 
@@ -141,6 +143,57 @@ class CacheTests(unittest.TestCase):
             dest.write_bytes(b"changed")
             self.assertEqual(ffmpeg_bundle.download(source.as_uri(), digest, dest).read_bytes(),
                              b"payload")
+
+    def test_a_failing_source_is_retried_then_its_mirror_answers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mirror = Path(tmp) / "mirror"
+            mirror.write_bytes(b"payload")
+            digest = hashlib.sha256(b"payload").hexdigest()
+            dead = "https://primary.invalid/source.tar.xz"
+            dest = Path(tmp) / "dest"
+            real = urllib.request.urlopen
+
+            def urlopen(url, timeout):
+                if url == dead:
+                    raise urllib.error.URLError("TLS refused")
+                return real(url, timeout=timeout)
+
+            with mock.patch.dict(ffmpeg_bundle.MIRRORS, {dead: (mirror.as_uri(),)}), \
+                    mock.patch("urllib.request.urlopen", side_effect=urlopen) as opened, \
+                    mock.patch("time.sleep") as sleep:
+                self.assertEqual(ffmpeg_bundle.download(dead, digest, dest).read_bytes(),
+                                 b"payload")
+            # Three tries of the failing source, with growing pauses, then the mirror.
+            self.assertEqual([call.args[0] for call in opened.call_args_list],
+                             [dead, dead, dead, mirror.as_uri()])
+            self.assertEqual([call.args[0] for call in sleep.call_args_list],
+                             [ffmpeg_bundle.RETRY_DELAY, 2 * ffmpeg_bundle.RETRY_DELAY])
+
+    def test_a_missing_page_or_other_bytes_move_on_and_the_error_names_each_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wrong = Path(tmp) / "wrong"
+            wrong.write_bytes(b"other")
+            gone = "https://primary.invalid/source.tar.xz"
+            real = urllib.request.urlopen
+
+            def urlopen(url, timeout):
+                if url == gone:
+                    raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+                return real(url, timeout=timeout)
+
+            with mock.patch.dict(ffmpeg_bundle.MIRRORS, {gone: (wrong.as_uri(),)}), \
+                    mock.patch("urllib.request.urlopen", side_effect=urlopen) as opened, \
+                    mock.patch("time.sleep") as sleep, self.assertRaises(OSError) as raised:
+                ffmpeg_bundle.download(gone, "0" * 64, Path(tmp) / "dest")
+            self.assertEqual(opened.call_count, 2)
+            sleep.assert_not_called()
+            self.assertIn("404", str(raised.exception))
+            self.assertIn("checksum mismatch", str(raised.exception))
+
+    def test_ffmpeg_mirrors_are_https_and_name_the_pinned_version(self):
+        for url in ffmpeg_bundle.MIRRORS[ffmpeg_bundle.FFMPEG_SOURCE[0]]:
+            self.assertTrue(url.startswith("https://"), url)
+            self.assertIn(ffmpeg_bundle.FFMPEG_VERSION, url)
 
     def test_manifest_lists_every_file(self):
         with tempfile.TemporaryDirectory() as tmp:

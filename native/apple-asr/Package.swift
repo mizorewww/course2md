@@ -8,7 +8,10 @@ let package = Package(
         .library(name: "CAppleASR", type: .static, targets: ["CAppleASR"])
     ],
     dependencies: [
-        .package(url: "https://github.com/soniqo/speech-swift", branch: "main")
+        // Updating: change this revision, run `swift package resolve`, commit both files.
+        .package(
+            url: "https://github.com/soniqo/speech-swift",
+            revision: "6f5aa4d0bca49c10d378723178465afaf813624c")
     ],
     targets: [
         .target(

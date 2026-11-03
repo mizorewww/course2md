@@ -1,6 +1,25 @@
 zh	zh_hans	en	zh_hant	ja
+--browser 只适用于 --login youtube / --browser applies only to --login youtube	--browser 只适用于 --login youtube	--browser applies only to --login youtube	--browser 只適用於 --login youtube	--browser は --login youtube でのみ使えます
+--method 只适用于 --login bilibili / --method applies only to --login bilibili	--method 只适用于 --login bilibili	--method applies only to --login bilibili	--method 只適用於 --login bilibili	--method は --login bilibili でのみ使えます
+AI 校对密钥（建议用 llm setup 设置，避免留在命令历史）/ AI proofreading key (prefer llm setup to keep it out of shell history)	AI 校对密钥（建议用 llm setup 设置，避免留在命令历史）	AI proofreading key (prefer llm setup to keep it out of shell history)	AI 校對金鑰（建議用 llm setup 設定，避免留在命令歷史）	AI 校正の API キー（シェル履歴に残さないよう llm setup での設定を推奨）
+Bilibili 拒绝了登录请求	Bilibili 拒绝了登录请求	Bilibili refused the login	Bilibili 拒絕了登入請求	Bilibili がログインを拒否しました
+Bilibili 暂时限制了登录请求，请稍后再试	Bilibili 暂时限制了登录请求，请稍后再试	Bilibili is limiting login requests for now; try again later	Bilibili 暫時限制了登入請求，請稍後再試	Bilibili が一時的にログインを制限しています。しばらくしてから再試行してください
+Bilibili 登录响应不完整，请重试	Bilibili 登录响应不完整，请重试	Bilibili’s login reply was incomplete; try again	Bilibili 登入回應不完整，請重試	Bilibili のログイン応答が不完全です。再試行してください
+Bilibili 登录方式：qr（默认）、password、sms / Bilibili login method: qr (default), password, sms	Bilibili 登录方式：qr（默认）、password、sms	Bilibili login method: qr (default), password, sms	Bilibili 登入方式：qr（預設）、password、sms	Bilibili のログイン方法：qr（既定）、password、sms
+Bilibili 要求了暂不支持的验证方式，请改用扫码登录	Bilibili 要求了暂不支持的验证方式，请改用扫码登录	Bilibili asked for a check this app does not support yet; sign in with a QR code instead	Bilibili 要求了暫不支援的驗證方式，請改用掃碼登入	Bilibili が未対応の確認方法を求めています。QR コードでログインしてください
+Bilibili 要求验证手机号	Bilibili 要求验证手机号	Bilibili asks to verify a phone number	Bilibili 要求驗證手機號碼	Bilibili が電話番号の確認を求めています
+Bilibili 要求验证手机号，但账号没有绑定手机。请改用扫码登录	Bilibili 要求验证手机号，但账号没有绑定手机。请改用扫码登录	Bilibili asks to verify a phone, but the account has none bound. Sign in with a QR code instead	Bilibili 要求驗證手機號碼，但帳號沒有綁定手機。請改用掃碼登入	Bilibili が電話番号の確認を求めていますが、アカウントに電話番号が登録されていません。QR コードでログインしてください
+Bilibili 要求验证账号绑定的手机 {}。/ Bilibili asks to verify the account's phone {}.	Bilibili 要求验证账号绑定的手机 {}。	Bilibili asks to verify the account's phone {}.	Bilibili 要求驗證帳號綁定的手機 {}。	Bilibili がアカウントの電話番号 {} の確認を求めています。
+Bilibili 认为这次登录有风险，需要用账号绑定的手机确认。	Bilibili 认为这次登录有风险，需要用账号绑定的手机确认。	Bilibili considers this login risky and asks the account’s phone to confirm it.	Bilibili 認為這次登入有風險，需要用帳號綁定的手機確認。	Bilibili はこのログインを危険と判断し、アカウントの電話番号での確認を求めています。
+Bilibili 返回的登录密钥无效，请重试	Bilibili 返回的登录密钥无效，请重试	Bilibili returned an invalid login key; try again	Bilibili 傳回的登入金鑰無效，請重試	Bilibili から無効なログインキーが返されました。再試行してください
 GPU 和 CPU 识别需要 Microsoft Visual C++ 运行库，安装后重新检查	GPU 和 CPU 识别需要 Microsoft Visual C++ 运行库，安装后重新检查	GPU and CPU transcription need the Microsoft Visual C++ runtime. Install it, then check again.	GPU 和 CPU 辨識需要 Microsoft Visual C++ 執行階段，安裝後重新檢查	GPU と CPU の音声認識には Microsoft Visual C++ ランタイムが必要です。インストール後に再確認してください。
 Microsoft Visual C++ 运行库	Microsoft Visual C++ 运行库	Microsoft Visual C++ runtime	Microsoft Visual C++ 執行階段	Microsoft Visual C++ ランタイム
+Windows 上的新版 Chrome 和 Edge 可能不允许读取登录信息；如果失败，请改用 Firefox。读取前请先退出该浏览器。	Windows 上的新版 Chrome 和 Edge 可能不允许读取登录信息；如果失败，请改用 Firefox。读取前请先退出该浏览器。	Recent Chrome and Edge on Windows may not allow reading their sign-in; if it fails, use Firefox. Quit the browser before reading.	Windows 上的新版 Chrome 和 Edge 可能不允許讀取登入資訊；如果失敗，請改用 Firefox。讀取前請先結束該瀏覽器。	Windows の新しい Chrome と Edge はログイン情報の読み取りを許可しない場合があります。失敗したら Firefox を使ってください。読み取る前にブラウザを終了してください。
+YouTube 不允许在其他应用中用密码登录。course2md 会让 yt-dlp 读取所选浏览器中的 YouTube 登录（Cookie），只在打开 YouTube 视频时使用，不保存这些 Cookie。连接时的检查会让 yt-dlp 把浏览器的 Cookie 短暂写入本机的私有临时文件，检查结束即删除。	YouTube 不允许在其他应用中用密码登录。course2md 会让 yt-dlp 读取所选浏览器中的 YouTube 登录（Cookie），只在打开 YouTube 视频时使用，不保存这些 Cookie。连接时的检查会让 yt-dlp 把浏览器的 Cookie 短暂写入本机的私有临时文件，检查结束即删除。	YouTube does not allow signing in with a password in other apps. course2md has yt-dlp read the YouTube sign-in (cookies) of the browser you choose, only when it opens a YouTube video, and does not keep them. To check the connection, yt-dlp briefly writes the browser's cookies to a private temporary file on this computer, deleted as soon as the check ends.	YouTube 不允許在其他應用程式中用密碼登入。course2md 會讓 yt-dlp 讀取所選瀏覽器中的 YouTube 登入（Cookie），只在開啟 YouTube 影片時使用，不儲存這些 Cookie。連接時的檢查會讓 yt-dlp 把瀏覽器的 Cookie 短暫寫入本機的私有暫存檔，檢查結束即刪除。	YouTube は他のアプリでのパスワードによるログインを許可していません。course2md は、選んだブラウザの YouTube ログイン（Cookie）を YouTube の動画を開くときだけ yt-dlp に読み取らせ、保存はしません。接続の確認では、yt-dlp がブラウザの Cookie をこのコンピュータ上の非公開の一時ファイルに短時間書き込み、確認が終わるとすぐに削除します。
+YouTube 使用哪个浏览器的登录，如 chrome 或 "chrome:Profile 1" / Browser whose YouTube session to use, e.g. chrome or "chrome:Profile 1"	YouTube 使用哪个浏览器的登录，如 chrome 或 "chrome:Profile 1"	Browser whose YouTube session to use, e.g. chrome or "chrome:Profile 1"	YouTube 使用哪個瀏覽器的登入，如 chrome 或 "chrome:Profile 1"	YouTube で使うログインのブラウザ（例：chrome、"chrome:Profile 1"）
+YouTube 登录设置已损坏，请重新连接浏览器	YouTube 登录设置已损坏，请重新连接浏览器	The YouTube login setting is damaged; connect the browser again	YouTube 登入設定已損毀，請重新連接瀏覽器	YouTube のログイン設定が壊れています。ブラウザをもう一度接続してください
+YouTube 要求登录时，可使用浏览器中的 YouTube 登录	YouTube 要求登录时，可使用浏览器中的 YouTube 登录	When YouTube asks you to sign in, use your browser’s YouTube sign-in	YouTube 要求登入時，可使用瀏覽器中的 YouTube 登入	YouTube にログインを求められたら、ブラウザの YouTube ログインを使えます
+YouTube 账号	YouTube 账号	YouTube account	YouTube 帳號	YouTube アカウント
 \n✓ 可用 · - 可选或未设置 · ! 需要检查 · ✗ 必须修复	\n✓ 可用 · - 可选或未设置 · ! 需要检查 · ✗ 必须修复	\n✓ available · - optional or unset · ! needs attention · ✗ must fix	\n✓ 可用 · - 可選或未設定 · ! 需要檢查 · ✗ 必須修復	\n✓ 利用可能 · - 任意または未設定 · ! 要確認 · ✗ 要修正
 \n以及另外 {} 份笔记。	\n以及另外 {} 份笔记。	\nand {} more notes.	\n以及另外 {} 份筆記。	\nほか {} 件のノート。
 \n当前识别方式	\n当前识别方式	\nConfigured speech backend	\n目前語音辨識方式	\n現在の音声認識方式
@@ -12,7 +31,6 @@ Microsoft Visual C++ 运行库	Microsoft Visual C++ 运行库	Microsoft Visual C
   仅 gpu/cpu 需要；下载约 2.4GB：course2md models download --dir "{}"	  仅 gpu/cpu 需要；下载约 2.4GB：course2md models download --dir "{}"	  Only needed for gpu/cpu (~2.4GB): course2md models download --dir "{}"	  僅 gpu/cpu 需要；下載約 2.4GB：course2md models download --dir "{}"	  gpu/cpu のみ必要です（約 2.4GB）：course2md models download --dir "{}"
  · 当前使用修改前的配置	 · 当前使用修改前的配置	 · Currently using the configuration from before the change	 · 目前使用修改前的配置	 · 現在は変更前の設定を使用しています
  · 部分完成	 · 部分完成	 · Partially completed	 · 部分完成	 · 一部完了
- 消息附带该段对应的课件截图，仅用于校正术语拼写与专有名词，不要描述或评论图片本身。	 消息附带该段对应的课件截图，仅用于校正术语拼写与专有名词，不要描述或评论图片本身。	 The message is accompanied by a screenshot of the courseware corresponding to the paragraph. It is only used to correct the spelling of terms and proper nouns. Do not describe or comment on the picture itself.	 訊息附帶該段對應的課件截圖，僅用於校正術語拼寫與專有名詞，不要描述或評論圖片本身。	 メッセージには、その段落に対応するコースウェアのスクリーンショットが添付されています。用語や固有名詞のスペルを修正するためにのみ使用されます。画像自体について説明したりコメントしたりしないでください。
 ! GPU  无法检查设备：{}	! GPU  无法检查设备：{}	! GPU  Cannot check device: {}	! GPU  無法檢查裝置：{}	! GPU  デバイスを確認できません：{}
 ! coreml  缺少 Metal 着色器资源，请重新安装 / Metal shader resources missing; reinstall course2md	! coreml  缺少 Metal 着色器资源，请重新安装	! coreml  Metal shader resources missing; reinstall course2md	! coreml  缺少 Metal 著色器資源，請重新安裝	! coreml  Metal シェーダー リソースがありません。再インストールしてください
 (已设置，隐藏 / set, hidden)	(已设置，隐藏)	(set, hidden)	(已設定，隱藏)	(設定済み、非表示)
@@ -25,7 +43,6 @@ Microsoft Visual C++ 运行库	Microsoft Visual C++ 运行库	Microsoft Visual C
 - npu  未检测到 Intel NPU 设备 / No Intel NPU device detected	- npu  未检测到 Intel NPU 设备	- npu  No Intel NPU device detected	- npu  未偵測到 Intel NPU 裝置	- npu  Intel NPU デバイスが検出されません
 - npu  需要 uv，或装好 openvino-genai 的 Python / Intel NPU transcription needs uv, or Python with openvino-genai installed	- npu  需要 uv，或装好 openvino-genai 的 Python	- npu  Intel NPU transcription needs uv, or Python with openvino-genai installed	- npu  需要 uv，或已安裝 openvino-genai 的 Python	- npu  Intel NPU での音声認識には uv、または openvino-genai をインストールした Python が必要です
 --login 后只能跟视频链接或本地视频路径 / After --login, provide only a video URL or local file path	--login 后只能跟视频链接或本地视频路径	After --login, provide only a video URL or local file path	--login 後只能接影片連結或本機影片路徑	--login の後には動画のリンクまたはローカル動画のパスのみ指定できます
-<img loading="lazy" src="{}" alt="视频 {} 的截图">	<img loading="lazy" src="{}" alt="视频 {} 的截图">	<img loading="lazy" src="{}" alt="Screenshot of video {}">	<img loading="lazy" src="{}" alt="影片 {} 的截圖">	<img loading="lazy" src="{}" alt="動画 {} のスクリーンショット">
 <li><b>{}</b> {}：{}</li>	<li><b>{}</b> {}：{}</li>	<li><b>{}</b> {}: {}</li>	<li><b>{}</b> {}：{}</li>	<li><b>{}</b> {}：{}</li>
 == 第 {} 段摘要 ==\n	== 第 {} 段摘要 ==\n	== Summary of segment {} ==\n	== 第 {} 段摘要 ==\n	== セグメント {} の要約 ==\n
 AI 处理	AI 处理	AI processing	AI 處理	AI 処理
@@ -40,7 +57,6 @@ AI 服务没有返回内容 / The AI service returned no content	AI 服务没有
 AI 服务返回了错误 / The AI service returned an error	AI 服务返回了错误	The AI service returned an error	AI 服務傳回了錯誤	AI サービスがエラーを返しました
 AI 校对	AI 校对	AI proofreading	AI 校對	AI 校正
 AI 校对 / AI proofreading	AI 校对	AI proofreading	AI 校對	AI校正
-AI 校对工作进程中断 / Proofreading worker interrupted	AI 校对工作进程中断	Proofreading worker interrupted	AI 校對工作程序中斷	AI校正プロセスが中断されました
 AI 校对并生成笔记	AI 校对并生成笔记	AI proofreads and generates notes	AI 校對並生成筆記	AI が校正してノートを生成
 AI 校对提示词 / AI proofreading instructions	AI 校对提示词	AI proofreading instructions	AI 校對提示詞	AI 校正プロンプト
 AI 校对服务地址 / AI proofreading base URL (OpenAI-compatible)	AI 校对服务地址	AI proofreading base URL (OpenAI-compatible)	AI 校對服務網址	AI 校正サービスの URL
@@ -61,7 +77,6 @@ Apple 识别程序	Apple 识别程序	Apple speech recognizer	Apple 辨識程式
 Apple 识别组件不可用，请选择其他识别方式	Apple 识别组件不可用，请选择其他识别方式	Apple speech recognition is unavailable; choose another recognition method	Apple 辨識元件不可用，請選擇其他辨識方式	Apple 音声認識コンポーネントは利用できません。別の認識方式を選択してください
 Apple 识别结果过长，部分文字被截断 / Apple transcript exceeded the size limit; some text was truncated	Apple 识别结果过长，部分文字被截断	Apple transcript exceeded the size limit; some text was truncated	Apple 辨識結果過長，部分文字被截斷	Apple の認識結果が長すぎるため、テキストの一部が切り捨てられました
 B 站暂时限制了访问。请稍后重试；若持续失败，运行 course2md --login bilibili 重新登录，或导入本地视频。 / Bilibili is temporarily limiting access. Retry later; if it keeps failing, run course2md --login bilibili to log in again, or import a local video.	B 站暂时限制了访问。请稍后重试；若持续失败，运行 course2md --login bilibili 重新登录，或导入本地视频。	Bilibili is temporarily limiting access. Retry later; if it keeps failing, run course2md --login bilibili to log in again, or import a local video.	B 站暫時限制了存取。請稍後重試；若持續失敗，執行 course2md --login bilibili 重新登入，或匯入本機影片。	Bilibiliは一時的にアクセスが制限されています。後でもう一度試してください。引き続き失敗する場合は、 course2md --login bilibili を実行して再度ログインするか、ローカル動画をインポートしてください。
-B 站暂时限制了访问，稍后重试 / Bilibili is limiting requests; retrying shortly	B 站暂时限制了访问，稍后重试	Bilibili is limiting requests; retrying shortly	B 站暫時限制了存取，稍後重試	Bilibili によりアクセスが一時的に制限されています。しばらくしてから再試行します
 Bilibili 未确认登录，请重新扫码 / Bilibili did not confirm the login; scan the QR code again	Bilibili 未确认登录，请重新扫码	Bilibili did not confirm the login; scan the QR code again	Bilibili 未確認登入，請重新掃描 QR 碼	Bilibili でログインが確認されませんでした。QR コードをもう一度スキャンしてください
 Bilibili 没有返回分集信息	Bilibili 没有返回分集信息	Bilibili did not return episode information	Bilibili 沒有傳回分集資訊	Bilibili がエピソード情報を返しませんでした
 Bilibili 用户	Bilibili 用户	Bilibili user	Bilibili 使用者	Bilibiliユーザー
@@ -89,13 +104,30 @@ CoreML 模型加载失败 / CoreML model loading failed	CoreML 模型加载失�
 Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}; Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}
 HTTP {}；响应超过 128 KiB，未读取其余内容	HTTP {}；响应超过 128 KiB，未读取其余内容	HTTP {}; response exceeds 128 KiB, remainder not read	HTTP {}；回應超過 128 KiB，未讀取其餘內容	HTTP {};応答が 128 KiB を超えているため、残りは読み取られていません
 Intel NPU 加速	Intel NPU 加速	Intel NPU acceleration	Intel NPU 加速	Intel NPU アクセラレーション
+course2md 人机验证	course2md 人机验证	course2md human check	course2md 人機驗證	course2md 人間確認
+macOS 可能询问是否允许访问浏览器的“Safe Storage”钥匙串项目。选择“始终允许”，之后打开 YouTube 视频时就不会再问。	macOS 可能询问是否允许访问浏览器的“Safe Storage”钥匙串项目。选择“始终允许”，之后打开 YouTube 视频时就不会再问。	macOS may ask to allow access to the browser’s “Safe Storage” keychain item. Choose “Always Allow” so opening YouTube videos does not ask again.	macOS 可能詢問是否允許取用瀏覽器的「Safe Storage」鑰匙圈項目。選擇「永遠允許」，之後開啟 YouTube 影片時就不會再問。	macOS がブラウザの「Safe Storage」キーチェーン項目へのアクセスを求める場合があります。「常に許可」を選ぶと、以後 YouTube の動画を開くときに再度確認されません。
+yt-dlp 已结束，但没有留下视频文件 / yt-dlp finished without leaving a video file	yt-dlp 已结束，但没有留下视频文件	yt-dlp finished without leaving a video file	yt-dlp 已結束，但沒有留下影片檔案	yt-dlp は終了しましたが、動画ファイルが残っていません
 {} 万	{} 万	{} × 10,000	{} 萬	{} 万
+{} 中没有登录 YouTube。请先在浏览器中登录 YouTube，再重新运行 / {} is not signed in to YouTube. Sign in there first, then run this again	{} 中没有登录 YouTube。请先在浏览器中登录 YouTube，再重新运行	{} is not signed in to YouTube. Sign in there first, then run this again	{} 中沒有登入 YouTube。請先在瀏覽器中登入 YouTube，再重新執行	{} で YouTube にログインしていません。先にブラウザでログインしてから、もう一度実行してください
 {} 亿	{} 亿	{} × 100 million	{} 億	{} 億
+{} 正在使用 Cookie 数据库。请退出 {} 后重试。	{} 正在使用 Cookie 数据库。请退出 {} 后重试。	{} is using its cookie database. Quit {}, then try again.	{} 正在使用 Cookie 資料庫。請結束 {} 後重試。	{} が Cookie データベースを使用中です。{} を終了してから再試行してください。
+{} 运行失败（退出码 {}）：	{} 运行失败（退出码 {}）：	{} failed (exit code {}):	{} 執行失敗（結束代碼 {}）：	{} が失敗しました（終了コード {}）：
+{} 运行失败：	{} 运行失败：	{} failed:	{} 執行失敗：	{} が失敗しました：
+{}（{}）	{}（{}）	{} ({})	{}（{}）	{}（{}）
+{}；重跑 install.sh 可安装随包版本	{}；重跑 install.sh 可安装随包版本	{}; rerun install.sh for the bundled build	{}；重跑 install.sh 可安裝隨包版本	{}（install.sh を再実行すると同梱版をインストールできます）
 ↓ {} 词元	↓ {} 词元	↓ {} tokens	↓ {} 詞元	↓ {} トークン
 下载 Microsoft Visual C++ 运行库	下载 Microsoft Visual C++ 运行库	Download the Microsoft Visual C++ runtime	下載 Microsoft Visual C++ 執行階段	Microsoft Visual C++ ランタイムをダウンロード
+下载视频最大高度（推荐 1080）/ Maximum download height (1080 recommended)	下载视频最大高度（推荐 1080）	Maximum download height (1080 recommended)	下載影片最大高度（建議 1080）	ダウンロードする動画の最大の高さ（推奨 1080）
 不使用 AI	不使用 AI	No AI processing	不使用 AI	AI 処理なし
+不支持的浏览器：{}。可用：{} / Unsupported browser: {}. Available: {}	不支持的浏览器：{}。可用：{}	Unsupported browser: {}. Available: {}	不支援的瀏覽器：{}。可用：{}	対応していないブラウザです：{}。使用可能：{}
+人机验证未通过或已过期，请重新验证	人机验证未通过或已过期，请重新验证	The human check failed or expired; verify again	人機驗證未通過或已過期，請重新驗證	人間確認に失敗したか期限切れです。もう一度確認してください
+人机验证超时，请重新开始	人机验证超时，请重新开始	The human check timed out; start again	人機驗證逾時，請重新開始	人間確認がタイムアウトしました。最初からやり直してください
 仅对「{}」生效	仅对「{}」生效	Applies only to “{}”	僅對「{}」生效	「{}」にのみ適用されます
 仅对下一个视频生效	仅对下一个视频生效	Applies only to the next video	僅對下一個影片生效	次の動画にのみ適用されます
+使用 {} 中的登录	使用 {} 中的登录	Uses the sign-in in {}	使用 {} 中的登入	{} のログインを使用
+保存 YouTube 登录设置失败	保存 YouTube 登录设置失败	Could not save the YouTube login setting	儲存 YouTube 登入設定失敗	YouTube のログイン設定を保存できませんでした
+区号	区号	Code	區碼	国番号
+国家或地区区号 / Country calling code	国家或地区区号	Country calling code	國家或地區區碼	国・地域番号
 安装 uv 后才能用 Intel NPU 识别	安装 uv 后才能用 Intel NPU 识别	Intel NPU transcription needs uv installed	安裝 uv 後才能用 Intel NPU 辨識	Intel NPU での認識には uv のインストールが必要です
 NPU 启动器	NPU 启动器	NPU launcher	NPU 啟動器	NPUランチャー
 NPU 模型准备未完成 / NPU model preparation did not complete	NPU 模型准备未完成	NPU model preparation did not complete	NPU 模型準備未完成	NPUモデルの準備が完了していません
@@ -109,7 +141,6 @@ Ollama 本地服务	Ollama 本地服务	Ollama local service	Ollama 本地服務
 OpenAI Codex 订阅	OpenAI Codex 订阅	OpenAI Codex subscription	OpenAI Codex 訂閱	OpenAI Codex サブスクリプション
 OpenAI 兼容服务	OpenAI 兼容服务	OpenAI-compatible service	OpenAI 相容服務	OpenAI互換サービス
 OpenVINO 模型 XML 和权重 / OpenVINO model XML and weights	OpenVINO 模型 XML 和权重	OpenVINO model XML and weights	OpenVINO 模型 XML 和權重	OpenVINO モデルの XML と重み
-ROI 坐标必须为非负有限数值 / ROI coordinates must be finite, non-negative numbers	ROI 坐标必须为非负有限数值	ROI coordinates must be finite, non-negative numbers	ROI 座標必須為非負有限數值	ROI 座標は負でない有限値でなければなりません
 ROI 百分比必须在 0–100 / ROI percentages must be between 0 and 100	ROI 百分比必须在 0–100	ROI percentages must be between 0 and 100	ROI 百分比必須在 0–100	ROI パーセンテージは 0 ～ 100 の範囲にする必要があります
 UP主/作者：{}\n	UP主/作者：{}\n	Uploader/author: {}\n	UP主/作者：{}\n	投稿者/作成者：{}\n
 [已隐藏凭据]	[已隐藏凭据]	[Credentials hidden]	[已隱藏憑證]	[認証情報を非表示]
@@ -117,19 +148,15 @@ UP主/作者：{}\n	UP主/作者：{}\n	Uploader/author: {}\n	UP主/作者：{}\
 asr checkpoint 无身份标记，旧进度作废重算 / asr checkpoint has no identity marker; old progress discarded and recomputed	asr checkpoint 无身份标记，旧进度作废重算	asr checkpoint has no identity marker; old progress discarded and recomputed	asr checkpoint 無身份標記，舊進度作廢重算	asr チェックポイントには ID タグがないため、古い進行状況は無効であり、再計算されます。
 asr checkpoint 身份不匹配（模型/后端/版本已变化），旧进度作废重算 / asr checkpoint identity mismatch (model/backend/version changed); old progress discarded and recomputed	asr checkpoint 身份不匹配（模型/后端/版本已变化），旧进度作废重算	asr checkpoint identity mismatch (model/backend/version changed); old progress discarded and recomputed	asr checkpoint 身份不匹配（模型/後端/版本已變化），舊進度作廢重算	ASR チェックポイント ID が一致しません (モデル/バックエンド/バージョンが変更されています)。古い進行状況は無効になり、再計算されます。
 checkpoint 末行解析失败（按崩溃残留忽略）：{e}	checkpoint 末行解析失败（按崩溃残留忽略）：{e}	Failed to parse the last checkpoint line (ignored as crash leftovers): {e}	checkpoint 末行解析失敗（按崩潰殘留忽略）：{e}	チェックポイントの最終行を解析できませんでした（クラッシュの残骸として無視）：{e}
-codex CLI 当前是 API key 模式；请在 codex 中用 ChatGPT 账号登录后重试 / The codex CLI is in API-key mode; log in with a ChatGPT account in codex and retry	codex CLI 当前是 API key 模式；请在 codex 中用 ChatGPT 账号登录后重试	The codex CLI is in API-key mode; log in with a ChatGPT account in codex and retry	codex CLI 目前是 API key 模式；請在 codex 中用 ChatGPT 帳號登入後重試	codex CLI は現在 API キー モードです。 Codex で ChatGPT アカウントを使用してログインし、もう一度試してください。
+codex CLI 当前是 API key 模式；请在 codex 中用 ChatGPT 账号登录后重试 / The codex CLI is in API-key mode; log in with a ChatGPT account in codex and retry	codex CLI 当前是 API key 模式；请在 codex 中用 ChatGPT 账号登录后重试	The codex CLI is in API-key mode; log in with a ChatGPT account in codex and retry	codex CLI 目前是 API key 模式；請在 codex 中用 ChatGPT 帳號登入後重試	codex CLI は現在 API キー モードです。Codex で ChatGPT アカウントを使用してログインし、もう一度試してください。
 codex CLI 登录态无法解析 / Cannot parse the codex CLI login state	codex CLI 登录态无法解析	Cannot parse the codex CLI login state	codex CLI 登入態無法解析	codex CLI ログイン状態を解析できません
 codex CLI 登录态缺少令牌，请在 codex 中重新登录 / The codex CLI login state is missing tokens; log in again in codex	codex CLI 登录态缺少令牌，请在 codex 中重新登录	The codex CLI login state is missing tokens; log in again in codex	codex CLI 登入態缺少令牌，請在 codex 中重新登入	Codex CLI ログイン状態にトークンがありません。Codexで再度ログインしてください。
 codex CLI 的登录已失效。改用浏览器授权登录（ChatGPT 账号）？/ The codex CLI login expired. Authorize in the browser instead?	codex CLI 的登录已失效。改用浏览器授权登录（ChatGPT 账号）？/ The codex CLI login expired. Authorize in the browser instead?	The codex CLI login expired. Authorize in the browser instead?	codex CLI 的登入已失效。改用瀏覽器授權登入（ChatGPT 帳號）？/ The codex CLI login expired. Authorize in the browser instead?	codex CLI のログインの有効期限が切れました。代わりにブラウザで認証しますか（ChatGPT アカウント）？
 course2md — 将视频转换为图文笔记	course2md — 将视频转换为图文笔记	course2md — Turn videos into illustrated notes	course2md — 將影片轉換為圖文筆記	course2md — 動画を画像付きノートに変換
-llama-server --help 探测失败，按旧版处理（仅 -ngl）	llama-server --help 探测失败，按旧版处理（仅 -ngl）	llama-server --help probe failed; treating it as an older version (-ngl only)	llama-server --help 探測失敗，按舊版處理（僅 -ngl）	llama-server --help による検出に失敗しました。旧バージョンとして扱います（-ngl のみ）
-llama-server flag 探测	llama-server flag 探测	llama-server flag detection	llama-server flag 探測	llama-server フラグの検出
 stable 模式的画面稳定时间（秒）/ Seconds to wait for a stable frame	stable 模式的画面稳定时间（秒）/ Seconds to wait for a stable frame	Seconds to wait for a stable frame	stable 模式的畫面穩定時間（秒）/ Seconds to wait for a stable frame	stable モードでフレームが安定するまで待つ時間（秒）
 stderr 管道已配置	stderr 管道已配置	The stderr pipe is configured	stderr 管道已配置	stderr パイプが構成されています
 stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdout 管道已配置	stdout パイプが構成されています
 {} / {} 段	{} / {} 段	{} / {} segments	{} / {} 段	{} / {} セグメント
-{} {}，{} 篇笔记	{} {}，{} 篇笔记	{} {}, {} notes	{} {}，{} 篇筆記	{} {}、{} 件のノート
-{} · 待下载	{} · 待下载	{} · Pending download	{} · 待下載	{} · ダウンロード待ち
 {} · 构建 {}	{} · 构建 {}	{} · Build {}	{} · 建置 {}	{} · ビルド {}
 {} 不支持「{}」，已改用 {}。	{} 不支持「{}」，已改用 {}。	{} does not support “{}”; switched to {}.	{} 不支援「{}」，已改用 {}。	{} は「{}」に対応していないため、{} に切り替えました。
 {} 个与进行中的任务相同，未重复加入	{} 个与进行中的任务相同，未重复加入	{} are identical to tasks in progress and were not added again	{} 個與進行中的任務相同，未重複加入	{} 件は進行中のタスクと同じため、追加しませんでした
@@ -152,33 +179,23 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {} 的笔记名称记录无法读取	{} 的笔记名称记录无法读取	The note name record for {} cannot be read.	{} 的筆記名稱記錄無法讀取	{} のノート名の記録を読み取れません。
 {} 秒	{} 秒	{}s	{} 秒	{} 秒
 {} 视频 {}	{} 视频 {}	{} video {}	{} 影片 {}	{} 動画 {}
-{} 输出为 JSON 对象 {{"segments":[{{"id":序号,"text":校对后的文本}}]}}，id 必须与输入一一对应；纯语气词条目的 text 为空字符串。{}	{} 输出为 JSON 对象 {{"segments":[{{"id":序号,"text":校对后的文本}}]}}，id 必须与输入一一对应；纯语气词条目的 text 为空字符串。{}	{} Output a JSON object {{"segments":[{{"id":index,"text":proofread text}}]}}; each id must match the input one-to-one; for entries that contain only filler words, text is an empty string. {}	{} 輸出為 JSON 物件 {{"segments":[{{"id":序號,"text":校對後的文字}}]}}，id 必須與輸入一一對應；純語氣詞條目的 text 為空字串。{}	{} JSON オブジェクト {{"segments":[{{"id":番号,"text":校正後のテキスト}}]}} として出力してください。id は入力と一対一で対応させてください。フィラー（つなぎ言葉）だけの項目は text を空文字列にしてください。{}
 {}。保存位置尚未切换，已复制的内容保留在目标位置。	{}。保存位置尚未切换，已复制的内容保留在目标位置。	{}. The save location has not been switched and the copied content remains at the target location.	{}。儲存位置尚未切換，已複製的內容保留在目標位置。	{}。保存場所はまだ切り替えられていません。コピー済みの内容はコピー先に残っています。
 {}。请备份后删除该文件再重试：{}	{}。请备份后删除该文件再重试：{}	{}. Back up and delete the file, then try again: {}	{}。請備份後刪除該檔案再重試：{}	{}。バックアップ後にファイルを削除して、再試行してください: {}
-{}会发送到 {}	{}会发送到 {}	{} will be sent to {}	{}會傳送到 {}	{} は {} に送信されます
-{}发送到「{}」	{}发送到「{}」	{} is sent to "{}"	{}傳送到「{}」	{} は「{}」に送信されます
+{}会发送到 {}	{}会发送到 {}	{} will be sent to {}	{}會傳送到 {}	{}は {} に送信されます
+{}发送到「{}」	{}发送到「{}」	{} is sent to "{}"	{}傳送到「{}」	{}は「{}」に送信されます
 {}尚未完成	{}尚未完成	{} has not been completed yet	{}尚未完成	{}はまだ完了していません
-{}尚未完成。{}	{}尚未完成。{}	{} is not completed yet. {}	{}尚未完成。{}	{} はまだ完了していません。 {}
-{}无法读取	{}无法读取	{} cannot be read	{}無法讀取	{} を読み取れません
-{}未保存：{}	{}未保存：{}	{} not saved: {}	{}未儲存：{}	{} は保存されていません: {}
-{}未完成	{}未完成	{} is not completed	{}未完成	{} は完了していません
-{}未生成	{}未生成	{} was not generated	{}未生成	{} は生成されませんでした
-{}未通过 · 重试	{}未通过 · 重试	{} failed · Retry	{}未通過 · 重試	{} 失敗 · 再試行
+{}未保存：{}	{}未保存：{}	{} not saved: {}	{}未儲存：{}	{}は保存されていません: {}
+{}未完成	{}未完成	{} not completed	{}未完成	{}は完了していません
+{}未生成	{}未生成	{} not generated	{}未生成	{}は生成されませんでした
 {}测试通过	{}测试通过	{} test passed	{}測試通過	{} テストに合格しました
 {}的文件夹信息已损坏：{}	{}的文件夹信息已损坏：{}	The folder information of {} is corrupted: {}	{}的資料夾資訊已損壞：{}	{} のフォルダー情報が壊れています: {}
 {}的显示名称尚未读取：{}	{}的显示名称尚未读取：{}	The display name of {} has not been read yet: {}	{}的顯示名稱尚未讀取：{}	{} の表示名はまだ読み込まれていません: {}
-{}结果未确认 · 重试	{}结果未确认 · 重试	{} result not confirmed · Try again	{}結果未確認 · 重試	{} 結果未確認 · 再試行
 {}读取失败：{}	{}读取失败：{}	{} failed to read: {}	{}讀取失敗：{}	{} が読み取れませんでした: {}
-{}通过 · 重测	{}通过 · 重测	{} passed · Retest	{}通過 · 重測	{} 合格 · 再テスト
-{}需要是有效的非负数	{}需要是有效的非负数	{} needs to be a valid non-negative number	{}需要是有效的非負數	{} は有効な非負の数値である必要があります
+{}需要是有效的非负数	{}需要是有效的非负数	{} needs to be a valid non-negative number	{}需要是有效的非負數	{}は有効な非負の数値である必要があります
 {}（具体内容未记录）	{}（具体内容未记录）	{} (specific content not recorded)	{}（具體內容未記錄）	{}（詳細は記録されていません）
-{}（当前）	{}（当前）	{} (current)	{}（目前）	{} (現在)
 {}（自动选择）	{}（自动选择）	{} (automatic)	{}（自動選擇）	{}（自動）
 {}，{}	{}，{}	{}, {}	{}，{}	{}、{}
-{}，{}{}	{}，{}{}	{}, {}{}	{}，{}{}	{}、{}{}
-{}，{}，{}	{}，{}，{}	{}, {}, {}	{}，{}，{}	{}、{}、{}
 {}：{}	{}：{}	{}: {}	{}：{}	{}:{}
-{}：{} · {}	{}：{} · {}	{}: {} · {}	{}：{} · {}	{}: {} · {}
 {}：{}{}	{}：{}{}	{}: {}{}	{}：{}{}	{}：{}{}
 {}；尚未发送请求	{}；尚未发送请求	{}; request not sent yet	{}；尚未傳送請求	{};リクエストはまだ送信されていません
 {}；首个错误：{}	{}；首个错误：{}	{}; first error: {}	{}；首個錯誤：{}	{};最初のエラー: {}
@@ -193,19 +210,11 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 《{}》：{}	《{}》：{}	“{}”: {}	《{}》：{}	「{}」：{}
 「{}」会重新发送失败部分，可能计费	「{}」会重新发送失败部分，可能计费	"{}" resends the failed parts; charges may apply.	「{}」會重新傳送失敗部分，可能計費	「{}」は失敗した部分を再送信します。料金が発生する場合があります。
 「未分类」已被使用，请换一个文件夹名称	「未分类」已被使用，请换一个文件夹名称	"Uncategorized" is already in use; choose a different folder name	「未分類」已被使用，請換一個資料夾名稱	「未分類」は既に使用されています。別のフォルダー名にしてください
-このメッセージまたはサブコマンドのヘルプを表示	このメッセージまたはサブコマンドのヘルプを表示	Show this message or the help for a subcommand	顯示此訊息或子命令的說明	このメッセージまたはサブコマンドのヘルプを表示
-オプション：	オプション：	Options:	選項：	オプション：
-コマンド：	コマンド：	Commands:	命令：	コマンド：
-バージョンを表示	バージョンを表示	Show version	顯示版本	バージョンを表示
-ヘルプを表示	ヘルプを表示	Show help	顯示說明	ヘルプを表示
-一切正常	一切正常	Everything is fine	一切正常	問題ありません
 上一个 Codex 请求尚未完成	上一个 Codex 请求尚未完成	The previous Codex request has not yet completed	上一個 Codex 請求尚未完成	前の Codex リクエストはまだ完了していません
 上一处	上一处	Previous match	上一處	前の一致
 上一张	上一张	Previous	上一張	前へ
 上一张 · ←	上一张 · ←	Previous · ←	上一張 · ←	前へ · ←
 上一步	上一步	Previous step	上一步	前のステップ
-上次准备	上次准备	Last preparation	上次準備	前回の準備
-上次准备记录：{}	上次准备记录：{}	Last preparation record: {}	上次準備記錄：{}	前回の準備記録：{}
 上次结果未确认；重测会再次发送，可能计费	上次结果未确认；重测会再次发送，可能计费	Previous result unconfirmed; retesting sends the request again and may incur charges	上次結果未確認；重測會再次傳送，可能計費	前回の結果は未確認です。再テストするとリクエストが再送信され、料金が発生する場合があります
 上次结果未确认；重测或「{}」都会再次发送请求，可能计费	上次结果未确认；重测或「{}」都会再次发送请求，可能计费	Previous result unconfirmed; retesting or "{}" sends the request again and may incur charges.	上次結果未確認；重測或「{}」都會再次傳送請求，可能計費	前回の結果は未確認です。再テストまたは「{}」でリクエストが再送信され、料金が発生する場合があります。
 下一处	下一处	Next match	下一處	次の一致
@@ -217,7 +226,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 下载完整应用	下载完整应用	Download the full app	下載完整應用程式	完全版アプリをダウンロード
 下载并准备模型	下载并准备模型	Download and prepare the model	下載並準備模型	モデルをダウンロードして準備する
 下载并验证模型 / Download and verify a model	下载并验证模型	Download and verify a model	下載並驗證模型	モデルをダウンロードして検証する
-下载模型	下载模型	Download model	下載模型	モデルをダウンロード
 下载视频	下载视频	Download video	下載影片	動画をダウンロードする
 下载视频 / Downloading video	下载视频	Downloading video	下載影片	動画をダウンロード中
 下载识别模型	下载识别模型	Downloading speech model	下載語音辨識模型	音声認識モデルをダウンロード
@@ -240,7 +248,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 二维码响应缺少 key / QR code response is missing key	二维码响应缺少 key	QR code response is missing key	QR 碼回應缺少 key	QR コードの応答に key がありません
 二维码响应缺少 url / QR code response is missing url	二维码响应缺少 url	QR code response is missing url	QR 碼回應缺少 url	QR コードの応答に url がありません
 二维码已过期	二维码已过期	QR code has expired	QR 碼已過期	QRコードの有効期限が切れています
-二维码已过期，请重新运行 course2md --login bilibili / QR code expired; run course2md --login bilibili again	二维码已过期，请重新运行 course2md --login bilibili	QR code expired; run course2md --login bilibili again	QR 碼已過期，請重新執行 course2md --login bilibili	QR コードの有効期限が切れています。 course2md --login bilibili を再実行してください。
+二维码已过期，请重新运行 course2md --login bilibili / QR code expired; run course2md --login bilibili again	二维码已过期，请重新运行 course2md --login bilibili	QR code expired; run course2md --login bilibili again	QR 碼已過期，請重新執行 course2md --login bilibili	QR コードの有効期限が切れています。course2md --login bilibili を再実行してください。
 二维码约 {} 秒后过期	二维码约 {} 秒后过期	QR code expires in approximately {} seconds	QR 碼約 {} 秒後過期	QR コードの有効期限は約 {} 秒後に切れます
 云端 API（需服务端点和 API Key，可能收费） / Cloud API (endpoint and API key required; charges may apply)	云端 API（需服务端点和 API Key，可能收费）	Cloud API (endpoint and API key required; charges may apply)	雲端 API（需服務端點和 API Key，可能收費）	クラウド API (サービス エンドポイントと API キーが必要、料金が適用される場合があります)
 云端服务	云端服务	Cloud service	雲端服務	クラウドサービス
@@ -264,9 +272,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 仍有请求结果尚未确认，请先查看请求范围	仍有请求结果尚未确认，请先查看请求范围	Some request results are still unconfirmed. Check the request scope first.	仍有請求結果尚未確認，請先檢視請求範圍	未確認のリクエスト結果があります。先にリクエスト範囲を確認してください。
 仍有请求结果尚未确认，请查看请求范围后选择是否重新发送	仍有请求结果尚未确认，请查看请求范围后选择是否重新发送	There are still request results that have not been confirmed. Please check the request scope and choose whether to resend it.	仍有請求結果尚未確認，請檢視請求範圍後選擇是否重新傳送	未確認のリクエスト結果がまだあります。リクエスト範囲を確認し、再送信するかどうかを選択してください。
 从头重新识别 / Transcribe again from the start	从头重新识别	Transcribe again from the start	從頭重新辨識	最初から音声認識をやり直す
-从服务返回的候选中选择模型	从服务返回的候选中选择模型	Select a model from the candidates returned by the service	從服務傳回的候選中選擇模型	サービスから返された候補の中からモデルを選択します
 从此处观看	从此处观看	Watch from here	從此處觀看	ここから見る
-从此处观看原视频	从此处观看原视频	Watch the original video from here	從此處觀看原影片	ここから元の動画を見る
 令牌响应不完整 / The token response is incomplete	令牌响应不完整	The token response is incomplete	令牌回應不完整	トークン応答が不完全です
 以 JSON 输出 / Print JSON	以 JSON 输出	Print JSON	以 JSON 輸出	JSONとして出力
 以 NDJSON 输出进度，禁用交互 / Stream NDJSON progress without prompts	以 NDJSON 输出进度，禁用交互	Stream NDJSON progress without prompts	以 NDJSON 輸出進度，禁用互動	進行状況を NDJSON として出力し、インタラクションを無効にする
@@ -275,14 +281,12 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 任务 · {}	任务 · {}	Tasks · {}	任務 · {}	タスク · {}
 任务不存在	任务不存在	Task not found	找不到任務	タスクが見つかりません
 任务与笔记位置必须是绝对路径 / Task paths must be absolute	任务与笔记位置必须是绝对路径	Task paths must be absolute	任務與筆記位置必須是絕對路徑	タスクとノートの場所は絶対パスである必要があります
-任务位置与笔记库记录不匹配，请先恢复存储位置	任务位置与笔记库记录不匹配，请先恢复存储位置	The task location does not match the note library record. Please restore the storage location first.	任務位置與筆記庫記錄不匹配，請先恢復儲存位置	タスクの場所がノート ライブラリのレコードと一致しません。まず保存場所を復元してください。
 任务保存位置尚未恢复	任务保存位置尚未恢复	The task save location has not been restored	任務儲存位置尚未恢復	タスクの保存場所が復元されていません
 任务保存位置暂时不可用	任务保存位置暂时不可用	The task save location is temporarily unavailable	任務儲存位置暫時不可用	タスクの保存場所が一時的に利用できなくなりました
 任务保存位置记录缺失	任务保存位置记录缺失	The task save location record is missing	任務儲存位置記錄缺失	タスクの保存場所レコードがありません
 任务参数过大（上限 {} MiB） / Task input exceeds {} MiB	任务参数过大（上限 {} MiB）	Task input exceeds {} MiB	任務參數過大（上限 {} MiB）	タスク入力が {} MiB を超えています
 任务只能指定一种已选字幕内容 / Specify subtitle file or parsed events, not both	任务只能指定一种已选字幕内容	Specify subtitle file or parsed events, not both	任務只能指定一種已選字幕內容	タスクでは選択した字幕コンテンツを 1 つだけ指定できます
 任务尚未加入队列：{}	任务尚未加入队列：{}	Task has not been queued yet: {}	任務尚未加入佇列：{}	タスクはまだキューに登録されていません: {}
-任务工作目录与保存位置不匹配	任务工作目录与保存位置不匹配	Task working directory does not match save location	任務工作目錄與儲存位置不匹配	タスクの作業ディレクトリが保存場所と一致しません
 任务工作目录与记录的笔记库不匹配	任务工作目录与记录的笔记库不匹配	The task working directory does not match the recorded note library	任務工作目錄與記錄的筆記庫不匹配	タスクの作業ディレクトリが記録されたノート ライブラリと一致しません
 任务工作目录被其他文件或链接占用，原内容已保留	任务工作目录被其他文件或链接占用，原内容已保留	The task working directory is occupied by other files or links, and the original content has been retained.	任務工作目錄被其他檔案或連結佔用，原內容已保留	タスクの作業ディレクトリは他のファイルまたはリンクによって占有されており、元のコンテンツは保持されています。
 任务已取消	任务已取消	Task cancelled	任務已取消	タスクがキャンセルされました
@@ -290,7 +294,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 任务恢复副本未能保存，原任务记录仍保留	任务恢复副本未能保存，原任务记录仍保留	The task recovery copy failed to be saved, and the original task records are still retained.	任務恢復副本未能儲存，原任務記錄仍保留	タスク回復コピーの保存に失敗しました。元のタスク レコードはまだ保持されています。
 任务指令尚未保存：{}	任务指令尚未保存：{}	Task instructions have not been saved: {}	任務指令尚未儲存：{}	タスクの指示が保存されていません: {}
 任务控制文件必须位于工作目录 / Invalid control file location	任务控制文件必须位于工作目录	Invalid control file location	任務控制檔案必須位於工作目錄	タスク制御ファイルは作業ディレクトリに配置する必要があります
-任务材料位置越出笔记库，原记录已保留	任务材料位置越出笔记库，原记录已保留	The location of the task materials is outside the note library, and the original records have been retained.	任務材料位置越出筆記庫，原記錄已保留	タスク資料の場所はノート ライブラリの外にあり、元の記録は保持されています。
 任务来源或参数与已保存进度不一致，原进度已保留 / Task inputs changed; create a new task instead of reusing this work directory	任务来源或参数与已保存进度不一致，原进度已保留	Task inputs changed; create a new task instead of reusing this work directory	任務來源或參數與已儲存進度不一致，原進度已保留	タスクのソースまたはパラメータは保存された進行状況と矛盾しており、元の進行状況が保持されています。
 任务来源身份或名称记录缺失	任务来源身份或名称记录缺失	The task source identity or name record is missing	任務來源身份或名稱記錄缺失	タスク ソース ID または名前レコードがありません
 任务状态尚未保存：{}	任务状态尚未保存：{}	Task status has not been saved: {}	任務狀態尚未儲存：{}	タスクのステータスが保存されていません: {}
@@ -308,7 +311,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 任务记录版本不受支持，请使用创建这些任务的应用版本	任务记录版本不受支持，请使用创建这些任务的应用版本	Task record version is not supported, please use the app version that created these tasks	任務記錄版本不受支援，請使用建立這些任務的應用版本	タスク レコードのバージョンはサポートされていません。これらのタスクを作成したアプリのバージョンを使用してください
 任务记录由较新版本创建，请使用对应版本打开。原记录和备份均保留，尚未启动任务。	任务记录由较新版本创建，请使用对应版本打开。原记录和备份均保留，尚未启动任务。	The task record was created by a newer version, please use the corresponding version to open it. The original records and backups are retained, and the task has not been started yet.	任務記錄由較新版本建立，請使用對應版本開啟。原記錄和備份均保留，尚未啟動任務。	タスク レコードは新しいバージョンで作成されました。対応するバージョンを使用して開いてください。元のレコードとバックアップは保持されますが、タスクはまだ開始されていません。
 任务记录缺少保存目录	任务记录缺少保存目录	Task record lacks save directory	任務記錄缺少儲存目錄	タスクレコードに保存ディレクトリがありません
-任务记录被链接替代，原文件已保留	任务记录被链接替代，原文件已保留	The task record is replaced by a link and the original file is retained.	任務記錄被連結替代，原檔案已保留	タスク レコードはリンクに置き換えられ、元のファイルは保持されます。
 任务记录读取失败：{}	任务记录读取失败：{}	Task record reading failed: {}	任務記錄讀取失敗：{}	タスク レコードの読み取りに失敗しました: {}
 任务记录超过可读取范围，原文件已保留	任务记录超过可读取范围，原文件已保留	The task record exceeds the readable range and the original file has been retained.	任務記錄超過可讀取範圍，原檔案已保留	タスクレコードが読み取り可能な範囲を超えており、元のファイルが保持されています。
 任务身份无效	任务身份无效	Invalid task identity	任務身份無效	無効なタスク ID
@@ -321,7 +323,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 使用 Bilibili 视频时，推荐先运行 course2md --login bilibili 扫码登录，可下载账号权限范围内更高清晰度的视频。 / For Bilibili videos, run course2md --login bilibili first to scan a QR code; downloads can then use higher resolutions available to your account.	使用 Bilibili 视频时，推荐先运行 course2md --login bilibili 扫码登录，可下载账号权限范围内更高清晰度的视频。	For Bilibili videos, run course2md --login bilibili first to scan a QR code; downloads can then use higher resolutions available to your account.	使用 Bilibili 影片時，建議先執行 course2md --login bilibili 掃描 QR 碼登入，即可下載帳號權限範圍內更高畫質的影片。	Bilibili 動画を使用する場合は、course2md --login bilibili を実行し、QR コードをスキャンしてログインすることをお勧めします。アカウント権限の範囲内で、より高解像度の動画をダウンロードできます。
 使用你的 ChatGPT 订阅	使用你的 ChatGPT 订阅	Use your ChatGPT subscription	使用你的 ChatGPT 訂閱	ChatGPT サブスクリプションを使用する
 使用标准规则	使用标准规则	Use standard rules	使用標準規則	標準ルールを使用する
-使用法：	使用法：	Usage:	使用法：	使用法:
 使用环境变量 {}	使用环境变量 {}	Use environment variable {}	使用環境變數 {}	環境変数 {} を使用する
 使用自定义校对规则	使用自定义校对规则	Use custom proofing rules	使用自訂校對規則	カスタム校正ルールを使用する
 使用语音服务识别	使用语音服务识别	Recognize with a speech service	使用語音服務辨識	音声サービスで認識する
@@ -335,23 +336,19 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 保存位置不可访问，请连接对应磁盘	保存位置不可访问，请连接对应磁盘	The save location is inaccessible, please connect the corresponding disk.	儲存位置無法存取，請連接對應磁碟	保存場所にアクセスできません。対応するディスクを接続してください。
 保存位置不可访问，请连接磁盘或选择其他位置	保存位置不可访问，请连接磁盘或选择其他位置	Save location unavailable. Connect the disk or choose another location.	儲存位置無法存取，請連接磁碟或選擇其他位置	保存先にアクセスできません。ディスクを接続するか、別の場所を選択してください
 保存位置不是文件夹	保存位置不是文件夹	The save location is not a folder	儲存位置不是資料夾	保存場所がフォルダーではありません
-保存位置在确认期间已经变化，尚未重新关联。请重新检查这个位置。	保存位置在确认期间已经变化，尚未重新关联。请重新检查这个位置。	The save location changed during confirmation and has not been reconnected. Check this location again.	儲存位置在確認期間已經變化，尚未重新關聯。請重新檢查這個位置。	保存場所は確認中に変更されたため、まだ再接続されていません。この場所をもう一度確認してください。
-保存位置在读取期间已经变化，请重新检查	保存位置在读取期间已经变化，请重新检查	The save location has changed during reading, please check again	儲存位置在讀取期間已經變化，請重新檢查	読み込み中に保存場所が変更されました。もう一度確認してください。
 保存位置对应其他笔记库，请恢复原位置或在存储设置中重新登记	保存位置对应其他笔记库，请恢复原位置或在存储设置中重新登记	The save location corresponds to other note libraries. Please restore the original location or re-register in the storage settings.	儲存位置對應其他筆記庫，請恢復原位置或在儲存設定中重新登記	保存場所は他のノートライブラリに対応します。元の場所に戻すか、ストレージ設定で再登録してください。
 保存位置尚未准备好：{}。可以在设置的存储中选择其他位置。	保存位置尚未准备好：{}。可以在设置的存储中选择其他位置。	The save location is not ready yet: {}. You can choose a different location in the settings' storage.	儲存位置尚未準備好：{}。可以在設定的儲存中選擇其他位置。	保存場所はまだ準備ができていません: {}。設定のストレージ内の別の場所を選択できます。
 保存位置尚未更新：{}	保存位置尚未更新：{}	The save location has not been updated yet: {}	儲存位置尚未更新：{}	保存場所はまだ更新されていません: {}
 保存位置已不在笔记库中，请选择保存位置	保存位置已不在笔记库中，请选择保存位置	The save location is no longer in the note library, please select a save location.	儲存位置已不在筆記庫中，請選擇儲存位置	保存場所はノート ライブラリにありません。保存場所を選択してください。
 保存位置暂时不可用	保存位置暂时不可用	The save location is temporarily unavailable	儲存位置暫時不可用	保存場所は一時的に利用できません
 保存位置暂时不可访问	保存位置暂时不可访问	The save location is temporarily inaccessible	儲存位置暫時無法存取	保存場所に一時的にアクセスできません
-保存位置暂时不可访问，请先连接对应磁盘	保存位置暂时不可访问，请先连接对应磁盘	The save location is temporarily inaccessible. Please connect the corresponding disk first.	儲存位置暫時無法存取，請先連接對應磁碟	保存場所に一時的にアクセスできなくなりました。まず対応するディスクを接続してください。
 保存位置暂时无法访问	保存位置暂时无法访问	The save location is temporarily inaccessible	儲存位置暫時無法存取	保存場所に一時的にアクセスできません
 保存位置暂时无法访问，未能搜索	保存位置暂时无法访问，未能搜索	The save location is temporarily inaccessible and cannot be searched.	儲存位置暫時無法存取，未能搜尋	保存場所に一時的にアクセスできないため、検索できません。
-保存位置未登记	保存位置未登记	The save location is not registered	儲存位置未登記	保存先が登録されていません
 保存位置由存储设置管理	保存位置由存储设置管理	Save location is managed by storage settings	儲存位置由儲存設定管理	保存場所はストレージ設定によって管理されます
 保存位置需要重新关联	保存位置需要重新关联	Save location needs to be reconnected	儲存位置需要重新關聯	保存場所を再接続する必要があります
 保存位置：{}\n\n	保存位置：{}\n\n	Save location: {}\n\n	儲存位置：{}\n\n	保存先：{}\n\n
 保存到	保存到	Save to	儲存到	保存先
-保存名称	保存名称	Saved name	儲存名稱	保存名
+保存名称	保存名称	Save name	儲存名稱	名前を保存
 保存并继续	保存并继续	Save and continue	儲存並繼續	保存して続行
 保存并补做	保存并补做	Save and fill in missing steps	儲存並補做	保存して未完了分を処理
 保留下载的视频	保留下载的视频	Keep downloaded videos	保留下載的影片	ダウンロードした動画を保存しておく
@@ -365,7 +362,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 保留服务	保留服务	Keep service	保留服務	サービスを残す
 保留的视频已不在	保留的视频已不在	The kept video is no longer there	保留的影片已不在	保持していた動画が見つかりません
 修复 AI 服务并补做	修复 AI 服务并补做	Fix the AI service and fill in missing steps	修復 AI 服務並補做	AI サービスを修正して未完了分を処理
-修复方式	修复方式	How to fix it	修復方式	修正方法
 修复服务并补做	修复服务并补做	Fix the service and fill in missing steps	修復服務並補做	サービスを修正して未完了分を処理
 修改接口不能改变此服务的用途，请添加另一用途的服务	修改接口不能改变此服务的用途，请添加另一用途的服务	Modifying the interface cannot change the purpose of this service. Please add a service with another purpose.	修改介面不能改變此服務的用途，請新增另一用途的服務	インターフェイスを変更しても、このサービスの目的を変更することはできません。別の目的のサービスを追加してください。
 修改暂时无法保存，请重试	修改暂时无法保存，请重试	The modification cannot be saved temporarily, please try again	修改暫時無法儲存，請重試	変更を一時的に保存できません。もう一度お試しください。
@@ -382,8 +378,79 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 关于	关于	About	關於	情報
 关于 course2md	关于 course2md	About course2md	關於 course2md	course2mdについて
 关闭	关闭	Close	關閉	閉じる
+密码	密码	Password	密碼	パスワード
+密码 / Password	密码	Password	密碼	パスワード
+密码只发送给 Bilibili 用于这次登录，不会保存。登录前会在浏览器中打开人机验证。	密码只发送给 Bilibili 用于这次登录，不会保存。登录前会在浏览器中打开人机验证。	The password goes only to Bilibili for this login and is not saved. A human check opens in your browser first.	密碼只傳送給 Bilibili 用於這次登入，不會儲存。登入前會在瀏覽器中開啟人機驗證。	パスワードはこのログインのために Bilibili にだけ送信され、保存されません。ログイン前にブラウザで人間確認が開きます。
+将由 yt-dlp 读取 {} 的 Cookie，仅用于访问 YouTube；course2md 不保存这些 Cookie（检查时会短暂写入私有临时文件，结束即删除）。使用账号下载存在被 YouTube 限制或封禁的风险，请适度使用。 / yt-dlp will read {}'s cookies and use them only for YouTube; course2md does not keep them (this check briefly writes them to a private temporary file, deleted when it ends). Downloading with an account risks YouTube restricting or banning it; use it sparingly.	将由 yt-dlp 读取 {} 的 Cookie，仅用于访问 YouTube；course2md 不保存这些 Cookie（检查时会短暂写入私有临时文件，结束即删除）。使用账号下载存在被 YouTube 限制或封禁的风险，请适度使用。	yt-dlp will read {}'s cookies and use them only for YouTube; course2md does not keep them (this check briefly writes them to a private temporary file, deleted when it ends). Downloading with an account risks YouTube restricting or banning it; use it sparingly.	將由 yt-dlp 讀取 {} 的 Cookie，僅用於存取 YouTube；course2md 不儲存這些 Cookie（檢查時會短暫寫入私有暫存檔，結束即刪除）。使用帳號下載有被 YouTube 限制或封鎖的風險，請適度使用。	yt-dlp が {} の Cookie を読み取り、YouTube にのみ使います。course2md は Cookie を保存しません（確認中は非公開の一時ファイルに短時間書き込み、終了時に削除します）。アカウントでのダウンロードは YouTube による制限や停止のおそれがあります。控えめに使ってください。
+尚未连接 YouTube 登录。/ No YouTube session connected.	尚未连接 YouTube 登录。	No YouTube session connected.	尚未連接 YouTube 登入。	YouTube のログインは接続されていません。
+已取消验证	已取消验证	Check cancelled	已取消驗證	確認をキャンセルしました
+已断开 YouTube 登录；浏览器中的登录不受影响。/ YouTube session disconnected; your browser stays signed in.	已断开 YouTube 登录；浏览器中的登录不受影响。	YouTube session disconnected; your browser stays signed in.	已中斷 YouTube 登入；瀏覽器中的登入不受影響。	YouTube のログインを切断しました。ブラウザのログインはそのままです。
+已连接 {} 中的 YouTube 登录。YouTube 视频将使用此登录。 / Connected to the YouTube session in {}. YouTube videos will use it.	已连接 {} 中的 YouTube 登录。YouTube 视频将使用此登录。	Connected to the YouTube session in {}. YouTube videos will use it.	已連接 {} 中的 YouTube 登入。YouTube 影片將使用此登入。	{} の YouTube ログインに接続しました。YouTube の動画で使われます。
+已连接 {} 中的 YouTube 登录。打开 YouTube 视频时会使用它。	已连接 {} 中的 YouTube 登录。打开 YouTube 视频时会使用它。	Connected to the YouTube sign-in in {}. YouTube videos will use it.	已連接 {} 中的 YouTube 登入。開啟 YouTube 影片時會使用它。	{} の YouTube ログインに接続しました。YouTube の動画を開くときに使われます。
+手机号	手机号	Phone number	手機號碼	電話番号
+手机号 / Phone number	手机号	Phone number	手機號碼	電話番号
+手机号、邮箱或用户名	手机号、邮箱或用户名	Phone, email or username	手機號碼、電子郵件或使用者名稱	電話番号、メールアドレスまたはユーザー名
+手机号格式不正确	手机号格式不正确	The phone number is not valid	手機號碼格式不正確	電話番号の形式が正しくありません
+扫码	扫码	QR code	掃碼	QR コード
+找不到 {} 的 Cookie。请确认已安装它，并至少打开过一次。	找不到 {} 的 Cookie。请确认已安装它，并至少打开过一次。	Cannot find {}’s cookies. Make sure it is installed and has been opened at least once.	找不到 {} 的 Cookie。請確認已安裝它，並至少開啟過一次。	{} の Cookie が見つかりません。インストールされていて、一度以上起動したことを確認してください。
+提示：YouTube 要求登录。可运行 course2md --login youtube 使用浏览器里的 YouTube 登录后重试。 / Hint: YouTube asks you to sign in. Run course2md --login youtube to use your browser's YouTube session, then retry.	提示：YouTube 要求登录。可运行 course2md --login youtube 使用浏览器里的 YouTube 登录后重试。	Hint: YouTube asks you to sign in. Run course2md --login youtube to use your browser's YouTube session, then retry.	提示：YouTube 要求登入。可執行 course2md --login youtube 使用瀏覽器裡的 YouTube 登入後重試。	ヒント：YouTube がログインを求めています。course2md --login youtube を実行してブラウザの YouTube ログインを使ってから再試行してください。
+提示：YouTube 要求登录。请在设置的账号中连接浏览器里的 YouTube 登录后重试。 / Hint: YouTube asks you to sign in. Connect your browser's YouTube session in Settings, then retry.	提示：YouTube 要求登录。请在设置的账号中连接浏览器里的 YouTube 登录后重试。	Hint: YouTube asks you to sign in. Connect your browser's YouTube session in Settings, then retry.	提示：YouTube 要求登入。請在設定的帳號中連接瀏覽器裡的 YouTube 登入後重試。	ヒント：YouTube がログインを求めています。設定のアカウントでブラウザの YouTube ログインを接続してから再試行してください。
+提示：若视频需要登录或会员权限，可运行 course2md --login bilibili 登录；已登录时可重新登录。 / Hint: if the video needs a login or membership, run course2md --login bilibili; if already logged in, log in again.	提示：若视频需要登录或会员权限，可运行 course2md --login bilibili 登录；已登录时可重新登录。	Hint: if the video needs a login or membership, run course2md --login bilibili; if already logged in, log in again.	提示：若影片需要登入或會員權限，可執行 course2md --login bilibili 登入；已登入時可重新登入。	ヒント：動画にログインや会員権限が必要な場合は course2md --login bilibili を実行してください。ログイン済みの場合はログインし直してください。
+提示：若视频需要登录或会员权限，请在设置的账号中登录 B 站；已登录时可重新登录。 / Hint: if the video needs a login or membership, sign in to Bilibili in Settings; if already signed in, sign in again.	提示：若视频需要登录或会员权限，请在设置的账号中登录 B 站；已登录时可重新登录。	Hint: if the video needs a login or membership, sign in to Bilibili in Settings; if already signed in, sign in again.	提示：若影片需要登入或會員權限，請在設定的帳號中登入 B 站；已登入時可重新登入。	ヒント：動画にログインや会員権限が必要な場合は、設定のアカウントで Bilibili にログインしてください。ログイン済みの場合はログインし直してください。
+改读字幕「{}」	改读字幕「{}」	Trying the subtitle track “{}” instead	改讀字幕「{}」	代わりに字幕「{}」を読み込みます
+断开未完成，原连接已保留	断开未完成，原连接已保留	Disconnecting did not finish; the connection is kept	中斷未完成，原連接已保留	切断できませんでした。接続はそのままです
+断开连接	断开连接	Disconnect	中斷連接	接続を解除
+无法加密密码，请重试	无法加密密码，请重试	Could not encrypt the password; try again	無法加密密碼，請重試	パスワードを暗号化できませんでした。再試行してください
+无法启动本机验证页面	无法启动本机验证页面	Could not start the check page on this computer	無法啟動本機驗證頁面	このコンピュータで確認ページを開始できませんでした
+无法解密 {} 的 Cookie。若系统询问是否允许访问钥匙串，请选择允许。	无法解密 {} 的 Cookie。若系统询问是否允许访问钥匙串，请选择允许。	Cannot decrypt {}’s cookies. If the system asks to allow keychain access, allow it.	無法解密 {} 的 Cookie。若系統詢問是否允許取用鑰匙圈，請選擇允許。	{} の Cookie を復号できません。キーチェーンへのアクセスを求められたら許可してください。
+无法解密 {} 的 Cookie：Windows 上的新版 Chromium 浏览器不允许其他程序读取。请改用 Firefox。	无法解密 {} 的 Cookie：Windows 上的新版 Chromium 浏览器不允许其他程序读取。请改用 Firefox。	Cannot decrypt {}’s cookies: recent Chromium browsers on Windows do not let other programs read them. Use Firefox instead.	無法解密 {} 的 Cookie：Windows 上的新版 Chromium 瀏覽器不允許其他程式讀取。請改用 Firefox。	{} の Cookie を復号できません。Windows の新しい Chromium 系ブラウザは他のプログラムからの読み取りを許可していません。Firefox を使ってください。
+无法读取 YouTube 登录设置	无法读取 YouTube 登录设置	Cannot read the YouTube login setting	無法讀取 YouTube 登入設定	YouTube のログイン設定を読み込めません
+无法读取 {} 的 Cookie。	无法读取 {} 的 Cookie。	Cannot read {}’s cookies.	無法讀取 {} 的 Cookie。	{} の Cookie を読み込めません。
+无法读取字幕「{}」：{}	无法读取字幕「{}」：{}	Could not read the subtitle track “{}”: {}	無法讀取字幕「{}」：{}	字幕「{}」を読み込めません：{}
+更换浏览器	更换浏览器	Change browser	更換瀏覽器	ブラウザを変更
 最小化	最小化	Minimize	最小化	最小化
 最大化	最大化	Maximize	最大化	最大化
+本地模型目录（默认使用系统缓存）/ Local model directory (default: platform cache)	本地模型目录（默认使用系统缓存）	Local model directory (default: platform cache)	本機模型目錄（預設使用系統快取）	ローカルモデルのディレクトリ（既定はシステムのキャッシュ）
+本机验证页面已停止	本机验证页面已停止	The check page on this computer stopped	本機驗證頁面已停止	このコンピュータの確認ページが停止しました
+检查并连接	检查并连接	Check and connect	檢查並連接	確認して接続
+正在加载验证…	正在加载验证…	Loading the check…	正在載入驗證…	確認を読み込んでいます…
+正在登录	正在登录	Signing in	正在登入	ログインしています
+正在读取浏览器中的登录	正在读取浏览器中的登录	Reading the browser’s sign-in	正在讀取瀏覽器中的登入	ブラウザのログインを読み取っています
+没有找到可读取的浏览器。请安装并登录 Chrome、Edge、Firefox 或 Safari 后重试。	没有找到可读取的浏览器。请安装并登录 Chrome、Edge、Firefox 或 Safari 后重试。	No browser to read was found. Install Chrome, Edge, Firefox or Safari, sign in to YouTube there, then try again.	沒有找到可讀取的瀏覽器。請安裝並登入 Chrome、Edge、Firefox 或 Safari 後重試。	読み取れるブラウザが見つかりません。Chrome、Edge、Firefox または Safari をインストールしてログインしてから再試行してください。
+没有找到可读取的浏览器。请用 --browser 指定，例如 --browser firefox / No browser found; name one with --browser, for example --browser firefox	没有找到可读取的浏览器。请用 --browser 指定，例如 --browser firefox	No browser found; name one with --browser, for example --browser firefox	沒有找到可讀取的瀏覽器。請用 --browser 指定，例如 --browser firefox	読み取れるブラウザが見つかりません。--browser で指定してください（例：--browser firefox）
+浏览器	浏览器	Browser	瀏覽器	ブラウザ
+浏览器个人资料	浏览器个人资料	Browser profile	瀏覽器設定檔	ブラウザのプロファイル
+浏览器未登录	浏览器未登录	Browser signed out	瀏覽器未登入	ブラウザ未ログイン
+清除 YouTube 登录设置失败	清除 YouTube 登录设置失败	Could not remove the YouTube login setting	清除 YouTube 登入設定失敗	YouTube のログイン設定を削除できませんでした
+用账号下载可能让 YouTube 限制或封禁这个账号。请适度使用，或使用不常用的账号。	用账号下载可能让 YouTube 限制或封禁这个账号。请适度使用，或使用不常用的账号。	Downloading with an account may lead YouTube to restrict or ban it. Use it sparingly, or use an account you rarely need.	用帳號下載可能讓 YouTube 限制或封鎖這個帳號。請適度使用，或使用不常用的帳號。	アカウントでダウンロードすると、YouTube がそのアカウントを制限または停止するおそれがあります。控えめに使うか、普段使わないアカウントを使ってください。
+登录	登录	Sign in	登入	ログイン
+登录密钥已过期，请重新登录	登录密钥已过期，请重新登录	The login key expired; sign in again	登入金鑰已過期，請重新登入	ログインキーの期限が切れました。もう一度ログインしてください
+登录方式	登录方式	Sign-in method	登入方式	ログイン方法
+登录（bilibili 扫码、密码或短信；youtube 浏览器登录；ollama 本地服务；codex 订阅），可接视频地址继续转换 / Log in (bilibili QR, password or SMS; youtube browser session; ollama local; codex subscription), optionally then process a video	登录（bilibili 扫码、密码或短信；youtube 浏览器登录；ollama 本地服务；codex 订阅），可接视频地址继续转换	Log in (bilibili QR, password or SMS; youtube browser session; ollama local; codex subscription), optionally then process a video	登入（bilibili 掃碼、密碼或簡訊；youtube 瀏覽器登入；ollama 本機服務；codex 訂閱），可接影片網址繼續轉換	ログイン（bilibili は QR コード・パスワード・SMS、youtube はブラウザのログイン、ollama はローカルサービス、codex はサブスクリプション）。続けて動画URLを指定して変換できます
+短信	短信	SMS	簡訊	SMS
+短信发送次数已达上限，请稍后再试	短信发送次数已达上限，请稍后再试	Too many codes sent; try again later	簡訊傳送次數已達上限，請稍後再試	SMS の送信回数が上限に達しました。しばらくしてから再試行してください
+短信验证码	短信验证码	SMS code	簡訊驗證碼	SMS 認証コード
+短信验证码 / SMS code	短信验证码	SMS code	簡訊驗證碼	SMS 認証コード
+短信验证码不正确	短信验证码不正确	The SMS code is not correct	簡訊驗證碼不正確	SMS 認証コードが正しくありません
+短信验证码已过期，请重新获取	短信验证码已过期，请重新获取	The SMS code expired; get a new one	簡訊驗證碼已過期，請重新取得	SMS 認証コードの期限が切れました。もう一度取得してください
+系统不允许读取 {} 的 Cookie，请检查权限后重试。	系统不允许读取 {} 的 Cookie，请检查权限后重试。	The system does not allow reading {}’s cookies. Check permissions, then try again.	系統不允許讀取 {} 的 Cookie，請檢查權限後重試。	システムが {} の Cookie の読み取りを許可していません。権限を確認してから再試行してください。
+macOS 不允许 course2md 读取 {} 的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开 course2md，然后退出并重新打开 course2md，再试一次。	macOS 不允许 course2md 读取 {} 的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开 course2md，然后退出并重新打开 course2md，再试一次。	macOS does not allow course2md to read {}’s data. Turn on course2md in System Settings › Privacy & Security › Full Disk Access, then quit and reopen course2md and try again.	macOS 不允許 course2md 讀取 {} 的資料。請在「系統設定 › 隱私權與安全性 › 完整磁碟取用權限」中開啟 course2md，然後結束並重新開啟 course2md，再試一次。	macOS が course2md による {} のデータの読み取りを許可していません。「システム設定 › プライバシーとセキュリティ › フルディスクアクセス」で course2md をオンにし、course2md を終了して開き直してから、もう一度お試しください。
+macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开你使用的终端应用（如“终端”），然后退出并重新打开它，再试一次。可运行 open "{}" 打开该设置。	macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开你使用的终端应用（如“终端”），然后退出并重新打开它，再试一次。可运行 open "{}" 打开该设置。	macOS does not allow the terminal to read {}’s data. Turn on the terminal app you use (such as Terminal) in System Settings › Privacy & Security › Full Disk Access, then quit and reopen it and try again. To open that setting, run open "{}".	macOS 不允許終端機讀取 {} 的資料。請在「系統設定 › 隱私權與安全性 › 完整磁碟取用權限」中開啟你使用的終端機 App（如「終端機」），然後結束並重新開啟它，再試一次。可執行 open "{}" 開啟該設定。	macOS がターミナルによる {} のデータの読み取りを許可していません。「システム設定 › プライバシーとセキュリティ › フルディスクアクセス」で使用中のターミナル App（「ターミナル」など）をオンにし、終了して開き直してから、もう一度お試しください。この設定は open "{}" を実行すると開けます。
+打开系统设置	打开系统设置	Open System Settings	打開系統設定	システム設定を開く
+提示：macOS 不允许读取所连接浏览器的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中允许 course2md（命令行则允许所用的终端应用），重新打开后重试。 / Hint: macOS does not allow reading the connected browser's data. Allow course2md (on the command line, your terminal app) in System Settings › Privacy & Security › Full Disk Access, reopen it, then retry.	提示：macOS 不允许读取所连接浏览器的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中允许 course2md（命令行则允许所用的终端应用），重新打开后重试。	Hint: macOS does not allow reading the connected browser's data. Allow course2md (on the command line, your terminal app) in System Settings › Privacy & Security › Full Disk Access, reopen it, then retry.	提示：macOS 不允許讀取所連接瀏覽器的資料。請在「系統設定 › 隱私權與安全性 › 完整磁碟取用權限」中允許 course2md（命令列則允許所用的終端機 App），重新開啟後重試。	ヒント：macOS が接続したブラウザのデータの読み取りを許可していません。「システム設定 › プライバシーとセキュリティ › フルディスクアクセス」で course2md（コマンドラインでは使用中のターミナル App）を許可し、開き直してから再試行してください。
+获取验证码	获取验证码	Get code	取得驗證碼	コードを取得
+获取验证码前会在浏览器中打开人机验证。	获取验证码前会在浏览器中打开人机验证。	A human check opens in your browser before the code is sent.	取得驗證碼前會在瀏覽器中開啟人機驗證。	コードを送信する前に、ブラウザで人間確認が開きます。
+识别后端：coreml（Apple 芯片）、gpu、cpu、npu（Intel）、api（云端）/ Speech backend: coreml (Apple Silicon), gpu, cpu, npu (Intel), api (cloud)	识别后端：coreml（Apple 芯片）、gpu、cpu、npu（Intel）、api（云端）	Speech backend: coreml (Apple silicon), gpu, cpu, npu (Intel), api (cloud)	辨識方式：coreml（Apple 晶片）、gpu、cpu、npu（Intel）、api（雲端）	認識方式：coreml（Apple シリコン）、gpu、cpu、npu（Intel）、api（クラウド）
+该手机号无法用于登录 Bilibili	该手机号无法用于登录 Bilibili	This phone number cannot sign in to Bilibili	此手機號碼無法用於登入 Bilibili	この電話番号では Bilibili にログインできません
+请先获取验证码	请先获取验证码	Get a code first	請先取得驗證碼	先に認証コードを取得してください
+请在浏览器中完成人机验证	请在浏览器中完成人机验证	Complete the human check in your browser	請在瀏覽器中完成人機驗證	ブラウザで人間確認を完了してください
+请在浏览器中完成人机验证（Ctrl+C 取消）：{} / Complete the human check in your browser (Ctrl+C to cancel): {}	请在浏览器中完成人机验证（Ctrl+C 取消）：{}	Complete the human check in your browser (Ctrl+C to cancel): {}	請在瀏覽器中完成人機驗證（Ctrl+C 取消）：{}	ブラウザで人間確認を完了してください（Ctrl+C でキャンセル）：{}
+请填写账号和密码	请填写账号和密码	Enter the account and password	請填寫帳號和密碼	アカウントとパスワードを入力してください
+请完成验证。完成后回到 course2md。	请完成验证。完成后回到 course2md。	Complete the check, then return to course2md.	請完成驗證。完成後回到 course2md。	確認を完了してから course2md に戻ってください。
+读取 Safari 需要在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中允许 course2md。	读取 Safari 需要在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中允许 course2md。	Reading Safari needs course2md allowed in System Settings › Privacy & Security › Full Disk Access.	讀取 Safari 需要在「系統設定 › 隱私權與安全性 › 完整磁碟取用權限」中允許 course2md。	Safari を読み取るには「システム設定 › プライバシーとセキュリティ › フルディスクアクセス」で course2md を許可する必要があります。
+账号已确认，但保存登录状态失败。请检查本地权限后重试。	账号已确认，但保存登录状态失败。请检查本地权限后重试。	The account was confirmed, but the login could not be saved. Check local permissions, then try again.	帳號已確認，但儲存登入狀態失敗。請檢查本機權限後重試。	アカウントは確認されましたが、ログイン状態を保存できませんでした。ローカルの権限を確認してから再試行してください。
+账号或密码错误	账号或密码错误	Wrong account or password	帳號或密碼錯誤	アカウントまたはパスワードが正しくありません
+账号（手机号、邮箱或用户名）/ Account (phone, email or username)	账号（手机号、邮箱或用户名）	Account (phone, email or username)	帳號（手機號碼、電子郵件或使用者名稱）	アカウント（電話番号、メールアドレスまたはユーザー名）
 还原	还原	Restore	還原	元に戻す
 关闭 / disabled	关闭	Disabled	關閉	オフ
 关闭 AI 校对并保留凭据 / Disable AI proofreading and keep credentials	关闭 AI 校对并保留凭据	Disable AI proofreading and keep credentials	關閉 AI 校對並保留憑證	AI 校正をオフにして資格情報を保持する
@@ -402,13 +469,11 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 写 checkpoint {} / Failed to write checkpoint {}	写 checkpoint {}	Failed to write checkpoint {}	寫 checkpoint {}	checkpoint {} の書き込みに失敗しました
 写 {} / Failed to write {}	写 {}	Failed to write {}	寫 {}	{} の書き込みに失敗しました
 准备 Apple 识别模型	准备 Apple 识别模型	Prepare Apple speech model	準備 Apple 辨識模型	Apple 音声認識モデルを準備
-准备中	准备中	In preparation	準備中	準備中
 准备失败	准备失败	Preparation failed	準備失敗	準備に失敗しました
 准备就绪	准备就绪	Ready	準備就緒	準備完了
 准备已暂停	准备已暂停	Preparation is paused	準備已暫停	準備は一時停止中です
 准备日志	准备日志	Preparation log	準備日誌	準備ログ
 准备未完成	准备未完成	Preparation not completed	準備未完成	準備が完了していません
-准备未完成，原因见模型详情	准备未完成，原因见模型详情	Preparation is not complete. Please see the model details for the reason.	準備未完成，原因見模型詳情	準備が完了していません。その理由はモデル詳細をご覧ください。
 准备识别模型	准备识别模型	Prepare speech model	準備辨識模型	音声認識モデルを準備
 减少动态效果	减少动态效果	Reduce motion	減少動態效果	動きを減らす
 凭据	凭据	Credentials	憑證	資格情報
@@ -419,7 +484,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 分组展开状态尚未保存：{}	分组展开状态尚未保存：{}	Group expansion status has not been saved: {}	分組展開狀態尚未儲存：{}	グループ展開ステータスが保存されていません: {}
 分集信息补充失败：{error:#}	分集信息补充失败：{error:#}	Failed to supplement episode information: {error:#}	分集資訊補充失敗：{error:#}	エピソード情報を補足できませんでした: {error:#}
 列表	列表	List	列表	リスト
-创建 checkpoint 目录 {} / Failed to create checkpoint directory {}	创建 checkpoint 目录 {}	Failed to create checkpoint directory {}	建立 checkpoint 目錄 {}	チェックポイント ディレクトリ {} の作成に失敗しました
 创建文件夹	创建文件夹	Create folder	建立資料夾	フォルダーの作成
 创建目录 {} / Failed to create directory {}	创建目录 {}	Failed to create directory {}	建立目錄 {}	ディレクトリ {} の作成に失敗しました
 删除	删除	Delete	刪除	削除
@@ -438,7 +502,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 加载识别模型	加载识别模型	Loading speech model	載入語音辨識模型	音声認識モデルを読み込み中
 加载识别模型（首次可能需要下载）/ Loading speech model (first use may download files)	加载识别模型（首次可能需要下载）/ Loading speech model (first use may download files)	Loading speech model (first use may download files)	載入辨識模型（首次可能需要下載）/ Loading speech model (first use may download files)	音声認識モデルを読み込み中（初回はファイルのダウンロードが必要な場合があります）
 匹配截图 {} / {}	匹配截图 {} / {}	Matching screenshots {} / {}	匹配截圖 {} / {}	一致するスクリーンショット {} / {}
-占用空间	占用空间	Disk usage	佔用空間	使用容量
 占用空间 {}	占用空间 {}	Uses {}	佔用空間 {}	使用容量 {}
 卡片	卡片	Cards	卡片	カード
 原任务仍在处理，请先暂停并等候当前步骤结束	原任务仍在处理，请先暂停并等候当前步骤结束	The original task is still being processed, please pause and wait for the current step to end.	原任務仍在處理，請先暫停並等候目前步驟結束	元のタスクはまだ処理中です。一時停止して、現在のステップが終了するまでお待ちください。
@@ -450,11 +513,9 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 原保存位置	原保存位置	Original save location	原儲存位置	元の保存場所
 原始记录备份未完成，尚未重建	原始记录备份未完成，尚未重建	The original record backup is not completed and has not been rebuilt.	原始記錄備份未完成，尚未重建	元のレコードのバックアップは完了しておらず、再構築されていません。
 原字幕无法重新读取	原字幕无法重新读取	The original subtitles cannot be reread	原字幕無法重新讀取	元の字幕を再度読み取れません
-原文件已保留，这些设置已重置	原文件已保留，这些设置已重置	The original file was kept; these settings were reset.	原檔案已保留，這些設定已重設	元のファイルは保持され、これらの設定はリセットされました
 原文进 raw 溯源	原文进 raw 溯源	Keep the original text in raw for traceability	原文進 raw 溯源	原文を raw に残して追跡可能にする
 原来选择的字幕无法读取，请重新选择文字来源	原来选择的字幕无法读取，请重新选择文字来源	The originally selected subtitles cannot be read, please select a new text source.	原來選擇的字幕無法讀取，請重新選擇文字來源	元々選択されていた字幕は読めません。新しいテキスト ソースを選択してください。
 原生运行于 Apple 芯片	原生运行于 Apple 芯片	Runs natively on Apple silicon	原生執行於 Apple 晶片	Appleシリコン上でネイティブに動作
-原笔记库在上次移动后发生变化，尚未切换位置。请保留这份副本，并重新选择空文件夹移动。	原笔记库在上次移动后发生变化，尚未切换位置。请保留这份副本，并重新选择空文件夹移动。	The original note library has changed since the last move and has not yet switched locations. Please keep this copy and select an empty folder again to move.	原筆記庫在上次移動後發生變化，尚未切換位置。請保留這份副本，並重新選擇空資料夾移動。	元のノート ライブラリは最後の移動以降に変更されており、まだ場所は切り替わっていません。このコピーを保管し、空のフォルダーを再度選択して移動してください。
 原笔记库在复制期间发生变化，尚未切换保存位置	原笔记库在复制期间发生变化，尚未切换保存位置	The original note library changed during copying, and the save location has not been switched yet.	原筆記庫在複製期間發生變化，尚未切換儲存位置	コピー中に元のノートライブラリが変更され、保存場所はまだ切り替えられていません。
 原笔记库无法访问，请重新连接这个保存位置	原笔记库无法访问，请重新连接这个保存位置	The original note library cannot be accessed, please reconnect to this save location.	原筆記庫無法存取，請重新連接這個儲存位置	元のノート ライブラリにアクセスできません。この保存場所に再接続してください。
 原笔记版本需要绝对路径 / Base version requires an absolute path	原笔记版本需要绝对路径	Base version requires an absolute path	原筆記版本需要絕對路徑	元のノートのバージョンには絶対パスが必要です
@@ -466,9 +527,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 原视频已移动或无法读取，请重新选择视频	原视频已移动或无法读取，请重新选择视频	The original video has been moved or cannot be read, please select the video again.	原影片已移動或無法讀取，請重新選擇影片	元の動画が移動されているか、読み込むことができません。動画を再度選択してください。
 原记录缺少文件名	原记录缺少文件名	The original record is missing a file name	原記錄缺少檔名	元のレコードにはファイル名がありません
 参数无效：{}	参数无效：{}	Invalid arguments: {}	參數無效：{}	無効なパラメータ: {}
-参数：	参数：	Parameters:	參數：	パラメータ:
-參數：	參數：	Parameters:	參數：	パラメータ:
-发布工作进程中断 / Publish worker interrupted	发布工作进程中断	Publish worker interrupted	發佈工作程序中斷	パブリッシングワーカープロセスが中断されました
+参数：	参数：	Arguments:	參數：	引数:
 发现 {} 项必需依赖或配置问题；请按上方提示修复	发现 {} 项必需依赖或配置问题；请按上方提示修复	Fix the {} required-tool or configuration issues listed above	發現 {} 項必需依賴或設定問題；請依上方提示修復	上記の必須ツールまたは設定の問題 {} 件を修正してください
 发送反馈	发送反馈	Send feedback	傳送意見回饋	フィードバックを送信する
 发送文字和截图 / Send text and slide images	发送文字和截图	Send text and slide images	傳送文字和截圖	テキストとスクリーンショットを送信する
@@ -480,26 +539,22 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 取消读取字幕	取消读取字幕	Cancel reading subtitles	取消讀取字幕	字幕の読み取りをキャンセル
 取消读取视频	取消读取视频	Cancel reading video	取消讀取影片	動画の読み取りをキャンセルします
 取消转换	取消转换	Cancel conversion	取消轉換	変換をキャンセルする
-取消重新关联	取消重新关联	Cancel reconnecting	取消重新關聯	再接続をキャンセル
 取消重新定位	取消重新定位	Cancel relocation	取消重新定位	場所の再指定をキャンセル
 另存一份摘要（Markdown）到此目录 / Also save each summary as Markdown in this directory	另存一份摘要（Markdown）到此目录	Also save each summary as Markdown in this directory	另存一份摘要（Markdown）到此目錄	各要約を Markdown としてこのディレクトリにも保存
 另有 {} 个位置未纳入搜索	另有 {} 个位置未纳入搜索	{} more locations were not included in the search	另有 {} 個位置未納入搜尋	ほかに {} か所が検索の対象外です
 另有 {} 个条目无法确认	另有 {} 个条目无法确认	There are {} more entries that cannot be confirmed	另有 {} 個條目無法確認	確認できないエントリがさらに {} 件あります
 另有 {} 份笔记无法读取。\n	另有 {} 份笔记无法读取。\n	{} more notes could not be read.\n	另有 {} 份筆記無法讀取。\n	ほかに {} 件のノートを読み込めませんでした。\n
-只回复两个字符：ok	只回复两个字符：ok	Reply with only two characters: ok	只回覆兩個字元：ok	2 文字だけ返信してください: ok
 只想用视频自带字幕？按 Esc 退出，加 --transcript-source subtitle 重新运行。 / Subtitles only? Press Esc and rerun with --transcript-source subtitle.	只想用视频自带字幕？按 Esc 退出，加 --transcript-source subtitle 重新运行。	Subtitles only? Press Esc and rerun with --transcript-source subtitle.	只想用影片自帶字幕？按 Esc 退出，加 --transcript-source subtitle 重新執行。	動画付属の字幕だけを使いたい場合は、Esc で終了し、--transcript-source subtitle を付けて再実行してください。
 只看画面的某块区域判断翻页，格式：左%,上%-右%,下% / Detect slide changes in a region: left%,top%-right%,bottom%	只看画面的某块区域判断翻页，格式：左%,上%-右%,下%	Detect slide changes in a region: left%,top%-right%,bottom%	只看畫面的某塊區域判斷翻頁，格式：左%,上%-右%,下%	画面の特定の領域だけを見てページ送りを判定します。形式：左%,上%-右%,下%
 可用	可用	Available	可用	利用可能
 可用识别方式	可用识别方式	Available recognition methods	可用辨識方式	利用可能な認識方式
 可离线播放，会占用更多磁盘空间	可离线播放，会占用更多磁盘空间	Plays offline; uses more disk space	可離線播放，會佔用更多磁碟空間	オフラインで再生できますが、より多くのディスク容量を消費します
-可返回第一步更换引擎	可返回第一步更换引擎	You can go back to the first step to change the engine.	可返回第一步更換引擎	最初のステップに戻ってエンジンを変更できます。
-可返回第一步更换模型	可返回第一步更换模型	You can return to the first step to change the model	可返回第一步更換模型	最初のステップに戻ってモデルを変更できます
 可选配置：course2md config init	可选配置：course2md config init	Optional setup: course2md config init	可選設定：course2md config init	任意の設定：course2md config init
 同时导出	同时导出	Also export	同時匯出	同時に書き出す
 同时清除云端语音识别密钥 / Also clear the cloud speech API key	同时清除云端语音识别密钥	Also clear the cloud speech API key	同時清除雲端語音辨識金鑰	クラウド音声認識キーもクリア
 名称	名称	Name	名稱	名前
 名称尚未恢复：{}	名称尚未恢复：{}	Name not yet restored: {}	名稱尚未恢復：{}	名前はまだ復元されていません: {}
-后台文件校验中断 / Background file check interrupted	后台文件校验中断	Background file check interrupted	背景檔案校驗中斷	バックグラウンドでのファイル検証が中断されました
+后台工作中断 / Background work was interrupted	后台工作中断	Background work was interrupted	背景工作中斷	バックグラウンド処理が中断されました
 后续任务记录缺失，请先恢复任务记录	后续任务记录缺失，请先恢复任务记录	Subsequent task records are missing, please restore the task records first	後續任務記錄缺失，請先恢復任務記錄	後続のタスク レコードが欠落しています。最初にタスク レコードを復元してください。
 含 {} 张截图	含 {} 张截图	Contains {} screenshots	含 {} 張截圖	スクリーンショット {} 枚を含む
 含 1 张截图	含 1 张截图	Contains 1 screenshot	含 1 張截圖	スクリーンショット 1 枚を含む
@@ -507,7 +562,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 启动 {} 失败	启动 {} 失败	Failed to start {}	啟動 {} 失敗	{} の起動に失敗しました
 呃	呃	Uh	呃	えー
 命令行 Codex 的登录已失效，请先在 Codex 中重新登录再导入，或改用浏览器授权	命令行 Codex 的登录已失效，请先在 Codex 中重新登录再导入，或改用浏览器授权	The command line Codex login has expired. Please log in again in Codex before importing, or use browser authorization instead.	命令列 Codex 的登入已失效，請先在 Codex 中重新登入再匯入，或改用瀏覽器授權	コマンド ライン Codex ログインの有効期限が切れました。インポートする前に Codex に再度ログインするか、代わりにブラウザ認証を使用してください。
-命令：	命令：	Command:	命令：	コマンド:
+命令：	命令：	Command:	命令：	コマンド：
 哦	哦	Oh	哦	おお
 唉	唉	Alas	唉	はあ
 唔	唔	Hmm	唔	うーん
@@ -529,23 +584,21 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 备份已删除，但列表尚未更新，请重启应用后检查	备份已删除，但列表尚未更新，请重启应用后检查	The backup has been deleted, but the list has not been updated, please restart the application and check	備份已刪除，但清單尚未更新，請重新啟動應用程式後檢查	バックアップは削除されましたが、リストは更新されていません。アプリケーションを再起動して確認してください。
 备份并重建任务记录	备份并重建任务记录	Back up and rebuild task records	備份並重建任務記錄	バックアップしてタスク記録を再構築
 复制与导出	复制与导出	Copy and export	複製與匯出	コピーとエクスポート
-复制内容未通过校验，尚未切换笔记库：{}	复制内容未通过校验，尚未切换笔记库：{}	The copied content failed the verification and the note library has not been switched yet: {}	複製內容未通過校驗，尚未切換筆記庫：{}	コピーされたコンテンツは検証に失敗し、ノート ライブラリはまだ切り替えられていません: {}
 复制安装命令	复制安装命令	Copy install command	複製安裝指令	インストールコマンドをコピー
 复制 Homebrew 安装命令	复制 Homebrew 安装命令	Copy Homebrew install command	複製 Homebrew 安裝指令	Homebrew のインストールコマンドをコピー
-复制或导出整份笔记	复制或导出整份笔记	Copy or export an entire note	複製或匯出整份筆記	ノート全体をコピーまたはエクスポートする
 复制整份笔记 · Markdown 文本	复制整份笔记 · Markdown 文本	Copy entire note · Markdown text	複製整份筆記 · Markdown 文字	ノート全体をコピー · Markdown テキスト
 复制整份笔记 · 纯文本	复制整份笔记 · 纯文本	Copy entire note · Plain text	複製整份筆記 · 純文字	ノート全体をコピー · プレーンテキスト
 外观	外观	Appearance	外觀	外観
 外观模式	外观模式	Appearance mode	外觀模式	外観モード
 外部处理	外部处理	External processing	外部處理	外部処理
 多模态对话（如 GPT-4o 音频）	多模态对话（如 GPT-4o 音频）	Multimodal conversations (e.g. GPT-4o audio)	多模態對話（如 GPT-4o 音訊）	マルチモーダルな会話 (例: GPT-4o オーディオ)
+大小未知 / size unknown	大小未知	size unknown	大小未知	サイズ不明
 字幕	字幕	Subtitles	字幕	字幕
 字幕与识别	字幕与识别	Subtitles and transcription	字幕與辨識	字幕と音声認識
 字幕列表为空，请重新读取字幕 / Subtitle list is empty; probe subtitles again	字幕列表为空，请重新读取字幕	Subtitle list is empty; probe subtitles again	字幕列表為空，請重新讀取字幕	字幕リストが空です。もう一度字幕を読み取ってください。
 字幕文件超过 32 MB，请选择较小的 SRT 或 VTT 文件 / Subtitle file exceeds 32 MB; choose a smaller SRT or VTT file	字幕文件超过 32 MB，请选择较小的 SRT 或 VTT 文件	Subtitle file exceeds 32 MB; choose a smaller SRT or VTT file	字幕檔案超過 32 MB，請選擇較小的 SRT 或 VTT 檔案	字幕ファイルが 32 MB を超えています。より小さい SRT または VTT ファイルを選択してください
 字幕时间区间无效，已跳过 / Skipped subtitle with invalid timestamps	字幕时间区间无效，已跳过	Skipped subtitle with invalid timestamps	字幕時間區間無效，已跳過	字幕の時間範囲が無効なため、スキップしました
 字幕时间无效 / Invalid subtitle timestamps	字幕时间无效	Invalid subtitle timestamps	字幕時間無效	字幕時間が無効です
-字幕未读取成功	字幕未读取成功	Subtitles could not be read	字幕未讀取成功	字幕を読み取れませんでした
 字幕缓存路径无法编码	字幕缓存路径无法编码	Subtitle cache path cannot be encoded	字幕快取路徑無法編碼	字幕キャッシュパスをエンコードできません
 字幕语言	字幕语言	Subtitle language	字幕語言	字幕言語
 字幕读取意外中断	字幕读取意外中断	Subtitle reading unexpectedly interrupted	字幕讀取意外中斷	字幕の読み取りが予期せず中断されました
@@ -556,7 +609,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 字幕链接暂时无法访问，请重新读取字幕，或选择其他文字来源。	字幕链接暂时无法访问，请重新读取字幕，或选择其他文字来源。	The subtitle link is temporarily inaccessible. Please read the subtitles again or choose another text source.	字幕連結暫時無法存取，請重新讀取字幕，或選擇其他文字來源。	字幕リンクに一時的にアクセスできません。字幕をもう一度読み込むか、別のテキストソースを選択してください。
 字幕需要登录，或改用语音识别	字幕需要登录，或改用语音识别	Subtitles require sign-in, or use speech recognition instead	字幕需要登入，或改用語音辨識	字幕にはログインが必要です。または音声認識を使用してください
 存储	存储	Storage	儲存	ストレージ
-安装 llama.cpp，确保可在终端直接运行 llama-server，然后重新打开应用	安装 llama.cpp，确保可在终端直接运行 llama-server，然后重新打开应用	Install llama.cpp, make sure you can run llama-server directly in the terminal, and then reopen the application	安裝 llama.cpp，確保可在終端直接執行 llama-server，然後重新開啟應用	llama.cpp をインストールし、ターミナルで llama-server を直接実行できることを確認してから、アプリを再度開いてください
 完成	完成	Done	完成	完了
 完成状态尚未保存：{}。已发布的笔记仍保留。	完成状态尚未保存：{}。已发布的笔记仍保留。	Completion status has not been saved: {}. Published notes remain.	完成狀態尚未儲存：{}。已發布的筆記仍保留。	完了ステータスは保存されていません: {}。公開されたノートは残ります。
 完整的 safetensors 权重文件 / a complete safetensors weight file	完整的 safetensors 权重文件	a complete safetensors weight file	完整的 safetensors 權重檔案	完全な safetensors 重みファイル
@@ -601,7 +653,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 尚未登录 Codex。/ No Codex login saved.	尚未登录 Codex。/ No Codex login saved.	No Codex login saved.	尚未登入 Codex。/ No Codex login saved.	Codex にまだログインしていません。
 尚未设置	尚未设置	Not set yet	尚未設定	まだ設定されていません
 尚未选择文字来源	尚未选择文字来源	No text source selected yet	尚未選擇文字來源	テキストソースがまだ選択されていません
-尚未重新关联：{}	尚未重新关联：{}	Not reconnected yet: {}	尚未重新關聯：{}	まだ再接続されていません: {}
 尚未重新定位：{}	尚未重新定位：{}	Not relocated yet: {}	尚未重新定位：{}	まだ場所を再指定していません: {}
 尚未验证	尚未验证	Not verified yet	尚未驗證	まだ検証されていません
 就绪 / Ready	就绪	Ready	就緒	準備完了
@@ -612,7 +663,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已下载	已下载	Downloaded	已下載	ダウンロード済み
 已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。	已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。	Inputs and tasks have been restored from backup. Unable to confirm the last operation, the unfinished task has been suspended.	已從備份恢復輸入和任務。無法確認最後一次操作，未完成任務已暫停。	入力とタスクはバックアップから復元されました。最後の操作を確認できず、未完了のタスクは中断されました。
 已使用环境变量中的密钥，点击保存后生效	已使用环境变量中的密钥，点击保存后生效	The key in the environment variable has been used and will take effect after clicking Save.	已使用環境變數中的金鑰，點選儲存後生效	環境変数のキーが使用されており、[保存] をクリックすると有効になります。
-已保存	已保存	Saved	已儲存	保存済み
 已保存 {} / {} 张截图	已保存 {} / {} 张截图	Screenshots saved: {} / {}	已儲存 {} / {} 張截圖	{} / {} 枚のスクリーンショットを保存しました
 已保存密钥，留空则保留	已保存密钥，留空则保留	Key saved; leave blank to keep it	已儲存金鑰，留空則保留	キーは保存されました。保持するには空白のままにしておきます
 已保存登录信息	已保存登录信息	Login information saved	已儲存登入資訊	ログイン情報が保存されました
@@ -624,7 +674,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已保存的服务请求记录已损坏；为避免重复扣费，没有重新发送 / A saved service request record is damaged; nothing was resent to avoid duplicate charges	已保存的服务请求记录已损坏；为避免重复扣费，没有重新发送	A saved service request record is damaged; nothing was resent to avoid duplicate charges	已儲存的服務請求記錄已損壞；為避免重複扣費，沒有重新傳送	保存されたサービスリクエストの記録が破損しています。重複課金を避けるため、再送信していません。
 已保存的视频无法校验；需要重新下载才能继续 / Cached video cannot be verified; downloading is required	已保存的视频无法校验；需要重新下载才能继续	Cached video cannot be verified; downloading is required	已儲存的影片無法校驗；需要重新下載才能繼續	保存された動画は検証できません。続行するには、再度ダウンロードする必要があります。
 已保存进度，等待下次继续 / Progress saved; waiting to continue	已保存进度，等待下次继续	Progress saved; waiting to continue	已儲存進度，等待下次繼續	進行状況が保存されました。次回の続行を待っています
-已保留材料，结果记录尚未确认：{}	已保留材料，结果记录尚未确认：{}	Materials kept; result record not yet confirmed: {}	已保留材料，結果記錄尚未確認：{}	素材は保持されています。結果の記録はまだ確認されていません: {}
 已保留正文	已保留正文	Text has been retained	已保留正文	テキストは保持されています
 已修改：{}	已修改：{}	Modified: {}	已修改：{}	変更: {}
 已停止	已停止	Stopped	已停止	停止しました
@@ -632,7 +681,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已关闭 AI 校对并重置 LLM 配置。/ AI proofreading disabled and LLM settings reset.	已关闭 AI 校对并重置 LLM 配置。/ AI proofreading disabled and LLM settings reset.	AI proofreading disabled and LLM settings reset.	已關閉 AI 校對並重設 LLM 設定。/ AI proofreading disabled and LLM settings reset.	AI 校正を無効にし、LLM 設定をリセットしました。
 已关闭截图辅助校对（本地模型通常不支持图片输入）。/ Image-assisted proofreading disabled (local models usually do not accept images).	已关闭截图辅助校对（本地模型通常不支持图片输入）。/ Image-assisted proofreading disabled (local models usually do not accept images).	Image-assisted proofreading disabled (local models usually do not accept images).	已關閉截圖輔助校對（本機模型通常不支援圖片輸入）。/ Image-assisted proofreading disabled (local models usually do not accept images).	スクリーンショットによる校正補助を無効にしました（ローカルモデルは通常、画像入力に対応していません）。
 已准备完成	已准备完成	Ready	已準備完成	準備が完了しました
-已删除此服务	已删除此服务	This service has been deleted	已刪除此服務	このサービスは削除されました
 已删除的文件夹	已删除的文件夹	Deleted folder	已刪除的資料夾	削除されたフォルダー
 已发布笔记与任务身份不匹配，原文件已保留	已发布笔记与任务身份不匹配，原文件已保留	The published notes do not match the task identity, and the original file has been retained.	已發布筆記與任務身分不匹配，原檔案已保留	公開されたノートはタスク ID と一致せず、元のファイルは保持されています。
 已取消	已取消	Cancelled	已取消	キャンセルしました
@@ -649,7 +697,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已取消读取	已取消读取	Read cancelled	已取消讀取	読み取りがキャンセルされました
 已取消读取字幕 / Subtitle reading cancelled	已取消读取字幕	Subtitle reading cancelled	已取消讀取字幕	字幕の読み取りがキャンセルされました
 已取消读取文件 / File reading cancelled	已取消读取文件	File reading cancelled	已取消讀取檔案	ファイルの読み込みがキャンセルされました
-已取消重新关联	已取消重新关联	Reconnecting cancelled	已取消重新關聯	再接続をキャンセルしました
 已取消重新定位	已取消重新定位	Relocation cancelled	已取消重新定位	場所の再指定をキャンセルしました
 已复制 Markdown 文本	已复制 Markdown 文本	Markdown text copied	已複製 Markdown 文字	Markdown テキストをコピーしました
 已复制纯文本	已复制纯文本	Plain text copied	已複製純文字	プレーンテキストがコピーされました
@@ -662,18 +709,13 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已就绪	已就绪	Ready	已就緒	準備完了
 已就绪 / Ready	已就绪	Ready	已就緒	準備完了
 已恢复最近一次可用的设置，原文件已保留	已恢复最近一次可用的设置，原文件已保留	The last available settings have been restored and the original files have been retained.	已恢復最近一次可用的設定，原檔案已保留	最後に利用可能な設定が復元され、元のファイルが保持されています。
-已恢复未保存的修改	已恢复未保存的修改	Unsaved changes restored	已恢復未儲存的修改	保存されていない変更が復元されました
 已扫码，请在手机上确认登录	已扫码，请在手机上确认登录	The code has been scanned, please confirm login on your mobile phone	已掃碼，請在手機上確認登入	コードがスキャンされました。携帯電話でのログインを確認してください。
-已扫码，请在手机上确认登录。/ Code scanned; confirm the login on your phone.	已扫码，请在手机上确认登录。/ Code scanned; confirm the login on your phone.	The code has been scanned, please confirm login on your mobile phone. / Code scanned; confirm the login on your phone.	已掃碼，請在手機上確認登入。/ Code scanned; confirm the login on your phone.	コードがスキャンされました。携帯電話でのログインを確認してください。 / コードがスキャンされました。携帯電話でログインを確認します。
+已扫码，请在手机上确认登录。/ Code scanned; confirm the login on your phone.	已扫码，请在手机上确认登录。	Code scanned; confirm the login on your phone.	已掃碼，請在手機上確認登入。	コードがスキャンされました。携帯電話でログインを確認してください。
 已找到	已找到	Found	已找到	見つかりました
 已找到 {} 张候选截图 / Found {} candidate slides	已找到 {} 张候选截图	Found {} candidate slides	已找到 {} 張候選截圖	{} 枚の候補スクリーンショットが見つかりました
-已找回上次未生效的应用设置，可以重试保存；当前仍使用原来的有效选项	已找回上次未生效的应用设置，可以重试保存；当前仍使用原来的有效选项	The application settings that did not take effect last time have been retrieved. You can try saving again; the original valid options are still used.	已找回上次未生效的應用程式設定，可以重試儲存；目前仍使用原來的有效選項	前回有効にならなかったアプリケーション設定が取得されました。もう一度保存してみてください。元の有効なオプションは引き続き使用されます。
-已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项	已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项	The last setting changes that did not take effect have been retrieved. You can try saving again; the original valid options are still used.	已找回上次未生效的設定變更，可以重試儲存；目前仍使用原來的有效選項	有効にならなかった最後の設定変更が取得されました。もう一度保存してみてください。元の有効なオプションは引き続き使用されます。
 已把 {} 个视频加入队列	已把 {} 个视频加入队列	{} videos have been queued	已把 {} 個影片加入佇列	{} 本の動画をキューに追加しました
 已收到回应，但服务未接受这项测试请求	已收到回应，但服务未接受这项测试请求	Response received, but the test request was not accepted by the service	已收到回應，但服務未接受這項測試請求	応答を受信しましたが、テスト要求はサービスによって受け入れられませんでした
 已暂停	已暂停	Paused	已暫停	一時停止中
-已暂存，点击「应用」后生效	已暂存，点击「应用」后生效	Staged. Applies after you click Apply.	已暫存，點擊「套用」後生效	一時保存しました。「適用」をクリックすると反映されます
-已更新默认服务	已更新默认服务	Default services updated	已更新預設服務	デフォルトのサービスが更新されました
 已有后续处理任务	已有后续处理任务	There are follow-up processing tasks	已有後續處理任務	フォローアップ処理タスクがあります
 已有摘要的格式不完整，保留原文 / Existing summary markup is incomplete; original text kept	已有摘要的格式不完整，保留原文	Existing summary markup is incomplete; original text kept	已有摘要的格式不完整，保留原文	既存の要約の形式が不完全です。元のテキストを保持します
 已有相同任务，未重复加入	已有相同任务，未重复加入	This task is already in the queue.	已有相同任務，未重複加入	このタスクはすでにキューにあります。
@@ -703,7 +745,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已退出首次使用向导 / Exited the first-run wizard	已退出首次使用向导	Exited the first-run wizard	已退出首次使用嚮導	初回ウィザードを終了しました
 已选的 Apple 识别方式未完成；任务参数和进度已保留 / Selected Apple transcription failed; task settings retained	已选的 Apple 识别方式未完成；任务参数和进度已保留	Selected Apple transcription failed; task settings retained	已選的 Apple 辨識方式未完成；任務參數和進度已保留	選択した Apple の認識方法が完了しませんでした。タスクの設定と進行状況は保持されています
 已重建 {} 项任务记录，未启动处理。原始记录保存在 {}。{}	已重建 {} 项任务记录，未启动处理。原始记录保存在 {}。{}	{} task records have been rebuilt and processing has not been started. Original records are kept at {}. {}	已重建 {} 項任務記錄，未啟動處理。原始記錄儲存在 {}。{}	{} 件のタスク記録を再構築しました。処理は開始していません。元の記録は {} に保存されています。{}
-已重新关联「{}」	已重新关联「{}」	"{}" has been reconnected	已重新關聯「{}」	「{}」を再接続しました
 已重新定位到 {}	已重新定位到 {}	Relocated to {}	已重新定位到 {}	場所を {} に再指定しました
 已重新开始整理文件夹，原损坏文件已另存	已重新开始整理文件夹，原损坏文件已另存	Folder organization restarted; the original damaged file was saved separately.	已重新開始整理資料夾，原損壞檔案已另存	フォルダーの整理を再開しました。元の破損ファイルは別に保存されています。
 带图时系统提示说明截图用途	带图时系统提示说明截图用途	With images, the system prompt explains what the screenshots are for	帶圖時系統提示說明截圖用途	画像付きの場合、システムプロンプトでスクリーンショットの用途を説明
@@ -714,24 +755,20 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 平台要求登录后读取字幕，请登录对应账号后重试。	平台要求登录后读取字幕，请登录对应账号后重试。	The platform requires logging in to read subtitles. Please log in to the corresponding account and try again.	平台要求登入後讀取字幕，請登入對應帳號後重試。	このプラットフォームでは、字幕を読むためにログインする必要があります。対応するアカウントにログインして、もう一度お試しください。
 应用	应用	Apply	套用	適用
 应用偏好	应用偏好	Application preferences	應用程式偏好設定	アプリケーションの設定
-应用文字大小	应用文字大小	App text size	應用程式文字大小	アプリの文字サイズ
 应用校对规则	应用校对规则	Apply proofreading rules	應用校對規則	校正ルールを適用する
-应用模型选择	应用模型选择	Apply model selection	應用模型選擇	モデル選択を適用する
 开启 / enabled	开启	enabled	開啟	有効
 开启后转录文字会发送到所选 AI 服务	开启后转录文字会发送到所选 AI 服务	When turned on, the transcribed text will be sent to the selected AI service	開啟後轉錄文字會傳送到所選 AI 服務	オンにすると、文字起こしされたテキストが選択した AI サービスに送信されます
-开启校对 / Enable transcript polish: course2md llm setup	开启校对	Enable transcript polish: course2md llm setup	開啟校對	校正をオンにする
+开启校对 / Enable transcript polish: course2md llm setup	开启校对：course2md llm setup	Enable transcript polish: course2md llm setup	開啟校對：course2md llm setup	校正をオンにする：course2md llm setup
 开始使用	开始使用	Get started	開始使用	始めましょう
 开始处理视频… / Processing your video…	开始处理视频…	Processing your video…	開始處理影片…	動画の処理を開始します…
 开始补做	开始补做	Start reprocessing	開始補做	再処理を開始
 开始转换	开始转换	Start conversion	開始轉換	変換を開始
 开源许可	开源许可	Open source licenses	開放原始碼授權	オープンソースライセンス
-引数：	引数：	Arguments:	引數：	引数:
 当前 LLM 配置不是 Ollama，未做改动。/ The current LLM configuration is not Ollama; nothing changed.	当前 LLM 配置不是 Ollama，未做改动。/ The current LLM configuration is not Ollama; nothing changed.	The current LLM configuration is not Ollama; nothing changed.	目前 LLM 設定不是 Ollama，未做改動。/ The current LLM configuration is not Ollama; nothing changed.	現在の LLM 設定は Ollama ではないため、変更しませんでした。
 当前 llama.cpp 版本过旧，不支持此显卡设置，请升级后重试 / This llama.cpp is too old for this GPU setting; upgrade and retry	当前 llama.cpp 版本过旧，不支持此显卡设置，请升级后重试	This llama.cpp is too old for this GPU setting; upgrade and retry	目前 llama.cpp 版本過舊，不支援此顯示卡設定，請升級後重試	llama.cpp の現在のバージョンは古すぎるため、このグラフィック カード設定をサポートしていません。アップグレードしてもう一度お試しください。
 当前 llama.cpp 版本过旧，无法只用 CPU 识别，请升级后重试 / This llama.cpp is too old to transcribe on CPU only; upgrade and retry	当前 llama.cpp 版本过旧，无法只用 CPU 识别，请升级后重试	This llama.cpp is too old to transcribe on CPU only; upgrade and retry	目前 llama.cpp 版本過舊，無法只用 CPU 辨識，請升級後重試	llama.cpp の現在のバージョンは古すぎるため、CPU だけでは認識できません。アップグレードしてもう一度お試しください。
 当前任务仍在保存进度，停止后再移动笔记库	当前任务仍在保存进度，停止后再移动笔记库	The current task is still saving progress. Move the note library after it stops.	目前任務仍在儲存進度，停止後再移動筆記庫	現在のタスクは進行状況を保存中です。停止してからノートライブラリを移動してください。
 当前任务仍在处理，请先等候当前步骤结束	当前任务仍在处理，请先等候当前步骤结束	The current task is still processing. Please wait for the current step to finish.	目前任務仍在處理，請先等候目前步驟結束	現在のタスクはまだ処理中です。現在のステップが終了するまでお待ちください。
-当前任务完成后才能下载模型	当前任务完成后才能下载模型	The model can only be downloaded after the current task is completed	目前任務完成後才能下載模型	モデルは、現在のタスクが完了した後にのみダウンロードできます
 当前任务完成后才能准备模型	当前任务完成后才能准备模型	The model cannot be prepared until the current task is completed	目前任務完成後才能準備模型	現在のタスクが完了するまでモデルを準備できません
 当前任务还在处理，请先暂停并等候当前步骤结束	当前任务还在处理，请先暂停并等候当前步骤结束	The current task is still processing. Please pause it and wait for the current step to finish.	目前任務還在處理，請先暫停並等候目前步驟結束	現在のタスクはまだ処理中です。一時停止して、現在のステップが終了するまでお待ちください。
 当前任务还在处理，请先暂停并等候当前步骤结束。	当前任务还在处理，请先暂停并等候当前步骤结束。	The current task is still processing. Please pause it and wait for the current step to finish.	目前任務還在處理，請先暫停並等候目前步驟結束。	現在のタスクはまだ処理中です。一時停止して、現在のステップが終了するまでお待ちください。
@@ -742,7 +779,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 当前服务编辑已结束，请重新打开服务后再试	当前服务编辑已结束，请重新打开服务后再试	The current service editing has ended, please reopen the service and try again	目前服務編輯已結束，請重新開啟服務後再試	現在のサービスの編集は終了しました。サービスを再度開いて、もう一度お試しください。
 当前未使用	当前未使用	Not currently in use	目前未使用	現在は使用されていません
 当前没有默认语音服务，请返回第一步完成配置。	当前没有默认语音服务，请返回第一步完成配置。	No default speech service is set. Go back to step one to finish setup.	目前沒有預設語音服務，請返回第一步完成設定。	現在デフォルトの音声サービスはありません。最初のステップに戻って設定を完了してください。
-当前章节：{}	当前章节：{}	Current chapter: {}	目前章節：{}	現在の章: {}
 当前笔记信息暂时不可用	当前笔记信息暂时不可用	The current note information is temporarily unavailable	目前筆記資訊暫時不可用	現在のノート情報は一時的に利用できません
 当前系统不支持 Apple 芯片识别，请改用其他方式	当前系统不支持 Apple 芯片识别，请改用其他方式	This system does not support recognition on Apple silicon. Please use another method.	目前系統不支援 Apple 晶片辨識，請改用其他方式	このシステムは Apple シリコンでの認識に対応していません。別の方法を使用してください。
 当前视频输入暂时不可用	当前视频输入暂时不可用	The current video input is temporarily unavailable	目前影片輸入暫時不可用	現在の動画入力は一時的に利用できません
@@ -759,7 +795,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 待确认的请求已变化，请查看最新范围后再选择是否重新发送	待确认的请求已变化，请查看最新范围后再选择是否重新发送	The request to be confirmed has changed. Please check the latest range before choosing whether to resend it.	待確認的請求已變化，請檢視最新範圍後再選擇是否重新傳送	確認待ちのリクエストが変更されました。再送信するかどうかを選択する前に、最新の範囲を確認してください。
 待确认请求已变化，请查看最新范围后再选择是否重新发送	待确认请求已变化，请查看最新范围后再选择是否重新发送	The request to be confirmed has changed. Please check the latest range before choosing whether to resend it.	待確認請求已變化，請檢視最新範圍後再選擇是否重新傳送	確認待ちのリクエストが変更されました。再送信するかどうかを選択する前に、最新の範囲を確認してください。
 德语	德语	German	德語	ドイツ語
-快速开始 / Quick start:\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\n转写方式 / Transcripts:\n  默认优先使用平台字幕，无字幕时使用语音识别。\n  Uses platform subtitles first, then speech recognition when needed.\n  --transcript-source subtitle  仅使用字幕 / Subtitles only\n  --transcript-source asr       强制语音识别 / Speech recognition only\n\n下一步 / Next steps:\n  course2md --login bilibili    扫码登录 / Log in with a QR code\n  course2md --logout bilibili   清除登录 / Remove saved login\n  course2md doctor              检查依赖与配置 / Check dependencies and settings\n  course2md config init         生成配置模板 / Create a configuration template\n  course2md llm setup           配置可选的 AI 校对 / Set up optional AI proofreading\n  course2md summarize ./notes   为已有笔记生成摘要 / Summarize existing notes\n\n交互终端首次转换会引导配置；脚本请显式传入所需参数。\nFirst conversion in a terminal offers setup; scripts should pass options explicitly.\n使用 <command> --help 查看子命令帮助 / Use <command> --help for details.\n	快速开始：\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\n转写方式：\n  默认优先使用平台字幕，无字幕时使用语音识别。\n  --transcript-source subtitle  仅使用字幕\n  --transcript-source asr       强制语音识别\n\n下一步：\n  course2md --login bilibili    扫码登录\n  course2md --logout bilibili   清除登录\n  course2md doctor              检查依赖与配置\n  course2md config init         生成配置模板\n  course2md llm setup           配置可选的 AI 校对\n  course2md summarize ./notes   为已有笔记生成摘要\n\n交互终端首次转换会引导配置；脚本请显式传入所需参数。\n使用 <command> --help 查看子命令帮助。\n	Quick start:\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\nTranscripts:\n  Platform subtitles are used first; speech recognition runs when none exist.\n  --transcript-source subtitle  Use subtitles only\n  --transcript-source asr       Force speech recognition\n\nNext steps:\n  course2md --login bilibili    Sign in with a QR code\n  course2md --logout bilibili   Remove the saved login\n  course2md doctor              Check dependencies and settings\n  course2md config init         Create a configuration template\n  course2md llm setup           Set up optional AI proofreading\n  course2md summarize ./notes   Summarize existing notes\n\nThe first conversion in a terminal offers setup; scripts should pass options explicitly.\nUse <command> --help for details.\n	快速開始：\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\n轉寫方式：\n  預設優先使用平台字幕，無字幕時使用語音辨識。\n  --transcript-source subtitle  僅使用字幕\n  --transcript-source asr       強制語音辨識\n\n下一步：\n  course2md --login bilibili    掃碼登入\n  course2md --logout bilibili   清除登入\n  course2md doctor              檢查依賴與設定\n  course2md config init         產生設定範本\n  course2md llm setup           設定可選的 AI 校對\n  course2md summarize ./notes   為已有筆記產生摘要\n\n互動式終端首次轉換會引導設定；指令碼請明確傳入所需參數。\n使用 <command> --help 查看子命令說明。\n	クイックスタート：\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\n文字起こし：\n  プラットフォームの字幕を優先し、ない場合は音声認識を使います。\n  --transcript-source subtitle  字幕のみ\n  --transcript-source asr       音声認識を強制\n\n次のステップ：\n  course2md --login bilibili    QR コードでログイン\n  course2md --logout bilibili   保存したログインを削除\n  course2md doctor              依存関係と設定を確認\n  course2md config init         設定テンプレートを作成\n  course2md llm setup           任意の AI 校正を設定\n  course2md summarize ./notes   既存のノートに要約を追加\n\nターミナルでの初回変換では設定を案内します。スクリプトでは必要な引数を明示してください。\n詳細は <command> --help を参照してください。\n
+快速开始 / Quick start:\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\n转写方式 / Transcripts:\n  默认优先使用平台字幕，无字幕时使用语音识别。\n  Uses platform subtitles first, then speech recognition when needed.\n  --transcript-source subtitle  仅使用字幕 / Subtitles only\n  --transcript-source asr       强制语音识别 / Speech recognition only\n\n下一步 / Next steps:\n  course2md --login bilibili    扫码登录 / Log in with a QR code\n  course2md --login bilibili --method password|sms\n                                密码或短信登录 / Log in with a password or SMS code\n  course2md --login youtube     使用浏览器中的 YouTube 登录 / Use your browser's YouTube session\n  course2md --logout bilibili   清除登录 / Remove saved login\n  course2md doctor              检查依赖与配置 / Check dependencies and settings\n  course2md config init         生成配置模板 / Create a configuration template\n  course2md llm setup           配置可选的 AI 校对 / Set up optional AI proofreading\n  course2md summarize ./notes   为已有笔记生成摘要 / Summarize existing notes\n\n交互终端首次转换会引导配置；脚本请显式传入所需参数。\nFirst conversion in a terminal offers setup; scripts should pass options explicitly.\n使用 <command> --help 查看子命令帮助 / Use <command> --help for details.\n	快速开始：\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\n转写方式：\n  默认优先使用平台字幕，无字幕时使用语音识别。\n  --transcript-source subtitle  仅使用字幕\n  --transcript-source asr       强制语音识别\n\n下一步：\n  course2md --login bilibili    扫码登录\n  course2md --login bilibili --method password|sms\n                                密码或短信登录\n  course2md --login youtube     使用浏览器中的 YouTube 登录\n  course2md --logout bilibili   清除登录\n  course2md doctor              检查依赖与配置\n  course2md config init         生成配置模板\n  course2md llm setup           配置可选的 AI 校对\n  course2md summarize ./notes   为已有笔记生成摘要\n\n交互终端首次转换会引导配置；脚本请显式传入所需参数。\n使用 <command> --help 查看子命令帮助。\n	Quick start:\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\nTranscripts:\n  Platform subtitles are used first; speech recognition runs when none exist.\n  --transcript-source subtitle  Use subtitles only\n  --transcript-source asr       Force speech recognition\n\nNext steps:\n  course2md --login bilibili    Sign in with a QR code\n  course2md --login bilibili --method password|sms\n                                Sign in with a password or SMS code\n  course2md --login youtube     Use your browser's YouTube session\n  course2md --logout bilibili   Remove the saved login\n  course2md doctor              Check dependencies and settings\n  course2md config init         Create a configuration template\n  course2md llm setup           Set up optional AI proofreading\n  course2md summarize ./notes   Summarize existing notes\n\nThe first conversion in a terminal offers setup; scripts should pass options explicitly.\nUse <command> --help for details.\n	快速開始：\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\n轉寫方式：\n  預設優先使用平台字幕，無字幕時使用語音辨識。\n  --transcript-source subtitle  僅使用字幕\n  --transcript-source asr       強制語音辨識\n\n下一步：\n  course2md --login bilibili    掃碼登入\n  course2md --login bilibili --method password|sms\n                                密碼或簡訊登入\n  course2md --login youtube     使用瀏覽器中的 YouTube 登入\n  course2md --logout bilibili   清除登入\n  course2md doctor              檢查依賴與設定\n  course2md config init         產生設定範本\n  course2md llm setup           設定可選的 AI 校對\n  course2md summarize ./notes   為已有筆記產生摘要\n\n互動式終端首次轉換會引導設定；指令碼請明確傳入所需參數。\n使用 <command> --help 查看子命令說明。\n	クイックスタート：\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\n文字起こし：\n  プラットフォームの字幕を優先し、ない場合は音声認識を使います。\n  --transcript-source subtitle  字幕のみ\n  --transcript-source asr       音声認識を強制\n\n次のステップ：\n  course2md --login bilibili    QR コードでログイン\n  course2md --login bilibili --method password|sms\n                                パスワードまたは SMS でログイン\n  course2md --login youtube     ブラウザの YouTube ログインを使う\n  course2md --logout bilibili   保存したログインを削除\n  course2md doctor              依存関係と設定を確認\n  course2md config init         設定テンプレートを作成\n  course2md llm setup           任意の AI 校正を設定\n  course2md summarize ./notes   既存のノートに要約を追加\n\nターミナルでの初回変換では設定を案内します。スクリプトでは必要な引数を明示してください。\n詳細は <command> --help を参照してください。\n
 恢复 AI 默认	恢复 AI 默认	Restore AI defaults	恢復 AI 預設	AI のデフォルトを復元する
 恢复为原始标题	恢复为原始标题	Revert to original title	恢復為原始標題	元のタイトルに戻す
 恢复最近名称备份	恢复最近名称备份	Restore recent name backup	恢復最近名稱備份	最近の名前のバックアップを復元する
@@ -778,11 +814,9 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 截图无法读取	截图无法读取	Screenshot can't be read	無法讀取截圖	スクリーンショットを読み込めません
 截图时机：first 立即，stable 等画面稳定 / Capture immediately or wait for stable slides	截图时机：first 立即，stable 等画面稳定	Capture immediately or wait for stable slides	截圖時機：first 立即，stable 等畫面穩定	撮影タイミング：first はすぐに、stable は画面が安定してから
 截图最短间隔（秒）/ Minimum seconds between screenshots	截图最短间隔（秒）/ Minimum seconds between screenshots	Minimum seconds between screenshots	截圖最短間隔（秒）/ Minimum seconds between screenshots	スクリーンショットの最小間隔（秒）
-截图校对	截图校对	Screenshot proofreading	截圖校對	スクリーンショットの校正
 截图生成未完成	截图生成未完成	Screenshot generation is not completed	截圖生成未完成	スクリーンショットの生成が完了していません
 截图辅助校对	截图辅助校对	Screenshot-assisted proofreading	截圖輔助校對	スクリーンショット補助校正
 截图进度损坏，原文件已保留 / Screenshot checkpoint is damaged	截图进度损坏，原文件已保留	Screenshot checkpoint is damaged	截圖進度損壞，原檔案已保留	スクリーンショットの進行状況は破損しており、元のファイルは保持されています。
-截断 checkpoint 残行 {} / Failed to truncate checkpoint partial line {}	截断 checkpoint 残行 {}	Failed to truncate checkpoint partial line {}	截斷 checkpoint 殘行 {}	チェックポイントの不完全な末尾行 {} を切り詰められませんでした
 所有保存位置都暂时无法访问	所有保存位置都暂时无法访问	All save locations are temporarily inaccessible	所有儲存位置都暫時無法存取	すべての保存場所に一時的にアクセスできません
 所选仍是当前位置，请选择移动后的笔记库文件夹	所选仍是当前位置，请选择移动后的笔记库文件夹	The selection is still the current location, please select the moved note library folder.	所選仍是目前位置，請選擇移動後的筆記庫資料夾	選択内容は現在の場所のままです。移動したノート ライブラリ フォルダーを選択してください。
 所选位置不能写入	所选位置不能写入	The selected location cannot be written to	所選位置不能寫入	選択した場所には書き込めません
@@ -813,12 +847,10 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 所选识别方式暂不可用，可在模型管理中查看原因	所选识别方式暂不可用，可在模型管理中查看原因	The selected recognition method is temporarily unavailable. You can check the reason in model management.	所選辨識方式暫不可用，可在模型管理中檢視原因	選択した認識方法は一時的に利用できません。理由はモデル管理で確認できます。
 所需程序	所需程序	Required programs	所需程式	必要なプログラム
 打开	打开	Open	開啟	開く
-打开 checkpoint {} / Failed to open checkpoint {}	打开 checkpoint {}	Failed to open checkpoint {}	開啟 checkpoint {}	チェックポイント {} を開けませんでした
 打开 {} 的模型文件夹：{}	打开 {} 的模型文件夹：{}	Open the model folder of {}: {}	開啟 {} 的模型資料夾：{}	{} のモデルフォルダーを開く: {}
 打开位置	打开位置	Open location	開啟位置	場所を開く
 打开保存位置	打开保存位置	Open save location	開啟儲存位置	保存場所を開く
 打开原视频	打开原视频	Open original video	開啟原影片	元の動画を開く
-打开原视频：{}	打开原视频：{}	Open the original video: {}	開啟原影片：{}	元の動画を開きます: {}
 打开备份位置	打开备份位置	Open backup location	開啟備份位置	バックアップ場所を開く
 打开导出位置	打开导出位置	Open export location	開啟匯出位置	書き出し先を開く
 打开导出文件夹	打开导出文件夹	Open export folder	開啟匯出資料夾	書き出しフォルダーを開く
@@ -834,10 +866,10 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 找不到任务使用的服务版本，请选择服务后建立新尝试	找不到任务使用的服务版本，请选择服务后建立新尝试	The service version used by the task cannot be found. Please select the service and create a new attempt.	找不到任務使用的服務版本，請選擇服務後建立新嘗試	タスクで使用されているサービスのバージョンが見つかりません。サービスを選択し、新しい試行を作成してください。
 找不到已下载的视频，请允许重新下载 / The downloaded video is missing; allow downloading it again	找不到已下载的视频，请允许重新下载	The downloaded video is missing; allow downloading it again	找不到已下載的影片，請允許重新下載	ダウンロードした動画が見つかりません。再ダウンロードを許可してください
 找不到当前笔记	找不到当前笔记	Current note not found	找不到目前筆記	現在のノートが見つかりません
-找不到截图所需的视频 / Video required for screenshots is unavailable	找不到截图所需的视频	Video required for screenshots is unavailable	找不到截圖所需的影片	スクリーンショットに必要な動画が見つかりません
 找不到此服务	找不到此服务	This service cannot be found	找不到此服務	このサービスは見つかりません
 找不到此服务的凭据，请重新保存 API Key	找不到此服务的凭据，请重新保存 API Key	Credentials not found for this service, please save the API Key again	找不到此服務的憑證，請重新儲存 API Key	このサービスの認証情報が見つかりません。API キーを再度保存してください
 找不到视频文件或无法识别链接：{}	找不到视频文件或无法识别链接：{}	Video file not found or URL not recognized: {}	找不到影片檔案或無法辨識連結：{}	動画ファイルが見つからないか、リンクを認識できません: {}
+找到 1 个模型	找到 1 个模型	Found 1 model	找到 1 個模型	1 個のモデルが見つかりました
 找到 {} 个模型	找到 {} 个模型	Found {} models	找到 {} 個模型	{} 個のモデルが見つかりました
 找到 {} 篇笔记	找到 {} 篇笔记	Found {} notes	找到 {} 篇筆記	{} 件のノートが見つかりました
 找到但无法运行：{}	找到但无法运行：{}	Found but failed to run: {}	找到但無法執行：{}	見つかりましたが実行できません：{}
@@ -861,6 +893,13 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 正在等待第一块数据	正在等待第一块数据	Waiting for the first block	正在等待第一塊資料	最初のブロックを待っています
 由环境变量指定	由环境变量指定	Set by environment variable	由環境變數指定	環境変数で指定
 系统安装	系统安装	Installed on the system	系統安裝	システムにインストール済み
+这个浏览器中没有登录 YouTube。请先在浏览器中登录 YouTube，再重新检查。	这个浏览器中没有登录 YouTube。请先在浏览器中登录 YouTube，再重新检查。	This browser is not signed in to YouTube. Sign in to YouTube there first, then check again.	這個瀏覽器中沒有登入 YouTube。請先在瀏覽器中登入 YouTube，再重新檢查。	このブラウザでは YouTube にログインしていません。先にブラウザで YouTube にログインしてから、もう一度確認してください。
+连接 YouTube	连接 YouTube	Connect YouTube	連接 YouTube	YouTube を接続
+选择已登录 YouTube 的浏览器 / Choose the browser where you are signed in to YouTube	选择已登录 YouTube 的浏览器	Choose the browser where you are signed in to YouTube	選擇已登入 YouTube 的瀏覽器	YouTube にログインしているブラウザを選んでください
+重新打开	重新打开	Open again	重新開啟	もう一度開く
+重新获取	重新获取	Resend	重新取得	再送信
+重新连接 YouTube	重新连接 YouTube	Reconnect YouTube	重新連接 YouTube	YouTube を再接続
+重新验证	重新验证	Check again	重新驗證	もう一度確認
 随应用附带	随应用附带	Included with the app	隨應用程式附帶	アプリに同梱
 音频不离开本机	音频不离开本机	Audio stays on this device	音訊不離開本機	音声はこのデバイスの外に送信されません
 提取画面	提取画面	Extract frames	提取畫面	フレームを抽出
@@ -874,24 +913,18 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 摘要	摘要	Summary	摘要	要約
 摘要 JSON 无法解析	摘要 JSON 无法解析	Summary JSON cannot be parsed	摘要 JSON 無法解析	要約 JSON を解析できません
 摘要合并未完成，已保存各段已确认结果 / Summary merge failed; completed parts retained	摘要合并未完成，已保存各段已确认结果	Summary merge failed; completed parts retained	摘要合併未完成，已儲存各段已確認結果	要約の結合が完了しませんでした。確認済みの各部分の結果は保存されています。
-摘要工作进程中断 / Summary worker interrupted	摘要工作进程中断	Summary worker interrupted	摘要工作程序中斷	要約作業プロセスが中断されました
 摘要结果未确认	摘要结果未确认	Summary result not confirmed	摘要結果未確認	要約結果は未確認
 操作已完成	操作已完成	Operation completed	操作已完成	操作が完了しました
 操作意外中断，请重试	操作意外中断，请重试	The operation was unexpectedly interrupted, please try again	操作意外中斷，請重試	操作が予期せず中断されました。もう一度お試しください。
-操作未完成	操作未完成	Operation not completed	操作未完成	操作が完了していません
 收尾中…	收尾中…	Wrapping up…	收尾中…	仕上げ中…
 收起	收起	Collapse	收合	折りたたむ
-收起准备详情	收起准备详情	Collapse preparation details	收起準備詳情	準備の詳細を折りたたむ
 收起处理详情	收起处理详情	Collapse processing details	收起處理詳情	処理の詳細を折りたたむ
 收起处理选项	收起处理选项	Collapse processing options	收起處理選項	処理オプションを折りたたむ
 收起已完成的处理	收起已完成的处理	Hide finished tasks	收起已完成的處理	完了した処理を折りたたむ
 收起技术详情	收起技术详情	Hide technical details	收合技術詳情	技術的な詳細を隠す
 收起文字	收起文字	Collapse text	收起文字	テキストを折りたたむ
 收起检查详情	收起检查详情	Collapse inspection details	收起檢查詳情	チェックの詳細を折りたたむ
-收起模型	收起模型	Collapse model	收起模型	モデルを折りたたむ
-收起模型文件	收起模型文件	Collapse model file	收起模型檔案	モデルファイルを折りたたむ
 收起测试详情	收起测试详情	Collapse test details	收起測試詳情	テストの詳細を折りたたむ
-收起目录	收起目录	Collapse table of contents	收起目錄	目次を折りたたむ
 收起笔记详情	收起笔记详情	Hide note details	收起筆記詳情	ノートの詳細を非表示にする
 收起详情	收起详情	Collapse details	收起詳情	詳細を折りたたむ
 改用云端 API / Use cloud API	改用云端 API	Use cloud API	改用雲端 API	クラウドAPIに切り替える
@@ -909,7 +942,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 文件夹	文件夹	Folders	資料夾	フォルダー
 文件夹信息损坏；原文件已保留，请修复后重试	文件夹信息损坏；原文件已保留，请修复后重试	The folder information is damaged; the original file has been retained, please repair it and try again.	資料夾資訊損壞；原檔案已保留，請修復後重試	フォルダー情報が破損しています。元のファイルは保持されています。修復して再試行してください。
 文件夹信息读取失败	文件夹信息读取失败	Failed to read folder information	資料夾資訊讀取失敗	フォルダー情報の読み込みに失敗しました
-文件夹信息需要恢复	文件夹信息需要恢复	Folder information needs to be restored	資料夾資訊需要恢復	フォルダー情報を復元する必要があります
 文件夹名称	文件夹名称	Folder name	資料夾名稱	フォルダー名
 文件夹名称最多 60 个字符	文件夹名称最多 60 个字符	Folder name can be up to 60 characters	資料夾名稱最多 60 個字元	フォルダー名は最大60文字です
 文件夹尚未恢复：{}	文件夹尚未恢复：{}	Folder has not been restored: {}	資料夾尚未恢復：{}	フォルダーは復元されていません: {}
@@ -935,7 +967,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 文字及对应截图会发送到所选服务	文字及对应截图会发送到所选服务	The text and corresponding screenshots will be sent to the selected service	文字及對應截圖會傳送到所選服務	テキストと対応するスクリーンショットが選択したサービスに送信されます
 文字未生成，已保留可用素材 / No readable text; available materials are retained in the task	文字未生成，已保留可用素材	No readable text; available materials are retained in the task	文字未生成，已保留可用素材	テキストは生成されませんでした。利用可能な素材は保持されています
 文字来源	文字来源	Transcript source	文字來源	文字起こしのソース
-文字来源待确认	文字来源待确认	Text source to be confirmed	文字來源待確認	テキストソースは確認待ち
 文字来源方式	文字来源方式	Text source method	文字來源方式	テキストソース方式
 文字来源：auto 优先字幕，subtitle 仅字幕，asr 语音识别 / Transcript source: auto, subtitle, asr	文字来源：auto 优先字幕，subtitle 仅字幕，asr 语音识别	Transcript source: auto, subtitle, asr	文字來源：auto 優先字幕，subtitle 僅字幕，asr 語音辨識	テキストソース：auto は字幕を優先、subtitle は字幕のみ、asr は音声認識
 文字笔记	文字笔记	Text notes	文字筆記	テキストノート
@@ -945,7 +976,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 新链接未能保存：{}	新链接未能保存：{}	New link failed to save: {}	新連結未能儲存：{}	新しいリンクを保存できませんでした: {}
 无匹配	无匹配	No match	無匹配	一致なし
 无权读取这份笔记，请检查保存位置的访问权限	无权读取这份笔记，请检查保存位置的访问权限	No permission to read this note, please check the access permissions of the save location	無權讀取這份筆記，請檢查儲存位置的存取權限	このノートを読む権限がありません。保存場所のアクセス権限を確認してください。
-无法传递任务参数	无法传递任务参数	Unable to pass task parameters	無法傳遞任務參數	タスクパラメータを渡すことができません
 无法保存恢复后的暂停指令，尚未替换原任务记录	无法保存恢复后的暂停指令，尚未替换原任务记录	The pause command after recovery cannot be saved, and the original task record has not been replaced.	無法儲存恢復後的暫停指令，尚未替換原任務記錄	回復後の一時停止コマンドは保存できず、元のタスク レコードは置き換えられていません。
 无法保存此组设置	无法保存此组设置	Unable to save this set of settings	無法儲存此組設定	この設定セットを保存できません
 无法保存此组设置的恢复副本	无法保存此组设置的恢复副本	Unable to save recovery copy of this set of settings	無法儲存此組設定的恢復副本	この設定セットのリカバリ コピーを保存できません
@@ -955,7 +985,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 无法保留损坏的任务记录	无法保留损坏的任务记录	Unable to retain corrupted task records	無法保留損壞的任務記錄	破損したタスクレコードを保持できません
 无法保留旧识别进度 {} / Cannot preserve previous transcription progress {}	无法保留旧识别进度 {}	Cannot preserve previous transcription progress {}	無法保留舊辨識進度 {}	以前の文字起こしの進行状況 {} を保持できません
 无法切分音频 / Could not split audio	无法切分音频	Could not split audio	無法切分音訊	音声を分割できません
-无法切分音频 / ffmpeg could not split audio	无法切分音频	ffmpeg could not split audio	無法切分音訊	音声を分割できません
 无法切换来源：{}	无法切换来源：{}	Unable to switch source: {}	無法切換來源：{}	ソースを切り替えられません: {}
 无法创建 course2md 窗口	无法创建 course2md 窗口	Unable to create course2md window	無法建立 course2md 視窗	course2md ウィンドウを作成できません
 无法创建临时工作目录 / Could not create a temporary working directory	无法创建临时工作目录	Could not create a temporary working directory	無法建立暫存工作目錄	一時作業ディレクトリを作成できません
@@ -977,7 +1006,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 无法找到这个视频，请检查链接或确认视频仍可访问。	无法找到这个视频，请检查链接或确认视频仍可访问。	This video cannot be found, please check the link or make sure the video is still accessible.	無法找到這個影片，請檢查連結或確認影片仍可存取。	この動画は見つかりません。リンクをチェックするか、動画にまだアクセスできることを確認してください。
 无法探测本地视频时长 / Could not probe the local video duration	无法探测本地视频时长	Could not probe the local video duration	無法偵測本機影片時長	ローカル動画の長さを検出できません
 无法提取截图	无法提取截图	Unable to extract screenshot	無法提取截圖	スクリーンショットを抽出できません
-无法校验 {}	无法校验 {}	Unable to verify {}	無法校驗 {}	{} を確認できません
 无法检查（缺少 llama-server）	无法检查（缺少 llama-server）	Unable to check (missing llama-server)	無法檢查（缺少 llama-server）	確認できません (llama-server がありません)
 无法检测显卡：{}	无法检测显卡：{}	Unable to detect graphics card: {}	無法偵測顯示卡：{}	グラフィックス カードを検出できません: {}
 无法生成安全随机数 / Cannot generate secure random bytes	无法生成安全随机数	Cannot generate secure random bytes	無法生成安全隨機數	安全な乱数を生成できません
@@ -992,14 +1020,13 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 无法获取 Codex 模型目录 / Cannot fetch the Codex model catalog	无法获取 Codex 模型目录	Cannot fetch the Codex model catalog	無法取得 Codex 模型目錄	Codex のモデル一覧を取得できません
 无法获取账号可用的模型列表，已使用默认模型 {}。	无法获取账号可用的模型列表，已使用默认模型 {}。	Could not fetch the account's models; using {}.	無法取得帳號可用的模型清單，已使用預設模型 {}。	アカウントで利用可能なモデル一覧を取得できません。デフォルトモデル {} を使用します。
 无法解析 Bilibili 登录响应 / Cannot parse Bilibili login response	无法解析 Bilibili 登录响应	Cannot parse Bilibili login response	無法解析 Bilibili 登入回應	Bilibili のログイン応答を解析できません
-无法解析 wav PCM 数据 / Cannot parse wav PCM data	无法解析 wav PCM 数据	Cannot parse wav PCM data	無法解析 wav PCM 資料	wav PCM データを解析できません
 无法解析令牌响应 / Cannot parse the token response	无法解析令牌响应	Cannot parse the token response	無法解析權杖回應	トークン応答を解析できません
 无法解析刷新响应 / Cannot parse the token refresh response	无法解析刷新响应	Cannot parse the token refresh response	無法解析重新整理回應	リフレッシュ応答を解析できません
 无法解析响应 / Cannot parse response	无法解析响应	Cannot parse response	無法解析回應	応答を解析できません
 无法解析账号状态 / Cannot parse account status	无法解析账号状态	Cannot parse account status	無法解析帳號狀態	アカウントのステータスを解析できません
 无法识别这个视频，请重新预览	无法识别这个视频，请重新预览	This video cannot be recognized, please preview again	無法辨識這個影片，請重新預覽	この動画は認識できません。もう一度プレビューしてください
 无法识别这个链接对应的视频，请粘贴具体视频的链接 / Cannot identify the video for this link; paste the link to a specific video	无法识别这个链接对应的视频，请粘贴具体视频的链接	Cannot identify the video for this link; paste the link to a specific video	無法辨識這個連結對應的影片，請貼上具體影片的連結	このリンクに対応する動画を認識できません。特定の動画へのリンクを貼り付けてください。
-无法读取 Bilibili 登录状态，请重新运行 course2md --login bilibili / Cannot read Bilibili login state; run course2md --login bilibili again	无法读取 Bilibili 登录状态，请重新运行 course2md --login bilibili	Cannot read Bilibili login state; run course2md --login bilibili again	無法讀取 Bilibili 登入狀態，請重新執行 course2md --login bilibili	Bilibili のログイン ステータスを読み取ることができません。 course2md --login bilibili を再実行してください。
+无法读取 Bilibili 登录状态，请重新运行 course2md --login bilibili / Cannot read Bilibili login state; run course2md --login bilibili again	无法读取 Bilibili 登录状态，请重新运行 course2md --login bilibili	Cannot read Bilibili login state; run course2md --login bilibili again	無法讀取 Bilibili 登入狀態，請重新執行 course2md --login bilibili	Bilibili のログイン ステータスを読み取ることができません。course2md --login bilibili を再実行してください。
 无法读取 Codex 登录状态 / Cannot read Codex login state	无法读取 Codex 登录状态	Cannot read Codex login state	無法讀取 Codex 登入狀態	Codex のログイン ステータスを読み取ることができません
 无法读取 {}	无法读取 {}	Unable to read {}	無法讀取 {}	{} を読み取れません
 无法读取 {} / Cannot read {}	无法读取 {}	Cannot read {}	無法讀取 {}	{} を読み取れません
@@ -1023,7 +1050,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 无法读取音频时长 / Could not read the audio duration	无法读取音频时长	Could not read the audio duration	無法讀取音訊時長	音声の長さを読み取れません
 无法连接 OpenAI 认证服务，稍后重试 / Cannot reach the OpenAI auth service; retry later	无法连接 OpenAI 认证服务，稍后重试	Cannot reach the OpenAI auth service; retry later	無法連線 OpenAI 認證服務，稍後重試	OpenAI 認証サービスに接続できません。後でもう一度試してください。
 无法连接服务，尚未提交内容 / Could not connect; request content was not submitted	无法连接服务，尚未提交内容	Could not connect; request content was not submitted	無法連線服務，尚未提交內容	サービスに接続できません。コンテンツはまだ送信されていません
-无法选择保存位置：{}	无法选择保存位置：{}	Unable to select save location: {}	無法選擇儲存位置：{}	保存場所を選択できません: {}
 无法选择文件夹：{}	无法选择文件夹：{}	Unable to select folder: {}	無法選擇資料夾：{}	フォルダーを選択できません: {}
 无法验证账号状态，请稍后重试 / Cannot verify account status; retry later	无法验证账号状态，请稍后重试	Cannot verify account status; retry later	無法驗證帳號狀態，請稍後重試	アカウントのステータスを確認できません。後でもう一度お試しください。
 日本語	日本語	Japanese	日本語	日本語
@@ -1048,7 +1074,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 显示此消息或子命令的帮助	显示此消息或子命令的帮助	Show this message or help for a subcommand	顯示此訊息或子命令的說明	このメッセージまたはサブコマンドのヘルプを表示
 显示版本	显示版本	Show version	顯示版本	バージョンを表示
 显示笔记保存位置	显示笔记保存位置	Show where notes are saved	顯示筆記儲存位置	ノートの保存場所を表示する
-显示诊断日志；-vv 显示调试细节 / Diagnostic logs; -vv for debug details	显示诊断日志；-vv 显示调试细节	Diagnostic logs; -vv for debug details	顯示診斷記錄；-vv 顯示除錯細節	診断ログを表示します。 -vv はデバッグの詳細を表示します
+显示诊断日志；-vv 显示调试细节 / Diagnostic logs; -vv for debug details	显示诊断日志；-vv 显示调试细节	Diagnostic logs; -vv for debug details	顯示診斷記錄；-vv 顯示除錯細節	診断ログを表示します。-vv はデバッグの詳細を表示します
 显示配置路径和文件设置 / Show the config path and file settings	显示配置路径和文件设置	Show the config path and file settings	顯示設定路徑和檔案設定	設定パスとファイル設定を表示
 暂停	暂停	Pause	暫停	一時停止
 暂停中	暂停中	Paused	暫停中	一時停止中
@@ -1072,12 +1098,9 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 暂时无法验证，已保存登录信息	暂时无法验证，已保存登录信息	Unable to verify temporarily, login information has been saved	暫時無法驗證，已儲存登入資訊	一時的に認証できませんでした。ログイン情報は保存されました
 暂时进入不会保存未完成的选择	暂时进入不会保存未完成的选择	Entering now won't save unfinished choices	暫時進入不會儲存未完成的選擇	今すぐ入ると、未完了の選択は保存されません
 暂时进入应用	暂时进入应用	Enter the app for now	暫時進入應用程式	ひとまずアプリに入る
-更多信息请运行 --help。	更多信息请运行 --help。	For more information, run --help.	更多資訊請執行 --help。	詳細については、--help を実行してください。
+更多信息请运行 --help。	更多信息请运行 --help。	For more information, run --help.	更多資訊請執行 --help。	詳細については、--help を参照してください。
 更多笔记操作	更多笔记操作	More note actions	更多筆記操作	その他のノート操作
-更多資訊請執行 --help。	更多資訊請執行 --help。	For more information, run --help.	更多資訊請執行 --help。	詳細については、--help を実行してください。
 更快，占内存较少	更快，占内存较少	Faster, takes up less memory	更快，佔記憶體較少	より高速で、メモリ使用量が少ない
-更换	更换	Replace	更換	交換する
-更换模型	更换模型	Change model	更換模型	モデルを変更
 更换视频	更换视频	Change video	更換影片	動画を変更する
 更改默认位置只影响后续生成的笔记	更改默认位置只影响后续生成的笔记	Changing the default location only affects subsequently generated notes	更改預設位置只影響後續生成的筆記	デフォルトの場所を変更すると、それ以降に生成されるノートにのみ影響します。
 更新为：{} · v{} · {}	更新为：{} · v{} · {}	Updated to: {} · v{} · {}	更新為：{} · v{} · {}	更新先: {} · v{} · {}
@@ -1091,7 +1114,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 有 {} 次未完成的移动记录已损坏，相关文件均已保留	有 {} 次未完成的移动记录已损坏，相关文件均已保留	{} unfinished move records are corrupted and related files have been retained	有 {} 次未完成的移動記錄已損壞，相關檔案均已保留	{} 件の未完了の移動記録が破損しています。関連ファイルはすべて保持されています
 有一个旧版本无法读取	有一个旧版本无法读取	There is an older version that cannot be read	有一個舊版本無法讀取	読み込めない古いバージョンがあります
 有字幕时直接用字幕，没有字幕时使用语音识别	有字幕时直接用字幕，没有字幕时使用语音识别	Use subtitles when available; otherwise use speech recognition	有字幕時直接使用字幕，沒有字幕時使用語音辨識	字幕があれば字幕を使用し、なければ音声認識を使用します
-有字幕，将直接使用	有字幕，将直接使用	Subtitles found; they will be used directly	有字幕，將直接使用	字幕があるため、そのまま使用します
 有效服务版本记录不完整	有效服务版本记录不完整	The effective service version record is incomplete	有效服務版本記錄不完整	有効なサービス バージョン レコードが不完全です
 有效的模型分片索引 / a valid model shard index	有效的模型分片索引	a valid model shard index	有效的模型分片索引	有効なモデルシャードインデックス
 服务	服务	Services	服務	サービス
@@ -1109,7 +1131,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 服务地址无效，请使用完整的 HTTP(S) URL。 / Invalid service URL; use a complete HTTP(S) URL.	服务地址无效，请使用完整的 HTTP(S) URL。	Invalid service URL; use a complete HTTP(S) URL.	服務網址無效，請使用完整的 HTTP(S) URL。	サービスURLが無効です。完全な HTTP(S) URL を使用してください。
 服务地址（兼容 OpenAI 接口）/ Service URL (OpenAI-compatible)	服务地址（兼容 OpenAI 接口）/ Service URL (OpenAI-compatible)	Service URL (OpenAI-compatible)	服務網址（相容 OpenAI 介面）	サービスURL（OpenAI 互換）
 服务尚未保存：{}	服务尚未保存：{}	Service not saved yet: {}	服務尚未儲存：{}	サービスはまだ保存されていません: {}
-服务已保存	服务已保存	Service saved	服務已儲存	サービスが保存されました
 服务已保存，补做任务尚未建立：{}	服务已保存，补做任务尚未建立：{}	The service has been saved, but the reprocessing task has not been created yet: {}	服務已儲存，補做任務尚未建立：{}	サービスは保存されましたが、再処理タスクはまだ作成されていません: {}
 服务拒绝了此请求 / Service rejected this request	服务拒绝了此请求	Service rejected this request	服務拒絕了此請求	サービスがリクエストを拒否しました
 服务拒绝了请求参数（HTTP {}），请检查此任务使用的模型与服务设置。 / The service rejected the request parameters (HTTP {}); check the model and service settings for this task.	服务拒绝了请求参数（HTTP {}），请检查此任务使用的模型与服务设置。	The service rejected the request parameters (HTTP {}); check the model and service settings for this task.	服務拒絕了請求參數（HTTP {}），請檢查此任務使用的模型與服務設定。	サービスはリクエスト パラメーター (HTTP {}) を拒否しました。このタスクで使用されるモデルとサービスの設定を確認してください。
@@ -1141,11 +1162,11 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 服务返回错误，无法确认是否已处理。再次提交可能产生额外费用 / Service processing is uncertain	服务返回错误，无法确认是否已处理。再次提交可能产生额外费用	Service processing is uncertain	服務傳回錯誤，無法確認是否已處理。再次提交可能產生額外費用	サービスがエラーを返したため、処理されたかどうかを確認できません。再送信すると追加料金が発生する場合があります
 服务返回错误，未收到确定结果，测试可能已产生费用	服务返回错误，未收到确定结果，测试可能已产生费用	The service returned an error and no definite result was received. The test may have incurred charges.	服務傳回錯誤，未收到確定結果，測試可能已產生費用	サービスがエラーを返し、確定した結果を受信できませんでした。テストで料金が発生した可能性があります。
 服务选择尚未保存：{}	服务选择尚未保存：{}	Service selection not saved yet: {}	服務選擇尚未儲存：{}	サービスの選択はまだ保存されていません: {}
-服务选择已保存	服务选择已保存	Service selection saved	服務選擇已儲存	サービスの選択が保存されました
 服务配置	服务配置	Service configuration	服務設定	サービス設定
 服务配置已保存，尚未开始补做	服务配置已保存，尚未开始补做	The service configuration has been saved; reprocessing has not started yet.	服務設定已儲存，尚未開始補做	サービス設定は保存されました。再処理はまだ開始していません。
 未下载	未下载	Not downloaded	未下載	未ダウンロード
 未下载完整	未下载完整	Incomplete download	未下載完整	ダウンロード未完了
+未下载识别模型 {}。之后可运行 {} 准备模型，再重新运行本命令 / The speech model {} was not downloaded. To prepare it later, run {}, then run this command again	未下载识别模型 {}。之后可运行 {} 准备模型，再重新运行本命令	The speech model {} was not downloaded. To prepare it later, run {}, then run this command again	未下載辨識模型 {}。之後可執行 {} 準備模型，再重新執行本命令	音声認識モデル {} はダウンロードしませんでした。後で {} を実行して準備し、このコマンドをもう一度実行してください
 未分类	未分类	Unfiled	未分類	未分類
 未安装	未安装	Not installed	未安裝	インストールされていません
 未完成	未完成	Incomplete	未完成	未完了
@@ -1155,7 +1176,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 未找到 uv，也没有装好 openvino-genai 的 Python，无法启动 NPU 识别 / Intel NPU transcription needs uv, or Python with openvino-genai, numpy and huggingface_hub installed	未找到 uv，也没有装好 openvino-genai 的 Python，无法启动 NPU 识别	Intel NPU transcription needs uv, or Python with openvino-genai, numpy and huggingface_hub installed	找不到 uv，也沒有已安裝 openvino-genai 的 Python，無法啟動 NPU 辨識	uv も、openvino-genai をインストールした Python も見つからないため、NPU 認識を開始できません
 未找到 llama-server。请安装 llama.cpp 并加入 PATH	未找到 llama-server。请安装 llama.cpp 并加入 PATH	llama-server not found. Install llama.cpp and add it to PATH.	找不到 llama-server。請安裝 llama.cpp 並加入 PATH	llama-server が見つかりません。llama.cpp をインストールして PATH に追加してください
 未找到 uv 或 Python	未找到 uv 或 Python	uv or Python not found	找不到 uv 或 Python	uv または Python が見つかりません
-未找到下载的视频（期望 {} 或 {}） / Downloaded video missing (expected {} or {})	未找到下载的视频（期望 {} 或 {}）	Downloaded video missing (expected {} or {})	找不到下載的影片（預期 {} 或 {}）	ダウンロードした動画が見つかりません（{} または {} を想定）
 未找到字幕	未找到字幕	Subtitles not found	未找到字幕	字幕が見つかりません
 未找到字幕。请选择已有字幕，或改用语音识别	未找到字幕。请选择已有字幕，或改用语音识别	No subtitles found. Select existing subtitles, or use speech recognition.	找不到字幕。請選擇現有字幕，或改用語音辨識	字幕が見つかりません。既存の字幕を選択するか、代わりに音声認識を使用してください
 未提供 API 密钥。请在向导中输入，或设置环境变量 COURSE2MD_ASR_API_KEY 后重试。 / No API key provided. Enter one in setup, or set COURSE2MD_ASR_API_KEY and retry.	未提供 API 密钥。请在向导中输入，或设置环境变量 COURSE2MD_ASR_API_KEY 后重试。	No API key provided. Enter one in setup, or set COURSE2MD_ASR_API_KEY and retry.	未提供 API 金鑰。請在嚮導中輸入，或設定環境變數 COURSE2MD_ASR_API_KEY 後重試。	API キーが提供されていません。ウィザードに入力するか、環境変数 COURSE2MD_ASR_API_KEY を設定して再試行してください。
@@ -1186,7 +1206,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 本地识别方式 / Local transcription engine	本地识别方式	Local transcription engine	本機辨識方式	ローカル音声認識エンジン
 本地识别（首次下载模型） / Local transcription (requires a model download)	本地识别（首次下载模型）	Local transcription (requires a model download)	本機辨識（首次需下載模型）	ローカル音声認識（初回はモデルのダウンロードが必要）
 本地语音识别请求失败 / Local transcription request failed	本地语音识别请求失败	Local transcription request failed	本機語音辨識請求失敗	ローカル音声認識リクエストが失敗しました
-本机	本机	This computer	本機	このコンピューター
 本机 · {}	本机 · {}	This computer · {}	本機 · {}	このコンピューター · {}
 本机引擎	本机引擎	Local engine	本機引擎	ローカルエンジン
 本机识别	本机识别	On this device	本機辨識	このデバイスで認識
@@ -1216,8 +1235,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 查看 uv 安装说明	查看 uv 安装说明	View uv installation instructions	檢視 uv 安裝說明	uv のインストール手順を表示する
 查看{}	查看{}	View {}	檢視{}	{} を表示
 查看任务	查看任务	View task	檢視任務	タスクを表示
-查看任务详情	查看任务详情	View task details	檢視任務詳情	タスクの詳細を表示する
-查看准备详情	查看准备详情	View preparation details	檢視準備詳情	準備の詳細を表示する
 查看后续处理任务	查看后续处理任务	View follow-up tasks	檢視後續處理任務	フォローアップタスクを表示する
 查看处理详情	查看处理详情	View processing details	檢視處理詳情	処理の詳細を表示する
 查看已完成的处理	查看已完成的处理	Show finished tasks	檢視已完成的處理	完了した処理を表示する
@@ -1225,7 +1242,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 查看文字	查看文字	View text	檢視文字	テキストを表示する
 查看新版	查看新版	View new version	檢視新版	新しいバージョンを表示
 查看未完成部分	查看未完成部分	View unfinished parts	檢視未完成部分	未完了の部分を表示する
-查看模型文件	查看模型文件	View model files	檢視模型檔案	モデルファイルを表示する
 查看测试详情	查看测试详情	View test details	檢視測試詳情	テストの詳細を表示する
 查看笔记库	查看笔记库	View note library	檢視筆記庫	ノートライブラリを表示する
 查看结果	查看结果	View results	檢視結果	結果を見る
@@ -1257,7 +1273,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 检查模型文件	检查模型文件	Check model file	檢查模型檔案	モデルファイルを確認
 检查模型是否可用	检查模型是否可用	Check if the model is available	檢查模型是否可用	モデルが利用可能かどうかを確認する
 检查模型是否已下载 / Check whether a model is downloaded	检查模型是否已下载	Check whether a model is downloaded	檢查模型是否已下載	モデルがダウンロードされているかどうかを確認する
-检查结果	检查结果	Check results	檢查結果	チェック結果
 检查结果尚未保存	检查结果尚未保存	Check results have not been saved yet	檢查結果尚未儲存	チェック結果はまだ保存されていません
 检查视频时意外中断，请重试	检查视频时意外中断，请重试	Unexpected interruption while checking video, please try again	檢查影片時意外中斷，請重試	動画の確認中に予期せぬ中断が発生しました。もう一度お試しください。
 检查识别模型 / Checking speech model	检查识别模型	Checking speech model	檢查辨識模型	音声認識モデルを確認しています
@@ -1265,17 +1280,17 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 检查配置	检查配置	Check configuration	檢查設定	設定を確認
 概述：{}\n	概述：{}\n	Overview: {}\n	概述：{}\n	概要: {}\n
 模型	模型	Model	模型	モデル
-模型 ID	模型 ID	Model ID	模型 ID	モデルID
 模型 ID，或从服务获取列表	模型 ID，或从服务获取列表	Model ID, or fetch the list from the service	模型 ID，或從服務取得清單	モデル ID、またはサービスから一覧を取得
 模型 ID 不能包含换行或控制字符	模型 ID 不能包含换行或控制字符	Model ID cannot contain newlines or control characters	模型 ID 不能包含換行或控制字元	モデル ID には改行や制御文字を含めることはできません
-模型 ID，{}	模型 ID，{}	Model ID, {}	模型 ID，{}	モデルID、{}
 模型 {}% · {}	模型 {}% · {}	Model {}% · {}	模型 {}% · {}	モデル {}% · {}
 模型下载任务失败 / Model download task failed	模型下载任务失败	Model download task failed	模型下載任務失敗	モデルのダウンロード タスクが失敗しました
 模型下载完成或停止后再移动笔记库	模型下载完成或停止后再移动笔记库	Move the note library after the model download is completed or stopped.	模型下載完成或停止後再移動筆記庫	モデルのダウンロードが完了または停止した後で、ノート ライブラリを移動します。
 模型仍在使用旧位置，请先在「生成笔记」中保存模型位置，再清理备份	模型仍在使用旧位置，请先在「生成笔记」中保存模型位置，再清理备份	The model still uses the old location. Save the model location in “Note generation” before cleaning backups.	模型仍在使用舊位置，請先在「產生筆記」中儲存模型位置，再清理備份	モデルはまだ古い場所を使用しています。「ノートを作成」でモデルの場所を保存してからバックアップを整理してください
 模型会继续在后台准备	模型会继续在后台准备	The model will continue to be prepared in the background	模型會繼續在背景準備	モデルはバックグラウンドで引き続き準備されます
 模型位置尚未更新，修改已保留，可重试保存：{}	模型位置尚未更新，修改已保留，可重试保存：{}	The model location has not been updated. Your changes were kept; you can try saving again: {}	模型位置尚未更新，修改已保留，可重試儲存：{}	モデルの場所はまだ更新されていません。変更は保持されています。もう一度保存できます: {}
-模型准备	模型准备	Model preparation	模型準備	モデルの準備
+一切正常	一切正常	All good	一切正常	すべて正常
+需要修复	需要修复	Needs repair	需要修復	修復が必要
+模型准备	模型准备	Model setup	模型準備	モデル準備
 模型准备完成 / Model preparation finished.	模型准备完成	Model preparation finished.	模型準備完成	モデルの準備ができました
 模型准备已暂停	模型准备已暂停	Model preparation is paused	模型準備已暫停	モデルの準備が一時停止されています
 模型准备未完成 / Model preparation did not complete	模型准备未完成	Model preparation did not complete	模型準備未完成	モデルの準備が完了していません
@@ -1283,14 +1298,10 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 模型名 / Model name (e.g. deepseek-chat)	模型名	Model name (e.g. deepseek-chat)	模型名	モデル名
 模型名称或 Hugging Face 仓库（如 org/model）	模型名称或 Hugging Face 仓库（如 org/model）	Model name or Hugging Face repository (e.g. org/model)	模型名稱或 Hugging Face 儲存庫（如 org/model）	モデル名または Hugging Face リポジトリ（例: org/model）
 模型已下载	模型已下载	Model downloaded	模型已下載	モデルをダウンロードしました
-模型已下载 · {}	模型已下载 · {}	Model has been downloaded · {}	模型已下載 · {}	モデルはダウンロードされました · {}
 模型已就绪	模型已就绪	Model ready	模型已就緒	モデルの準備が完了
 模型文件下载不完整，请重新运行 course2md models download / Model download incomplete; run course2md models download again	模型文件下载不完整，请重新运行 course2md models download	Model download incomplete; run course2md models download again	模型檔案下載不完整，請重新執行 course2md models download	モデルファイルのダウンロードが不完全です。course2md models download を再実行してください。
 模型文件不完整，正在重新下载 / Model file incomplete; downloading again	模型文件不完整，正在重新下载	Model file incomplete; downloading again	模型檔案不完整，正在重新下載	モデル ファイルが不完全なため、再度ダウンロード中です。
-模型检查与设置	模型检查与设置	Model checking and setup	模型檢查與設定	モデルの確認とセットアップ
-模型检查未完成	模型检查未完成	Model check not completed	模型檢查未完成	モデルチェックが完了していません
 模型检查未完成，可在模型管理中查看原因并重试	模型检查未完成，可在模型管理中查看原因并重试	The model check is not completed. You can check the reason in model management and try again.	模型檢查未完成，可在模型管理中檢視原因並重試	モデルのチェックが完了していません。モデル管理で理由を確認し、再試行できます。
-模型状态	模型状态	Model status	模型狀態	モデルステータス
 模型目录 / Model directory	模型目录	Model directory	模型目錄	モデルディレクトリ
 模型目录暂不可用，已使用默认模型	模型目录暂不可用，已使用默认模型	The model directory is temporarily unavailable, the default model has been used	模型目錄暫不可用，已使用預設模型	モデル ディレクトリは一時的に使用できません。デフォルトのモデルが使用されています
 模型缓存包含过多文件，检查未完成 / Model cache contains too many files; check incomplete	模型缓存包含过多文件，检查未完成	Model cache contains too many files; check incomplete	模型快取包含過多檔案，檢查未完成	モデル キャッシュに含まれるファイルが多すぎるため、チェックが完了していません
@@ -1299,8 +1310,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 模型请求失败 / Model request failed	模型请求失败	Model request failed	模型請求失敗	モデルリクエストが失敗しました
 模型（默认为该识别方式的默认模型）/ Model (defaults to the backend's default)	模型（默认为该识别方式的默认模型）/ Model (defaults to the backend's default)	Model (defaults to the backend's default)	模型（預設為該辨識方式的預設模型）	モデル（既定ではこの認識方式のデフォルトモデル）
 欢迎使用 course2md！选择字幕不可用时的语音转写方式。 / Welcome! Choose how to transcribe when subtitles are unavailable.	欢迎使用 course2md！选择字幕不可用时的语音转写方式。	Welcome! Choose how to transcribe when subtitles are unavailable.	歡迎使用 course2md！選擇字幕不可用時的語音轉寫方式。	course2mdへようこそ!字幕が利用できない場合に音声を文字に起こす方法を選択します。
-正在下载识别模型（约 2.4GB）/ Downloading speech models (~2.4GB): {}	正在下载识别模型（约 2.4GB）/ Downloading speech models (~2.4GB): {}	Downloading speech models (~2.4GB): {}	正在下載辨識模型（約 2.4GB）：{}	音声認識モデルをダウンロードしています（約 2.4GB）: {}
-正在使用最近一次可用的设置，但恢复文件尚未保存；原文件已保留	正在使用最近一次可用的设置，但恢复文件尚未保存；原文件已保留	The last available settings are being used, but the recovery file has not been saved; the original file has been retained	正在使用最近一次可用的設定，但恢復檔案尚未儲存；原檔案已保留	最後に使用可能な設定が使用されていますが、リカバリ ファイルは保存されていません。元のファイルは保持されています
 正在保存当前结果…	正在保存当前结果…	Saving current results…	正在儲存目前結果…	現在の結果を保存しています…
 正在保存当前结果，请等候当前任务停止后再补做。	正在保存当前结果，请等候当前任务停止后再补做。	Saving the current results. Wait until the current task stops before running the reprocessing.	正在儲存目前結果，請等候目前任務停止後再補做。	現在の結果を保存しています。現在のタスクが停止するまで待ってから再処理を実行してください。
 正在保存当前结果，请等候当前任务停止后再选择重新发送。	正在保存当前结果，请等候当前任务停止后再选择重新发送。	The current results are being saved. Please wait until the current task stops before choosing to resend.	正在儲存目前結果，請等候目前任務停止後再選擇重新傳送。	現在の結果が保存されています。現在のタスクが停止するまで待ってから、再送信を選択してください。
@@ -1310,7 +1319,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 正在保存进度并退出…	正在保存进度并退出…	Saving progress and quitting…	正在儲存進度並結束…	進行状況を保存して終了しています…
 正在停止检查	正在停止检查	Stopping check	正在停止檢查	チェックを停止しています
 正在准备	正在准备	Preparing	正在準備	準備中
-正在准备 {}	正在准备 {}	Preparing {}	正在準備 {}	{}を準備しています
 正在准备…	正在准备…	Preparing…	正在準備…	準備中…
 正在准备模型	正在准备模型	Preparing model	正在準備模型	モデルの準備中
 正在准备的模型	正在准备的模型	Model being prepared	正在準備的模型	準備中のモデル
@@ -1340,11 +1348,9 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 正在检查保存位置…	正在检查保存位置…	Checking save location...	正在檢查儲存位置…	保存場所を確認しています...
 正在检查保存位置，请稍候	正在检查保存位置，请稍候	Checking the save location, please wait.	正在檢查儲存位置，請稍候	保存場所を確認中です。しばらくお待ちください。
 正在检查原笔记库…	正在检查原笔记库…	Checking the original note library...	正在檢查原筆記庫…	元のノート ライブラリを確認しています...
-正在检查备份…	正在检查备份…	Checking backup...	正在檢查備份…	バックアップを確認しています...
 正在检查所需组件…	正在检查所需组件…	Checking required components...	正在檢查所需元件…	必要なコンポーネントを確認しています...
 正在检查本机能力…	正在检查本机能力…	Checking this computer's capabilities...	正在檢查本機能力…	このコンピューターの機能を確認しています...
 正在检查模型	正在检查模型	Checking model	正在檢查模型	モデルを確認中
-正在检查模型…	正在检查模型…	Checking model…	正在檢查模型…	モデルを確認中…
 正在检查识别模型…	正在检查识别模型…	Checking speech model...	正在檢查辨識模型…	音声認識モデルを確認しています...
 正在检查配置	正在检查配置	Checking configuration	正在檢查設定	設定を確認中
 正在检测	正在检测	Detecting	正在偵測	検出中
@@ -1369,9 +1375,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 正在读取视频信息…	正在读取视频信息…	Reading video information...	正在讀取影片資訊…	動画情報を読み取っています...
 正在连接	正在连接	Connecting	正在連線	接続中
 正在退出	正在退出	Exiting	正在結束	終了しています
-正在重新读取这个位置中的笔记…	正在重新读取这个位置中的笔记…	Rereading notes at this location...	正在重新讀取這個位置中的筆記…	この場所のノートを再読み込みしています...
 正在验证登录状态…	正在验证登录状态…	Verifying login status...	正在驗證登入狀態…	ログインステータスを確認しています...
-正文	正文	Text	正文	テキスト
 正文已保存	正文已保存	Text has been saved	正文已儲存	テキストが保存されました
 此任务使用的凭据没有访问该服务或模型的权限。 / The credentials used by this task cannot access that service or model.	此任务使用的凭据没有访问该服务或模型的权限。	The credentials used by this task cannot access that service or model.	此任務使用的憑證沒有存取該服務或模型的權限。	このタスクで使用される資格情報には、サービスまたはモデルにアクセスする権限がありません。
 此任务尚无可补做的笔记正文	此任务尚无可补做的笔记正文	This task has no note text for reprocessing yet	此任務尚無可補做的筆記正文	このタスクには再処理できるノート本文がまだありません
@@ -1404,7 +1408,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 没有数组	没有数组	No array	沒有陣列	配列がありません
 没有检测到可用的 GPU 识别引擎。请选择 CPU 或其他本机识别方式。	没有检测到可用的 GPU 识别引擎。请选择 CPU 或其他本机识别方式。	No usable GPU transcription engine detected. Choose CPU or another local transcription method.	沒有偵測到可用的 GPU 辨識引擎。請選擇 CPU 或其他本機辨識方式。	利用可能な GPU 音声認識エンジンが検出されませんでした。CPU または他のローカル音声認識方式を選択してください。
 没有检测到可用的 Intel NPU 识别环境。请选择其他本机识别方式。	没有检测到可用的 Intel NPU 识别环境。请选择其他本机识别方式。	No usable Intel NPU transcription environment detected. Choose another local transcription method.	沒有偵測到可用的 Intel NPU 辨識環境。請選擇其他本機辨識方式。	利用可能な Intel NPU 音声認識環境が検出されませんでした。他のローカル音声認識方式を選択してください。
-没有获得可读文字 / No readable transcript	没有获得可读文字	No readable transcript	沒有獲得可讀文字	判読可能なテキストが得られませんでした
 没有获得可读文字；已保留可用截图 / No readable transcript; available screenshots were retained	没有获得可读文字；已保留可用截图	No readable transcript; available screenshots were retained	沒有獲得可讀文字；已保留可用截圖	読み取り可能なテキストが得られませんでした。使用可能なスクリーンショットは保持されています
 法语	法语	French	法語	フランス語
 浅色	浅色	Light	淺色	ライト
@@ -1427,7 +1430,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 清理旧位置备份	清理旧位置备份	Clean up old location backups	清理舊位置備份	古い場所のバックアップを整理
 清理旧位置备份…	清理旧位置备份…	Clean up old location backups…	清理舊位置備份…	古い場所のバックアップを整理…
 清理旧位置备份？	清理旧位置备份？	Clean up old location backups?	清理舊位置備份？	古い場所のバックアップを整理しますか？
-清空链接，选项恢复为默认设置	清空链接，选项恢复为默认设置	Clears the link and returns the options to your defaults	清空連結，選項恢復為預設設定	リンクを消去し、オプションを既定の設定に戻します
 清除 AI 校对的地址、密钥、模型和 Codex 登录 / Clear the AI proofreading endpoint, key, model and Codex login	清除 AI 校对的地址、密钥、模型和 Codex 登录 / Clear the AI proofreading endpoint, key, model and Codex login	Clear the AI proofreading endpoint, key, model and Codex login	清除 AI 校對的網址、金鑰、模型與 Codex 登入	AI 校正のURL・キー・モデル・Codex ログインを消去
 清除 Bilibili 登录状态失败 / Could not remove Bilibili login	清除 Bilibili 登录状态失败	Could not remove Bilibili login	清除 Bilibili 登入狀態失敗	Bilibiliのログインステータスをクリアできませんでした
 清除 Codex 登录状态失败 / Could not remove Codex login	清除 Codex 登录状态失败	Could not remove Codex login	清除 Codex 登入狀態失敗	Codex ログイン ステータスのクリアに失敗しました
@@ -1475,7 +1477,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 登录 Bilibili	登录 Bilibili	Sign in to Bilibili	登入 Bilibili	Bilibili にログイン
 登录后可读取账号有权访问的视频与字幕	登录后可读取账号有权访问的视频与字幕	Sign in to read the videos and subtitles your account can access.	登入後可讀取帳號有權存取的影片與字幕	ログイン後、アカウントがアクセスできる動画と字幕を読むことができます。
 登录响应未包含完整凭据，请重新扫码 / Login response did not include complete credentials; scan the QR code again	登录响应未包含完整凭据，请重新扫码	Login response did not include complete credentials; scan the QR code again	登入回應未包含完整憑證，請重新掃描 QR 碼	ログイン応答に完全な認証情報が含まれていません。QR コードをもう一度スキャンしてください。
-登录响应缺少凭据，请重新运行 course2md --login bilibili / Login response is missing credentials; run course2md --login bilibili again	登录响应缺少凭据，请重新运行 course2md --login bilibili	Login response is missing credentials; run course2md --login bilibili again	登入回應缺少憑證，請重新執行 course2md --login bilibili	ログイン応答に資格情報がありません。 course2md --login bilibili を再実行してください。
+登录响应缺少凭据，请重新运行 course2md --login bilibili / Login response is missing credentials; run course2md --login bilibili again	登录响应缺少凭据，请重新运行 course2md --login bilibili	Login response is missing credentials; run course2md --login bilibili again	登入回應缺少憑證，請重新執行 course2md --login bilibili	ログイン応答に資格情報がありません。course2md --login bilibili を再実行してください。
 登录回调地址无效 / Invalid login callback URL	登录回调地址无效	Invalid login callback URL	登入回呼網址無效	ログインコールバックURLが無効です
 登录失败，请回终端重试。/ Login failed; return to the terminal and retry.	登录失败，请回终端重试。/ Login failed; return to the terminal and retry.	Login failed; return to the terminal and retry.	登入失敗，請回到終端機重試。	ログインに失敗しました。ターミナルに戻って再試行してください。
 登录已失效	登录已失效	Login expired	登入已失效	ログインの有効期限切れ
@@ -1483,7 +1485,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 登录请求失败，请检查网络后重新获取二维码	登录请求失败，请检查网络后重新获取二维码	Login request failed. Check the network and get a new QR code.	登入請求失敗，請檢查網路後重新取得 QR 碼	ログイン要求に失敗しました。ネットワークを確認して QR コードを再度取得してください。
 登录跳转地址无效 / Invalid login redirect URL	登录跳转地址无效	Invalid login redirect URL	登入重新導向網址無效	ログインリダイレクトURLが無効です
 登录跳转缺少地址 / Login redirect is missing an address	登录跳转缺少地址	Login redirect is missing an address	登入重新導向缺少網址	ログインリダイレクトにURLがありません
-登录（bilibili 扫码；ollama 本地服务；codex 订阅），可接视频地址继续转换 / Log in (bilibili QR, ollama local, codex subscription), optionally then process a video	登录（bilibili 扫码；ollama 本地服务；codex 订阅），可接视频地址继续转换	Log in (bilibili QR, ollama local, codex subscription), optionally then process a video	登入（bilibili 掃碼；ollama 本機服務；codex 訂閱），可接影片網址繼續轉換	ログイン（bilibili は QR コード、ollama はローカルサービス、codex はサブスクリプション）。続けて動画URLを指定して変換できます
 目前使用 {}	目前使用 {}	Currently using {}	目前使用 {}	現在{}を使用しています
 目前可读取 {} 份笔记：\n{}	目前可读取 {} 份笔记：\n{}	{} notes are currently readable:\n{}	目前可讀取 {} 份筆記：\n{}	現在読み取り可能なノートは {} 件です:\n{}
 目录	目录	Directory	目錄	ディレクトリ
@@ -1492,28 +1493,22 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 目标不能是原笔记库、它的父文件夹或子文件夹	目标不能是原笔记库、它的父文件夹或子文件夹	The target cannot be the original note library, its parent folder, or a subfolder	目標不能是原筆記庫、它的父資料夾或子資料夾	元のノート ライブラリ、その親フォルダー、またはサブフォルダーをターゲットにすることはできません
 目标与另一个笔记库重叠，请选择单独的文件夹	目标与另一个笔记库重叠，请选择单独的文件夹	The destination overlaps with another note library, please select a separate folder	目標與另一個筆記庫重疊，請選擇單獨的資料夾	保存先が他のノートライブラリと重複しているため、別のフォルダーを選択してください
 目标位置暂时无法访问	目标位置暂时无法访问	The destination is temporarily inaccessible	目標位置暫時無法存取	移動先に一時的にアクセスできません
-目标出现非预期文件，原文件已保留：{}	目标出现非预期文件，原文件已保留：{}	An unexpected file appeared in the destination; the original file was retained: {}	目標出現非預期檔案，原檔案已保留：{}	移動先に予期しないファイルが見つかりました。元のファイルは保持されています: {}
 目标副本出现了非预期内容，未覆盖任何文件	目标副本出现了非预期内容，未覆盖任何文件	The destination copy has unexpected content and no files were overwritten.	目標副本出現了非預期內容，未覆蓋任何檔案	コピー先に予期しない内容が含まれているため、ファイルは上書きされませんでした。
 目标副本包含非预期内容，尚未切换保存位置	目标副本包含非预期内容，尚未切换保存位置	The destination copy contains unexpected content; the save location was not switched.	目標副本包含非預期內容，尚未切換儲存位置	コピー先に予期しない内容が含まれているため、保存場所は切り替えられていません。
 目标副本尚未核验，不能切换保存位置	目标副本尚未核验，不能切换保存位置	The destination copy has not been verified, so the save location cannot be switched.	目標副本尚未核驗，不能切換儲存位置	コピー先が検証されていないため、保存場所を切り替えられません。
-目标副本已被修改，未覆盖：{}	目标副本已被修改，未覆盖：{}	The destination copy has been modified and was not overwritten: {}	目標副本已被修改，未覆蓋：{}	コピー先が変更されているため、上書きしませんでした: {}
 目标副本未通过校验，尚未切换保存位置：{}	目标副本未通过校验，尚未切换保存位置：{}	The destination copy failed verification; the save location was not switched: {}	目標副本未通過校驗，尚未切換儲存位置：{}	コピー先の検証に失敗したため、保存場所は切り替えられていません: {}
 目标已被其他操作使用，原笔记库尚未改变	目标已被其他操作使用，原笔记库尚未改变	The destination is in use by another operation; the original note library has not changed.	目標已被其他操作使用，原筆記庫尚未改變	移動先は他の操作で使用中です。元のノートライブラリは変更されていません。
 目标文件夹不是空的，请选择空文件夹	目标文件夹不是空的，请选择空文件夹	The destination folder is not empty, please select an empty folder	目標資料夾不是空的，請選擇空資料夾	宛先フォルダーが空ではありません。空のフォルダーを選択してください
-目标文件夹在准备期间出现了内容，请选择另一个空文件夹	目标文件夹在准备期间出现了内容，请选择另一个空文件夹	Contents appeared in the destination folder during preparation, please select another empty folder	目標資料夾在準備期間出現了內容，請選擇另一個空資料夾	準備中に宛先フォルダーにコンテンツが表示されました。別の空のフォルダーを選択してください
 目标文件夹无法访问，请选择已有的空文件夹	目标文件夹无法访问，请选择已有的空文件夹	The destination folder cannot be accessed. Select an existing empty folder.	目標資料夾無法存取，請選擇已有的空資料夾	宛先フォルダーにアクセスできません。既存の空のフォルダーを選択してください。
 目标文件缺少目录	目标文件缺少目录	Target file is missing directory	目標檔案缺少目錄	ターゲットファイルのディレクトリがありません
 目标缺少这次移动的识别记录，未修改目标内容	目标缺少这次移动的识别记录，未修改目标内容	The destination is missing the identification record for this move; its contents were not modified.	目標缺少這次移動的識別記錄，未修改目標內容	移動先にこの移動の識別記録がないため、内容は変更されていません。
 设置下一个视频	设置下一个视频	Set up the next video	設定下一個影片	次の動画を設定する
 跳过设置	跳过设置	Skip setup	略過設定	セットアップをスキップ
 短文讲述光合作用使用阳光并释放氧气，摘要未保留这些关键信息	短文讲述光合作用使用阳光并释放氧气，摘要未保留这些关键信息	The short text says photosynthesis uses sunlight and releases oxygen; the summary did not keep this key information.	短文講述光合作用使用陽光並釋放氧氣，摘要未保留這些關鍵資訊	短い文章では光合成が太陽光を使い酸素を放出すると述べていますが、要約にはこの重要な情報が残っていません
-移动临时文件位置发生变化，未修改内容	移动临时文件位置发生变化，未修改内容	The location of the move's temporary file has changed; nothing was modified.	移動暫存檔案位置發生變化，未修改內容	移動用の一時ファイルの場所が変わったため、内容は変更されていません。
 移动位置已经变化，原数据和副本已保留	移动位置已经变化，原数据和副本已保留	The move location has changed; the original data and the copy were retained.	移動位置已經變化，原資料和副本已保留	移動先が変わりました。元のデータとコピーは保持されています。
 移动笔记库	移动笔记库	Move note library	移動筆記庫	ノートライブラリを移動
 移动笔记库…	移动笔记库…	Move note library…	移動筆記庫…	ノートライブラリを移動…
-移动记录包含无效文件位置，未修改任何内容	移动记录包含无效文件位置，未修改任何内容	Move record contains invalid file location, nothing was modified	移動記錄包含無效檔案位置，未修改任何內容	移動レコードに無効なファイルの場所が含まれています。何も変更されていません
 移动记录无法读取	移动记录无法读取	The move record cannot be read	移動記錄無法讀取	移動記録を読み取れません
-移动记录缺少保存目录	移动记录缺少保存目录	Move record is missing save directory	移動記錄缺少儲存目錄	移動レコードに保存ディレクトリがありません
 移除预览	移除预览	Remove preview	移除預覽	プレビューを削除
 稍后下载模型，再重新运行视频命令： / Download the model, then rerun your video command: course2md models download	稍后下载模型，再重新运行视频命令：	Download the model, then rerun your video command: course2md models download	稍後下載模型，再重新執行影片命令：	後でモデルをダウンロードしてから、動画コマンドを再実行してください:
 稍后准备	稍后准备	Prepare later	稍後準備	後で準備する
@@ -1530,7 +1525,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 笔记名称最多 240 个字符	笔记名称最多 240 个字符	Note names can be up to 240 characters	筆記名稱最多 240 個字元	ノート名は最大 240 文字です
 笔记名称记录无法读取，原文件已保留	笔记名称记录无法读取，原文件已保留	The note name record cannot be read; the original file was retained	筆記名稱記錄無法讀取，原檔案已保留	ノート名の記録を読み取れません。元のファイルは保持されています。
 笔记名称记录暂时无法读取	笔记名称记录暂时无法读取	The note name record is temporarily unreadable.	筆記名稱記錄暫時無法讀取	ノート名の記録を一時的に読み取れません。
-笔记名称需要恢复	笔记名称需要恢复	Note name needs to be restored	筆記名稱需要恢復	ノート名を復元する必要があります
 笔记已保存，{}	笔记已保存，{}	Note saved, {}	筆記已儲存，{}	ノートを保存しました、{}
 笔记已保存，部分处理未完成 / Notes saved with unfinished work	笔记已保存，部分处理未完成	Notes saved with unfinished work	筆記已儲存，部分處理未完成	ノートは保存されましたが、一部の処理が完了していません
 笔记已生成	笔记已生成	Note has been generated	筆記已生成	ノートが生成されました
@@ -1562,13 +1556,11 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 笔记清单损坏 / Invalid note manifest	笔记清单损坏	Invalid note manifest	筆記清單損壞	ノートマニフェストが破損しています
 笔记版本位置无效 / Invalid note version location	笔记版本位置无效	Invalid note version location	筆記版本位置無效	ノートのバージョンの場所が無効です
 笔记版本信息已损坏	笔记版本信息已损坏	Note version information is corrupted	筆記版本資訊已損壞	ノートのバージョン情報が破損しています
-笔记的文字来源	笔记的文字来源	The text source of the note	筆記的文字來源	ノートのテキストソース
 笔记目录，或存放多份笔记的上级目录 / A note directory or a folder of notes	笔记目录，或存放多份笔记的上级目录	A note directory or a folder of notes	筆記目錄，或存放多份筆記的上級目錄	ノート ディレクトリ、または複数のノートが保存される親ディレクトリ
 笔记详情	笔记详情	Note details	筆記詳情	ノートの詳細
-第 {} 版	第 {} 版	Version {}	第 {} 版	バージョン {}
 第 {} 版 · {} 生成	第 {} 版 · {} 生成	Version {} · generated {}	第 {} 版 · {} 生成	バージョン {} · {} に生成
 第 {} 版 · {}{}	第 {} 版 · {}{}	Version {} · {}{}	第 {} 版 · {}{}	バージョン {} · {}{}
-第一段应纠正 have / book 的语法；第二段应保留水在零摄氏度结冰的原意	第一段应纠正 have / book 的语法；第二段应保留水在零摄氏度结冰的原意	The first paragraph should correct the grammar of have / book; the second paragraph should retain the original meaning of water freezing at zero degrees Celsius	第一段應糾正 have / book 的語法；第二段應保留水在零攝氏度結冰的原意	最初の段落では、have / book の文法を修正する必要があります。 2 番目の段落は、摂氏 0 度で水が凍るという本来の意味を保持する必要があります。
+第一段应纠正 have / book 的语法；第二段应保留水在零摄氏度结冰的原意	第一段应纠正 have / book 的语法；第二段应保留水在零摄氏度结冰的原意	The first paragraph should correct the grammar of have / book; the second paragraph should retain the original meaning of water freezing at zero degrees Celsius	第一段應糾正 have / book 的語法；第二段應保留水在零攝氏度結冰的原意	最初の段落では、have / book の文法を修正する必要があります。2 番目の段落は、摂氏 0 度で水が凍るという本来の意味を保持する必要があります。
 等待 yt-dlp 结束失败 / Failed waiting for yt-dlp to exit	等待 yt-dlp 结束失败	Failed waiting for yt-dlp to exit	等待 yt-dlp 結束失敗	yt-dlp の終了待ちに失敗しました
 等待准备进度	等待准备进度	Waiting for preparation progress	等待準備進度	準備の進行を待っています
 等待响应	等待响应	Waiting for response	等待回應	応答を待っています
@@ -1579,12 +1571,13 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 管理模型与下载	管理模型与下载	Manage models and downloads	管理模型與下載	モデルとダウンロードを管理する
 管理配置文件 / Manage the configuration file	管理配置文件 / Manage the configuration file	Manage the configuration file	管理設定檔案	設定ファイルを管理
 粘贴 YouTube 或 Bilibili 视频链接	粘贴 YouTube 或 Bilibili 视频链接	Paste YouTube or Bilibili video link	貼上 YouTube 或 Bilibili 影片連結	YouTube または Bilibili 動画のリンクを貼り付けます
-粘贴视频链接	粘贴视频链接	Paste video link	貼上影片連結	動画リンクを貼り付け
 粘贴链接或拖入视频	粘贴链接或拖入视频	Paste a link or drag in a video	貼上連結或拖入影片	リンクを貼り付けるか動画をドラッグ
+系统凭据库当前不可用，此服务的凭据可能保存在其中。请确认系统凭据服务已启动，或重新保存 API Key	系统凭据库当前不可用，此服务的凭据可能保存在其中。请确认系统凭据服务已启动，或重新保存 API Key	The system credential store is unavailable, and this service's credential may be saved there. Make sure the credential service is running, or save the API key again.	系統憑據庫目前無法使用，此服務的憑據可能儲存在其中。請確認系統憑據服務已啟動，或重新儲存 API Key	システムの資格情報ストアを利用できません。このサービスの資格情報はそこに保存されている可能性があります。資格情報サービスが起動していることを確認するか、API キーを保存し直してください。
 系统凭据库中找不到此服务的凭据，请重新保存 API Key	系统凭据库中找不到此服务的凭据，请重新保存 API Key	Credentials for this service were not found in the system credential store. Save the API key again.	系統憑證庫中找不到此服務的憑證，請重新儲存 API Key	このサービスの認証情報がシステム認証情報ストアに見つかりませんでした。API キーを再度保存してください。
 系统提示与 response_format=json_object 同为 segments 对象契约	系统提示与 response_format=json_object 同为 segments 对象契约	The system prompt and response_format=json_object both use the segments object contract.	系統提示與 response_format=json_object 同為 segments 物件契約	システムプロンプトと response_format=json_object はどちらも segments オブジェクトの契約に従います。
 繁体中文	繁体中文	Traditional Chinese	繁體中文	繁体字中国語
 繁體中文	繁體中文	Traditional Chinese	繁體中文	繁体字中国語
+约 {} / about {}	约 {}	about {}	約 {}	約 {}
 纯语气词被置空，随后由调用方删除	纯语气词被置空，随后由调用方删除	Entries containing only filler words are emptied and then removed by the caller	純語氣詞被置空，隨後由呼叫方刪除	フィラーのみのエントリは空にされ、その後呼び出し元によって削除されます。
 终端输出 / Terminal output	终端输出	Terminal output	終端機輸出	ターミナル出力
 结果尚未确认	结果尚未确认	Results are not yet confirmed	結果尚未確認	結果はまだ確認されていません
@@ -1601,23 +1594,19 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 编辑语音服务	编辑语音服务	Edit speech service	編輯語音服務	音声サービスの編集
 缩小	缩小	Zoom out	縮小	縮小
 缩小 · −	缩小 · −	Zoom out · −	縮小 · −	ズームアウト · −
-缩放	缩放	Zoom	縮放	ズーム
-缩放图片	缩放图片	Zoom image	縮放圖片	画像をズームする
 缺失 / Missing	缺失	Missing	缺失	欠落
 缺失或不完整 / Missing or incomplete	缺失或不完整	Missing or incomplete	缺失或不完整	欠落または不完全
 缺失：{}	缺失：{}	Missing: {}	缺失：{}	欠落：{}
 缺少 Apple 识别所需的组件，请重新安装 course2md / Apple speech component missing; reinstall course2md	缺少 Apple 识别所需的组件，请重新安装 course2md	Apple speech component missing; reinstall course2md	缺少 Apple 辨識所需的元件，請重新安裝 course2md	Apple 音声認識に必要なコンポーネントがありません。course2md を再インストールしてください。
 缺少 Apple 识别组件，请重新安装应用或改用其他方式	缺少 Apple 识别组件，请重新安装应用或改用其他方式	The Apple transcription component is missing. Reinstall the app or use another method.	缺少 Apple 辨識元件，請重新安裝應用程式或改用其他方式	Apple 音声認識コンポーネントがありません。アプリを再インストールするか、別の方法を使用してください。
 安装 llama.cpp 后才能用 GPU 或 CPU 识别	安装 llama.cpp 后才能用 GPU 或 CPU 识别	GPU and CPU transcription need llama.cpp installed	安裝 llama.cpp 後才能用 GPU 或 CPU 辨識	GPU と CPU での認識には llama.cpp のインストールが必要です
-缺少 stderr 管道	缺少 stderr 管道	Missing stderr pipe	缺少 stderr 管道	stderr パイプがありません
-缺少 stdout 管道	缺少 stdout 管道	Missing stdout pipe	缺少 stdout 管道	stdout パイプがありません
 缺少可核验的原任务身份 / Original task identity is missing	缺少可核验的原任务身份	Original task identity is missing	缺少可核驗的原任務身份	検証可能な元のタスクの識別情報がありません
 缺少在线视频下载组件，请在设置中查看	缺少在线视频下载组件，请在设置中查看	The online video download component is missing. Check Settings.	缺少線上影片下載元件，請在設定中檢視	オンライン動画ダウンロードコンポーネントがありません。設定を確認してください。
 缺少或尚未验证：{}	缺少或尚未验证：{}	Missing or not yet verified: {}	缺少或尚未驗證：{}	欠落しているか、まだ検証されていません: {}
 缺少视频信息，请重新读取 / Missing video info; please probe again	缺少视频信息，请重新读取	Missing video info; please probe again	缺少影片資訊，請重新讀取	動画情報がありません。もう一度読み込んでください。
 缺少视频处理组件，请在设置中查看	缺少视频处理组件，请在设置中查看	The video processing component is missing. Check Settings.	缺少影片處理元件，請在設定中檢視	動画処理コンポーネントがありません。設定を確認してください。
 缺少视频来源。示例：course2md ./lecture.mp4	缺少视频来源。示例：course2md ./lecture.mp4	Missing video source. Example: course2md ./lecture.mp4	缺少影片來源。範例：course2md ./lecture.mp4	動画ソースがありません。例: course2md ./lecture.mp4
-缺少识别组件	缺少识别组件	Missing transcription component	缺少辨識元件	音声認識コンポーネントがありません
+缺少识别模型时直接下载，不再询问（适用于脚本；也可设 COURSE2MD_DOWNLOAD_MODELS=1）/ Download a missing speech model without asking (for scripts; or set COURSE2MD_DOWNLOAD_MODELS=1)	缺少识别模型时直接下载，不再询问（适用于脚本；也可设 COURSE2MD_DOWNLOAD_MODELS=1）	Download a missing speech model without asking (for scripts; or set COURSE2MD_DOWNLOAD_MODELS=1)	缺少辨識模型時直接下載，不再詢問（適用於腳本；也可設定 COURSE2MD_DOWNLOAD_MODELS=1）	音声認識モデルがなければ確認せずにダウンロード（スクリプト向け。COURSE2MD_DOWNLOAD_MODELS=1 でも可）
 缺少读取视频所需的组件，请在设置中检查运行环境	缺少读取视频所需的组件，请在设置中检查运行环境	The components required to read the video are missing. Check the runtime environment in Settings.	缺少讀取影片所需的元件，請在設定中檢查執行環境	動画を読み取るために必要なコンポーネントがありません。設定で実行環境を確認してください。
 缺少这份备份的核验记录，未清理任何文件	缺少这份备份的核验记录，未清理任何文件	This backup has no verification record; no files were cleaned up.	缺少這份備份的核驗記錄，未清理任何檔案	このバックアップには検証記録がないため、ファイルは整理されていません。
 网页	网页	Web page	網頁	ウェブページ
@@ -1629,7 +1618,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 自定义优先级	自定义优先级	Custom priority	自訂優先順序	カスタム優先度
 自定义校对规则	自定义校对规则	Custom proofreading rules	自訂校對規則	カスタム校正ルール
 自定义模型	自定义模型	Custom model	自訂模型	カスタムモデル
-自定义语言优先级	自定义语言优先级	Custom language priority	自訂語言優先順序	カスタム言語の優先順位
 英语	英语	English	英語	英語
 获取二维码失败，请检查网络后重试	获取二维码失败，请检查网络后重试	Failed to get the QR code. Check the network and try again.	取得 QR 碼失敗，請檢查網路後重試	QR コードを取得できませんでした。ネットワークを確認してもう一度お試しください。
 获取模型列表	获取模型列表	Get model list	取得模型列表	モデルリストを取得
@@ -1639,14 +1627,10 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 补做任务尚未建立：{}	补做任务尚未建立：{}	The reprocessing task has not been created yet: {}	補做任務尚未建立：{}	再処理タスクはまだ作成されていません: {}
 补做内容无效 / Invalid requested components	补做内容无效	Invalid requested components	補做內容無效	再処理する内容が無効です
 补全未完成部分	补全未完成部分	Complete the unfinished parts	補全未完成部分	未完成の部分を補完
-补换行 {} / Failed to append newline to {}	补换行 {}	Failed to append newline to {}	補換行 {}	{} に改行を追加できませんでした
 西班牙语	西班牙语	Spanish	西班牙語	スペイン語
 要测试的服务能力	要测试的服务能力	Service capabilities to be tested	要測試的服務能力	テストするサービス機能
-观看	观看	Watch	觀看	視聴
 视频	视频	Video	影片	動画
 视频 {}	视频 {}	Video {}	影片 {}	動画 {}
-视频下载失败 / Video download failed	视频下载失败	Video download failed	影片下載失敗	動画のダウンロードに失敗しました
-视频下载失败，正在重试 / Retrying video download	视频下载失败，正在重试	Retrying video download	影片下載失敗，正在重試	動画のダウンロードに失敗しました。再試行しています
 视频不存在	视频不存在	Video does not exist	影片不存在	動画が存在しません
 视频位置已有未校验的文件 / An unverified file already exists at the video location	视频位置已有未校验的文件	An unverified file already exists at the video location	影片位置已有未校驗的檔案	動画の保存先に未検証のファイルが既に存在します
 视频内容发生变化，请重新读取视频	视频内容发生变化，请重新读取视频	The video content has changed. Please read the video again.	影片內容發生變化，請重新讀取影片	動画の内容が変更されました。もう一度動画を読み込んでください
@@ -1669,7 +1653,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 视频链接	视频链接	Video link	影片連結	動画リンク
 视频链接或本地文件 / Video URL or local file	视频链接或本地文件	Video URL or local file	影片連結或本地檔案	動画リンクまたはローカルファイル
 视频需要登录后读取，请登录后重试预览	视频需要登录后读取，请登录后重试预览	The video requires login to read. Please log in and retry the preview.	影片需要登入後讀取，請登入後重試預覽	動画の読み込みにはログインが必要です。ログインしてからプレビューを再試行してください。
-詳細は --help を参照してください。	詳細は --help を参照してください。	For details, please refer to --help.	詳情請參閱 --help。	詳細については、--help を参照してください。
 计算中	计算中	Calculating	計算中	計算中
 认证	认证	Authentication	認證	認証
 记录仍无法读取，原件已保留：{}	记录仍无法读取，原件已保留：{}	The record still cannot be read, the original has been retained: {}	記錄仍無法讀取，原件已保留：{}	レコードはまだ読み取れません。オリジナルは保持されています: {}
@@ -1677,7 +1660,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 记录尚未重建，原件仍保留：{}	记录尚未重建，原件仍保留：{}	The record has not been reconstructed and the original remains: {}	記錄尚未重建，原件仍保留：{}	レコードは再構築されておらず、オリジナルのままです: {}
 记录已恢复，请重新扫描笔记库	记录已恢复，请重新扫描笔记库	The record has been restored. Please rescan the note library.	記錄已恢復，請重新掃描筆記庫	記録が復元されました。ノートライブラリをもう一度スキャンしてください
 设备与运行时	设备与运行时	Devices and runtime	裝置與執行環境	デバイスとランタイム
-设备状态	设备状态	Device status	裝置狀態	デバイスのステータス
 设置	设置	Settings	設定	設定
 设置 AI 服务	设置 AI 服务	Set up AI service	設定 AI 服務	AI サービスを設定
 设置…	设置…	Settings…	設定…	設定…
@@ -1690,11 +1672,13 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 设置目录：{}\n{}	设置目录：{}\n{}	Settings directory: {}\n{}	設定資料夾：{}\n{}	設定フォルダー：{}\n{}
 设置记录无法解析	设置记录无法解析	Settings record cannot be parsed	設定記錄無法解析	設定レコードを解析できません
 设置语音识别服务	设置语音识别服务	Set up speech recognition	設定語音辨識服務	音声認識を設定
+识别模型 {} 尚未下载，请先下载并准备模型，再继续 / The speech model {} is not downloaded yet; prepare it, then continue	识别模型 {} 尚未下载，请先下载并准备模型，再继续	The speech model {} is not downloaded yet; prepare it, then continue	辨識模型 {} 尚未下載，請先下載並準備模型，再繼續	音声認識モデル {} はまだダウンロードされていません。準備してから続けてください
 识别方式	识别方式	Recognition method	辨識方式	認識方式
 识别方式 / Speech backend	识别方式	Speech backend	辨識方式	認識方式
 识别时使用 {} · {}	识别时使用 {} · {}	Transcribe with {} · {}	辨識時使用 {} · {}	認識に {} · {} を使用
 识别服务错误详情 / llama-server error details	识别服务错误详情	llama-server error details	辨識服務錯誤詳細資訊	認識サービスのエラー詳細
 识别模型	识别模型	Recognition model	辨識模型	認識モデル
+识别模型 {} 尚未下载，未经同意不会下载。请先运行 {} 准备模型，或加 --download-models 允许本次下载 / The speech model {} is not downloaded, and it is not downloaded without your consent. Prepare it first with {}, or pass --download-models to allow the download in this run	识别模型 {} 尚未下载，未经同意不会下载。请先运行 {} 准备模型，或加 --download-models 允许本次下载	The speech model {} is not downloaded, and it is not downloaded without your consent. Prepare it first with {}, or pass --download-models to allow the download in this run	辨識模型 {} 尚未下載，未經同意不會下載。請先執行 {} 準備模型，或加上 --download-models 允許本次下載	音声認識モデル {} はまだダウンロードされておらず、同意なしにはダウンロードしません。先に {} で準備するか、--download-models を付けて今回のダウンロードを許可してください
 识别模型（需与后端兼容）/ Speech model (must match the backend) gpu/cpu: qwen3-1.7b；coreml: qwen3-1.7b、qwen3-0.6b、whisper；npu: whisper 或 Hugging Face 仓库名 / or a Hugging Face repository	识别模型（需与后端兼容）/ Speech model (must match the backend) gpu/cpu: qwen3-1.7b；coreml: qwen3-1.7b、qwen3-0.6b、whisper；npu: whisper 或 Hugging Face 仓库名	Speech model (must match the backend) gpu/cpu: qwen3-1.7b; coreml: qwen3-1.7b, qwen3-0.6b, whisper; npu: whisper or a Hugging Face repository	辨識模型（需與後端相容）/ Speech model (must match the backend) gpu/cpu: qwen3-1.7b；coreml: qwen3-1.7b、qwen3-0.6b、whisper；npu: whisper 或 Hugging Face 儲存庫名	認識モデル（バックエンドと互換性が必要）gpu/cpu: qwen3-1.7b、coreml: qwen3-1.7b、qwen3-0.6b、whisper、npu: whisper または Hugging Face リポジトリ名
 识别视频 {}–{} 的声音 / Transcribe video audio {}–{}	识别视频 {}–{} 的声音	Transcribe video audio {}–{}	辨識影片 {}–{} 的聲音	動画 {}–{} の音声を認識
 识别设备	识别设备	Recognition device	辨識裝置	認識デバイス
@@ -1704,7 +1688,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 该后端支持的模型：{}	该后端支持的模型：{}	Models supported by this backend: {}	此後端支援的模型：{}	このバックエンドが対応するモデル：{}
 语言代码只能包含字母、数字和连字符，请用逗号分隔各语言	语言代码只能包含字母、数字和连字符，请用逗号分隔各语言	Language codes can only contain letters, numbers, and hyphens. Please separate languages with commas.	語言代碼只能包含字母、數字和連字號，請用逗號分隔各語言	言語コードには文字、数字、ハイフンのみを含めることができます。言語はカンマで区切ってください。
 语言优先级	语言优先级	Language priority	語言優先順序	言語の優先順位
-语音	语音	Speech	語音	音声
 语音分段长度需要大于 0	语音分段长度需要大于 0	Speech segment length must be greater than 0	語音分段長度需要大於 0	音声セグメントの長さは 0 より大きくする必要があります
 语音服务	语音服务	Speech service	語音服務	音声サービス
 语音服务没有返回文字 / The speech service returned no text	语音服务没有返回文字	The speech service returned no text	語音服務沒有傳回文字	音声サービスがテキストを返しませんでした
@@ -1785,7 +1768,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 跟随系统	跟随系统	Follow system	跟隨系統	システムに合わせる
 跳过登录	跳过登录	Skip login	跳過登入	ログインをスキップする
 转写为空，无法摘要 / Transcript is empty; cannot summarize	转写为空，无法摘要	Transcript is empty; cannot summarize	轉寫為空，無法摘要	文字起こしが空のため要約できません
-转到 {}	转到 {}	Go to {}	前往 {}	{} に移動
 转换未完成	转换未完成	Conversion not completed	轉換未完成	変換が完了していません
 转换程序	转换程序	Conversion program	轉換程式	変換プログラム
 转换程序无法运行，请重新安装应用	转换程序无法运行，请重新安装应用	The conversion program cannot run. Please reinstall the application.	轉換程式無法執行，請重新安裝應用程式	変換プログラムは実行できません。アプリケーションを再インストールしてください。
@@ -1826,7 +1808,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 这个链接包含多个视频，请选择具体单集后生成笔记 / This link contains multiple videos; choose a specific episode before generating notes	这个链接包含多个视频，请选择具体单集后生成笔记	This link contains multiple videos; choose a specific episode before generating notes	這個連結包含多個影片，請選擇具體單集後生成筆記	このリンクには複数の動画が含まれています。ノートを生成するには特定のエピソードを選択してください
 这些任务由较新版本创建，请使用对应版本恢复，原文件已保留	这些任务由较新版本创建，请使用对应版本恢复，原文件已保留	These tasks were created by a newer version. Please use the corresponding version to restore. The original files have been retained.	這些任務由較新版本建立，請使用對應版本恢復，原檔案已保留	これらのタスクは新しいバージョンで作成されました。対応するバージョンを使用して復元してください。元のファイルは保持されています。
 这些修改尚未保存：{}	这些修改尚未保存：{}	These changes have not been saved: {}	這些修改尚未儲存：{}	これらの変更は保存されていません: {}
-这些请求已获得重新发送授权，请等待对应任务处理	这些请求已获得重新发送授权，请等待对应任务处理	These requests have been authorized to be resent, please wait for the corresponding tasks to be processed	這些請求已獲得重新傳送授權，請等待對應任務處理	これらのリクエストは再送信が許可されています。対応するタスクが処理されるまでお待ちください。
 这份备份尚未核验，不能清理	这份备份尚未核验，不能清理	This backup has not been verified and cannot be cleaned up.	這份備份尚未核驗，不能清理	このバックアップは検証されていないため、クリーンアップできません。
 这份字幕未包含可读取的文字，请选择其他字幕	这份字幕未包含可读取的文字，请选择其他字幕	This subtitle does not contain readable text, please choose another subtitle	這份字幕未包含可讀取的文字，請選擇其他字幕	この字幕には判読可能なテキストが含まれていません。別の字幕を選択してください
 这份字幕未包含可读取的文字，请选择其他字幕 / This subtitle contains no readable text; choose another subtitle	这份字幕未包含可读取的文字，请选择其他字幕	This subtitle contains no readable text; choose another subtitle	這份字幕未包含可讀取的文字，請選擇其他字幕	この字幕には判読可能なテキストが含まれていません。別の字幕を選択してください
@@ -1839,7 +1820,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 这份笔记的位置暂时无法访问	这份笔记的位置暂时无法访问	The location of this note is temporarily inaccessible	這份筆記的位置暫時無法存取	このノートの場所に一時的にアクセスできません
 这份笔记的保存位置暂时无法确认，请在笔记库菜单中重新扫描。	这份笔记的保存位置暂时无法确认，请在笔记库菜单中重新扫描。	The storage location of this note cannot be confirmed at the moment. Please scan again in the note library menu.	這份筆記的儲存位置暫時無法確認，請在筆記庫選單中重新掃描。	このノートの保存場所を現在確認できません。ノートライブラリメニューで再度スキャンしてください。
 这张截图没有对应文字	这张截图没有对应文字	This screenshot has no corresponding text	這張截圖沒有對應文字	このスクリーンショットには対応するテキストがありません
-这段讲解：{}	这段讲解：{}	This explanation: {}	這段講解：{}	この説明: {}
 这部分无需补做	这部分无需补做	This part doesn't need reprocessing	這部分無需補做	この部分は再処理の必要がありません
 这里是长期默认值，主页的「处理选项」可以只对单次生效	这里是长期默认值，主页的「处理选项」可以只对单次生效	These are your defaults; “Processing options” on the home page can change them for a single run.	這裡是長期預設值，首頁的「處理選項」可以只對單次生效	ここは長期的な既定値です。ホームの「処理オプション」では今回だけに適用できます。
 这项任务已有后续处理，请打开对应任务继续	这项任务已有后续处理，请打开对应任务继续	This task already has follow-up processing. Open the corresponding task to continue.	這項任務已有後續處理，請開啟對應任務繼續	このタスクには後続の処理があります。続行するには対応するタスクを開いてください。
@@ -1866,7 +1846,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 选中的视频无法识别，请单独打开后转换	选中的视频无法识别，请单独打开后转换	The selected video cannot be recognized, please open it separately and convert it.	選中的影片無法辨識，請單獨開啟後轉換	選択した動画は認識できません。別途開いて変換してください。
 选择 Codex 模型 / Choose a Codex model	选择 Codex 模型	Choose a Codex model	選擇 Codex 模型	Codexモデルの選択
 选择 SRT 或 VTT 字幕	选择 SRT 或 VTT 字幕	Choose SRT or VTT subtitles	選擇 SRT 或 VTT 字幕	SRT または VTT 字幕を選択します
-选择 {}	选择 {}	Select {}	選擇 {}	{} を選択
 选择保存位置	选择保存位置	Select save location	選擇儲存位置	保存場所を選択
 选择原视频	选择原视频	Select original video	選擇原影片	元の動画を選択してください
 选择字幕文件	选择字幕文件	Select subtitle file	選擇字幕檔案	字幕ファイルを選択
@@ -1876,15 +1855,14 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 选择模型	选择模型	Select model	選擇模型	モデルを選択してください
 选择用于校对的模型 / Choose a model for proofreading	选择用于校对的模型	Choose a model for proofreading	選擇用於校對的模型	校正用のモデルを選択してください
 选择空文件夹作为笔记库的新位置	选择空文件夹作为笔记库的新位置	Select an empty folder as the new location for your notes library	選擇空資料夾作為筆記庫的新位置	ノートライブラリの新しい場所として空のフォルダーを選択します
+选择要下载的识别模型（保存到 {}）/ Choose a speech model to download (saved to {})	选择要下载的识别模型（保存到 {}）	Choose a speech model to download (saved to {})	選擇要下載的辨識模型（儲存到 {}）	ダウンロードする音声認識モデルを選択（保存先：{}）
 选择要处理的视频	选择要处理的视频	Select videos to process	選擇要處理的影片	処理する動画を選択してください
 选择视频	选择视频	Choose video	選擇影片	動画を選択
-选择识别模型 / Choose a speech model	选择识别模型	Choose a speech model	選擇辨識模型	認識モデルを選択
 选择课程视频	选择课程视频	Select course video	選擇課程影片	コース動画を選択してください
 选择这个笔记库移动后的文件夹	选择这个笔记库移动后的文件夹	Select the folder to which this note library is moved	選擇這個筆記庫移動後的資料夾	このノートライブラリの移動先フォルダーを選択してください
-选项：	选项：	Options:	選項：	オプション:
+选项：	选项：	Options:	選項：	オプション：
 速度	速度	Speed	速度	速度
 速度 {}	速度 {}	Speed {}	速度 {}	速度 {}
-選項：	選項：	Options:	選項：	オプション:
 部分内容待补全	部分内容待补全	Incomplete	部分內容待補全	一部の内容は補完が必要です
 部分内容暂未读取	部分内容暂未读取	Some content has not been read yet	部分內容暫未讀取	一部の内容はまだ読み込まれていません
 部分处理结果未确认	部分处理结果未确认	Some processing results are not confirmed	部分處理結果未確認	一部の処理結果が未確認
@@ -1910,7 +1888,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 重新关联…	重新关联…	Reconnect…	重新關聯…	再接続…
 重新关联此保存位置	重新关联此保存位置	Reconnect this save location	重新關聯此儲存位置	この保存場所を再接続します
 重新关联此保存位置？	重新关联此保存位置？	Reconnect this save location?	重新關聯此儲存位置？	この保存場所を再接続しますか?
-重新关联笔记库	重新关联笔记库	Reconnect the note library	重新關聯筆記庫	ノートライブラリを再接続する
 重新发送以上内容	重新发送以上内容	Resend the above	重新傳送以上內容	上記を再送します
 重新发送的选择尚未保存：{}	重新发送的选择尚未保存：{}	Resend selection not saved: {}	重新傳送的選擇尚未儲存：{}	再送信選択が保存されていません: {}
 重新定位…	重新定位…	Relocate…	重新定位…	再配置…
@@ -1922,7 +1899,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 重新检查	重新检查	Check again	重新檢查	再確認
 重新检查保存位置	重新检查保存位置	Recheck save location	重新檢查儲存位置	保存場所を再確認
 重新检查是否可用	重新检查是否可用	Recheck availability	重新檢查是否可用	利用可能か再確認
-重新检查模型	重新检查模型	Recheck model	重新檢查模型	モデルの再チェック
 重新生成已有摘要 / Regenerate existing summaries	重新生成已有摘要	Regenerate existing summaries	重新生成已有摘要	既存の要約を再生成する
 重新生成截图	重新生成截图	Regenerate screenshots	重新產生截圖	スクリーンショットを再生成
 重新生成摘要	重新生成摘要	Regenerate summary	重新產生摘要	要約を再生成
@@ -1943,7 +1919,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 重试补做	重试补做	Retry reprocessing	重試補做	再処理を再試行
 重试转换	重试转换	Retry conversion	重試轉換	変換を再試行する
 重试预览	重试预览	Retry preview	重試預覽	プレビューを再試行する
-重跑 install.sh 可安装随包版本	重跑 install.sh 可安装随包版本	Rerun install.sh for the bundled build	重跑 install.sh 可安裝隨包版本	install.sh を再実行すると同梱版をインストールできます
 钥匙串中找不到此服务的凭据，请重新保存 API Key	钥匙串中找不到此服务的凭据，请重新保存 API Key	The credentials for this service were not found in the keychain. Please save the API key again.	鑰匙圈中找不到此服務的憑證，請重新儲存 API 金鑰	このサービスの認証情報がキーチェーンに見つかりませんでした。API キーを再度保存してください。
 链接无效；请提供完整的视频链接 / Invalid URL; provide a complete video URL	链接无效；请提供完整的视频链接	Invalid URL; provide a complete video URL	連結無效；請提供完整的影片連結	無効なリンクです。完全な動画リンクを提供してください
 链接缺少主机名 / URL is missing a host	链接缺少主机名	URL is missing a host	連結缺少主機名	リンクにホスト名がありません
@@ -1953,7 +1928,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 阅读位置尚未保存：{}	阅读位置尚未保存：{}	Reading position not saved yet: {}	閱讀位置尚未儲存：{}	閲覧位置がまだ保存されていません: {}
 阅读笔记	阅读笔记	Read note	閱讀筆記	ノートを読む
 阅读视图	阅读视图	Reading view	閱讀檢視	閲覧ビュー
-阅读视图与笔记操作	阅读视图与笔记操作	Reading view and note operations	閱讀檢視與筆記操作	閲覧ビューとノート操作
 阅读进度未能保存：{}	阅读进度未能保存：{}	Reading progress failed to save: {}	閱讀進度未能儲存：{}	閲覧の進行状況を保存できませんでした: {}
 阿拉伯语	阿拉伯语	Arabic	阿拉伯語	アラビア語
 附截图辅助校对（需要视觉模型）/ Attach slides for proofreading (requires image support)	附截图辅助校对（需要视觉模型）/ Attach slides for proofreading (requires image support)	Attach slides for proofreading (requires image support)	附截圖輔助校對（需要視覺模型）/ Attach slides for proofreading (requires image support)	校正用のスクリーンショットを添付します (画像のサポートが必要です)
@@ -1961,7 +1935,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 隐藏完成后的 AI 校对提示 / Hide the optional AI proofreading tip	隐藏完成后的 AI 校对提示	Hide the optional AI proofreading tip	隱藏完成後的 AI 校對提示	完了後の AI 校正のヒントを非表示にする
 隐藏密钥	隐藏密钥	Hide key	隱藏金鑰	キーを隠す
 需要 Apple 芯片的 Mac	需要 Apple 芯片的 Mac	Requires a Mac with Apple silicon	需要 Apple 晶片的 Mac	Apple シリコン搭載の Mac が必要です
-需要 Homebrew；安装后重新打开应用	需要 Homebrew；安装后重新打开应用	Requires Homebrew; reopen the app after installation	需要 Homebrew；安裝後重新開啟應用程式	Homebrew が必要です。インストール後にアプリを再度開いてください
 需要 segments 列表，每项有 id 与 text	需要 segments 列表，每项有 id 与 text	A segments list is required; each item needs an id and text	需要 segments 列表，每項有 id 與 text	segments リストが必要です。各項目に id と text が必要です
 需要填写服务地址和模型名。在终端运行 course2md llm setup，或传入 --base-url 和 --model / A base URL and model are required. Run course2md llm setup in a terminal, or pass --base-url and --model.	需要填写服务地址和模型名。在终端运行 course2md llm setup，或传入 --base-url 和 --model	A base URL and model are required. Run course2md llm setup in a terminal, or pass --base-url and --model.	需要填寫服務網址和模型名稱。在終端機執行 course2md llm setup，或傳入 --base-url 和 --model	サービスURLとモデル名を入力する必要があります。ターミナルで course2md llm setup を実行するか、--base-url と --model を指定してください
 需要处理	需要处理	Needs attention	需要處理	対応が必要
@@ -1975,14 +1948,9 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 韩语	韩语	Korean	韓語	韓国語
 音频会发送到所选服务	音频会发送到所选服务	Audio is sent to the selected service	音訊會傳送到所選服務	音声は選択したサービスに送信されます
 音频会发送到所选语音识别服务	音频会发送到所选语音识别服务	Audio is sent to the selected speech recognition service	音訊會傳送到所選語音辨識服務	音声は選択した音声認識サービスに送信されます
-音频切分线程异常终止 / Audio split thread terminated unexpectedly	音频切分线程异常终止	Audio split thread terminated unexpectedly	音訊切分執行緒異常終止	音声分割スレッドが異常終了しました
 音频编码部分也用 GPU（默认）/ Also run the audio encoder on the GPU (default)	音频编码部分也用 GPU（默认）/ Also run the audio encoder on the GPU (default)	Also run the audio encoder on the GPU (default)	音訊編碼部分也用 GPU（預設）/ Also run the audio encoder on the GPU (default)	GPU 上でオーディオ エンコーダも実行します (デフォルト)
 音频编码部分改用 CPU（显存不足时）/ Run the audio encoder on the CPU (when GPU memory is low)	音频编码部分改用 CPU（显存不足时）/ Run the audio encoder on the CPU (when GPU memory is low)	Run the audio encoder on the CPU (when GPU memory is low)	音訊編碼部分改用 CPU（視訊記憶體不足時）/ Run the audio encoder on the CPU (when GPU memory is low)	CPU 上でオーディオエンコーダーを実行します（GPU メモリが少ない場合）
-顯示此訊息或子命令的說明	顯示此訊息或子命令的說明	Show this message or the help for a subcommand	顯示此訊息或子命令的說明	このメッセージまたはサブコマンドのヘルプを表示します
-顯示版本	顯示版本	Show version	顯示版本	バージョンを表示
-顯示說明	顯示說明	Show help	顯示說明	ヘルプを表示
 项目主页	项目主页	Project homepage	專案首頁	プロジェクトのホームページ
-预切游标与当前 chunk 对齐	预切游标与当前 chunk 对齐	The precut cursor is aligned with the current chunk	預切游標與目前 chunk 對齊	プレカット カーソルは現在のチャンクと位置合わせされます
 预览视频	预览视频	Preview video	預覽影片	動画をプレビュー
 预计剩余	预计剩余	Estimated remaining	預計剩餘	推定残り時間
 预计剩余 {}	预计剩余 {}	{} remaining	預計剩餘 {}	推定残り時間 {}
@@ -1991,7 +1959,12 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 首次识别时会自动下载所选模型	首次识别时会自动下载所选模型	The selected model is automatically downloaded upon first recognition	首次辨識時會自動下載所選模型	選択したモデルは最初の認識時に自動的にダウンロードされます
 首次识别时选择并下载 Apple 模型（约 1–2.3 GB）。 / Choose and download an Apple model at first transcription (about 1–2.3 GB).	首次识别时选择并下载 Apple 模型（约 1–2.3 GB）。	Choose and download an Apple model at first transcription (about 1–2.3 GB).	首次辨識時選擇並下載 Apple 模型（約 1–2.3 GB）。	初回認識時に Apple モデル (約 1 ～ 2.3 GB) を選択してダウンロードします。
 验证中	验证中	Verifying	驗證中	検証中
-高级识别设置	高级识别设置	Advanced recognition settings	進階辨識設定	高度な認識設定
+验证完成，可以关闭此页面并回到 course2md。	验证完成，可以关闭此页面并回到 course2md。	Check complete. You can close this page and return to course2md.	驗證完成，可以關閉此頁面並回到 course2md。	確認が完了しました。このページを閉じて course2md に戻れます。
+验证已关闭。	验证已关闭。	The check was closed.	驗證已關閉。	確認が閉じられました。
+验证并登录	验证并登录	Verify and sign in	驗證並登入	確認してログイン
+验证未能加载或未通过，请回到 course2md 重新开始。	验证未能加载或未通过，请回到 course2md 重新开始。	The check did not load or did not pass. Return to course2md and start again.	驗證未能載入或未通過，請回到 course2md 重新開始。	確認を読み込めなかったか、通過できませんでした。course2md に戻ってやり直してください。
+验证码已发送。/ Code sent.	验证码已发送。	Code sent.	驗證碼已傳送。	認証コードを送信しました。
+验证码已发送，请稍后再试	验证码已发送，请稍后再试	A code was already sent; try again later	驗證碼已傳送，請稍後再試	認証コードは送信済みです。しばらくしてから再試行してください
 默认 · 更准确，占内存较多	默认 · 更准确，占内存较多	Default · More accurate, takes up more memory	預設 · 更準確，佔記憶體較多	デフォルト · より正確、メモリ使用量が多い
 默认位置尚未更改：{}	默认位置尚未更改：{}	The default location has not been changed: {}	預設位置尚未更改：{}	デフォルトの場所は変更されていません: {}
 默认保存位置	默认保存位置	Default save location	預設儲存位置	デフォルトの保存場所
@@ -2012,19 +1985,11 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 （输入隐藏；回车保留已保存的密钥） / API key (hidden; Enter keeps the saved key)	（输入隐藏；回车保留已保存的密钥）	API key (hidden; Enter keeps the saved key)	（輸入隱藏；按 Enter 保留已儲存的金鑰）	（入力は非表示。Enter で保存済みのキーを保持）
 （输入隐藏；无密钥的本地服务可留空） / API key (hidden; leave blank for a local service without authentication)	（输入隐藏；无密钥的本地服务可留空）	API key (hidden; leave blank for a local service without authentication)	（輸入隱藏；無金鑰的本地服務可留空）	(入力は非表示になります。キーのないローカル サービスは空白のままにすることができます)
 （输出 json）	（输出 json）	(output json)	（輸出 json）	（json を出力）
-，已选择	，已选择	, selected	，已選擇	、選択済み
 ，或 Hugging Face 仓库名（如 org/model）	，或 Hugging Face 仓库名（如 org/model）	, or Hugging Face repository name (such as org/model)	，或 Hugging Face 儲存庫名（如 org/model）	、または Hugging Face リポジトリ名（org/model など）
 ；	；	; 	；	;
-自动（紧凑）	自动	Auto	自動	自動
-仅字幕（紧凑）	仅字幕	Subtitles	僅字幕	字幕のみ
-语音识别（紧凑）	语音识别	Speech	語音辨識	音声認識
-正在保存…	正在保存…	Saving…	正在儲存…	保存中…
-设置保存线程已停止	设置保存线程已停止	The settings save thread has stopped	設定儲存執行緒已停止	設定保存スレッドが停止しました
-没有待保存的服务设置	没有待保存的服务设置	There are no service settings waiting to be saved	沒有待儲存的服務設定	保存待ちのサービス設定はありません
 原笔记已关闭；服务正在保存，但未用于其他笔记	原笔记已关闭；服务正在保存，但未用于其他笔记	The original note is closed; the service is still being saved and was not used for other notes	原筆記已關閉；服務正在儲存，但未用於其他筆記	元のノートは閉じられています。サービスは保存中で、他のノートには使用されていません
 服务正在保存，本次选择尚未保存：{}	服务正在保存，本次选择尚未保存：{}	The service is still being saved; this selection was not saved: {}	服務正在儲存，本次選擇尚未儲存：{}	サービスは保存中です。今回の選択は保存されていません: {}
 服务正在保存，补做任务尚未创建。请重试补做。	服务正在保存，补做任务尚未创建。请重试补做。	The service is still being saved; the reprocessing task has not been created. Retry reprocessing.	服務正在儲存，補做任務尚未建立。請重試補做。	サービスは保存中です。再処理タスクはまだ作成されていません。再処理を再試行してください。
-Markdown 包…	Markdown 包…	Markdown package…	Markdown 包…	Markdown パッケージ…
 上传音频，返回转写文字	上传音频，返回转写文字	Uploads audio and returns a transcript	上傳音訊，傳回轉寫文字	音声をアップロードし、文字起こしを返します
 主页	主页	Home	首頁	ホーム
 使用 ChatGPT 订阅，不需要 API Key	使用 ChatGPT 订阅，不需要 API Key	Uses your ChatGPT subscription; no API key needed	使用 ChatGPT 訂閱，不需要 API 金鑰	ChatGPT のサブスクリプションを使用し、API キーは不要です
@@ -2033,7 +1998,6 @@ Markdown 包…	Markdown 包…	Markdown package…	Markdown 包…	Markdown パ
 删除服务…	删除服务…	Delete service…	刪除服務…	サービスを削除…
 填写接口地址和 API Key，适用于大多数云端服务	填写接口地址和 API Key，适用于大多数云端服务	Enter an endpoint and API key; works with most cloud services	填寫介面網址和 API 金鑰，適用於大多數雲端服務	エンドポイントと API キーを入力します。多くのクラウドサービスで使えます
 复制原视频链接	复制原视频链接	Copy video link	複製原影片連結	元の動画リンクをコピー
-导出为	导出为	Export as	匯出為	エクスポート形式
 已在 {} 检测到 {} 个模型	已在 {} 检测到 {} 个模型	{}: found {} models	已在 {} 偵測到 {} 個模型	{} で {} 個のモデルを検出しました
 已是默认保存位置	已是默认保存位置	Already the default location	已是預設儲存位置	既定の保存先です
 已是默认服务	已是默认服务	Already the default service	已是預設服務	既定のサービスです
@@ -2046,12 +2010,9 @@ Markdown 包…	Markdown 包…	Markdown package…	Markdown 包…	Markdown パ
 测试通过	测试通过	Test passed	測試通過	テスト合格
 添加或管理 AI 服务…	添加或管理 AI 服务…	Add or manage AI services…	新增或管理 AI 服務…	AI サービスを追加・管理…
 添加或管理语音服务…	添加或管理语音服务…	Add or manage speech services…	新增或管理語音服務…	音声サービスを追加・管理…
-用账号登录	用账号登录	Sign in with an account	用帳號登入	アカウントでサインイン
 移动到	移动到	Move to	移動到	移動先
 笔记库操作	笔记库操作	Library actions	筆記庫操作	ノートライブラリの操作
-结构化数据…	结构化数据…	Structured data…	結構化資料…	構造化データ…
 编辑…	编辑…	Edit…	編輯…	編集…
-网页文件…	网页文件…	Web page…	網頁檔案…	Web ページ…
 设为默认保存位置	设为默认保存位置	Set as default location	設為預設儲存位置	既定の保存先にする
 设为默认服务…	设为默认服务…	Set as default service…	設為預設服務…	既定のサービスにする…
 退出 ChatGPT 账号	退出 ChatGPT 账号	Sign out of ChatGPT	登出 ChatGPT 帳號	ChatGPT からサインアウト
@@ -2074,12 +2035,11 @@ ChatGPT 登录已失效，请重新登录	ChatGPT 登录已失效，请重新登
 ChatGPT 账号	ChatGPT 账号	ChatGPT account	ChatGPT 帳號	ChatGPT アカウント
 例如：我的 API	例如：我的 API	e.g. My API	例如：我的 API	例：マイ API
 播放原视频	播放原视频	Play original video	播放原影片	元の動画を再生
-从 {} 播放原视频	从 {} 播放原视频	Play original video from {}	從 {} 播放原影片	{} から元の動画を再生
 在 {} 打开	在 {} 打开	Open on {}	在 {} 開啟	{} で開く
 所选项目不是视频文件，请选择一个视频文件	所选项目不是视频文件，请选择一个视频文件	The selected item is not a video file. Choose a video file.	所選項目不是影片檔案，請選擇一個影片檔案	選択した項目は動画ファイルではありません。動画ファイルを選んでください
 暂时无法获取模型列表，可以直接填写模型名称（{}）	暂时无法获取模型列表，可以直接填写模型名称（{}）	Could not load the model list; you can type a model name ({})	暫時無法取得模型列表，可以直接填寫模型名稱（{}）	モデル一覧を取得できません。モデル名を直接入力できます（{}）
 用时 {}	用时 {}	{} elapsed	用時 {}	経過 {}
-检测到中国大陆网络，从国内镜像下载模型 / Mainland China network detected; downloading models from a domestic mirror	检测到中国大陆网络，从国内镜像下载模型	Mainland China network detected; downloading models from a domestic mirror	偵測到中國大陸網路，從國內鏡像下載模型	中国本土のネットワークを検出しました。国内ミラーからモデルをダウンロードします
+位于中国大陆，优先从国内镜像下载模型（可用 HF_ENDPOINT 指定地址） / In mainland China: trying domestic mirrors first for models (HF_ENDPOINT sets a host)	位于中国大陆，优先从国内镜像下载模型（可用 HF_ENDPOINT 指定地址）	In mainland China: trying domestic mirrors first for models (HF_ENDPOINT sets a host)	位於中國大陸，優先從國內鏡像下載模型（可用 HF_ENDPOINT 指定位址）	中国本土のため、国内ミラーからのモデルダウンロードを優先します（HF_ENDPOINT で指定可能）
 所有下载地址均失败 / Every download host failed	所有下载地址均失败	Every download host failed	所有下載網址均失敗	すべてのダウンロード元で失敗しました
 文件校验不符 / Checksum mismatch	文件校验不符	Checksum mismatch	檔案校驗不符	チェックサムが一致しません
 一分钟没有收到数据 / No data for a minute	一分钟没有收到数据	No data for a minute	一分鐘沒有收到資料	1 分間データを受信していません
@@ -2109,7 +2069,6 @@ ChatGPT 账号	ChatGPT 账号	ChatGPT account	ChatGPT 帳號	ChatGPT アカウ�
 服务返回的翻译结构无效 / Invalid translation structure	服务返回的翻译结构无效	Invalid translation structure	服務傳回的翻譯結構無效	サービスから返された翻訳の構造が無効です
 翻译结果与原文段落不对应 / Translated segments do not match the input	翻译结果与原文段落不对应	Translated segments do not match the input	翻譯結果與原文段落不對應	翻訳結果が元の段落と一致しません
 翻译未完成：{}	翻译未完成：{}	Translation incomplete: {}	翻譯未完成：{}	翻訳が完了していません: {}
-AI 翻译工作进程中断 / Translation worker interrupted	AI 翻译工作进程中断	Translation worker interrupted	AI 翻譯工作程序中斷	AI 翻訳プロセスが中断されました
 翻译未全部完成（{}/{} 失败）	翻译未全部完成（{}/{} 失败）	Translation incomplete ({}/{} failed)	翻譯未全部完成（{}/{} 失敗）	翻訳が完了していません（{}/{} 件失敗）
 AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 双语翻译	双语翻译	Bilingual translation	雙語翻譯	バイリンガル翻訳
@@ -2124,7 +2083,6 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 拖动可以调整顺序	拖动可以调整顺序	Drag to reorder	拖曳可以調整順序	ドラッグして並べ替え
 显示另外 {} 个	显示另外 {} 个	Show {} more	顯示另外 {} 個	さらに {} 件を表示
 复制视频链接	复制视频链接	Copy video link	複製影片連結	動画のリンクをコピー
-展开详情	展开详情	Show details	展開詳情	詳細を表示
 查看日志	查看日志	View log	查看日誌	ログを表示
 收起日志	收起日志	Hide log	收合日誌	ログを隠す
 移到最前	移到最前	Move to top	移到最前	先頭へ移動
@@ -2174,18 +2132,78 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 运行检查、版本、许可	运行检查、版本、许可	Run checks, version, licenses	執行檢查、版本、授權	チェック、バージョン、ライセンス
 搜索设置	搜索设置	Search settings	搜尋設定	設定を検索
 没有匹配的设置	没有匹配的设置	No matching settings	沒有符合的設定	一致する設定はありません
-设置分类	设置分类	Settings categories	設定分類	設定のカテゴリ
 使用中	使用中	In use	使用中	使用中
 未添加时使用本机识别	未添加时使用本机识别	Without one, speech is recognized on this device	未新增時使用本機辨識	未追加の場合はこのデバイスで認識します
-需要修复	需要修复	Needs repair	需要修復	修正が必要です
 {} 项检查未通过	{} 项检查未通过	Failed checks: {}	{} 項檢查未通過	{} 件のチェックに合格しませんでした
 应用 / Application	应用	Application	應用程式	アプリ
-1 个需要处理	1 个需要处理	1 needs attention	1 個需要處理	対応が必要 1 件
-收起已完成的步骤	收起已完成的步骤	Hide completed steps	收起已完成的步驟	完了したステップを折りたたむ
-查看已完成的步骤	查看已完成的步骤	Show completed steps	檢視已完成的步驟	完了したステップを表示する
 找到 1 篇笔记	找到 1 篇笔记	Found 1 note	找到 1 篇筆記	1 件のノートが見つかりました
 1 篇笔记	1 篇笔记	1 note	1 篇筆記	1 件のノート
 {} 篇笔记	{} 篇笔记	{} notes	{} 篇筆記	{} 件のノート
 Intel NPU 不再提供 Qwen3，已改用 Whisper large-v3-turbo	Intel NPU 不再提供 Qwen3，已改用 Whisper large-v3-turbo	Qwen3 is no longer available on Intel NPU; switched to Whisper large-v3-turbo	Intel NPU 不再提供 Qwen3，已改用 Whisper large-v3-turbo	Intel NPU では Qwen3 を利用できなくなったため、Whisper large-v3-turbo に切り替えました
 Intel NPU 不再支持 Qwen3 模型。可用：{}	Intel NPU 不再支持 Qwen3 模型。可用：{}	Qwen3 models are no longer available on Intel NPU. Available: {}	Intel NPU 不再支援 Qwen3 模型。可用：{}	Intel NPU では Qwen3 モデルを利用できなくなりました。利用可能：{}
+等待文件锁 {} 超时 / Timed out waiting for the file lock {}	等待文件锁 {} 超时	Timed out waiting for the file lock {}	等待檔案鎖 {} 逾時	ファイルロック {} の待機がタイムアウトしました
+授权被拒绝：{} / Authorization denied: {}	授权被拒绝：{}	Authorization denied: {}	授權被拒絕：{}	認可が拒否されました: {}
 识别方式 {} 不支持模型「{}」。可用：{}	识别方式 {} 不支持模型「{}」。可用：{}	The {} backend does not support model "{}". Available: {}	辨識方式 {} 不支援模型「{}」。可用：{}	音声認識方式 {} はモデル「{}」に対応していません。利用可能：{}
+字幕未读取成功：{}	字幕未读取成功：{}	Subtitles could not be read: {}	字幕未讀取成功：{}	字幕を読み取れませんでした：{}
+暂不发送	暂不发送	Don’t send now	暫不傳送	今は送信しない
+导出为 Markdown 包…	导出为 Markdown 包…	Export as Markdown package…	匯出為 Markdown 包…	Markdown パッケージとしてエクスポート…
+导出为网页文件…	导出为网页文件…	Export as web page…	匯出為網頁檔案…	Web ページとしてエクスポート…
+导出为结构化数据…	导出为结构化数据…	Export as structured data…	匯出為結構化資料…	構造化データとしてエクスポート…
+移动到…	移动到…	Move to…	移動到…	移動…
+重新测试	重新测试	Test again	重新測試	再テスト
+收起模型列表	收起模型列表	Hide model list	收起模型清單	モデル一覧を閉じる
+AI 用途	AI 用途	What AI is used for	AI 用途	AI の用途
+第 {} 步，共 {} 步	第 {} 步，共 {} 步	Step {} of {}	第 {} 步，共 {} 步	ステップ {} / {}
+音频的处理位置	音频的处理位置	Where audio is processed	音訊的處理位置	音声の処理場所
+清空链接，选项恢复为默认设置	清空链接，选项恢复为默认设置	Clears the link and returns the options to your defaults	清空連結，選項恢復為預設設定	リンクを消去し、オプションを既定の設定に戻します
+已找回上次未生效的应用设置，可以重试保存；当前仍使用原来的有效选项	已找回上次未生效的应用设置，可以重试保存；当前仍使用原来的有效选项	An app settings change that could not be saved last time was found. Save it again to apply it; the previous settings stay in use until then.	已找回上次未生效的應用程式設定，可以重試儲存；目前仍使用原來的有效選項	前回保存できなかったアプリ設定の変更が見つかりました。もう一度保存すると適用されます。それまでは元の設定が使われます。
+已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项	已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项	A settings change that could not be saved last time was found. Save it again to apply it; the previous settings stay in use until then.	已找回上次未生效的設定變更，可以重試儲存；目前仍使用原來的有效選項	前回保存できなかった設定の変更が見つかりました。もう一度保存すると適用されます。それまでは元の設定が使われます。
+打开「校对文字和标点」后可用	打开「校对文字和标点」后可用	Available once “Proofread text and punctuation” is on	開啟「校對文字與標點」後可用	「文章と句読点を校正」をオンにすると使えます
+无法连接服务，尚未发送请求，请核对服务地址和网络	无法连接服务，尚未发送请求，请核对服务地址和网络	Could not connect to the service, so no request was sent. Check the service URL and the network.	無法連線服務，尚未傳送請求，請核對服務網址和網路	サービスに接続できなかったため、リクエストは送信されていません。サービス URL とネットワークを確認してください。
+有字幕，将直接使用	有字幕，将直接使用	Subtitles found; they will be used directly	有字幕，將直接使用	字幕があるため、そのまま使います
+配置文件 / Configuration: {}	配置文件：{}	Configuration: {}	設定檔：{}	設定ファイル：{}
+  LLM 校对 / Transcript polish: {}	  LLM 校对：{}	  Transcript polish: {}	  LLM 校對：{}	  AI 校正：{}
+  服务类型 / Provider: {}	  服务类型：{}	  Provider: {}	  服務類型：{}	  サービスの種類：{}
+  服务地址 / Base URL: {}	  服务地址：{}	  Base URL: {}	  服務位址：{}	  サービスの URL：{}
+  API 密钥 / API key: {}	  API 密钥：{}	  API key: {}	  API 金鑰：{}	  API キー：{}
+  模型 / Model: {}	  模型：{}	  Model: {}	  模型：{}	  モデル：{}
+  截图辅助校对 / Slide-assisted polish: {}	  截图辅助校对：{}	  Slide-assisted polish: {}	  截圖輔助校對：{}	  スライドを使った校正：{}
+  自动摘要 / Automatic summary: {}	  自动摘要：{}	  Automatic summary: {}	  自動摘要：{}	  自動要約：{}
+  并发请求 / Concurrent requests: {}	  并发请求：{}	  Concurrent requests: {}	  並行請求：{}	  同時リクエスト数：{}
+  使用提示 / Usage hint: {}	  使用提示：{}	  Usage hint: {}	  使用提示：{}	  使い方のヒント：{}
+gpu/cpu 模型目录 / gpu/cpu model directory: {}	gpu/cpu 模型目录：{}	gpu/cpu model directory: {}	gpu/cpu 模型目錄：{}	gpu/cpu モデルのディレクトリ：{}
+下载或修复 / Download or repair: course2md models download --dir "{}"	下载或修复：course2md models download --dir "{}"	Download or repair: course2md models download --dir "{}"	下載或修復：course2md models download --dir "{}"	ダウンロードまたは修復：course2md models download --dir "{}"
+下载或修复 / Download or repair: course2md models prepare --provider {} --model {}	下载或修复：course2md models prepare --provider {} --model {}	Download or repair: course2md models prepare --provider {} --model {}	下載或修復：course2md models prepare --provider {} --model {}	ダウンロードまたは修復：course2md models prepare --provider {} --model {}
+模型已就绪 / Models ready: {}	模型已就绪：{}	Models ready: {}	模型已就緒：{}	モデルの準備ができました：{}
+已保存并启用 / Saved and enabled: {}	已保存并启用：{}	Saved and enabled: {}	已儲存並啟用：{}	保存して有効にしました：{}
+配置已保存，但连接测试失败；请检查服务地址、密钥和模型 / Settings saved, but connection test failed; check endpoint, key and model: {}	配置已保存，但连接测试失败；请检查服务地址、密钥和模型：{}	Settings saved, but connection test failed; check endpoint, key and model: {}	設定已儲存，但連線測試失敗；請檢查服務位址、金鑰和模型：{}	設定は保存しましたが、接続テストに失敗しました。サービスの URL、キー、モデルを確認してください：{}
+已关闭 AI 校对，凭据保留 / AI proofreading disabled; credentials kept: {}	已关闭 AI 校对，凭据保留：{}	AI proofreading disabled; credentials kept: {}	已關閉 AI 校對，憑證保留：{}	AI 校正をオフにしました（認証情報は残します）：{}
+已生成配置模板 / Configuration template created: {}	已生成配置模板：{}	Configuration template created: {}	已產生設定範本：{}	設定テンプレートを作成しました：{}
+没有需要清除的 API 配置 / No saved API settings to clear: {}	没有需要清除的 API 配置：{}	No saved API settings to clear: {}	沒有需要清除的 API 設定：{}	消去する API 設定はありません：{}
+已清除 API 配置 / Cleared API settings ({}): {}	已清除 API 配置（{}）：{}	Cleared API settings ({}): {}	已清除 API 設定（{}）：{}	API 設定を消去しました（{}）：{}
+已有摘要，笔记保持不变 / Summary already exists: {}	已有摘要，笔记保持不变：{}	Summary already exists: {}	已有摘要，筆記保持不變：{}	要約は既にあります。ノートは変更しません：{}
+已导出摘要 / Summary exported: {}	已导出摘要：{}	Summary exported: {}	已匯出摘要：{}	要約を書き出しました：{}
+摘要已作为新版笔记保存 / Summary saved as a new note version: {}	摘要已作为新版笔记保存：{}	Summary saved as a new note version: {}	摘要已作為新版筆記儲存：{}	要約をノートの新しい版として保存しました：{}
+模型 / Model: {} · {} · {}	模型：{} · {} · {}	Model: {} · {} · {}	模型：{} · {} · {}	モデル：{} · {} · {}
+占用空间 / Disk usage: {}	占用空间：{}	Disk usage: {}	佔用空間：{}	使用容量：{}
+使用已下载模型 / Using downloaded models: {}	使用已下载模型：{}	Using downloaded models: {}	使用已下載模型：{}	ダウンロード済みのモデルを使います：{}
+✓ 已保存配置 / Configuration saved: {}	✓ 已保存配置：{}	✓ Configuration saved: {}	✓ 已儲存設定：{}	✓ 設定を保存しました：{}
+请手动在浏览器打开 / Open this URL in your browser:\n{}	请手动在浏览器打开：\n{}	Open this URL in your browser:\n{}	請手動在瀏覽器開啟：\n{}	ブラウザでこの URL を開いてください：\n{}
+登录态已保存，但连接测试失败；可用 course2md llm setup 调整模型 / Login saved, but the connection test failed; adjust the model with course2md llm setup: {}	登录态已保存，但连接测试失败；可用 course2md llm setup 调整模型：{}	Login saved, but the connection test failed; adjust the model with course2md llm setup: {}	登入狀態已儲存，但連線測試失敗；可用 course2md llm setup 調整模型：{}	ログイン状態は保存しましたが、接続テストに失敗しました。course2md llm setup でモデルを調整できます：{}
+无法连接 Ollama 服务 {}；请确认已安装并正在运行（ollama serve） / Cannot reach the Ollama service at {}; make sure it is installed and running (ollama serve)	无法连接 Ollama 服务 {}；请确认已安装并正在运行（ollama serve）	Cannot reach the Ollama service at {}; make sure it is installed and running (ollama serve)	無法連線 Ollama 服務 {}；請確認已安裝並正在執行（ollama serve）	Ollama サービス {} に接続できません。インストールされ、実行中であること（ollama serve）を確認してください
+配置已保存，但连接测试失败；请确认模型 {} 可正常对话：{} / Settings saved, but the connection test failed; make sure {} can chat: {}	配置已保存，但连接测试失败；请确认模型 {} 可正常对话：{}	Settings saved, but the connection test failed; make sure {} can chat: {}	設定已儲存，但連線測試失敗；請確認模型 {} 可正常對話：{}	設定は保存しましたが、接続テストに失敗しました。モデル {} で会話できることを確認してください：{}
+正在加载本机模型… / Loading local model…	正在加载本机模型…	Loading local model…	正在載入本機模型…	ローカルモデルを読み込んでいます…
+扫码（默认）/ Scan a QR code (default)	扫码（默认）	Scan a QR code (default)	掃碼（預設）	QR コードをスキャン（既定）
+账号和密码 / Account and password	账号和密码	Account and password	帳號和密碼	アカウントとパスワード
+手机短信验证码 / SMS code	手机短信验证码	SMS code	手機簡訊驗證碼	SMS 認証コード
+POST {base_url}/audio/transcriptions（OpenAI 兼容转录端点，如 OpenRouter 的 qwen3-asr）	POST {base_url}/audio/transcriptions（OpenAI 兼容转录端点，如 OpenRouter 的 qwen3-asr）	POST {base_url}/audio/transcriptions (an OpenAI-compatible transcription endpoint, e.g. qwen3-asr on OpenRouter)	POST {base_url}/audio/transcriptions（OpenAI 相容轉錄端點，如 OpenRouter 的 qwen3-asr）	POST {base_url}/audio/transcriptions（OpenAI 互換の文字起こしエンドポイント。例：OpenRouter の qwen3-asr）
+POST {base_url}/chat/completions（支持音频输入的多模态 LLM， 如 gpt-4o-audio-preview、Gemini、Qwen2-Audio 等 OpenAI 兼容端点）	POST {base_url}/chat/completions（支持音频输入的多模态 LLM，如 gpt-4o-audio-preview、Gemini、Qwen2-Audio 等 OpenAI 兼容端点）	POST {base_url}/chat/completions (a multimodal LLM with audio input on an OpenAI-compatible endpoint, e.g. gpt-4o-audio-preview, Gemini, Qwen2-Audio)	POST {base_url}/chat/completions（支援音訊輸入的多模態 LLM，如 gpt-4o-audio-preview、Gemini、Qwen2-Audio 等 OpenAI 相容端點）	POST {base_url}/chat/completions（音声入力に対応したマルチモーダル LLM。例：gpt-4o-audio-preview、Gemini、Qwen2-Audio などの OpenAI 互換エンドポイント）
+优先字幕，无字幕时识别语音 / Prefer subtitles; transcribe speech if unavailable	优先字幕，无字幕时识别语音	Prefer subtitles; transcribe speech if unavailable	優先字幕，無字幕時辨識語音	字幕を優先し、なければ音声を認識
+仅字幕；本地需同名 .srt/.vtt / Subtitles only; local files need a matching .srt/.vtt	仅字幕；本地需同名 .srt/.vtt	Subtitles only; local files need a matching .srt/.vtt	僅字幕；本機檔案需同名 .srt/.vtt	字幕のみ。ローカルファイルには同名の .srt/.vtt が必要
+使用所选后端识别，不查字幕 / Transcribe with the selected backend; skip subtitles	使用所选后端识别，不查字幕	Transcribe with the selected backend; skip subtitles	使用所選後端辨識，不查字幕	選択したバックエンドで認識し、字幕は使わない
+密码和短信登录需要在终端中输入。请在终端运行 course2md --login bilibili --method password 或 --method sms，或改用扫码登录：course2md --login bilibili / Password and SMS login need a terminal to type in. Run course2md --login bilibili --method password or --method sms in a terminal, or sign in with a QR code: course2md --login bilibili	密码和短信登录需要在终端中输入。请在终端运行 course2md --login bilibili --method password 或 --method sms，或改用扫码登录：course2md --login bilibili	Password and SMS login need a terminal to type in. Run course2md --login bilibili --method password or --method sms in a terminal, or sign in with a QR code: course2md --login bilibili	密碼和簡訊登入需要在終端機中輸入。請在終端機執行 course2md --login bilibili --method password 或 --method sms，或改用掃碼登入：course2md --login bilibili	パスワードと SMS のログインにはターミナルでの入力が必要です。ターミナルで course2md --login bilibili --method password または --method sms を実行するか、QR コードでログインしてください：course2md --login bilibili
+可选值：	可选值：	Possible values:	可選值：	使用できる値：
+[可选值：	[可选值：	[possible values:	[可選值：	[使用できる値：
+Apple 模型下载失败 / Apple model download failed {}	Apple 模型下载失败 {}	Apple model download failed {}	Apple 模型下載失敗 {}	Apple モデルのダウンロードに失敗しました {}
+Apple 模型从镜像下载失败，改用 Hugging Face / Apple model download from the mirror failed; trying Hugging Face: {}	Apple 模型从镜像下载失败，改用 Hugging Face：{}	Apple model download from the mirror failed; trying Hugging Face: {}	Apple 模型從鏡像下載失敗，改用 Hugging Face：{}	Apple モデルをミラーからダウンロードできませんでした。Hugging Face で再試行します：{}
+需要下载识别模型 {}（{}），保存到 {}。现在下载吗？[y/N] / The speech model {} ({}) needs to be downloaded to {}. Download it now? [y/N]	需要下载识别模型 {}（{}），保存到 {}。现在下载吗？[y/N]	The speech model {} ({}) needs to be downloaded to {}. Download it now? [y/N]	需要下載辨識模型 {}（{}），儲存到 {}。現在下載嗎？[y/N]	音声認識モデル {}（{}）を {} にダウンロードする必要があります。今すぐダウンロードしますか？[y/N]

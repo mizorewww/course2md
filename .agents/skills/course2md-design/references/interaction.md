@@ -42,8 +42,6 @@ A completion action should reach the result it names. Processing history and tec
 - A label such as “only this note” has a real scope boundary. Define what happens on a new source, retry, navigation and restart; do not let a temporary choice silently become a permanent default or vice versa.
 - Fresh setup, a configured repeat task and a restored interrupted task are distinct states. Review each without assuming evidence for one proves the others.
 
-## Guidance and evidence
-
-[Apple Onboarding](https://developer.apple.com/design/human-interface-guidelines/onboarding) favors learning while doing, contextual help, optional tutorials and postponing nonessential setup. [Apple Settings](https://developer.apple.com/design/human-interface-guidelines/settings) distinguishes infrequent preferences from contextual task options and discourages asking for facts the app can detect. [Apple Feedback](https://developer.apple.com/design/human-interface-guidelines/feedback) relates interruption to the significance of the consequence and keeps status near its subject. [Apple Offering help](https://developer.apple.com/design/human-interface-guidelines/offering-help) recommends concise guidance for the action at hand, rather than explaining standard controls or requiring memorization.
+## Evidence
 
 Judge a flow with an actual native action trace, including the decisions made, extra navigation, changed data and reached result. Screenshots establish visible state; source inspection establishes implementation paths. Neither alone proves that first-time users can complete the task or that a repeat run reuses configuration.
