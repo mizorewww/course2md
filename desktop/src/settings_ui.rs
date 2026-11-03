@@ -874,8 +874,12 @@ impl Desktop {
 
     fn services_settings_page(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let mut view = v_flex().w_full().min_w_0().gap(rem(28.));
-        let account = self.account_row(course2md::tr!("Bilibili 账号"), window, cx);
-        let youtube = self.youtube_row(window, cx);
+        let (account, youtube) = self.accounts.update(cx, |accounts, cx| {
+            (
+                accounts.account_row(course2md::tr!("Bilibili 账号"), window, cx),
+                accounts.youtube_row(window, cx),
+            )
+        });
         view = view.child(self.settings_fields(
             "account-settings-heading",
             course2md::tr!("来源账号"),

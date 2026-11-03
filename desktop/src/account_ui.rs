@@ -1,7 +1,7 @@
 //! Bilibili account settings and its login dialog: the cancellable QR login here, the
 //! password and SMS forms in `login_ui`. No ticket is logged or stored in UI text.
 use crate::ui::Resource;
-use crate::{Desktop, Field, Page, symbols, ui};
+use crate::{symbols, ui};
 use course2md::auth::{AccountStatus, QrPoll, QrSession};
 use desktop_accounts::account::*;
 use gpui::{prelude::*, *};
@@ -12,7 +12,49 @@ use std::{sync::Arc, time::Duration};
 /// The login dialog's width in design px.
 const DIALOG_LOGIN_WIDTH: f32 = 448.;
 
-impl Desktop {
+/// What the sign-ins ask of the window.
+pub(crate) enum AccountsEvent {
+    /// Open the Bilibili sign-in, deciding what it may retry.
+    OpenAccount,
+    /// Open the YouTube connection, deciding what it may retry.
+    OpenYoutube,
+    /// Signed in to Bilibili from a source preview that failed: retry it, if it is
+    /// still the one shown and still needs it.
+    SignedIn { source: (u64, String) },
+    /// Connected YouTube from a source preview that failed: retry it, if it is still
+    /// the one shown.
+    YoutubeConnected { source: (u64, String) },
+}
+
+/// The sign-ins: the Bilibili account and its login dialog, and the YouTube
+/// connection. Pages draw its rows and dialogs; what the sign-ins change about the
+/// rest of the window goes out as `AccountsEvent`.
+pub(crate) struct AccountsView {
+    pub(crate) account: AccountUi,
+    /// The password and SMS login fields, made when the login dialog first opens.
+    pub(crate) login_inputs: Option<crate::login_ui::LoginInputs>,
+    pub(crate) youtube: desktop_accounts::youtube::YoutubeUi,
+    /// The window the dialogs open in; deferred input changes return to it.
+    pub(crate) window: AnyWindowHandle,
+}
+
+impl EventEmitter<AccountsEvent> for AccountsView {}
+
+impl AccountsView {
+    pub(crate) fn new(window: &Window, cx: &mut Context<Self>) -> Self {
+        let mut this = Self {
+            account: AccountUi::default(),
+            login_inputs: None,
+            youtube: Default::default(),
+            window: window.window_handle(),
+        };
+        this.refresh_account(cx);
+        this.load_youtube(cx);
+        this
+    }
+}
+
+impl AccountsView {
     pub(crate) fn account_connected(&self) -> bool {
         matches!(self.account.status, Some(AccountStatus::Connected(_)))
     }
@@ -85,9 +127,7 @@ impl Desktop {
                     .tone(ButtonTone::Accent)
                     .icon(symbols::bilibili())
                     .child(login)
-                    .on_click(
-                        cx.listener(|this, _, window, cx| this.open_account_dialog(window, cx)),
-                    )
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(AccountsEvent::OpenAccount)))
                     .into_any_element(),
             );
         }
@@ -220,22 +260,9 @@ impl Desktop {
                     material_button("source-account-login", ButtonVariant::Text)
                         .icon(symbols::login())
                         .child(label)
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.open_account_dialog(window, cx)),
-                        ),
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(AccountsEvent::OpenAccount))),
                 )
             })
-    }
-
-    fn can_retry_account_source(&self, cx: &App) -> bool {
-        self.account.can_resume_source(
-            self.import.preview_generation,
-            &self.value(Field::Source, cx),
-            !self.onboarding.active
-                && matches!(self.page, Page::New)
-                && self.online(cx)
-                && (self.import.preview_error.is_some() || self.subtitle_attention_required(cx)),
-        )
     }
 
     fn clear_account(&mut self, cx: &mut Context<Self>) {
@@ -277,21 +304,18 @@ impl Desktop {
         cx.notify();
     }
 
-    pub fn open_account_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens the sign-in dialog. `retry_source` is the source preview to try again once
+    /// signed in, as the window saw it when the dialog opened.
+    pub fn open_account_dialog(
+        &mut self,
+        retry_source: Option<(u64, String)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.account.dialog.is_some() {
             return;
         }
-        self.account.retry_source = (!self.onboarding.active
-            && matches!(self.page, Page::New)
-            && self.online(cx)
-            && (self.import.preview_error.is_some() || self.subtitle_attention_required(cx))
-            && course2md::auth::is_bilibili_url(&self.value(Field::Source, cx)))
-        .then(|| {
-            (
-                self.import.preview_generation,
-                self.value(Field::Source, cx),
-            )
-        });
+        self.account.retry_source = retry_source;
         self.ensure_login_inputs(window, cx);
         if self.account.method == LoginMethod::Qr {
             self.start_account_qr(cx);
@@ -425,7 +449,14 @@ impl Desktop {
     }
 
     /// The login dialog, while it is open or playing its exit.
-    pub(crate) fn account_dialog(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    /// The sign-in dialog. `source_ready` says the source preview it was opened from can
+    /// be tried again once signed in.
+    pub(crate) fn account_dialog(
+        &self,
+        source_ready: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let open = self.account.dialog.is_some();
         let Some(state) = self
             .account
@@ -438,13 +469,14 @@ impl Desktop {
         let success = matches!(state, QrDialogState::Success(_));
         let qr = self.account.method == LoginMethod::Qr || success;
         let retry = qr && matches!(state, QrDialogState::Expired | QrDialogState::Error(_));
-        let retry_source = success && self.can_retry_account_source(cx);
-        let close = cx.listener(|this, _: &ClickEvent, window, cx| {
+        let retry_source = success && source_ready;
+        let close = cx.listener(|this, _: &ClickEvent, _, cx| {
             let retry = matches!(this.account.dialog, Some(QrDialogState::Success(_)))
-                && this.can_retry_account_source(cx);
+                .then(|| this.account.retry_source.clone())
+                .flatten();
             this.close_account_dialog(cx);
-            if retry {
-                this.inspect_source(window, cx);
+            if let Some(source) = retry {
+                cx.emit(AccountsEvent::SignedIn { source });
             }
         });
         let close = material_button(

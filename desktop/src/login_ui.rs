@@ -5,7 +5,7 @@
 //! handed to the engine as a zeroizing `Password`; it is never logged, stored or
 //! shown. Every reply is checked against the attempt that asked for it, so a
 //! closed dialog or a switched method ignores late answers.
-use crate::{Desktop, symbols};
+use crate::{account_ui::AccountsView, symbols};
 use course2md::auth::{
     geetest::{CAPTCHA_TIMEOUT, CaptchaPage},
     passport::{Captcha, GeetestSolution, LoginOutcome, Passport, Password, Zeroizing},
@@ -37,7 +37,7 @@ impl LoginInputs {
     }
 }
 
-impl Desktop {
+impl AccountsView {
     fn login_field(&self, pick: fn(&LoginInputs) -> &Entity<InputState>, cx: &App) -> String {
         self.login_inputs
             .as_ref()
@@ -562,7 +562,7 @@ impl Desktop {
 
 /// Capture builds: the login dialogs in each state, without a network request.
 #[cfg(feature = "capture")]
-impl Desktop {
+impl AccountsView {
     pub(crate) fn capture_login_state(
         &mut self,
         state: &str,

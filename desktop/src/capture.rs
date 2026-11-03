@@ -502,11 +502,15 @@ impl Desktop {
                     "storage" => this.capture_storage_operation(&detail, window, cx),
                     "login" => {
                         this.open_account_dialog(window, cx);
-                        this.capture_login_state(&detail, window, cx);
+                        this.accounts.update(cx, |accounts, cx| {
+                            accounts.capture_login_state(&detail, window, cx)
+                        });
                     }
                     "youtube" => {
                         this.open_youtube_dialog(window, cx);
-                        this.capture_youtube_state(&detail, cx);
+                        this.accounts.update(cx, |accounts, cx| {
+                            accounts.capture_youtube_state(&detail, cx)
+                        });
                     }
                     "image" => {
                         if let Some(course) = newest {
