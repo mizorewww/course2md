@@ -579,6 +579,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 外观模式	外观模式	Appearance mode	外觀模式	外観モード
 外部处理	外部处理	External processing	外部處理	外部処理
 多模态对话（如 GPT-4o 音频）	多模态对话（如 GPT-4o 音频）	Multimodal conversations (e.g. GPT-4o audio)	多模態對話（如 GPT-4o 音訊）	マルチモーダルな会話 (例: GPT-4o オーディオ)
+大小未知 / size unknown	大小未知	size unknown	大小未知	サイズ不明
 字幕	字幕	Subtitles	字幕	字幕
 字幕与识别	字幕与识别	Subtitles and transcription	字幕與辨識	字幕と音声認識
 字幕列表为空，请重新读取字幕 / Subtitle list is empty; probe subtitles again	字幕列表为空，请重新读取字幕	Subtitle list is empty; probe subtitles again	字幕列表為空，請重新讀取字幕	字幕リストが空です。もう一度字幕を読み取ってください。
@@ -1152,6 +1153,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 服务配置已保存，尚未开始补做	服务配置已保存，尚未开始补做	The service configuration has been saved; reprocessing has not started yet.	服務設定已儲存，尚未開始補做	サービス設定は保存されました。再処理はまだ開始していません。
 未下载	未下载	Not downloaded	未下載	未ダウンロード
 未下载完整	未下载完整	Incomplete download	未下載完整	ダウンロード未完了
+未下载识别模型 {}。之后可运行 {} 准备模型，再重新运行本命令 / The speech model {} was not downloaded. To prepare it later, run {}, then run this command again	未下载识别模型 {}。之后可运行 {} 准备模型，再重新运行本命令	The speech model {} was not downloaded. To prepare it later, run {}, then run this command again	未下載辨識模型 {}。之後可執行 {} 準備模型，再重新執行本命令	音声認識モデル {} はダウンロードしませんでした。後で {} を実行して準備し、このコマンドをもう一度実行してください
 未分类	未分类	Unfiled	未分類	未分類
 未安装	未安装	Not installed	未安裝	インストールされていません
 未完成	未完成	Incomplete	未完成	未完了
@@ -1295,7 +1297,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 模型请求失败 / Model request failed	模型请求失败	Model request failed	模型請求失敗	モデルリクエストが失敗しました
 模型（默认为该识别方式的默认模型）/ Model (defaults to the backend's default)	模型（默认为该识别方式的默认模型）/ Model (defaults to the backend's default)	Model (defaults to the backend's default)	模型（預設為該辨識方式的預設模型）	モデル（既定ではこの認識方式のデフォルトモデル）
 欢迎使用 course2md！选择字幕不可用时的语音转写方式。 / Welcome! Choose how to transcribe when subtitles are unavailable.	欢迎使用 course2md！选择字幕不可用时的语音转写方式。	Welcome! Choose how to transcribe when subtitles are unavailable.	歡迎使用 course2md！選擇字幕不可用時的語音轉寫方式。	course2mdへようこそ!字幕が利用できない場合に音声を文字に起こす方法を選択します。
-正在下载识别模型（约 2.4GB）/ Downloading speech models (~2.4GB): {}	正在下载识别模型（约 2.4GB）/ Downloading speech models (~2.4GB): {}	Downloading speech models (~2.4GB): {}	正在下載辨識模型（約 2.4GB）：{}	音声認識モデルをダウンロードしています（約 2.4GB）: {}
 正在保存当前结果…	正在保存当前结果…	Saving current results…	正在儲存目前結果…	現在の結果を保存しています…
 正在保存当前结果，请等候当前任务停止后再补做。	正在保存当前结果，请等候当前任务停止后再补做。	Saving the current results. Wait until the current task stops before running the reprocessing.	正在儲存目前結果，請等候目前任務停止後再補做。	現在の結果を保存しています。現在のタスクが停止するまで待ってから再処理を実行してください。
 正在保存当前结果，请等候当前任务停止后再选择重新发送。	正在保存当前结果，请等候当前任务停止后再选择重新发送。	The current results are being saved. Please wait until the current task stops before choosing to resend.	正在儲存目前結果，請等候目前任務停止後再選擇重新傳送。	現在の結果が保存されています。現在のタスクが停止するまで待ってから、再送信を選択してください。
@@ -1563,6 +1564,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 系统提示与 response_format=json_object 同为 segments 对象契约	系统提示与 response_format=json_object 同为 segments 对象契约	The system prompt and response_format=json_object both use the segments object contract.	系統提示與 response_format=json_object 同為 segments 物件契約	システムプロンプトと response_format=json_object はどちらも segments オブジェクトの契約に従います。
 繁体中文	繁体中文	Traditional Chinese	繁體中文	繁体字中国語
 繁體中文	繁體中文	Traditional Chinese	繁體中文	繁体字中国語
+约 {} / about {}	约 {}	about {}	約 {}	約 {}
 纯语气词被置空，随后由调用方删除	纯语气词被置空，随后由调用方删除	Entries containing only filler words are emptied and then removed by the caller	純語氣詞被置空，隨後由呼叫方刪除	フィラーのみのエントリは空にされ、その後呼び出し元によって削除されます。
 终端输出 / Terminal output	终端输出	Terminal output	終端機輸出	ターミナル出力
 结果尚未确认	结果尚未确认	Results are not yet confirmed	結果尚未確認	結果はまだ確認されていません
@@ -1591,6 +1593,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 缺少视频信息，请重新读取 / Missing video info; please probe again	缺少视频信息，请重新读取	Missing video info; please probe again	缺少影片資訊，請重新讀取	動画情報がありません。もう一度読み込んでください。
 缺少视频处理组件，请在设置中查看	缺少视频处理组件，请在设置中查看	The video processing component is missing. Check Settings.	缺少影片處理元件，請在設定中檢視	動画処理コンポーネントがありません。設定を確認してください。
 缺少视频来源。示例：course2md ./lecture.mp4	缺少视频来源。示例：course2md ./lecture.mp4	Missing video source. Example: course2md ./lecture.mp4	缺少影片來源。範例：course2md ./lecture.mp4	動画ソースがありません。例: course2md ./lecture.mp4
+缺少识别模型时直接下载，不再询问（适用于脚本；也可设 COURSE2MD_DOWNLOAD_MODELS=1）/ Download a missing speech model without asking (for scripts; or set COURSE2MD_DOWNLOAD_MODELS=1)	缺少识别模型时直接下载，不再询问（适用于脚本；也可设 COURSE2MD_DOWNLOAD_MODELS=1）	Download a missing speech model without asking (for scripts; or set COURSE2MD_DOWNLOAD_MODELS=1)	缺少辨識模型時直接下載，不再詢問（適用於腳本；也可設定 COURSE2MD_DOWNLOAD_MODELS=1）	音声認識モデルがなければ確認せずにダウンロード（スクリプト向け。COURSE2MD_DOWNLOAD_MODELS=1 でも可）
 缺少读取视频所需的组件，请在设置中检查运行环境	缺少读取视频所需的组件，请在设置中检查运行环境	The components required to read the video are missing. Check the runtime environment in Settings.	缺少讀取影片所需的元件，請在設定中檢查執行環境	動画を読み取るために必要なコンポーネントがありません。設定で実行環境を確認してください。
 缺少这份备份的核验记录，未清理任何文件	缺少这份备份的核验记录，未清理任何文件	This backup has no verification record; no files were cleaned up.	缺少這份備份的核驗記錄，未清理任何檔案	このバックアップには検証記録がないため、ファイルは整理されていません。
 网页	网页	Web page	網頁	ウェブページ
@@ -1662,6 +1665,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 识别时使用 {} · {}	识别时使用 {} · {}	Transcribe with {} · {}	辨識時使用 {} · {}	認識に {} · {} を使用
 识别服务错误详情 / llama-server error details	识别服务错误详情	llama-server error details	辨識服務錯誤詳細資訊	認識サービスのエラー詳細
 识别模型	识别模型	Recognition model	辨識模型	認識モデル
+识别模型 {} 尚未下载，未经同意不会下载。请先运行 {} 准备模型，或加 --download-models 允许本次下载 / The speech model {} is not downloaded, and it is not downloaded without your consent. Prepare it first with {}, or pass --download-models to allow the download in this run	识别模型 {} 尚未下载，未经同意不会下载。请先运行 {} 准备模型，或加 --download-models 允许本次下载	The speech model {} is not downloaded, and it is not downloaded without your consent. Prepare it first with {}, or pass --download-models to allow the download in this run	辨識模型 {} 尚未下載，未經同意不會下載。請先執行 {} 準備模型，或加上 --download-models 允許本次下載	音声認識モデル {} はまだダウンロードされておらず、同意なしにはダウンロードしません。先に {} で準備するか、--download-models を付けて今回のダウンロードを許可してください
 识别模型（需与后端兼容）/ Speech model (must match the backend) gpu/cpu: qwen3-1.7b；coreml: qwen3-1.7b、qwen3-0.6b、whisper；npu: whisper 或 Hugging Face 仓库名 / or a Hugging Face repository	识别模型（需与后端兼容）/ Speech model (must match the backend) gpu/cpu: qwen3-1.7b；coreml: qwen3-1.7b、qwen3-0.6b、whisper；npu: whisper 或 Hugging Face 仓库名	Speech model (must match the backend) gpu/cpu: qwen3-1.7b; coreml: qwen3-1.7b, qwen3-0.6b, whisper; npu: whisper or a Hugging Face repository	辨識模型（需與後端相容）/ Speech model (must match the backend) gpu/cpu: qwen3-1.7b；coreml: qwen3-1.7b、qwen3-0.6b、whisper；npu: whisper 或 Hugging Face 儲存庫名	認識モデル（バックエンドと互換性が必要）gpu/cpu: qwen3-1.7b、coreml: qwen3-1.7b、qwen3-0.6b、whisper、npu: whisper または Hugging Face リポジトリ名
 识别视频 {}–{} 的声音 / Transcribe video audio {}–{}	识别视频 {}–{} 的声音	Transcribe video audio {}–{}	辨識影片 {}–{} 的聲音	動画 {}–{} の音声を認識
 识别设备	识别设备	Recognition device	辨識裝置	認識デバイス
@@ -1838,9 +1842,9 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 选择模型	选择模型	Select model	選擇模型	モデルを選択してください
 选择用于校对的模型 / Choose a model for proofreading	选择用于校对的模型	Choose a model for proofreading	選擇用於校對的模型	校正用のモデルを選択してください
 选择空文件夹作为笔记库的新位置	选择空文件夹作为笔记库的新位置	Select an empty folder as the new location for your notes library	選擇空資料夾作為筆記庫的新位置	ノートライブラリの新しい場所として空のフォルダーを選択します
+选择要下载的识别模型（保存到 {}）/ Choose a speech model to download (saved to {})	选择要下载的识别模型（保存到 {}）	Choose a speech model to download (saved to {})	選擇要下載的辨識模型（儲存到 {}）	ダウンロードする音声認識モデルを選択（保存先：{}）
 选择要处理的视频	选择要处理的视频	Select videos to process	選擇要處理的影片	処理する動画を選択してください
 选择视频	选择视频	Choose video	選擇影片	動画を選択
-选择识别模型 / Choose a speech model	选择识别模型	Choose a speech model	選擇辨識模型	認識モデルを選択
 选择课程视频	选择课程视频	Select course video	選擇課程影片	コース動画を選択してください
 选择这个笔记库移动后的文件夹	选择这个笔记库移动后的文件夹	Select the folder to which this note library is moved	選擇這個筆記庫移動後的資料夾	このノートライブラリの移動先フォルダーを選択してください
 选项：	选项：	Options:	選項：	オプション：
@@ -2190,3 +2194,4 @@ POST {base_url}/chat/completions（支持音频输入的多模态 LLM， 如 gpt
 [可选值：	[可选值：	[possible values:	[可選值：	[使用できる値：
 Apple 模型下载失败 / Apple model download failed {}	Apple 模型下载失败 {}	Apple model download failed {}	Apple 模型下載失敗 {}	Apple モデルのダウンロードに失敗しました {}
 Apple 模型从镜像下载失败，改用 Hugging Face / Apple model download from the mirror failed; trying Hugging Face: {}	Apple 模型从镜像下载失败，改用 Hugging Face：{}	Apple model download from the mirror failed; trying Hugging Face: {}	Apple 模型從鏡像下載失敗，改用 Hugging Face：{}	Apple モデルをミラーからダウンロードできませんでした。Hugging Face で再試行します：{}
+需要下载识别模型 {}（{}），保存到 {}。现在下载吗？[y/N] / The speech model {} ({}) needs to be downloaded to {}. Download it now? [y/N]	需要下载识别模型 {}（{}），保存到 {}。现在下载吗？[y/N]	The speech model {} ({}) needs to be downloaded to {}. Download it now? [y/N]	需要下載辨識模型 {}（{}），儲存到 {}。現在下載嗎？[y/N]	音声認識モデル {}（{}）を {} にダウンロードする必要があります。今すぐダウンロードしますか？[y/N]

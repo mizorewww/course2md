@@ -506,11 +506,15 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
             };
             let mut cfg = course2md::options::resolve(source, &cli.opts, &file)?;
             // coreml 首次使用时先确定模型（可能交互询问），模型缓存准备与转写才会是同一个模型
+            #[cfg_attr(not(apple_native), allow(unused_mut))]
+            let mut agreed = false;
             #[cfg(apple_native)]
             if cfg.provider == config::AsrProvider::Coreml
                 && cfg.transcript_source != config::TranscriptSource::Subtitle
             {
-                cfg.asr_model = Some(course2md::apple::resolve_model(cfg.asr_model.as_deref())?);
+                let (model, chosen) = course2md::apple::choose_model(cfg.asr_model.as_deref())?;
+                cfg.asr_model = Some(model);
+                agreed = chosen;
             }
             // The CLI may take the cloud transcription key from the environment;
             // desktop tasks carry fully resolved credentials instead.
@@ -520,8 +524,25 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
             {
                 cfg.asr_api.api_key = key;
             }
+            // A missing speech model is downloaded only with the person's consent.
+            use course2md::consent::{self, Consent};
+            let ask = consent::ask_terminal;
+            let models = match consent::decide(consent::Situation {
+                opted_in: cli.opts.download_models
+                    || consent::env_opt_in(
+                        std::env::var_os(consent::DOWNLOAD_MODELS_ENV).as_deref(),
+                    ),
+                agreed,
+                interactive: course2md::runtime::interactive(),
+                json: cli.opts.json,
+                quiet: cli.opts.quiet,
+            }) {
+                Consent::Allowed => pipeline::ModelDownload::Allowed,
+                Consent::Ask => pipeline::ModelDownload::Ask(&ask),
+                Consent::Refused => pipeline::ModelDownload::Refused,
+            };
             tracing::info!(out = %cfg.out_root.display(), provider = %cfg.provider, "start");
-            Ok(course2md::runtime::block_on(pipeline::run(&cfg))??)
+            Ok(course2md::runtime::block_on(pipeline::run(&cfg, models))??)
         }
     }
 }

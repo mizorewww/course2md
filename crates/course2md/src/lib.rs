@@ -25,6 +25,8 @@ pub mod account;
 #[cfg(feature = "cli")]
 pub mod cli;
 #[cfg(feature = "cli")]
+pub mod consent;
+#[cfg(feature = "cli")]
 pub mod doctor;
 #[cfg(feature = "cli")]
 pub mod wizard;

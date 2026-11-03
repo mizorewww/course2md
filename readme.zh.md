@@ -160,6 +160,8 @@ course2md ./lecture.mp4 -o ./notes             # 指定笔记保存位置
 
 第一次运行会询问几项设置；笔记保存在输出目录的 `平台/标题/ID/` 下。
 
+识别模型不会在未经询问时下载。转换需要的模型尚未下载时，CLI 会说明模型名称、大小和保存位置，并询问 `[y/N]`；没有终端时（管道、脚本、`--json`、`--quiet`）直接停止，退出码为 1（`--json` 的错误代码为 `model_required`）。可先运行 `course2md models prepare --provider … --model …` 准备模型，或加 `--download-models`（或设置 `COURSE2MD_DOWNLOAD_MODELS=1`）允许本次下载。这样停止的转换在模型就绪后从中断处继续。
+
 | 命令 | 用途 |
 | --- | --- |
 | `course2md --login bilibili` / `--logout bilibili` | 扫码登录 Bilibili（`--method password` 或 `sms` 改用密码或短信验证码）/ 清除保存的登录 |

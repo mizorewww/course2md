@@ -160,6 +160,8 @@ course2md ./lecture.mp4 -o ./notes             # choose where notes go
 
 The first run asks a few setup questions; notes are saved as `platform/title/ID/` under the output folder.
 
+A speech model is never downloaded without asking. When a conversion needs one that is missing, the CLI names it, its size and where it will be stored, and asks `[y/N]`; without a terminal (pipes, scripts, `--json`, `--quiet`) it stops with exit code 1 (`--json`: error code `model_required`). Prepare the model first with `course2md models prepare --provider … --model …`, or pass `--download-models` (or set `COURSE2MD_DOWNLOAD_MODELS=1`) to allow the download in that run. A conversion stopped this way continues where it left off once the model is ready.
+
 | Command | Purpose |
 | --- | --- |
 | `course2md --login bilibili` / `--logout bilibili` | Log in to Bilibili with a QR code (`--method password` or `sms` for a password or SMS code) / remove the saved login |

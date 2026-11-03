@@ -219,18 +219,25 @@ fn ensure_metallib() -> Result<()> {
 /// 未设置时交互终端询问一次并写入 config.toml，非交互环境用默认模型。
 /// CLI 在准备模型缓存之前调用，确保下载的正是转写时加载的模型。
 pub fn resolve_model(explicit: Option<&str>) -> Result<String> {
+    choose_model(explicit).map(|(model, _)| model)
+}
+
+/// [`resolve_model`], and whether the person just chose the model at the terminal. That
+/// choice names the size and where it is stored, and cancelling it downloads nothing, so
+/// it is their agreement to the download.
+pub fn choose_model(explicit: Option<&str>) -> Result<(String, bool)> {
     if let Some(model) = explicit.filter(|m| !m.trim().is_empty()) {
-        return canonical_model(AsrProvider::Coreml, model);
+        return Ok((canonical_model(AsrProvider::Coreml, model)?, false));
     }
     if crate::progress::is_json() || crate::progress::is_quiet() || !crate::runtime::interactive() {
         tracing::info!(
             "非交互环境，使用默认模型 {DEFAULT_ASR_MODEL}（可用 --asr-model 切换） / Non-interactive; using {DEFAULT_ASR_MODEL} (change with --asr-model)"
         );
-        return Ok(DEFAULT_ASR_MODEL.into());
+        return Ok((DEFAULT_ASR_MODEL.into(), false));
     }
     let chosen = prompt_model_choice()?;
     persist_model_choice(&chosen);
-    Ok(chosen)
+    Ok((chosen, true))
 }
 
 /// 把交互选择的模型写入 config.toml defaults.asr_model。
@@ -251,12 +258,17 @@ fn persist_model_choice(model: &str) {
 /// 首次使用：选择下载哪个 Apple 模型。
 fn prompt_model_choice() -> Result<String> {
     let models = crate::config::local_models(AsrProvider::Coreml);
+    let location = crate::models::status::apple_cache_root().join("qwen3-speech");
     let items: Vec<String> = models
         .iter()
         .map(|m| format!("{}{}", m.label, tr!(m.note)))
         .collect();
     let index = crate::runtime::choose(
-        tr!("选择识别模型 / Choose a speech model"),
+        &tr!(
+            "选择要下载的识别模型（保存到 {}）/ Choose a speech model to download (saved to {})",
+            location.display(),
+            location.display()
+        ),
         &items,
         0,
         tr!("已取消模型选择，未开始下载 / Model selection cancelled; download not started"),
