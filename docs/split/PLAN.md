@@ -58,6 +58,9 @@ directory when the project is accepted.
     - **No feature is dropped (owner, 2026-10-31).** Behaviour may be simplified, but
       every feature stays. The working target is the largest reduction the audit finds
       achievable under that rule, whatever it comes to.
+    - **Revised (owner, round 3).** The 20% first target is not reached: the measured reduction under the no-drop
+      rule is the figure, -11.7% at `e31032b1` (69,361 lines; `STATUS.md` § Metrics). The owner accepted that the
+      thin-wrapper work of decision 9 costs lines; it is not undone to recover them.
 
 14. **Choose components again; don't map old to new (owner, 2026-10-31).** Many current control
     choices are wrong in meaning and UX. For each page element, ask what the user is doing and pick

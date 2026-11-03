@@ -12,24 +12,27 @@ and kit #28 (a menu opens above its field when there is no room below), ready fo
 
 ## Metrics
 
-`python3 docs/split/metrics.py` at `edf140d`: **66,768** production Rust lines against the 78,518 baseline
-(-11,750, -15.0%); the current script reads 77,921 at `3db4a88`, so -14.3% like for like. Engine 19,901 across
-`crates/`; desktop 46,867 (`desktop` 29,451, `prefs` 4,454, `store` 6,112, `tasks` 3,653, `reader-core` 946,
-`accounts` 493, `ui` 1,758).
+`python3 docs/split/metrics.py` at `e31032b1` (3.0.0-alpha.1): **69,361** production Rust lines against the 78,518
+baseline (-9,157, -11.7%); the current script reads 77,921 at `3db4a88`, so -8,560, -11.0% like for like. Engine
+20,807 across `crates/`; desktop 48,554 (`desktop` 30,027, `prefs` 4,486, `store` 6,455, `tasks` 4,338, `reader-core`
+994, `accounts` 496, `ui` 1,758). The figure rose from 66,768 at `edf140d` with the round-2 fixes and the thin-wrapper
+work (decision 9), which the owner accepted costs lines (decision 13).
 
-Secondary metric (decision 13): the merged `gpui-kit-material` PRs #1 to #27 add **5,677** net Rust lines
-(`gh pr view <n> --json files`, `.rs` files only): 2,833 in tests and the gallery (`tests/`, `gallery/`, `*_tests.rs`)
-and 2,844 elsewhere. The 2,844 still holds any inline `#[cfg(test)]` module. #28, open, would add 454 (321 of them
-tests). `model-fetch`, `slide-detect` and `subtitle-parse` hold 2,343. Across all the owner's repositories the
-net reduction is about 11,750 − 2,343 − 2,844 = **6,563** lines (−8.4% of the baseline), beside the −15.0% inside this
-repository.
+Secondary metric (decision 13): the merged `gpui-kit-material` PRs #1 to #30 add **6,364** net Rust lines
+(`gh pr view <n> -R mizorewww/gpui-kit-material --json files`, `.rs` additions minus deletions): 3,191 in tests and
+the gallery (`tests/`, `gallery/`, `*_tests.rs`) and **3,173** elsewhere (#1 to #27: 2,833 and 2,844; #28: 321 and
+133; #29: 16 and 191; #30: 21 and 5). The 3,173 still holds any inline `#[cfg(test)]` module. `model-fetch`
+(1,242), `slide-detect` (596) and `subtitle-parse` (711) hold **2,549** production lines at their pinned revisions
+(`metrics.py` on each). Across all the owner's repositories the net reduction is 9,157 − 2,549 − 3,173 = **3,435**
+lines (−4.4% of the baseline), beside the −11.7% inside this repository.
 
 The reduction was re-estimated by reading every desktop file over 400 lines and every engine crate (finding P1):
 about 3,500 lines looked removable with every feature kept. Done by chunk, the reductions came to engine and
 process helpers -140, tasks -174, reader -103, library and storage -188, settings and setup -175, import -15,
 async idiom -40: -835, about a quarter of the estimate. Most rows were not duplication once read (different
 wording, look, retry policy or cancellation), or saved nothing after formatting. What remains is feature logic.
-Under the no-drop rule this is the reachable figure; see `REDUCTION.md` § Working target.
+Under the no-drop rule this is the reachable figure; see `REDUCTION.md` § Working target. The thin-wrapper work
+since added lines back (entity plumbing, events, `ShellFacts`).
 
 | Reading | Commit | Lines |
 | --- | --- | ---: |
@@ -39,6 +42,7 @@ Under the no-drop rule this is the reachable figure; see `REDUCTION.md` § Worki
 | Acceptance round 1 | `d89579d` | 63,001 |
 | Fixes and logins | `5863f22` | 67,456 |
 | Reduction chunks, crate split | `edf140d` | 66,768 |
+| 3.0.0-alpha.1: round-2 fixes, thin wrapper | `e31032b1` | 69,361 |
 
 ## P2: the thin wrapper (decision 9, finding Q2)
 
