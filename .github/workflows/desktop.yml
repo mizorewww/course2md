@@ -57,6 +57,14 @@ jobs:
     # forks never reach it; they use GitHub's macos-26 runner instead.
     runs-on: ${{ matrix.os != 'macos-26' && matrix.os || ((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "macOS", "ARM64", "course2md"]') || 'macos-26') }}
     steps:
+      # The hosted Ubuntu image has about 14 GB free; the workspace's debug build
+      # with tests and both binaries outgrew it. Its Android, .NET and Haskell
+      # toolchains are unused here.
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h .
       - uses: actions/checkout@v4
       - uses: ./.github/actions/desktop-deps
       - uses: actions/download-artifact@v4
