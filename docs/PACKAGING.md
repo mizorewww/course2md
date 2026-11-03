@@ -41,7 +41,7 @@ On macOS arm64 `cargo build --release` stops if the Apple speech module (`native
 ## Publishing a version
 
 1. Set the SemVer version (`2.0.0`, or `2.0.0-rc.N` / `-beta.N` / `-alpha.N`) in `[workspace.package]` of the root `Cargo.toml`, which every crate and the desktop inherit, update `Cargo.lock`, and write `docs/releases/v<version>.md`, which becomes the release body.
-2. Push tag `v<version>`, or run the `release` workflow with that version. `dry_run: true` builds, signs and notarizes every asset on any branch without publishing. The workflow builds every asset first, then publishes the GitHub Release with `SHA256SUMS`. Prereleases do not replace Latest.
+2. Push tag `v<version>`, or run the `release` workflow with the tag as its input, leading `v` included (`v3.0.0-alpha.1`). `dry_run: true` builds, signs and notarizes every asset on any branch without publishing. The workflow builds every asset first, then publishes the GitHub Release with `SHA256SUMS`. Prereleases do not replace Latest.
 3. `brew-tap` and `aur` run after a successful release. Homebrew updates only the release's channel; AUR skips prereleases and checks the GUI package on Arch before pushing. Secrets: `HOMEBREW_TAP_DEPLOY_KEY` (a deploy key with write access to `mizorewww/homebrew-tap` only) and `AUR_SSH_PRIVATE_KEY`.
 
 To retry a channel, run `brew-tap` or `aur` manually with `version`; `aur` accepts `dry_run: true`, and `packaging/aur/update-aur.sh <version> --dry-run` runs the same validation locally on Arch.

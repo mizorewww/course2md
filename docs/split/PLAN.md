@@ -26,6 +26,9 @@ directory when the project is accepted.
 9. The app should end up as a thin wrapper over many crates with low coupling and
    high cohesion. A crate boundary that needs many cross-crate reaches is wrong; move
    the boundary rather than widening the API.
+   **Stopping point (owner, round 3):** the work stops after the `Records`, `Work`, `ReaderPage` (with
+   `ReaderBar`), `NoteExports`, `AccountsView` and `TasksPage` entities. The library page and a `Prefs` entity
+   remain methods and fields of `Desktop`; they are known unfinished and not required for acceptance.
 10. Disk is tight. Do not keep several full `target` directories: share one
     `CARGO_TARGET_DIR` where possible, delete build output and worktrees once merged,
     and check `df -h` during long builds. Never delete anything in the owner's
@@ -58,6 +61,9 @@ directory when the project is accepted.
     - **No feature is dropped (owner, 2026-10-31).** Behaviour may be simplified, but
       every feature stays. The working target is the largest reduction the audit finds
       achievable under that rule, whatever it comes to.
+    - **Revised (owner, round 3).** The 20% first target is not reached: the measured reduction under the no-drop
+      rule is the figure, -11.7% at `e31032b1` (69,361 lines; `STATUS.md` § Metrics). The owner accepted that the
+      thin-wrapper work of decision 9 costs lines; it is not undone to recover them.
 
 14. **Choose components again; don't map old to new (owner, 2026-10-31).** Many current control
     choices are wrong in meaning and UX. For each page element, ask what the user is doing and pick
@@ -73,6 +79,13 @@ directory when the project is accepted.
     the large-radius link field, survives. A look the kit lacks is added to `gpui-kit-material`, and
     the page uses it; it is neither flattened to the kit default nor hand-painted in the page.
     `DESIGN-RESTORE.md` lists what wave 2 lost and how each item is restored.
+17. **CI and releases run only on GitHub-hosted runners (owner, round 3).** The owner's own Mac runner is
+    removed; every macOS job runs on `macos-26` (`docs/PACKAGING.md` § macOS runners).
+18. **The CLI asks before downloading a speech model (owner, round 2).** A video command fetches a missing model
+    only with consent: a `[y/N]` prompt at a terminal, otherwise `--download-models` or
+    `COURSE2MD_DOWNLOAD_MODELS=1`; `models prepare` never asks (`ACCEPTANCE.md`, B5).
+19. **3.0.0-alpha.1 is released from `main` (owner, round 3)** after `split/workspace` merges into it (PR #24).
+    Acceptance round 3 reviews `e31032b1`, the release commit.
 
 ## Decisions
 
@@ -157,8 +170,9 @@ directions are in `docs/CRATES.md`.
 `REDUCTION.md` is the execution guide for what each lever removes. Each wave ends green and
 pushed; agents work on branches in sibling worktrees, and the coordinator merges.
 
-Done: P0 setup, P1 deps, P2 bugs, docs rewrite, waves 1 to 3. Now: wave 4, fixing the findings of
-acceptance round 1 (`ACCEPTANCE.md`); `STATUS.md` has the state.
+Done: P0 setup, P1 deps, P2 bugs, docs rewrite, waves 1 to 3, acceptance rounds 1 and 2 with their fixes, the
+thin wrapper up to decision 9's stopping point. Now: wave 4, acceptance round 3 against `e31032b1`
+(`ACCEPTANCE.md`); `STATUS.md` has the state.
 
 **Wave 1, in parallel:**
 - `split/engine`: lever 1, engine cleanup, plus the engine wheels.

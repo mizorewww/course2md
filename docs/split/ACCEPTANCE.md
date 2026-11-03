@@ -213,8 +213,8 @@ plan reviewer re-derives anything they held.
 
 # Acceptance round 2
 
-In progress, with fresh reviewers (UI, app, CLI, plan) per `PLAN.md` § Acceptance. The coordinator adds the findings
-and their resolutions here.
+Fresh reviewers (UI, app, CLI, plan) per `PLAN.md` § Acceptance. Every finding below has its resolution; round 3
+re-checks them.
 
 ## UI findings: resolutions
 
@@ -345,3 +345,28 @@ no AI service, no model host. Before is `36e40f03`'s tree.
   `a_held_task_counts_once_as_processing`. Native (app `kill -9`ed mid-run, the task's lock held by another process,
   relaunched): before, "1 processing", "1 queued" and "Pause all"; after, "1 processing" alone. The card's own Pause
   on a held task is unchanged.
+
+## Plan conformance: findings and resolutions
+
+| ID | Sev | Finding | Resolution |
+|---|---|---|---|
+| Q1 | blocker | Windows CI red: the 2.0.1 template check failed on a CRLF checkout | `ff032c3b` (the check reads lines); also `07f897ef` (async-executor 1.14.0 yanked, 1.14.1) and `d166df4d` (the check folder's date in a form Windows allows) |
+| Q2 | blocker | Decision 9 not met: the app is not a thin wrapper | Partly done, then stopped by the owner's ruling (`PLAN.md` decision 9): the binary's logic moved to library crates and `Records`, `NoteExports`, `ReaderPage`/`ReaderBar`, `AccountsView`, `Work` and `TasksPage` became entities. Merges `6739a6d9`, `b1838ce5`, `ab18df27` (`split/thin-wrapper`), `cea9a13d` (`split/thin-wrapper2`). The library page and `Prefs` are known unfinished, not required for acceptance |
+| Q3 | should | The 20% reduction target is not reached | The plan is revised: the measured figure under the no-drop rule stands, and the thin wrapper's cost is accepted (`PLAN.md` decision 13, owner ruling) |
+| Q4 | should | The secondary metric in `STATUS.md` was inaccurate | `7d5f8ec5` counts the merged kit PRs' Rust lines; refreshed for kit #28 to #30 and the split-out crates' pinned revisions in `STATUS.md` § Metrics |
+| Q5 | should | `ACCEPTANCE.md` lacked resolutions for round-1 findings | `8fed6e0c` records every round-1 resolution and opens round 2 |
+| Q6 | should | `packaging.yml` had never run | It runs on the draft PR #24 (`split/workspace` → `main`), green. A `release` dry run of the split tree is still pending |
+| Q7 | should | Stale docs | `0c769cc6` (`desktop/prefs` paths), `ecf916a0` (D11), `22c15a79` (H7, S13, R6) |
+| Q8 | minor | Leftover worktrees and branches | Merged worktrees and `split/*` branches removed; the kit's merged PR branches deleted. The kit's `course2md-design` and `course2md-integration` wait on the owner (`STATUS.md` § Open problems) |
+| Q9 | minor | Hand-painted touches: hairlines and the mark's corners | `bb5c8c49`: `MaterialDivider`, and the icon carries its own rounded square |
+| Q10 | minor | The capture's `~end` waited a guessed 800 ms | `5f49d50a`: it asks the restore, which runs once the content has laid out |
+| Q11 | info | Items `pub` that are only used inside their crate | Informational; no change |
+
+# Acceptance round 3
+
+In progress, against `e31032b1` (3.0.0-alpha.1), with fresh reviewers (UI, app, CLI, plan). The coordinator adds the
+findings and their resolutions here.
+
+| ID | Sev | Finding | Resolution |
+|---|---|---|---|
+| G1 | blocker | Windows clippy: an unused import (the job tick constant, used only by a Unix test) | `6a12ed17`: the constant is named where its Unix-only test uses it |

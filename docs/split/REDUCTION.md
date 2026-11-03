@@ -41,12 +41,16 @@ owner's no-drop rule:
 
 ## Working target
 
-**About 66,800 lines (-15%), measured, not estimated.** The figures above counted theme, widget and
-`note_text` code that waves 2 and 3 had already removed or moved to the kit. A second audit read every desktop file
-over 400 lines and every engine crate and found about 3,500 lines it judged removable with every feature kept;
-the chunks delivered -835 of them (`STATUS.md` § Metrics). The rest is feature logic: draft and version safety,
-paid-request guards, move and recovery, the image viewer, find, capture. More would need features dropped, which
-decision 13 rules out, or the owner's leave for the items `STATUS.md` lists as owner questions.
+**69,361 lines at `e31032b1` (-11.7% against 78,518; -11.0% against the script's 77,921 at `3db4a88`), measured,
+not estimated.** The figures above counted theme, widget and `note_text` code that waves 2 and 3 had already removed
+or moved to the kit. A second audit read every desktop file over 400 lines and every engine crate and found about
+3,500 lines it judged removable with every feature kept; the chunks delivered -835 of them, reaching 66,768 (-15%) at
+`edf140d`. The round-2 fixes and the thin-wrapper work (decision 9: entities, their events and plumbing, logic moved
+into library crates) then added lines back; the owner accepted that cost (decision 13). The rest is feature logic:
+draft and version safety, paid-request guards, move and recovery, the image viewer, find, capture. More would need
+features dropped, which decision 13 rules out, or the owner's leave for the items `STATUS.md` lists as owner
+questions. Across the owner's repositories, after the kit PRs and the split-out crates, the net is about -3,435
+(`STATUS.md` § Metrics).
 
 ## Kit audit (2026-10-31)
 
