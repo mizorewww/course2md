@@ -26,6 +26,8 @@ pub struct Activity {
     pub unit: Option<Unit>,
     pub done: bool,
     pub workers: usize,
+    /// What the stage has found so far: a scene scan's candidate screenshots.
+    pub found: Option<u64>,
     /// Tokens the AI service reported for this stage, sent and received.
     prompt_tokens: u64,
     completion_tokens: u64,
@@ -138,6 +140,8 @@ impl JobEvents {
                 match status {
                     StageStatus::Start => {
                         self.stages.insert(stage.clone(), Activity::new());
+                        // The engine counts tokens again from zero for each stage.
+                        self.tokens = (0, 0);
                     }
                     StageStatus::Done => self.stage(stage).finish(),
                 }
@@ -150,11 +154,15 @@ impl JobEvents {
                 message,
                 phase,
                 unit,
+                found,
             } => {
                 let activity = self.stage(stage);
                 activity.update(*current, *total, message.clone());
                 activity.set_phase(*phase);
                 activity.unit = *unit;
+                if found.is_some() {
+                    activity.found = *found;
+                }
                 false
             }
             Event::Tokens {
@@ -162,13 +170,17 @@ impl JobEvents {
                 prompt,
                 completion,
             } => {
-                // The engine reports running totals for the whole task; each
-                // stage keeps the part that arrived while it ran.
+                // The engine reports running totals that start again at zero with each
+                // stage start; each stage keeps the part that arrived while it ran. A
+                // total below the last one is a count that started again.
                 let (sent, received) = std::mem::replace(&mut self.tokens, (*prompt, *completion));
-                self.stage(stage).note_tokens(
-                    prompt.saturating_sub(sent),
-                    completion.saturating_sub(received),
-                );
+                let (sent, received) = if *prompt < sent || *completion < received {
+                    (0, 0)
+                } else {
+                    (sent, received)
+                };
+                self.stage(stage)
+                    .note_tokens(prompt - sent, completion - received);
                 false
             }
             Event::Workers { stage, workers } => {
@@ -257,6 +269,7 @@ impl Activity {
             unit: None,
             done: false,
             workers: 1,
+            found: None,
             prompt_tokens: 0,
             completion_tokens: 0,
             sampled: false,
@@ -296,16 +309,38 @@ impl Activity {
         self.finished.unwrap_or_else(Instant::now) - self.created
     }
     /// Unmeasured work shows that it is moving: how long it has run and, for
-    /// AI requests, how much the service has sent back.
+    /// AI requests, how much was sent to the service and how much it sent back.
     pub fn live_counter(&self) -> String {
         let mut parts = vec![elapsed_label(self.elapsed())];
-        if self.completion_tokens > 0 {
-            parts.push(c2m_i18n::tr!(
-                "↓ {} 词元",
-                compact_count(self.completion_tokens)
-            ));
-        }
+        parts.extend(self.tokens_label());
         parts.join(" · ")
+    }
+    /// "↑ 4,740 · ↓ 4,289 词元": the tokens sent and received, once a response
+    /// reported any. It stays with the stage as its record after it finishes.
+    pub fn tokens_label(&self) -> Option<String> {
+        (self.prompt_tokens > 0 || self.completion_tokens > 0).then(|| {
+            c2m_i18n::tr!(
+                "↑ {} · ↓ {} 词元",
+                compact_count(self.prompt_tokens),
+                compact_count(self.completion_tokens)
+            )
+        })
+    }
+    /// What the stage has counted, with what it has found so far: "已检查 388 张画面 ·
+    /// 已找到 4 张候选截图".
+    pub fn quantity(&self, stage: &Stage) -> String {
+        let quantity = quantity_of(stage, self.counts_bytes(stage), self.current, self.total);
+        match self.found.filter(|_| *stage == Stage::ScenesScan) {
+            Some(found) => {
+                let found = c2m_i18n::tr!("已找到 {} 张候选截图", found);
+                if quantity.is_empty() {
+                    found
+                } else {
+                    format!("{quantity} · {found}")
+                }
+            }
+            None => quantity,
+        }
     }
     pub fn fraction(&self) -> Option<f32> {
         (self.total > 0).then(|| (self.current as f32 / self.total as f32).clamp(0., 1.))
@@ -359,7 +394,7 @@ impl Activity {
             };
         }
         let byte_download = self.counts_bytes(stage);
-        let quantity = quantity_of(stage, byte_download, self.current, self.total);
+        let quantity = self.quantity(stage);
         // Apple loading and compilation report weighted stages, not throughput,
         // and do not advance at a constant rate. Its downloads report bytes.
         if *stage == Stage::ModelApple && !byte_download {
@@ -1151,6 +1186,7 @@ mod tests {
                 message: None,
                 phase: None,
                 unit: None,
+                found: None,
             },
             Event::Log {
                 level: c2m_protocol::progress::LogLevel::Info,
@@ -1186,6 +1222,88 @@ mod tests {
         assert_eq!(replayed.logs, live.logs);
         assert_eq!(replayed.blocked, live.blocked);
         assert_eq!(replayed.error, live.error);
+    }
+
+    #[test]
+    fn each_ai_stage_keeps_the_tokens_sent_and_received_while_it_ran() {
+        let start = |stage: &Stage| Event::Stage {
+            stage: stage.clone(),
+            status: StageStatus::Start,
+        };
+        let tokens = |stage: &Stage, prompt, completion| Event::Tokens {
+            stage: stage.clone(),
+            prompt,
+            completion,
+        };
+        let mut events = JobEvents::default();
+        // The engine's totals start again at zero with every stage start.
+        events.apply(&start(&Stage::Llm));
+        events.apply(&tokens(&Stage::Llm, 1_200, 800));
+        events.apply(&tokens(&Stage::Llm, 4_740, 4_289));
+        events.apply(&start(&Stage::Summary));
+        events.apply(&tokens(&Stage::Summary, 4_656, 94));
+        assert_eq!(
+            events.stages[&Stage::Llm].tokens_label().as_deref(),
+            Some("↑ 4,740 · ↓ 4,289 词元")
+        );
+        assert_eq!(
+            events.stages[&Stage::Summary].tokens_label().as_deref(),
+            Some("↑ 4,656 · ↓ 94 词元")
+        );
+        assert!(
+            events.stages[&Stage::Summary]
+                .live_counter()
+                .ends_with("↑ 4,656 · ↓ 94 词元")
+        );
+        // A stage that starts in between (scenes beside proofreading) restarts the
+        // engine's count too; a lower total is a fresh count, not lost tokens.
+        events.apply(&tokens(&Stage::Summary, 4_700, 120));
+        events.apply(&start(&Stage::ScenesExtract));
+        events.apply(&tokens(&Stage::Summary, 50, 10));
+        assert_eq!(
+            events.stages[&Stage::Summary].tokens_label().as_deref(),
+            Some("↑ 4,750 · ↓ 130 词元")
+        );
+        assert_eq!(Activity::new().tokens_label(), None);
+    }
+
+    #[test]
+    fn a_scene_scan_says_how_many_screenshots_it_has_found() {
+        let progress = |current, found| Event::Progress {
+            stage: Stage::ScenesScan,
+            current,
+            total: 1_205,
+            message: None,
+            phase: None,
+            unit: None,
+            found,
+        };
+        let mut events = JobEvents::default();
+        events.apply(&Event::Stage {
+            stage: Stage::ScenesScan,
+            status: StageStatus::Start,
+        });
+        events.apply(&progress(38, None));
+        let scan = &events.stages[&Stage::ScenesScan];
+        assert_eq!(scan.quantity(&Stage::ScenesScan), "已检查 38 张画面");
+        events.apply(&progress(388, Some(4)));
+        // A later sample without the count keeps the one already found.
+        events.apply(&progress(397, None));
+        let scan = &events.stages[&Stage::ScenesScan];
+        assert_eq!(
+            scan.quantity(&Stage::ScenesScan),
+            "已检查 397 张画面 · 已找到 4 张候选截图"
+        );
+        assert!(
+            scan.detail(&Stage::ScenesScan, true)
+                .starts_with("已检查 397 张画面 · 已找到 4 张候选截图")
+        );
+        // Older engines' events carry no count and still read.
+        let old: Event = serde_json::from_str(
+            r#"{"type":"progress","stage":"scenes/scan","current":5,"total":9}"#,
+        )
+        .unwrap();
+        assert!(matches!(old, Event::Progress { found: None, .. }));
     }
 
     #[test]

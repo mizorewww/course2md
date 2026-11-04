@@ -1446,18 +1446,13 @@ impl Desktop {
                 SubtitleEvidence::Failed { .. } => course2md::tr!("字幕还没读取完成").into(),
             }
         };
-        let trigger = AssistChip::new("text-source", value).icon(if speech {
+        let trigger = AssistChip::new("text-source", value.clone()).icon(if speech {
             symbols::mic()
         } else {
             symbols::subtitles()
         });
-        let chip = ui::menu(
-            "text-source-menu",
-            trigger,
-            self.text_source_menu(source, cx),
-            window,
-            cx,
-        );
+        let menu = self.text_source_menu(source, &value, window, cx);
+        let chip = ui::menu("text-source-menu", trigger, menu, window, cx);
         let login = source.online
             && course2md::auth::is_bilibili_url(&source.input)
             && read_error
@@ -1528,7 +1523,13 @@ impl Desktop {
     }
 
     /// The tracks, speech recognition, and the ways to get more subtitles.
-    fn text_source_menu(&self, source: &source::Source, cx: &mut Context<Self>) -> MaterialMenu {
+    fn text_source_menu(
+        &self,
+        source: &source::Source,
+        chip_value: &str,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> MaterialMenu {
         let speech = self.import_uses_speech(cx);
         let cached = source
             .selected_subtitle
@@ -1546,14 +1547,24 @@ impl Desktop {
             .map(|track| track.id.clone())
             .or_else(|| cached.clone())
             .filter(|_| !speech);
+        // Two tracks of one language differ by their kind (机器翻译, 人工字幕), so it is
+        // the item's supporting text, where a long name cannot push it out of view.
+        let mut texts = vec![];
         let mut items: Vec<MaterialMenuItem> = tracks
             .into_iter()
             .map(|track| {
                 let id = track.id.clone();
-                let label = course2md::subtitle::track_label(&track);
+                let name = course2md::subtitle::track_name(&track);
+                let kind = course2md::subtitle::track_kind_label(&track);
+                texts.push(name.clone());
+                texts.extend(kind.clone());
                 let confirmed = cached.as_ref() == Some(&id);
-                MaterialMenuItem::new(label)
-                    .leading(Icon::from(symbols::subtitles()))
+                let item = MaterialMenuItem::new(name);
+                let item = match kind {
+                    Some(kind) => item.supporting_text(kind),
+                    None => item,
+                };
+                item.leading(Icon::from(symbols::subtitles()))
                     .selected(selected.as_ref() == Some(&id))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if confirmed {
@@ -1571,6 +1582,7 @@ impl Desktop {
                 .iter()
                 .any(|track| track.id == subtitle.track_id)
         }) {
+            texts.push(subtitle.label.clone());
             items.push(
                 MaterialMenuItem::new(subtitle.label.clone())
                     .leading(Icon::from(symbols::subtitles()))
@@ -1602,7 +1614,9 @@ impl Desktop {
                     ),
             );
         }
-        MaterialMenu::new("text-source-items").items(items)
+        MaterialMenu::new("text-source-items")
+            .width(text_source_menu_width(chip_value, &texts, window))
+            .items(items)
     }
 
     /// A subtitle that could not be read: what it means, and the ways on from here.
@@ -3045,4 +3059,22 @@ impl Desktop {
             AccountsEvent::Relaunch => self.relaunch_for_access(cx),
         }
     }
+}
+
+/// The text source menu's width in design px: at least its chip's, and wide enough
+/// for its longest track name, within the window.
+fn text_source_menu_width(chip_value: &str, texts: &[String], window: &Window) -> f32 {
+    let scale = f32::from(window.rem_size()) / gpui_kit_material::tokens::typography::BASE_PX;
+    let measure = |text: &str, size: f32, weight| {
+        crate::views::shaped_width(text, size * scale, weight, window) / scale
+    };
+    // An assist chip: 8 + 18 icon + 8 before its label, 16 after.
+    let chip = measure(chip_value, 14., FontWeight::MEDIUM) + 50.;
+    // A menu item: 12 + 24 icon + 12 before its label, 12 + 24 check + 12 after.
+    let item = texts
+        .iter()
+        .map(|text| measure(text, 16., FontWeight::NORMAL) + 96.)
+        .fold(0., f32::max);
+    let room = f32::from(window.bounds().size.width) / scale - 32.;
+    chip.max(item).max(200.).min(room.max(200.))
 }

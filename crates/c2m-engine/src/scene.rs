@@ -138,11 +138,14 @@ fn report(event: Event, bar: &mut Option<Bar>, mode: SlideMode) {
         }
         Event::CandidateFound { slides } => {
             bar.as_ref().inspect(|bar| {
-                bar.set_message(crate::tr!(
-                    "已找到 {} 张候选截图 / Found {} candidate slides",
-                    slides,
-                    slides
-                ))
+                bar.set_found(
+                    slides as u64,
+                    crate::tr!(
+                        "已找到 {} 张候选截图 / Found {} candidate slides",
+                        slides,
+                        slides
+                    ),
+                )
             });
         }
         Event::ScanFinished { frames, slides } => {

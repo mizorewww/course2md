@@ -96,33 +96,42 @@ pub fn fallback_tracks<'a>(
     tracks
 }
 
-/// A track's name for people.
+/// A track's name for people: its name or language and, when known, what kind of
+/// track it is ("中文 · 机器翻译").
 pub fn track_label(track: &SubtitleTrack) -> String {
-    let mut parts = Vec::new();
-    if let Some(name) = track.name.as_ref().filter(|value| !value.trim().is_empty()) {
-        parts.push(name.clone());
-    } else if let Some(language) = &track.language {
-        parts.push(language_label(language));
-    } else if let SubtitleOrigin::File { path } = &track.origin {
-        parts.push(
-            path.file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned(),
-        );
-    } else if let SubtitleOrigin::Embedded { stream_index, .. } = &track.origin {
-        parts.push(crate::tr!("内嵌字幕（轨道 {}）", stream_index));
-    } else {
-        parts.push(crate::tr!("字幕").into());
+    match track_kind_label(track) {
+        Some(kind) => format!("{} · {kind}", track_name(track)),
+        None => track_name(track),
     }
+}
+
+/// A track's name or language, without its kind.
+pub fn track_name(track: &SubtitleTrack) -> String {
+    if let Some(name) = track.name.as_ref().filter(|value| !value.trim().is_empty()) {
+        name.clone()
+    } else if let Some(language) = &track.language {
+        language_label(language)
+    } else if let SubtitleOrigin::File { path } = &track.origin {
+        path.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned()
+    } else if let SubtitleOrigin::Embedded { stream_index, .. } = &track.origin {
+        crate::tr!("内嵌字幕（轨道 {}）", stream_index)
+    } else {
+        crate::tr!("字幕").into()
+    }
+}
+
+/// What kind of track it is, which tells two tracks of one language apart.
+pub fn track_kind_label(track: &SubtitleTrack) -> Option<String> {
     match track.kind {
         // Whatever its name says, a translation the platform makes on request is one.
-        _ if track.translated => parts.push(crate::tr!("机器翻译").into()),
-        SubtitleKind::Manual => parts.push(crate::tr!("人工字幕").into()),
-        SubtitleKind::Automatic => parts.push(crate::tr!("自动字幕").into()),
-        SubtitleKind::Unknown => {}
+        _ if track.translated => Some(crate::tr!("机器翻译").into()),
+        SubtitleKind::Manual => Some(crate::tr!("人工字幕").into()),
+        SubtitleKind::Automatic => Some(crate::tr!("自动字幕").into()),
+        SubtitleKind::Unknown => None,
     }
-    parts.join(" · ")
 }
 
 /// Failed discovery and successful discovery with no readable tracks are distinct.

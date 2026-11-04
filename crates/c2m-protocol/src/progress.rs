@@ -280,8 +280,13 @@ pub enum Event {
         phase: Option<Phase>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         unit: Option<Unit>,
+        /// What the stage has found so far, apart from what it has processed: the
+        /// candidate screenshots of a scene scan. Absent from older engines.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        found: Option<u64>,
     },
-    /// Running LLM token totals for the stage.
+    /// Running LLM token totals for the stage: they start again at zero with
+    /// each stage start.
     Tokens {
         stage: Stage,
         prompt: u64,
@@ -439,6 +444,7 @@ pub fn download_progress(current: u64, total: u64) {
         message: None,
         phase: None,
         unit: Some(Unit::Bytes),
+        found: None,
     });
 }
 
@@ -549,6 +555,7 @@ pub struct Bar {
     message: Mutex<String>,
     phase: Mutex<Option<Phase>>,
     unit: Option<Unit>,
+    found: Mutex<Option<u64>>,
     last_emit: Mutex<std::time::Instant>,
 }
 
@@ -567,6 +574,7 @@ impl Bar {
             message: Mutex::new(String::new()),
             phase: Mutex::new(None),
             unit: None,
+            found: Mutex::new(None),
             last_emit: Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(1)),
         }
     }
@@ -640,6 +648,19 @@ impl Bar {
         }
     }
 
+    /// What the stage has found so far (json mode), with `human` as the bar
+    /// message in human mode.
+    pub fn set_found(&self, found: u64, human: impl Into<String>) {
+        if is_json() {
+            *crate::sync::lock_recover(&self.found) = Some(found);
+            *crate::sync::lock_recover(&self.message) = human.into();
+            let cur = self.current.load(Ordering::Relaxed);
+            self.emit_progress(cur, false);
+        } else {
+            self.bar.set_message(human.into());
+        }
+    }
+
     /// Structured phase and its data (json mode); the GUI words it. Human mode
     /// shows `human` as the bar message instead.
     pub fn set_phase(&self, phase: Phase, data: &str, human: impl Into<String>) {
@@ -671,6 +692,7 @@ impl Bar {
         *last = std::time::Instant::now();
         let message = crate::sync::lock_recover(&self.message).clone();
         let phase = *crate::sync::lock_recover(&self.phase);
+        let found = *crate::sync::lock_recover(&self.found);
         emit(&Event::Progress {
             stage: self.stage.clone(),
             current,
@@ -678,6 +700,7 @@ impl Bar {
             message: Some(message).filter(|m| !m.is_empty()),
             phase,
             unit: self.unit,
+            found,
         });
     }
 }
@@ -892,6 +915,7 @@ mod tests {
             message: Some(ledger.host().into()),
             phase: Some(Phase::Download),
             unit: Some(Unit::Bytes),
+            found: None,
         };
         assert_eq!(
             serde_json::to_value(&event).unwrap(),
