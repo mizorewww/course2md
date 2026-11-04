@@ -1817,6 +1817,7 @@ dependencies = [
  "c2m-i18n",
  "c2m-source",
  "desktop-prefs",
+ "tempfile",
 ]
 
 [[package]]
