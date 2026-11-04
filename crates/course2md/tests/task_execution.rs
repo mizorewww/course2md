@@ -1022,13 +1022,30 @@ fn is_translation(body: &serde_json::Value) -> bool {
 /// is never sent again.
 #[test]
 fn translation_resend_sends_only_unfinished_batches_and_the_held_back_summary() {
-    if !common::ffmpeg_available() {
-        return;
+    if common::ffmpeg_available() {
+        translation_resend(false, false);
     }
+}
+
+/// The saved note says which batches are translated: a batch whose receipt is gone
+/// is still never sent again.
+#[test]
+fn a_translated_batch_without_its_receipt_is_not_sent_again() {
+    if common::ffmpeg_available() {
+        translation_resend(true, false);
+    }
+}
+
+fn translation_resend(missing_receipt: bool, lose_again: bool) {
     let translations = Arc::new(AtomicUsize::new(0));
     let counted = translations.clone();
+    let lose_all = Arc::new(AtomicBool::new(false));
+    let losing = lose_all.clone();
     let summary = common::fake_ai()["responses"]["summary"].clone();
     let mock = MockAi::respond_with(move |_, body| {
+        if losing.load(Ordering::SeqCst) {
+            return None;
+        }
         if is_translation(body) {
             // The second translation batch is received, but its response is lost.
             if counted.fetch_add(1, Ordering::SeqCst) == 1 {
@@ -1099,6 +1116,22 @@ fn translation_resend_sends_only_unfinished_batches_and_the_held_back_summary() 
     assert_eq!(manifest.outcomes.summary.status, artifact::Status::Failed);
     let untouched = std::fs::read(base.join("document.json")).unwrap();
     std::fs::remove_file(&source).unwrap();
+    if missing_receipt {
+        let finished = receipts
+            .iter()
+            .find(|r| {
+                r.purpose == Component::Translation.as_str()
+                    && r.state == course2md::dispatch::State::Completed
+            })
+            .unwrap();
+        std::fs::remove_file(
+            original
+                .work_dir
+                .join(format!("requests/{}.json", finished.stable_id)),
+        )
+        .unwrap();
+    }
+    lose_all.store(lose_again, Ordering::SeqCst);
 
     let mut retry = original.clone();
     retry.task_id = "retry-translation".into();
@@ -1122,9 +1155,20 @@ fn translation_resend_sends_only_unfinished_batches_and_the_held_back_summary() 
     let sent_before = mock.bodies.lock().unwrap().len();
     let second = run(root.path(), &retry);
     let observed = events(&second);
-    assert!(second.status.success(), "{observed:#?}");
     let bodies = mock.bodies.lock().unwrap()[sent_before..].to_vec();
     let translated: Vec<_> = bodies.iter().filter(|body| is_translation(body)).collect();
+    if lose_again {
+        assert!(!second.status.success() || observed.iter().any(|e| e["type"] == "error"));
+        // The authorized batch once; lost again, it holds the rest and the summary back.
+        assert_eq!(translated.len(), 1, "{bodies:#?}");
+        assert_eq!(bodies.len(), 1, "{bodies:#?}");
+        assert!(
+            !retry.course_dir.join("versions/retry-translation").exists(),
+            "a version identical to the saved note was published"
+        );
+        return;
+    }
+    assert!(second.status.success(), "{observed:#?}");
     // The lost batch once and the third batch it held back; the summary once.
     assert_eq!(translated.len(), 2, "{bodies:#?}");
     assert_eq!(bodies.len(), 3, "{bodies:#?}");

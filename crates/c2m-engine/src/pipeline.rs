@@ -712,6 +712,8 @@ impl Task<'_> {
                     if let Some(raw) = &event.raw {
                         event.text = raw.clone();
                     }
+                    // Proofreading changes the text; its translation is made again.
+                    event.translation = None;
                 }
             }
             let sections = std::mem::take(&mut document.sections);
