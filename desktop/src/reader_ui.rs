@@ -3452,14 +3452,25 @@ impl ReaderPage {
             .min(1.)
     }
     /// So short a window shows the image or its text, not both.
+    /// How far the viewer keeps its header and content from the window's top edge:
+    /// the title bar's row, where the macOS traffic lights or the Windows and Linux
+    /// caption buttons (drawn above every dialog) stay. The viewer's surface still
+    /// fills the row behind them.
+    fn viewer_safe_top(window: &Window) -> Pixels {
+        TITLE_BAR_HEIGHT.to_pixels(window.rem_size())
+    }
+    /// The height the viewer has below the title bar's row.
+    fn viewer_height(window: &Window) -> Pixels {
+        window.bounds().size.height - Self::viewer_safe_top(window)
+    }
     fn viewer_is_short(window: &Window) -> bool {
-        window.bounds().size.height < rem(420.).to_pixels(window.rem_size())
+        Self::viewer_height(window) < rem(420.).to_pixels(window.rem_size())
     }
     /// Text is shown by default when the window has room for it.
     fn viewer_text_open(viewer: &ImageViewer, window: &Window) -> bool {
         viewer
             .text_open
-            .unwrap_or(window.bounds().size.height >= rem(448.).to_pixels(window.rem_size()))
+            .unwrap_or(Self::viewer_height(window) >= rem(448.).to_pixels(window.rem_size()))
     }
     fn zoom_reader_image(&mut self, factor: Option<f32>, window: &Window, cx: &mut Context<Self>) {
         let Some(viewer) = &mut self.viewer else {
@@ -3592,6 +3603,10 @@ impl ReaderPage {
             MaterialDialog::new("reader-image-viewer")
                 .container(ColorRole::SURFACE)
                 .full_screen(course2md::tr!("关闭截图"), None)
+                .safe_area(Edges {
+                    top: Self::viewer_safe_top(window),
+                    ..Edges::default()
+                })
                 .headline(headline)
                 .content(content)
                 .modal(open)
@@ -4127,6 +4142,19 @@ mod tests {
     };
     use gpui::{AppContext as _, ListAlignment, ListOffset, ListState, TestAppContext, px};
     use std::collections::HashMap;
+
+    #[test]
+    fn the_screenshot_viewer_header_starts_below_the_window_buttons() {
+        use gpui_kit_material::components::traffic_light_position;
+        // At the smallest text scale the row the viewer keeps clear is still the
+        // whole title bar the traffic lights are centred on, and taller than the
+        // Windows and Linux caption buttons (32 px).
+        let row =
+            super::TITLE_BAR_HEIGHT.to_pixels(px(gpui_kit_material::tokens::typography::BASE_PX));
+        let lights = traffic_light_position(crate::views::APP_BAR_HEIGHT);
+        assert!(row >= lights.y * 2. + px(14.), "{row:?}");
+        assert!(row >= px(32.));
+    }
 
     #[test]
     fn a_gallery_resize_keeps_the_same_screenshot() {
