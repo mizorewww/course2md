@@ -21,11 +21,13 @@ use std::{
 /// What the name dialog names.
 #[derive(Clone)]
 pub(crate) enum NameTarget {
-    /// A new folder inside `parent`, chosen for `draft` when it was asked for from one.
+    /// A new folder inside `parent`, chosen for `draft` when it was asked for from one,
+    /// and receiving `then_move` when the move dialog had nowhere else to offer.
     NewFolder {
         root: PathBuf,
         parent: Option<u64>,
         draft: Option<String>,
+        then_move: Option<Moving>,
     },
     Folder {
         root: PathBuf,
@@ -369,6 +371,7 @@ impl Desktop {
                 root,
                 parent,
                 draft,
+                then_move: None,
             },
             window,
             cx,
@@ -390,6 +393,7 @@ impl Desktop {
                 root,
                 parent,
                 draft: None,
+                then_move: None,
             },
         };
         self.begin_naming(target, window, cx)
@@ -577,6 +581,20 @@ impl Desktop {
         };
         match target {
             NameTarget::Note { .. } => {}
+            // Asked for from the move dialog: what was being moved goes into it.
+            NameTarget::NewFolder {
+                root,
+                then_move: Some(moving),
+                ..
+            } => {
+                let (root, moving) = (root.clone(), moving.clone());
+                self.close_name_dialog(cx);
+                match moving {
+                    Moving::Note(storage) => self.file_note(root, storage, Some(saved), cx),
+                    Moving::Folder(id) => self.move_folder_into(root, id, Some(saved), cx),
+                }
+                return;
+            }
             NameTarget::NewFolder {
                 root,
                 draft: Some(draft_id),
@@ -630,14 +648,20 @@ impl Desktop {
             });
         }
         let (headline, label, action, icon) = match &dialog.target {
-            NameTarget::NewFolder { parent, .. } => (
+            NameTarget::NewFolder {
+                parent, then_move, ..
+            } => (
                 if parent.is_some() {
                     course2md::tr!("新建子文件夹")
                 } else {
                     course2md::tr!("新建文件夹")
                 },
                 course2md::tr!("文件夹名称"),
-                course2md::tr!("创建文件夹"),
+                if then_move.is_some() {
+                    course2md::tr!("创建并移入")
+                } else {
+                    course2md::tr!("创建文件夹")
+                },
                 symbols::create_new_folder(),
             ),
             NameTarget::Folder { .. } => (
@@ -740,11 +764,16 @@ impl Desktop {
                 library.subtree(*id),
             ),
         };
-        let folders = library
+        let folders: Vec<_> = library
             .tree()
             .into_iter()
             .filter(|(id, _)| !inside.contains(id))
-            .map(|(id, _)| (Some(id), library.path(id).join(" / ")));
+            .map(|(id, _)| (Some(id), library.path(id).join(" / ")))
+            .collect();
+        // Nowhere to go but where it already is: say so, and offer the folder to make.
+        if folders.is_empty() && current.is_none() {
+            return Some(self.move_nowhere_view(dialog, cx));
+        }
         let rows = std::iter::once((None, top)).chain(folders).enumerate();
         let rows = rows.map(|(index, (destination, label))| {
             let (root, moving) = (dialog.root.clone(), dialog.moving.clone());
@@ -780,7 +809,12 @@ impl Desktop {
                         .id("move-destinations")
                         .max_h(rem(320.))
                         .overflow_y_scroll()
-                        .child(segmented_list(rows.collect::<Vec<_>>())),
+                        // On the title's and the actions' margins.
+                        .child(
+                            div()
+                                .px(rem(24.))
+                                .child(segmented_list(rows.collect::<Vec<_>>())),
+                        ),
                 )
                 .action(
                     material_button("move-cancel", ButtonVariant::Text)
@@ -796,6 +830,56 @@ impl Desktop {
                 })
                 .into_any_element(),
         )
+    }
+
+    /// The move dialog when the library has no other folder: what that means, and a
+    /// new folder that what is being moved goes into.
+    fn move_nowhere_view(&self, dialog: &MoveDialog, cx: &mut Context<Self>) -> AnyElement {
+        let text = match dialog.moving {
+            Moving::Note(_) => {
+                course2md::tr!("这个笔记库还没有文件夹。新建一个，这份笔记会移入其中。")
+            }
+            Moving::Folder(_) => {
+                course2md::tr!("这个笔记库没有可以移入的文件夹。新建一个，这个文件夹会移入其中。")
+            }
+        };
+        let (root, moving) = (dialog.root.clone(), dialog.moving.clone());
+        MaterialDialog::new("move-dialog")
+            .width(crate::ui::DIALOG_WIDTH_ROOMY)
+            .container(ColorRole::SURFACE)
+            .headline(course2md::tr!("移动到"))
+            .supporting_text(text)
+            .action(
+                material_button("move-cancel", ButtonVariant::Text)
+                    .child(course2md::tr!("取消"))
+                    .on_click(cx.listener(|this, _, _, cx| this.close_move_dialog(cx))),
+            )
+            .action(
+                material_button("move-new-folder", ButtonVariant::Filled)
+                    .icon(symbols::create_new_folder())
+                    .child(course2md::tr!("新建文件夹"))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.close_move_dialog(cx);
+                        this.begin_naming(
+                            NameTarget::NewFolder {
+                                root: root.clone(),
+                                parent: None,
+                                draft: None,
+                                then_move: Some(moving.clone()),
+                            },
+                            window,
+                            cx,
+                        );
+                    })),
+            )
+            .modal(dialog.open)
+            .on_dismiss({
+                let desktop = cx.weak_entity();
+                move |_, cx| {
+                    let _ = desktop.update(cx, |this, cx| this.close_move_dialog(cx));
+                }
+            })
+            .into_any_element()
     }
 
     /// Deleting a folder removes the folders inside it; notes are kept and

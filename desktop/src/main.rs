@@ -537,11 +537,15 @@ impl Desktop {
             return;
         }
         let wake = self.work.read(cx).waker();
-        let Some(Some(reconciliation)) = self.with_workspace(cx, |workspace| {
-            let reconciliation = workspace.reconciliation()?;
-            // A record reopened elsewhere needs the wake sender too.
-            workspace.set_wake_sender(wake);
-            Some(reconciliation)
+        // Asked on every poll; nothing a page shows changes, so the records'
+        // readers are not told.
+        let Some(Some(reconciliation)) = self.records.update(cx, |records, _| {
+            records.workspace.as_mut().map(|workspace| {
+                let reconciliation = workspace.reconciliation()?;
+                // A record reopened elsewhere needs the wake sender too.
+                workspace.set_wake_sender(wake);
+                Some(reconciliation)
+            })
         }) else {
             return;
         };
@@ -822,6 +826,8 @@ impl Desktop {
         // Visible state transitions repaint now; log/progress lines coalesce.
         let mut immediate = false;
         let mut commit = false;
+        // Whether a task record changed in a way more than its progress shows.
+        let mut records_changed = false;
         for event in events {
             let event = match event {
                 Event::Exit { success, cancelled } => {
@@ -866,14 +872,17 @@ impl Desktop {
                         event,
                         EngineEvent::Error { .. } | EngineEvent::Blocked { .. }
                     );
-                    // Applied quietly: the records tell their readers once the
-                    // coalesced repaint below is due.
-                    self.records.update(cx, |records, _| {
+                    // Applied quietly: progress reaches the pages that show it with
+                    // the work's repaint below; a visible transition tells every
+                    // reader of the records.
+                    let visible = self.records.update(cx, |records, _| {
                         records
                             .workspace
                             .as_mut()
                             .is_some_and(|workspace| workspace.state.apply_task_event(&id, &event))
-                    })
+                    });
+                    records_changed |= visible;
+                    visible
                 }
                 None => self
                     .work
@@ -906,12 +915,16 @@ impl Desktop {
         } else {
             self.start_next_task(cx);
         }
-        // The records and the work tell their readers together, at most once per interval.
+        // The work tells its readers at most once per interval; the records only
+        // when a task's state changed, so a page that reads them but shows no
+        // progress (the reader) is not built again for every progress line.
         if self
             .work
             .update(cx, |work, _| work.repaint_due(streaming, immediate))
         {
-            self.records.change(cx, |_, _| {});
+            if records_changed || commit {
+                self.records.change(cx, |_, _| {});
+            }
             self.work.change(cx, |_, _| {});
             cx.notify();
         }

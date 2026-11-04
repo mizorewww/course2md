@@ -273,9 +273,19 @@ impl Desktop {
             return app_bar(title_bar_height(window), window, cx).child(bar);
         }
         if page == Page::Result {
-            // The reader draws its own part, so the shell does not read it.
+            // The reader draws its own part, so the shell does not read it. Drawn cached:
+            // it is built again when it, the reader, the records or the exports change,
+            // not with every repaint of a task's progress in the shell around it.
             let height = crate::reader_ui::TITLE_BAR_HEIGHT.to_pixels(window.rem_size());
-            return app_bar(height, window, cx).child(self.reader_bar.clone());
+            return app_bar(height, window, cx).child(
+                self.reader_bar.clone().cached(
+                    StyleRefinement::default()
+                        .flex()
+                        .flex_1()
+                        .min_w_0()
+                        .h_full(),
+                ),
+            );
         }
         // The brand leads the bar and returns to the workbench, as on the M3
         // canvas; destinations follow on the trailing edge with icon and label.

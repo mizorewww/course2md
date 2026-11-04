@@ -116,6 +116,8 @@ pub fn track_label(track: &SubtitleTrack) -> String {
         parts.push(crate::tr!("字幕").into());
     }
     match track.kind {
+        // Whatever its name says, a translation the platform makes on request is one.
+        _ if track.translated => parts.push(crate::tr!("机器翻译").into()),
         SubtitleKind::Manual => parts.push(crate::tr!("人工字幕").into()),
         SubtitleKind::Automatic => parts.push(crate::tr!("自动字幕").into()),
         SubtitleKind::Unknown => {}
@@ -436,6 +438,11 @@ mod tests {
         assert!(!track_label(&track).contains("自动"));
         track.kind = SubtitleKind::Manual;
         assert!(track_label(&track).ends_with("人工字幕"));
+        // A translation YouTube makes on request reads as one, not as captions.
+        track.kind = SubtitleKind::Automatic;
+        track.translated = true;
+        track.name = Some("Chinese (Simplified)".into());
+        assert_eq!(track_label(&track), "Chinese (Simplified) · 机器翻译");
     }
 
     #[test]

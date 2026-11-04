@@ -549,6 +549,30 @@ fn subtitle_evidence(
             });
         }
     }
+    // YouTube lists its captions twice, as `en-orig` and `en`: one text, which the
+    // fallback already reads as one. Offer it once, under the plain key.
+    let plain_captions: Vec<String> = tracks
+        .iter()
+        .filter(|track| !track.translated)
+        .filter_map(|track| match &track.origin {
+            SubtitleOrigin::Online {
+                language_key,
+                automatic: true,
+                ..
+            } => Some(language_key.clone()),
+            _ => None,
+        })
+        .collect();
+    tracks.retain(|track| match &track.origin {
+        SubtitleOrigin::Online {
+            language_key,
+            automatic: true,
+            ..
+        } => !language_key
+            .strip_suffix("-orig")
+            .is_some_and(|plain| plain_captions.iter().any(|key| key == plain)),
+        _ => true,
+    });
     if !tracks.is_empty() {
         SubtitleEvidence::Found { tracks, warning }
     } else if let Some(message) = warning {
@@ -1653,8 +1677,9 @@ mod tests {
             .filter(|track| !track.translated)
             .map(key)
             .collect();
-        assert_eq!(original, ["manual en", "auto en-orig", "auto en"]);
-        assert_eq!(video.subtitles.tracks().len(), 14);
+        // The captions' `en-orig` is the same text as `en`, offered once.
+        assert_eq!(original, ["manual en", "auto en"]);
+        assert_eq!(video.subtitles.tracks().len(), 13);
         for interface in ["zh-Hans", "zh", "zh-Hant", "ja", "en", "fr"] {
             let mut tracks = video.subtitles.tracks().to_vec();
             crate::subtitle::sort_tracks(

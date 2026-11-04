@@ -149,12 +149,13 @@ impl AccountsView {
                     MaterialMenuItem::new(course2md::tr!("重新检查"))
                         .leading(Icon::from(symbols::refresh()))
                         .disabled(self.account.checking)
+                        // Signing out stands apart, below the line.
+                        .divider(true)
                         .on_click(cx.listener(|this, _, _, cx| this.refresh_account(cx))),
                 )
                 .item(
                     MaterialMenuItem::new(course2md::tr!("退出登录"))
                         .leading(Icon::from(symbols::logout()))
-                        .divider(true)
                         .on_click(cx.listener(|this, _, _, cx| this.clear_account(cx))),
                 );
             actions.push(

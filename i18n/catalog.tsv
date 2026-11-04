@@ -2207,3 +2207,8 @@ POST {base_url}/chat/completions（支持音频输入的多模态 LLM， 如 gpt
 Apple 模型下载失败 / Apple model download failed {}	Apple 模型下载失败 {}	Apple model download failed {}	Apple 模型下載失敗 {}	Apple モデルのダウンロードに失敗しました {}
 Apple 模型从镜像下载失败，改用 Hugging Face / Apple model download from the mirror failed; trying Hugging Face: {}	Apple 模型从镜像下载失败，改用 Hugging Face：{}	Apple model download from the mirror failed; trying Hugging Face: {}	Apple 模型從鏡像下載失敗，改用 Hugging Face：{}	Apple モデルをミラーからダウンロードできませんでした。Hugging Face で再試行します：{}
 需要下载识别模型 {}（{}），保存到 {}。现在下载吗？[y/N] / The speech model {} ({}) needs to be downloaded to {}. Download it now? [y/N]	需要下载识别模型 {}（{}），保存到 {}。现在下载吗？[y/N]	The speech model {} ({}) needs to be downloaded to {}. Download it now? [y/N]	需要下載辨識模型 {}（{}），儲存到 {}。現在下載嗎？[y/N]	音声認識モデル {}（{}）を {} にダウンロードする必要があります。今すぐダウンロードしますか？[y/N]
+创建并移入	创建并移入	Create and move	建立並移入	作成して移動
+这个笔记库还没有文件夹。新建一个，这份笔记会移入其中。	这个笔记库还没有文件夹。新建一个，这份笔记会移入其中。	This library has no folders yet. Create one and the note moves into it.	這個筆記庫還沒有資料夾。新增一個，這份筆記會移入其中。	このライブラリにはまだフォルダーがありません。作成すると、このノートがその中に移動します。
+这个笔记库没有可以移入的文件夹。新建一个，这个文件夹会移入其中。	这个笔记库没有可以移入的文件夹。新建一个，这个文件夹会移入其中。	This library has no folder to move into. Create one and this folder moves into it.	這個筆記庫沒有可以移入的資料夾。新增一個，這個資料夾會移入其中。	このライブラリには移動先のフォルダーがありません。作成すると、このフォルダーがその中に移動します。
+设置分类	设置分类	Settings categories	設定分類	設定のカテゴリ
+机器翻译	机器翻译	Machine translation	機器翻譯	機械翻訳

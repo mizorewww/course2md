@@ -398,6 +398,8 @@ impl ReaderPage {
 
 /// The address of the note's opening: its facts, notices and details.
 const HEAD_BLOCK: &str = "reader:head";
+/// The address of the space after the note's last block.
+const END_BLOCK: &str = "reader:end";
 const FIGURE_BLOCK: &str = "figure:";
 
 /// A note as Markdown, with what each top-level block of it shows.
@@ -516,6 +518,8 @@ impl NoteDocument {
             index += 1;
         }
         parts.append(&mut figures);
+        // The card's inset below the last block, inside the scrolled document.
+        parts.push((format!("![]({END_BLOCK})"), None));
         let (parts, blocks): (Vec<_>, Vec<_>) = parts.into_iter().unzip();
         Self {
             markdown: parts.join("\n\n"),
@@ -963,6 +967,23 @@ impl ReaderPage {
             });
         });
         self.refresh_reader_data(cx);
+    }
+
+    /// The note's name as the library shows it, after a rename: the bar and the
+    /// document's heading both read it. The published files keep their title.
+    pub(crate) fn retitle(&mut self, title: String, cx: &mut Context<Self>) {
+        let Some(preview) = self.opened.preview.as_mut() else {
+            return;
+        };
+        if preview.course.title == title {
+            return;
+        }
+        Rc::make_mut(preview).course.title = title;
+        let preview = preview.clone();
+        // A note whose data has not loaded yet builds its document with the name then.
+        if self.loaded.as_ref() == Some(&preview.course.dir) {
+            self.rebuild_note_document(&preview, cx);
+        }
     }
 
     /// The note's document and contents follow the loaded note.
@@ -1999,6 +2020,8 @@ impl ReaderPage {
             Some(preview) if address == HEAD_BLOCK => {
                 self.reader_head(preview, window, cx).into_any_element()
             }
+            // As far below the last block as the note's opening is below the card's top.
+            _ if address == END_BLOCK => div().h(rem(24.)).into_any_element(),
             _ => div().into_any_element(),
         }
     }
@@ -4054,12 +4077,8 @@ impl Render for ReaderBar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         #[cfg(feature = "capture")]
         crate::capture::count_render(crate::capture::Counted::ReaderBar);
-        let bar = h_flex()
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .gap(px(4.))
-            .items_center();
+        // Fills the cached box the shell lays out for it.
+        let bar = h_flex().size_full().min_w_0().gap(px(4.)).items_center();
         self.reader
             .update(cx, |reader, cx| reader.title_bar(bar, window, cx))
     }
@@ -4216,9 +4235,12 @@ mod tests {
                 Some(6),
                 Some(7),
                 Some(5),
-                Some(8)
+                Some(8),
+                None
             ]
         );
+        // The card's inset below the last block scrolls with the note.
+        assert!(document.markdown.ends_with("![](reader:end)"));
         // The overview and every key point are in the summary's panel.
         assert_eq!(document.item_of(1), Some(2));
         assert_eq!(document.item_of(3), Some(2));

@@ -172,6 +172,16 @@ pub(crate) struct ShellFacts {
     pub reassociate: HashSet<String>,
     /// A storage operation is under way.
     pub storage_busy: bool,
+    /// Where the model a waiting task needs stands, once its card asked to prepare it.
+    pub models: HashMap<String, ModelPreparation>,
+}
+
+/// The model preparation a task's card started.
+#[derive(Clone, PartialEq)]
+pub(crate) enum ModelPreparation {
+    Preparing,
+    /// It stopped with this message; the card's 下载并准备模型 tries again.
+    Failed(String),
 }
 
 /// What the task page asks of the window.
@@ -1634,6 +1644,20 @@ impl TasksPage {
                 .text_size(TEXT_AUX)
                 .text_color(color(ColorRole::ON_SURFACE_VARIANT))
                 .whitespace_normal()
+            }))
+            .children(self.facts.models.get(&id).map(|preparation| {
+                let key = SharedString::from(format!("task-model-{id}"));
+                match preparation {
+                    ModelPreparation::Preparing => {
+                        ui::status_line(key, course2md::tr!("正在准备识别模型"))
+                            .text_size(TEXT_AUX)
+                            .into_any_element()
+                    }
+                    ModelPreparation::Failed(message) => error_text(key, message.clone())
+                        .text_size(TEXT_BODY)
+                        .whitespace_normal()
+                        .into_any_element(),
+                }
             }))
             .children(self.uncertain_block(task, cx))
             .children(progress)
