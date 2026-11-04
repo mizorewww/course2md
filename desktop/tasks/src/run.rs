@@ -333,18 +333,7 @@ pub fn uncertain_requests(task: &TaskRecord) -> Vec<String> {
         .collect()
 }
 
-/// The parts of a published note those requests belonged to.
-pub fn uncertain_components(task: &TaskRecord) -> Vec<Component> {
-    task.events
-        .blocked
-        .iter()
-        .filter(|b| b.is_uncertain())
-        .filter_map(|b| b.purpose.as_deref())
-        .map(|purpose| task_view::ai_component(purpose).unwrap_or(Component::Proofreading))
-        .collect()
-}
-
-/// The proofreading and summary of a published note that failed, for a service repair.
+/// The proofreading, translation and summary of a published note that failed, for a service repair.
 pub fn repairable_components(task: &TaskRecord) -> Vec<Component> {
     if task.artifact.is_none() {
         return Vec::new();
@@ -368,8 +357,8 @@ pub fn reprocess_config(
     base.defaults.transcript_source = Some(TranscriptSource::Subtitle);
     base.llm.enabled = components.contains(&Component::Proofreading);
     base.llm.summarize = components.contains(&Component::Summary);
-    // Translation follows the proofread paragraphs it is redone with.
-    if !base.llm.enabled {
+    // Translation is redone on its own, or follows the proofread paragraphs it is redone with.
+    if !base.llm.enabled && !components.contains(&Component::Translation) {
         base.llm.translate = None;
     }
     preferences.config_for_refs(

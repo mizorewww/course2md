@@ -987,6 +987,435 @@ fn proofreading_resend_continues_unsent_summary_without_repeating_source_work() 
     );
 }
 
+/// Answers a proofreading or translation batch item for item, so the note keeps
+/// its text: proofreading echoes it, translation marks it.
+fn batch_reply(body: &serde_json::Value, translated: bool) -> serde_json::Value {
+    let user = &body["messages"][1]["content"];
+    let payload = user.as_str().or_else(|| user[0]["text"].as_str()).unwrap();
+    let items: Vec<serde_json::Value> = serde_json::from_str(payload).unwrap();
+    let segments: Vec<_> = items
+        .iter()
+        .map(|item| {
+            let text = item["text"].as_str().unwrap();
+            let text = if translated {
+                format!("译：{text}")
+            } else {
+                text.to_owned()
+            };
+            serde_json::json!({"id": item["id"], "text": text})
+        })
+        .collect();
+    chat_completion(&serde_json::json!({ "segments": segments }))
+}
+
+fn is_translation(body: &serde_json::Value) -> bool {
+    body["messages"][0]["content"]
+        .as_str()
+        .unwrap_or_default()
+        .starts_with("You translate lecture transcripts")
+}
+
+/// The owner's deadlock in the engine: a translation batch lost its response after
+/// the note was saved. Redoing the translation alone sends exactly that batch (as
+/// authorized) and the batch it held back, plus the summary the uncertain step kept
+/// from starting. The finished batch comes back from its receipt, and proofreading
+/// is never sent again.
+#[test]
+fn translation_resend_sends_only_unfinished_batches_and_the_held_back_summary() {
+    if common::ffmpeg_available() {
+        translation_resend(false, false);
+    }
+}
+
+/// The saved note says which batches are translated: a batch whose receipt is gone
+/// is still never sent again.
+#[test]
+fn a_translated_batch_without_its_receipt_is_not_sent_again() {
+    if common::ffmpeg_available() {
+        translation_resend(true, false);
+    }
+}
+
+/// A repair whose resend is lost again finishes nothing new: it sends the one
+/// authorized batch, holds the rest back, and publishes no copy of the note, even
+/// with the summary riding along.
+#[test]
+fn a_repair_that_finishes_nothing_new_publishes_no_version() {
+    if common::ffmpeg_available() {
+        translation_resend(false, true);
+    }
+}
+
+fn translation_resend(missing_receipt: bool, lose_again: bool) {
+    let translations = Arc::new(AtomicUsize::new(0));
+    let counted = translations.clone();
+    let lose_all = Arc::new(AtomicBool::new(false));
+    let losing = lose_all.clone();
+    let summary = common::fake_ai()["responses"]["summary"].clone();
+    let mock = MockAi::respond_with(move |_, body| {
+        if losing.load(Ordering::SeqCst) {
+            return None;
+        }
+        if is_translation(body) {
+            // The second translation batch is received, but its response is lost.
+            if counted.fetch_add(1, Ordering::SeqCst) == 1 {
+                return None;
+            }
+            return Some((200, batch_reply(body, true)));
+        }
+        let proofreading = body["messages"][1]["content"].is_array();
+        Some((
+            200,
+            if proofreading {
+                batch_reply(body, false)
+            } else {
+                chat_completion(&summary)
+            },
+        ))
+    });
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("unreadable-video.mp4");
+    std::fs::write(&source, b"broken").unwrap();
+    let mut original = request(root.path(), &source);
+    // Pauses between sentences keep each one its own paragraph.
+    original.duration = 450.;
+    original.subtitle_events = Some(
+        (0..45)
+            .map(|index| TranscriptEvent {
+                start: index as f64 * 10.,
+                end: index as f64 * 10. + 2.,
+                text: format!("This is spoken sentence number {index} of the lecture."),
+                raw: None,
+                translation: None,
+            })
+            .collect(),
+    );
+    let llm = &mut original.config.llm;
+    llm.enabled = true;
+    llm.summarize = true;
+    llm.translate = Some("zh-Hans".into());
+    llm.concurrency = 1;
+    llm.base_url = mock.url.clone();
+    llm.model = "test-model".into();
+    llm.api_key = "private-task-key".into();
+    original
+        .service_versions
+        .insert("llm".into(), "ai-v1".into());
+    let first = run(root.path(), &original);
+    let first_events = events(&first);
+    assert!(first.status.success(), "{first_events:#?}");
+    // Three proofreading batches, then translation: the first answered, the second lost.
+    assert_eq!(mock.calls.load(Ordering::SeqCst), 5);
+    let receipts = course2md::dispatch::receipts(&original.work_dir).unwrap();
+    let uncertain: Vec<_> = receipts
+        .iter()
+        .filter(|r| r.state == course2md::dispatch::State::Uncertain)
+        .collect();
+    assert_eq!(uncertain.len(), 1);
+    assert_eq!(uncertain[0].purpose, Component::Translation.as_str());
+    let base = original.course_dir.join("versions/version-one");
+    let manifest = artifact::read_manifest(&base.join("manifest.json")).unwrap();
+    assert_eq!(
+        manifest.outcomes.proofreading.status,
+        artifact::Status::Succeeded
+    );
+    assert_ne!(
+        manifest.outcomes.translation.status,
+        artifact::Status::Succeeded
+    );
+    assert_eq!(manifest.outcomes.summary.status, artifact::Status::Failed);
+    let untouched = std::fs::read(base.join("document.json")).unwrap();
+    std::fs::remove_file(&source).unwrap();
+    if missing_receipt {
+        let finished = receipts
+            .iter()
+            .find(|r| {
+                r.purpose == Component::Translation.as_str()
+                    && r.state == course2md::dispatch::State::Completed
+            })
+            .unwrap();
+        std::fs::remove_file(
+            original
+                .work_dir
+                .join(format!("requests/{}.json", finished.stable_id)),
+        )
+        .unwrap();
+    }
+    lose_all.store(lose_again, Ordering::SeqCst);
+
+    let mut retry = original.clone();
+    retry.task_id = "retry-translation".into();
+    retry.version_id = "retry-translation".into();
+    retry.work_dir = root.path().join("retry-work");
+    retry.control_path = Some(retry.work_dir.join("control.json"));
+    // As the desktop asks for it: no proofreading, translation and the summary.
+    retry.config.llm.enabled = false;
+    retry.operation = course2md::execution::Operation::Reprocess {
+        base_version_dir: base.clone(),
+        components: vec![Component::Translation, Component::Summary],
+        prior_work_dir: Some(original.work_dir.clone()),
+    };
+    std::fs::create_dir_all(&retry.work_dir).unwrap();
+    std::fs::write(
+        retry.control_path.as_ref().unwrap(),
+        serde_json::to_vec(&serde_json::json!({"intent":"run","resend":[uncertain[0].request_id]}))
+            .unwrap(),
+    )
+    .unwrap();
+    let sent_before = mock.bodies.lock().unwrap().len();
+    let second = run(root.path(), &retry);
+    let observed = events(&second);
+    let bodies = mock.bodies.lock().unwrap()[sent_before..].to_vec();
+    let translated: Vec<_> = bodies.iter().filter(|body| is_translation(body)).collect();
+    if lose_again {
+        assert!(!second.status.success() || observed.iter().any(|e| e["type"] == "error"));
+        // The authorized batch once; lost again, it holds the rest and the summary back.
+        assert_eq!(translated.len(), 1, "{bodies:#?}");
+        assert_eq!(bodies.len(), 1, "{bodies:#?}");
+        assert!(
+            !retry.course_dir.join("versions/retry-translation").exists(),
+            "a version identical to the saved note was published"
+        );
+        return;
+    }
+    assert!(second.status.success(), "{observed:#?}");
+    // The lost batch once and the third batch it held back; the summary once.
+    assert_eq!(translated.len(), 2, "{bodies:#?}");
+    assert_eq!(bodies.len(), 3, "{bodies:#?}");
+    let first_sent = mock.bodies.lock().unwrap()[..sent_before].to_vec();
+    let answered = first_sent.iter().find(|body| is_translation(body)).unwrap();
+    assert!(
+        !translated.contains(&answered),
+        "a finished batch was sent again"
+    );
+    assert!(
+        !observed
+            .iter()
+            .any(|event| event["stage"] == "llm" || event["stage"] == "transcribe")
+    );
+    let updated = artifact::read_manifest(
+        &retry
+            .course_dir
+            .join("versions/retry-translation/manifest.json"),
+    )
+    .unwrap();
+    assert_eq!(
+        updated.outcomes.translation.status,
+        artifact::Status::Succeeded
+    );
+    assert_eq!(
+        updated.outcomes.proofreading.status,
+        artifact::Status::Succeeded
+    );
+    assert_eq!(updated.outcomes.summary.status, artifact::Status::Succeeded);
+    let document: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            retry
+                .course_dir
+                .join("versions/retry-translation")
+                .join(&updated.document),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let speech: Vec<_> = document["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|section| section["speech"].as_array().unwrap())
+        .collect();
+    assert_eq!(speech.len(), 45);
+    assert!(speech.iter().all(|event| {
+        event["translation"]
+            .as_str()
+            .is_some_and(|text| text.starts_with("译："))
+    }));
+    let receipts = course2md::dispatch::receipts(&retry.work_dir).unwrap();
+    let resent = receipts
+        .iter()
+        .find(|r| r.stable_id == uncertain[0].stable_id)
+        .unwrap();
+    assert_eq!(resent.state, course2md::dispatch::State::Completed);
+    assert_eq!(resent.attempt, uncertain[0].attempt + 1);
+    assert_eq!(
+        std::fs::read(base.join("document.json")).unwrap(),
+        untouched
+    );
+}
+
+/// Several paid batches lose their responses while in flight together, so each is
+/// uncertain and everything after them is held back. Resending all of them sends each
+/// once, with the batches they held back and the summary, and the repair finishes in
+/// one run even with concurrent batches: an authorized request never holds back
+/// another (it did, and nothing was sent).
+#[test]
+fn resending_several_uncertain_paid_batches_sends_each_once_and_finishes() {
+    if !common::ffmpeg_available() {
+        return;
+    }
+    for lost_kind in ["translation", "proofreading"] {
+        for lost in [2, 3] {
+            several_uncertain_batches(lost_kind, lost);
+        }
+    }
+}
+
+fn several_uncertain_batches(lost_kind: &'static str, lost: usize) {
+    let losing = Arc::new(AtomicBool::new(true));
+    let (losses, still_losing) = (Arc::new(AtomicUsize::new(0)), losing.clone());
+    let summary = common::fake_ai()["responses"]["summary"].clone();
+    let mock = MockAi::respond_with(move |_, body| {
+        let translation = is_translation(body);
+        let proofreading = !translation && body["messages"][1]["content"].is_array();
+        let kind = if translation {
+            "translation"
+        } else if proofreading {
+            "proofreading"
+        } else {
+            "summary"
+        };
+        if kind == lost_kind
+            && still_losing.load(Ordering::SeqCst)
+            && losses.fetch_add(1, Ordering::SeqCst) < lost
+        {
+            // Received, then lost late enough that the batches beside it are already sent.
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            return None;
+        }
+        Some((
+            200,
+            match kind {
+                "summary" => chat_completion(&summary),
+                _ => batch_reply(body, translation),
+            },
+        ))
+    });
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("unreadable-video.mp4");
+    std::fs::write(&source, b"broken").unwrap();
+    let mut original = request(root.path(), &source);
+    // Four batches of each kind.
+    original.duration = 800.;
+    original.subtitle_events = Some(
+        (0..80)
+            .map(|index| TranscriptEvent {
+                start: index as f64 * 10.,
+                end: index as f64 * 10. + 2.,
+                text: format!("This is spoken sentence number {index} of the lecture."),
+                raw: None,
+                translation: None,
+            })
+            .collect(),
+    );
+    let llm = &mut original.config.llm;
+    llm.enabled = true;
+    llm.summarize = true;
+    llm.translate = Some("zh-Hans".into());
+    llm.concurrency = lost;
+    llm.base_url = mock.url.clone();
+    llm.model = "test-model".into();
+    llm.api_key = "private-task-key".into();
+    original
+        .service_versions
+        .insert("llm".into(), "ai-v1".into());
+    let first = run(root.path(), &original);
+    assert!(first.status.success(), "{:#?}", events(&first));
+    let receipts = course2md::dispatch::receipts(&original.work_dir).unwrap();
+    let uncertain: Vec<_> = receipts
+        .iter()
+        .filter(|r| r.state == course2md::dispatch::State::Uncertain)
+        .collect();
+    assert_eq!(uncertain.len(), lost, "{lost_kind} {lost}: {receipts:#?}");
+    assert!(uncertain.iter().all(|r| r.purpose == lost_kind));
+    let answered_before: Vec<_> = mock.bodies.lock().unwrap().clone();
+    losing.store(false, Ordering::SeqCst);
+
+    let base = original.course_dir.join("versions/version-one");
+    let mut retry = original.clone();
+    retry.task_id = "retry".into();
+    retry.version_id = "retry".into();
+    retry.work_dir = root.path().join("retry-work");
+    retry.control_path = Some(retry.work_dir.join("control.json"));
+    // As the desktop asks for it: the uncertain part and the summary it held back.
+    let part = if lost_kind == "translation" {
+        retry.config.llm.enabled = false;
+        Component::Translation
+    } else {
+        Component::Proofreading
+    };
+    retry.operation = course2md::execution::Operation::Reprocess {
+        base_version_dir: base,
+        components: vec![part, Component::Summary],
+        prior_work_dir: Some(original.work_dir.clone()),
+    };
+    std::fs::create_dir_all(&retry.work_dir).unwrap();
+    let ids: Vec<_> = uncertain.iter().map(|r| r.request_id.clone()).collect();
+    std::fs::write(
+        retry.control_path.as_ref().unwrap(),
+        serde_json::to_vec(&serde_json::json!({"intent":"run","resend":ids})).unwrap(),
+    )
+    .unwrap();
+    let second = run(root.path(), &retry);
+    let observed = events(&second);
+    assert!(second.status.success(), "{observed:#?}");
+    let sent = mock.bodies.lock().unwrap()[answered_before.len()..].to_vec();
+    let kinds = |kind: &str| {
+        sent.iter()
+            .filter(|body| match kind {
+                "translation" => is_translation(body),
+                "proofreading" => {
+                    !is_translation(body) && body["messages"][1]["content"].is_array()
+                }
+                _ => !is_translation(body) && !body["messages"][1]["content"].is_array(),
+            })
+            .count()
+    };
+    // Every batch of the redone parts once (none had finished), the summary once,
+    // and nothing that was answered before.
+    let expected_proofreading = if lost_kind == "proofreading" { 4 } else { 0 };
+    assert_eq!(
+        kinds("proofreading"),
+        expected_proofreading,
+        "{lost_kind} {lost}"
+    );
+    assert_eq!(kinds("translation"), 4, "{lost_kind} {lost}");
+    assert_eq!(kinds("summary"), 1, "{lost_kind} {lost}");
+    for (index, body) in sent.iter().enumerate() {
+        assert!(
+            !sent[..index].contains(body),
+            "{lost_kind} {lost}: a request was sent twice"
+        );
+    }
+    // Before, only the lost batches of that kind went out; everything else was answered.
+    let answered: Vec<_> = answered_before
+        .iter()
+        .filter(|body| {
+            if lost_kind == "translation" {
+                !is_translation(body)
+            } else {
+                is_translation(body) || !body["messages"][1]["content"].is_array()
+            }
+        })
+        .collect();
+    assert!(
+        sent.iter().all(|body| !answered.contains(&body)),
+        "{lost_kind} {lost}: an answered request was sent again"
+    );
+    let updated =
+        artifact::read_manifest(&retry.course_dir.join("versions/retry/manifest.json")).unwrap();
+    for outcome in [
+        &updated.outcomes.proofreading,
+        &updated.outcomes.translation,
+        &updated.outcomes.summary,
+    ] {
+        assert_eq!(
+            outcome.status,
+            artifact::Status::Succeeded,
+            "{lost_kind} {lost}"
+        );
+    }
+}
+
 #[test]
 fn export_only_recovery_uses_the_saved_version_after_source_and_subtitle_are_gone() {
     use course2md::config::OutputFormat;

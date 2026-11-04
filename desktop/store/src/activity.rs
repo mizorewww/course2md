@@ -105,6 +105,9 @@ pub struct JobEvents {
     /// The saved events have been read back; a disconnected library's have not.
     #[serde(skip)]
     pub loaded: bool,
+    /// The purposes the task's receipts hold any attempt for, read with them.
+    #[serde(skip)]
+    pub attempted: std::collections::BTreeSet<String>,
     #[serde(skip)]
     pub tokens: (u64, u64),
 }
@@ -705,6 +708,7 @@ fn quantity_of(stage: &Stage, byte_download: bool, current: u64, total: u64) -> 
 pub enum NotePart {
     Screenshots,
     Proofreading,
+    Translation,
     Summary,
     Exports,
 }
@@ -714,6 +718,7 @@ impl NotePart {
         match self {
             Self::Screenshots => c2m_i18n::tr!("截图"),
             Self::Proofreading => c2m_i18n::tr!("校对"),
+            Self::Translation => c2m_i18n::tr!("翻译"),
             Self::Summary => c2m_i18n::tr!("摘要"),
             Self::Exports => c2m_i18n::tr!("导出"),
         }
@@ -724,6 +729,7 @@ impl NotePart {
         match self {
             Self::Screenshots => "截图",
             Self::Proofreading => "校对",
+            Self::Translation => "翻译",
             Self::Summary => "摘要",
             Self::Exports => "导出",
         }
@@ -734,7 +740,9 @@ impl NotePart {
 fn missing_term(part: NotePart) -> String {
     match part {
         NotePart::Screenshots | NotePart::Summary => c2m_i18n::tr!("{}未生成", part.label()),
-        NotePart::Proofreading | NotePart::Exports => c2m_i18n::tr!("{}未完成", part.label()),
+        NotePart::Proofreading | NotePart::Translation | NotePart::Exports => {
+            c2m_i18n::tr!("{}未完成", part.label())
+        }
     }
 }
 

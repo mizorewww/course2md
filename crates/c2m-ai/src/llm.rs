@@ -315,6 +315,10 @@ pub fn polish_sections_report(
 
 /// Translates every paragraph into `target`, kept beside the original.
 /// Failed batches stay untranslated; the note is published either way.
+/// A batch whose paragraphs already carry a translation (a saved note being
+/// completed) is kept as it is and not sent: its receipt may be gone, and a
+/// finished paid batch must not go out again. Batches keep the boundaries they
+/// always had, so the remaining ones are the same requests as before.
 pub fn translate_sections_report(
     sections: &mut [Section],
     s: &LlmSettings,
@@ -336,11 +340,15 @@ pub fn translate_sections_report(
         .flat_map(|section| section.speech.iter_mut())
         .filter(is_text);
     into_chunks(None, events, &mut chunks);
-    run_batches(
+    let (done, chunks): (Vec<_>, Vec<_>) = chunks
+        .into_iter()
+        .partition(|(_, chunk)| chunk.iter().any(|event| event.translation.is_some()));
+    let kept: usize = done.iter().map(|(_, chunk)| chunk.len()).sum();
+    let mut report = run_batches(
         s,
         Purpose::Translation,
         chunks,
-        attempted,
+        attempted - kept,
         control,
         |items, _| translation_body(s, target, items),
         |chunk, translated| {
@@ -351,7 +359,10 @@ pub fn translate_sections_report(
                 }
             }
         },
-    )
+    )?;
+    report.attempted += kept;
+    report.succeeded += kept;
+    Ok(report)
 }
 
 /// The batch as the JSON the service gets.

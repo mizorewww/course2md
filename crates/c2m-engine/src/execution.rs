@@ -49,17 +49,26 @@ pub enum Operation {
 pub enum Component {
     Screenshots,
     Proofreading,
+    /// The bilingual translation of the proofread text. Its name is the request
+    /// ledger's purpose, so a receipt names the component it belongs to.
+    Translation,
     Summary,
     Exports,
 }
 
 impl Component {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::Screenshots,
         Self::Proofreading,
+        Self::Translation,
         Self::Summary,
         Self::Exports,
     ];
+
+    /// A component made by AI requests, which the request ledger names by purpose.
+    pub fn is_ai(self) -> bool {
+        matches!(self, Self::Proofreading | Self::Translation | Self::Summary)
+    }
 
     pub fn as_str(self) -> &'static str {
         self.into()
