@@ -8,6 +8,7 @@ use crate::{
 use anyhow::Context as _;
 use course2md::config::TranscriptSource;
 use course2md::subtitle::{SubtitleEvidence, SubtitleReadError, SubtitleTrack};
+use desktop_accounts::youtube::GuideOrigin;
 use desktop_tasks::import::*;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
@@ -3005,7 +3006,18 @@ impl Desktop {
         let retry = (self.sign_in_source(false, cx)
             && course2md::auth::is_youtube_url(&self.value(Field::Source, cx)))
         .then(|| self.source_now(cx));
+        // Where a reopen for Full Disk Access brings the person back to.
+        let origin = if self.onboarding.active {
+            GuideOrigin::Onboarding
+        } else if self.page == Page::Settings {
+            GuideOrigin::Settings
+        } else {
+            GuideOrigin::Elsewhere
+        };
         self.accounts.update(cx, |accounts, cx| {
+            if accounts.youtube.dialog.is_none() {
+                accounts.youtube.origin = origin;
+            }
             accounts.open_youtube_dialog(retry, window, cx)
         });
     }
@@ -3057,6 +3069,10 @@ impl Desktop {
                 }
             }
             AccountsEvent::Relaunch => self.relaunch_for_access(cx),
+            AccountsEvent::ResumeYoutube { origin } => {
+                self.return_to_guide_origin(*origin, window, cx);
+                self.open_youtube_dialog(window, cx);
+            }
         }
     }
 }

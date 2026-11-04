@@ -305,6 +305,15 @@ impl Desktop {
         service.details_open = false;
     }
 
+    /// First use at its account step, as the YouTube guide left it before the app
+    /// reopened for Full Disk Access.
+    pub(crate) fn show_setup_accounts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.onboarding.active {
+            self.start_onboarding(window, cx);
+        }
+        self.setup_step(Step::Account, cx);
+    }
+
     fn setup_step(&mut self, step: Step, cx: &mut Context<Self>) {
         if step == Step::Engine && self.setup_model_job_running(cx) {
             return;

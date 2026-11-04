@@ -30,7 +30,9 @@ pub struct YoutubeUi {
     pub access: Option<Access>,
     /// Open the dialog again on this launch, on the browser it guided for: the
     /// person left it to give access (and macOS, or the guide, reopened the app).
-    pub resume_guide: Option<Option<Browser>>,
+    pub resume_guide: Option<Resume>,
+    /// Where the person opened the dialog, kept in the resume note.
+    pub origin: GuideOrigin,
 }
 
 impl YoutubeUi {
@@ -315,16 +317,98 @@ impl AccessGuide {
     }
 }
 
-/// The `.app` bundle a program runs from, the thing System Settings lists and a
-/// relaunch opens; `None` for a program outside a bundle (a development build).
-pub fn app_bundle_of(exe: &Path) -> Option<PathBuf> {
-    exe.ancestors()
+/// Where the running app is, as Full Disk Access and a relaunch see it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AppLocation {
+    /// A `.app` bundle the person can find, add to the list and reopen.
+    Bundle(PathBuf),
+    /// A quarantined download macOS runs from a randomized read-only copy (App
+    /// Translocation): access given to it does not reach the app the person
+    /// opens next time, and reopening it would open that copy again. The app
+    /// must be moved (to /Applications) and opened from there first.
+    Translocated,
+    /// No bundle: a development build run from a terminal.
+    Unbundled,
+}
+
+/// Where `exe` runs from: the `.app` holding it, and whether that is a
+/// translocated copy.
+pub fn app_location_of(exe: &Path) -> AppLocation {
+    let Some(bundle) = exe
+        .ancestors()
         .skip(1)
         .find(|dir| {
             dir.extension().is_some_and(|ext| ext == "app")
                 && dir.join("Contents/Info.plist").is_file()
         })
         .map(Path::to_path_buf)
+    else {
+        return AppLocation::Unbundled;
+    };
+    if bundle
+        .components()
+        .any(|part| part.as_os_str() == "AppTranslocation")
+    {
+        AppLocation::Translocated
+    } else {
+        AppLocation::Bundle(bundle)
+    }
+}
+
+/// Where the person was when they opened the dialog, so a reopen for access
+/// brings them back there.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GuideOrigin {
+    Settings,
+    Onboarding,
+    /// The workbench (a source preview that asked for a sign-in) or elsewhere:
+    /// the app's own restored page.
+    #[default]
+    Elsewhere,
+}
+
+impl GuideOrigin {
+    fn id(self) -> &'static str {
+        match self {
+            Self::Settings => "settings",
+            Self::Onboarding => "onboarding",
+            Self::Elsewhere => "",
+        }
+    }
+
+    fn from_id(id: &str) -> Self {
+        match id.trim() {
+            "settings" => Self::Settings,
+            "onboarding" => Self::Onboarding,
+            _ => Self::Elsewhere,
+        }
+    }
+}
+
+/// What the resume note asks of this launch: the browser the guide was for and
+/// where the person started.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Resume {
+    pub browser: Option<Browser>,
+    pub origin: GuideOrigin,
+}
+
+impl Resume {
+    pub fn note(self) -> String {
+        format!(
+            "{}\n{}\n",
+            self.browser.map_or("", Browser::id),
+            self.origin.id()
+        )
+    }
+
+    fn parse(note: &str) -> Self {
+        let mut lines = note.lines();
+        Self {
+            browser: lines.next().and_then(Browser::from_id),
+            origin: GuideOrigin::from_id(lines.next().unwrap_or_default()),
+        }
+    }
 }
 
 /// The note left when the person goes to give access, so the dialog opens again
@@ -335,19 +419,14 @@ pub fn resume_marker(cache: &Path) -> PathBuf {
 
 pub const RESUME_WINDOW: Duration = Duration::from_secs(15 * 60);
 
-/// Whether `marker` asks this launch to open the dialog again, and for which
-/// browser (the note holds its id, as yt-dlp names it).
-pub fn resume_due(marker: &Path, now: std::time::SystemTime) -> Option<Option<Browser>> {
+/// Whether `marker` asks this launch to open the dialog again, and how.
+pub fn resume_due(marker: &Path, now: std::time::SystemTime) -> Option<Resume> {
     let fresh = std::fs::metadata(marker)
         .and_then(|meta| meta.modified())
         .ok()
         .and_then(|modified| now.duration_since(modified).ok())
         .is_some_and(|age| age <= RESUME_WINDOW);
-    fresh.then(|| {
-        std::fs::read_to_string(marker)
-            .ok()
-            .and_then(|id| Browser::from_id(&id))
-    })
+    fresh.then(|| Resume::parse(&std::fs::read_to_string(marker).unwrap_or_default()))
 }
 
 #[cfg(test)]
@@ -494,19 +573,27 @@ mod tests {
     }
 
     #[test]
-    fn the_bundle_is_the_app_that_holds_the_program() {
+    fn the_bundle_is_the_app_that_holds_the_program_unless_translocated() {
         let dir = tempfile::tempdir().unwrap();
         let app = dir.path().join("Apps/course2md.app");
-        let exe = app.join("Contents/MacOS/course2md");
+        let exe = app.join("Contents/MacOS/course2md-desktop");
         std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
-        assert_eq!(app_bundle_of(&exe), None);
+        assert_eq!(app_location_of(&exe), AppLocation::Unbundled);
         std::fs::write(app.join("Contents/Info.plist"), "").unwrap();
-        assert_eq!(app_bundle_of(&exe), Some(app.clone()));
+        assert_eq!(app_location_of(&exe), AppLocation::Bundle(app.clone()));
         // A development build is no bundle.
         assert_eq!(
-            app_bundle_of(&dir.path().join("target/debug/course2md-desktop")),
-            None
+            app_location_of(&dir.path().join("target/debug/course2md-desktop")),
+            AppLocation::Unbundled
         );
+        // A quarantined download run from its randomized copy.
+        let moved = dir
+            .path()
+            .join("private/var/folders/x/T/AppTranslocation/1A2B/d/course2md.app");
+        let exe = moved.join("Contents/MacOS/course2md-desktop");
+        std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+        std::fs::write(moved.join("Contents/Info.plist"), "").unwrap();
+        assert_eq!(app_location_of(&exe), AppLocation::Translocated);
     }
 
     #[test]
@@ -516,11 +603,33 @@ mod tests {
         let now = std::time::SystemTime::now();
         let soon = now + Duration::from_secs(60);
         assert_eq!(resume_due(&marker, now), None);
-        std::fs::write(&marker, "brave").unwrap();
-        assert_eq!(resume_due(&marker, soon), Some(Some(Browser::Brave)));
+        let note = Resume {
+            browser: Some(Browser::Brave),
+            origin: GuideOrigin::Onboarding,
+        };
+        std::fs::write(&marker, note.note()).unwrap();
+        assert_eq!(resume_due(&marker, soon), Some(note));
         std::fs::write(&marker, "").unwrap();
-        assert_eq!(resume_due(&marker, soon), Some(None));
+        assert_eq!(resume_due(&marker, soon), Some(Resume::default()));
         let late = now + RESUME_WINDOW + Duration::from_secs(60);
         assert_eq!(resume_due(&marker, late), None);
+    }
+
+    #[test]
+    fn a_stale_recheck_still_ends_checking_unless_a_newer_one_runs() {
+        let mut ui = YoutubeUi {
+            checking: true,
+            recheck: Some(3),
+            generation: 4,
+            ..Default::default()
+        };
+        // Switching browser or disconnecting moved the generation on.
+        assert!(!ui.current(3));
+        ui.finish_recheck(3);
+        assert!(!ui.checking);
+        ui.checking = true;
+        ui.recheck = Some(5);
+        ui.finish_recheck(3);
+        assert!(ui.checking);
     }
 }
