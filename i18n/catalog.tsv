@@ -2218,3 +2218,5 @@ Apple 模型从镜像下载失败，改用 Hugging Face / Apple model download f
 重试 AI 翻译	重试 AI 翻译	Retry AI translation	重試 AI 翻譯	AI翻訳を再試行する
 AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not confirmed	AI 翻譯結果未確認	AI翻訳の結果は未確認
 翻译	翻译	Translation	翻譯	翻訳
+校对后有变化的段落会重新翻译	校对后有变化的段落会重新翻译	Paragraphs that change in proofreading are translated again	校對後有變化的段落會重新翻譯	校正で変わった段落は再翻訳されます
+还会生成此前因此未能开始的摘要	还会生成此前因此未能开始的摘要	The summary these requests kept from starting is also generated	還會產生此前因此未能開始的摘要	これらのリクエストのために開始できなかった要約も生成されます

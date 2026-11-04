@@ -1464,6 +1464,17 @@ impl TasksPage {
                         )
                         .whitespace_normal()
                     }))
+                    // What else the resend sends, which is not uncertain but is sent too.
+                    .children(task.resend_also_sends().into_iter().enumerate().map(
+                        |(index, also)| {
+                            accessible_text(
+                                SharedString::from(format!("unknown-also-{id}-{index}")),
+                                also,
+                            )
+                            .whitespace_normal()
+                            .text_color(color(ColorRole::ON_SURFACE_VARIANT))
+                        },
+                    ))
                     .when(active, |view| {
                         view.child(accessible_text(
                             SharedString::from(format!("unknown-saving-{id}")),

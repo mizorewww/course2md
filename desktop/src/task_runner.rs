@@ -1239,6 +1239,9 @@ impl Desktop {
                 for request in task.events.blocked.iter().filter(|b| b.is_uncertain()) {
                     question = question.text(request_scope(request));
                 }
+                for also in task.resend_also_sends() {
+                    question = question.text(also);
+                }
                 question
                     .text(course2md::tr!(
                         "服务可能已处理这些内容，重新发送可能产生额外费用"

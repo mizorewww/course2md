@@ -105,6 +105,9 @@ pub struct JobEvents {
     /// The saved events have been read back; a disconnected library's have not.
     #[serde(skip)]
     pub loaded: bool,
+    /// The purposes the task's receipts hold any attempt for, read with them.
+    #[serde(skip)]
+    pub attempted: std::collections::BTreeSet<String>,
     #[serde(skip)]
     pub tokens: (u64, u64),
 }
