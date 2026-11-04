@@ -147,14 +147,40 @@ impl Browser {
             .collect()
     }
 
-    /// Whether the system refuses to list this browser's data folder. macOS 27
-    /// keeps the folders of Chrome and other browsers to the browser itself unless
-    /// the reading app has Full Disk Access; the folder still exists (so the browser
-    /// is offered), but yt-dlp cannot search it and reports no cookie database.
-    pub fn blocked(self) -> bool {
+    /// The folder yt-dlp searches for this browser's cookies: the data folder, or
+    /// for Safari its cookie folder (in Safari's container on current macOS), which
+    /// is not the app that marks Safari installed.
+    fn cookie_dir(self, home: &Path) -> Option<PathBuf> {
+        if self != Self::Safari {
+            return self.data_dir(home);
+        }
+        if !cfg!(target_os = "macos") {
+            return None;
+        }
+        [
+            home.join("Library/Cookies"),
+            home.join("Library/Containers/com.apple.Safari/Data/Library/Cookies"),
+        ]
+        .into_iter()
+        .rev()
+        .find(|dir| dir.exists())
+    }
+
+    /// Whether this app may read the browser's cookie folder now. macOS 27 keeps
+    /// the folders of Chrome and other browsers (and Safari's container) to the
+    /// browser itself unless the reading app has Full Disk Access; the folder still
+    /// exists (so the browser is offered), but yt-dlp cannot search it and reports
+    /// no cookie database. One folder listing, no cookie is read: cheap enough to
+    /// ask again every few seconds while the person grants access.
+    pub fn access(self) -> Access {
         c2m_core::paths::home_dir()
-            .and_then(|home| self.data_dir(&home))
-            .is_some_and(|dir| listing_denied(&dir))
+            .and_then(|home| self.cookie_dir(&home))
+            .map_or(Access::Absent, |dir| access_to(&dir))
+    }
+
+    /// Whether the system refuses to list this browser's cookie folder.
+    pub fn blocked(self) -> bool {
+        self.access() == Access::Blocked
     }
 
     /// A Chromium browser's profiles by the names the person gave them. Others
@@ -177,9 +203,31 @@ pub struct Profile {
     pub name: String,
 }
 
+/// What the system answers this app about a browser's cookie folder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Access {
+    /// The folder lists: yt-dlp can search it.
+    Open,
+    /// The folder exists but the system refuses to list it (on macOS, until the
+    /// app has Full Disk Access).
+    Blocked,
+    /// No such folder, or another failure that access would not change.
+    Absent,
+}
+
+/// Lists `dir` once. Both refusals (`EPERM`, as macOS privacy answers, and
+/// `EACCES`, as file modes do) read as blocked.
+pub fn access_to(dir: &Path) -> Access {
+    match std::fs::read_dir(dir) {
+        Ok(_) => Access::Open,
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => Access::Blocked,
+        Err(_) => Access::Absent,
+    }
+}
+
 /// Whether listing `dir` is refused, as opposed to the folder being absent.
 fn listing_denied(dir: &Path) -> bool {
-    matches!(std::fs::read_dir(dir), Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied)
+    access_to(dir) == Access::Blocked
 }
 
 fn chromium_profiles(data_dir: &Path) -> Vec<Profile> {
@@ -447,10 +495,7 @@ fn blocked_dir(choice: &BrowserChoice, home: &Path) -> Option<PathBuf> {
         .filter(|profile| profile.components().count() > 1);
     let dirs = [
         profile_path.map(Path::to_path_buf),
-        // Safari's cookies are not in the folder that marks it installed.
-        (choice.browser != Browser::Safari)
-            .then(|| choice.browser.data_dir(home))
-            .flatten(),
+        choice.browser.cookie_dir(home),
     ];
     dirs.into_iter().flatten().find(|dir| listing_denied(dir))
 }
@@ -852,6 +897,61 @@ mod tests {
             assert_eq!(blocked_dir(&choice, home.path()), Some(data.clone()));
         }
         restore(&data);
+    }
+
+    /// The probe the desktop repeats while the person grants access: a folder the
+    /// system will not list is blocked, a listed one open, and one that is not there
+    /// absent; giving access back (here, the folder's mode) opens it again.
+    #[cfg(unix)]
+    #[test]
+    fn access_follows_the_folder_as_it_is_refused_and_granted() {
+        let home = tempfile::tempdir().unwrap();
+        let data = home.path().join("Chrome");
+        assert_eq!(access_to(&data), Access::Absent);
+        std::fs::create_dir(&data).unwrap();
+        assert_eq!(access_to(&data), Access::Open);
+        if unlistable(&data, 0o000).is_some() {
+            assert_eq!(access_to(&data), Access::Blocked);
+            assert!(listing_denied(&data));
+            // Search without read is still a refusal to list.
+            unlistable(&data, 0o311);
+            assert_eq!(access_to(&data), Access::Blocked);
+        }
+        restore(&data);
+        assert_eq!(access_to(&data), Access::Open);
+        // A file where the folder should be is not something access would change.
+        let file = home.path().join("file");
+        std::fs::write(&file, "").unwrap();
+        assert_eq!(access_to(&file), Access::Absent);
+    }
+
+    /// Safari's cookies live in its container, not in the app that marks it
+    /// installed; without either folder there is nothing to grant.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn safari_is_probed_at_its_cookie_folder() {
+        let home = tempfile::tempdir().unwrap();
+        assert_eq!(Browser::Safari.cookie_dir(home.path()), None);
+        let legacy = home.path().join("Library/Cookies");
+        std::fs::create_dir_all(&legacy).unwrap();
+        assert_eq!(Browser::Safari.cookie_dir(home.path()), Some(legacy));
+        let container = home
+            .path()
+            .join("Library/Containers/com.apple.Safari/Data/Library/Cookies");
+        std::fs::create_dir_all(&container).unwrap();
+        assert_eq!(
+            Browser::Safari.cookie_dir(home.path()),
+            Some(container.clone())
+        );
+        let choice = BrowserChoice {
+            browser: Browser::Safari,
+            profile: None,
+        };
+        assert_eq!(blocked_dir(&choice, home.path()), None);
+        if unlistable(&container, 0o000).is_some() {
+            assert_eq!(blocked_dir(&choice, home.path()), Some(container.clone()));
+        }
+        restore(&container);
     }
 
     /// When the folder cannot be listed but "Local State" opens by name (execute
