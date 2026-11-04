@@ -2220,3 +2220,6 @@ AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not conf
 翻译	翻译	Translation	翻譯	翻訳
 校对后有变化的段落会重新翻译	校对后有变化的段落会重新翻译	Paragraphs that change in proofreading are translated again	校對後有變化的段落會重新翻譯	校正で変わった段落は再翻訳されます
 还会生成此前因此未能开始的摘要	还会生成此前因此未能开始的摘要	The summary these requests kept from starting is also generated	還會產生此前因此未能開始的摘要	これらのリクエストのために開始できなかった要約も生成されます
+{}未完成的 {} 段都会发送，包括以上内容	{}未完成的 {} 段都会发送，包括以上内容	{}: all {} unfinished paragraphs are sent, including the requests above	{}未完成的 {} 段都會傳送，包括以上內容	{}：未完了の {} 段落はすべて送信されます（上記を含む）
+还会翻译此前未能完成的 {} 段	还会翻译此前未能完成的 {} 段	The {} paragraphs not translated before are translated too	還會翻譯此前未能完成的 {} 段	以前に翻訳できなかった {} 段落も翻訳されます
+还会生成此前未能开始的翻译	还会生成此前未能开始的翻译	The translation that could not start before is made too	還會產生此前未能開始的翻譯	以前に開始できなかった翻訳も作成されます

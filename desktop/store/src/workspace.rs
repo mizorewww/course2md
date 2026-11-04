@@ -534,10 +534,16 @@ impl TaskRecord {
         Ok(components)
     }
 
-    /// Requests a resend sends beyond the uncertain ones listed on the card: the
-    /// summary they held back, and the translation of paragraphs proofreading changes.
-    pub fn resend_also_sends(&self) -> Vec<&'static str> {
-        let Ok(components) = self.uncertain_components() else {
+    /// What a resend sends beyond the uncertain requests listed on the card, as the
+    /// repair decides it: the unfinished rest of each part it redoes (batches the
+    /// uncertain ones held back or that failed; finished ones come back from their
+    /// receipts or the saved note), the translation that follows proofreading, and
+    /// the summary they held back.
+    pub fn resend_also_sends(&self) -> Vec<String> {
+        use c2m_artifact::artifact::{Outcome, Status};
+        let (Ok(components), Some(outcomes)) =
+            (self.uncertain_components(), self.events.outcomes.as_ref())
+        else {
             return Vec::new();
         };
         let uncertain = |part: Component| {
@@ -545,14 +551,61 @@ impl TaskRecord {
                 request.is_uncertain() && request.purpose.as_deref() == Some(part.as_str())
             })
         };
+        let unfinished = |outcome: &Outcome| match outcome.status {
+            Status::Succeeded | Status::NotRequested => None,
+            _ => Some(
+                outcome
+                    .total
+                    .map(|total| total.saturating_sub(outcome.completed.unwrap_or(0))),
+            ),
+        };
         let mut also = Vec::new();
+        for (part, outcome, label) in [
+            (
+                Component::Proofreading,
+                &outcomes.proofreading,
+                crate::activity::NotePart::Proofreading.label(),
+            ),
+            (
+                Component::Translation,
+                &outcomes.translation,
+                crate::activity::NotePart::Translation.label(),
+            ),
+        ] {
+            if components.contains(&part)
+                && uncertain(part)
+                && let Some(Some(count)) = unfinished(outcome).filter(|count| *count != Some(0))
+            {
+                also.push(c2m_i18n::tr!(
+                    "{}未完成的 {} 段都会发送，包括以上内容",
+                    label,
+                    count
+                ));
+            }
+        }
+        let translation = &outcomes.translation;
         if components.contains(&Component::Proofreading)
+            && !components.contains(&Component::Translation)
             && self.plan.config.llm.translation_target().is_some()
         {
-            also.push(c2m_i18n::tr!("校对后有变化的段落会重新翻译"));
+            // Translation follows the proofread paragraphs. What it had made is made
+            // again only where proofreading changes the text; what it had not yet made
+            // (held back by the uncertain proofreading) is a first send.
+            let made = translation.status == Status::Succeeded
+                || translation.completed.is_some_and(|completed| completed > 0);
+            if made {
+                also.push(c2m_i18n::tr!("校对后有变化的段落会重新翻译").to_owned());
+            }
+            match unfinished(translation) {
+                Some(Some(count)) if count > 0 => {
+                    also.push(c2m_i18n::tr!("还会翻译此前未能完成的 {} 段", count))
+                }
+                Some(None) => also.push(c2m_i18n::tr!("还会生成此前未能开始的翻译").to_owned()),
+                _ => {}
+            }
         }
         if components.contains(&Component::Summary) && !uncertain(Component::Summary) {
-            also.push(c2m_i18n::tr!("还会生成此前因此未能开始的摘要"));
+            also.push(c2m_i18n::tr!("还会生成此前因此未能开始的摘要").to_owned());
         }
         also
     }
@@ -4396,34 +4449,91 @@ mod tests {
             kind: Some(c2m_artifact::artifact::FailureKind::Uncertain),
             ..Outcome::failed("前一步请求结果尚不确定；没有继续发送")
         };
-        for (purpose, part) in [
-            ("translation", Component::Translation),
-            ("proofreading", Component::Proofreading),
-        ] {
+        let partial = |completed, total| Outcome {
+            status: c2m_artifact::artifact::Status::Partial,
+            completed: Some(completed),
+            total: Some(total),
+            ..Outcome::failed("未全部完成")
+        };
+        let label = |part: crate::activity::NotePart, count: usize| {
+            c2m_i18n::tr!(
+                "{}未完成的 {} 段都会发送，包括以上内容",
+                part.label(),
+                count
+            )
+        };
+        let summary_line = c2m_i18n::tr!("还会生成此前因此未能开始的摘要").to_owned();
+        let changed_line = c2m_i18n::tr!("校对后有变化的段落会重新翻译").to_owned();
+        use crate::activity::NotePart;
+        // (uncertain purpose, proofreading, translation, summary) → what the card adds.
+        let cases = [
+            // Paid translation: two batches uncertain, the rest and the summary held back.
+            (
+                Component::Translation,
+                Outcome::succeeded(),
+                partial(40, 135),
+                held(),
+                vec![label(NotePart::Translation, 95), summary_line.clone()],
+            ),
+            // Paid proofreading: the whole translation and the summary were held back,
+            // so the translation is a first send, not a repeat of changed paragraphs.
+            (
+                Component::Proofreading,
+                partial(60, 135),
+                Outcome {
+                    total: Some(135),
+                    completed: Some(0),
+                    ..held()
+                },
+                held(),
+                vec![
+                    label(NotePart::Proofreading, 75),
+                    c2m_i18n::tr!("还会翻译此前未能完成的 {} 段", 135),
+                    summary_line.clone(),
+                ],
+            ),
+            // A free service went on: the translation was made, and only paragraphs
+            // proofreading changes are translated again.
+            (
+                Component::Proofreading,
+                partial(60, 135),
+                Outcome::succeeded(),
+                Outcome::succeeded(),
+                vec![label(NotePart::Proofreading, 75), changed_line.clone()],
+            ),
+            // The owner's task: two uncertain translation batches, nothing held back.
+            (
+                Component::Translation,
+                Outcome::succeeded(),
+                partial(95, 135),
+                Outcome::succeeded(),
+                vec![label(NotePart::Translation, 40)],
+            ),
+        ];
+        for (part, proofreading, translation, summary, expected) in cases {
             let dir = tempfile::tempdir().unwrap();
             let mut ws = test_workspace(dir.path());
-            let mut outcomes = finished_except(part, Outcome::failed("结果尚不确定"));
-            outcomes.summary = held();
-            let (id, request) = uncertain_note(&mut ws, purpose, outcomes);
+            let outcomes = c2m_artifact::artifact::Outcomes {
+                proofreading,
+                translation,
+                summary: summary.clone(),
+                ..finished_except(part, Outcome::failed("结果尚不确定"))
+            };
+            let (id, request) = uncertain_note(&mut ws, part.as_str(), outcomes);
             let task = ws.state.task(&id).unwrap().clone();
-            assert_eq!(
-                task.uncertain_components().unwrap(),
-                vec![part, Component::Summary],
-                "{purpose}"
-            );
-            let also = task.resend_also_sends();
-            assert!(also.contains(&c2m_i18n::tr!("还会生成此前因此未能开始的摘要")));
-            assert_eq!(
-                also.contains(&c2m_i18n::tr!("校对后有变化的段落会重新翻译")),
-                part == Component::Proofreading
-            );
+            let mut parts = vec![part];
+            if summary.status != c2m_artifact::artifact::Status::Succeeded {
+                parts.push(Component::Summary);
+            }
+            assert_eq!(task.uncertain_components().unwrap(), parts, "{part:?}");
+            assert_eq!(task.resend_also_sends(), expected, "{part:?}");
             let next = ws.state.reprocess(&id, Vec::new(), vec![request]).unwrap();
             let c2m_engine::execution::Operation::Reprocess { components, .. } =
                 &ws.state.task(&next).unwrap().plan.operation
             else {
                 panic!("expected component recovery");
             };
-            assert_eq!(components, &[part, Component::Summary]);
+            assert_eq!(components, &parts);
         }
         // A summary that has an attempt of its own is never sent on this decision.
         let dir = tempfile::tempdir().unwrap();
