@@ -1437,6 +1437,13 @@ impl TasksPage {
             return None;
         }
         let active = self.is_running_task(id, cx);
+        // A published note resends by redoing the part the requests were made for. When
+        // none explains them, say why instead of offering what the repair refuses.
+        let refusal = task
+            .artifact
+            .as_ref()
+            .and_then(|_| task.uncertain_components().err())
+            .map(|error| format!("{error:#}"));
         Some(
             notice_banner(
                 SharedString::from(format!("unknown-effect-{id}")),
@@ -1463,20 +1470,31 @@ impl TasksPage {
                             course2md::tr!("正在保存当前结果…"),
                         ))
                     })
-                    .child(
-                        material_button(
-                            SharedString::from(format!("resend-{id}")),
-                            ButtonVariant::Filled,
+                    .when_some(refusal.clone(), |view, refusal| {
+                        view.child(
+                            accessible_text(
+                                SharedString::from(format!("unknown-refused-{id}")),
+                                refusal,
+                            )
+                            .whitespace_normal(),
                         )
-                        .self_start()
-                        .icon(symbols::refresh())
-                        .child(course2md::tr!("重新发送以上内容"))
-                        .disabled(active)
-                        .on_click(cx.listener({
-                            let id = id.clone();
-                            move |_, _, _, cx| cx.emit(TasksEvent::Resend(id.clone()))
-                        })),
-                    ),
+                    })
+                    .when(refusal.is_none(), |view| {
+                        view.child(
+                            material_button(
+                                SharedString::from(format!("resend-{id}")),
+                                ButtonVariant::Filled,
+                            )
+                            .self_start()
+                            .icon(symbols::refresh())
+                            .child(course2md::tr!("重新发送以上内容"))
+                            .disabled(active)
+                            .on_click(cx.listener({
+                                let id = id.clone();
+                                move |_, _, _, cx| cx.emit(TasksEvent::Resend(id.clone()))
+                            })),
+                        )
+                    }),
             ),
         )
     }

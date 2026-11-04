@@ -797,7 +797,13 @@ impl Desktop {
             return;
         }
         if task.artifact.is_some() {
-            self.reprocess_task(id, run::uncertain_components(&task), requests, cx);
+            match task.uncertain_components() {
+                Ok(components) => self.reprocess_task(id, components, requests, cx),
+                Err(error) => {
+                    self.message = Some(format!("{error:#}"));
+                    cx.notify();
+                }
+            }
             return;
         }
         if self.records.read(cx).workspace.is_some()

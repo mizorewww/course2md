@@ -491,6 +491,35 @@ impl TaskRecord {
         self.events.blocked.iter().any(BlockedRequest::is_uncertain)
     }
 
+    /// The parts of this task's published note that resending its uncertain requests
+    /// redoes: the unfinished part each request was made for. Resending is offered
+    /// only when this succeeds; the error says why it cannot, and the repair checks
+    /// the same thing, so the card never offers what the repair would refuse.
+    pub fn uncertain_components(&self) -> Result<Vec<Component>> {
+        let outcomes = self.events.outcomes.as_ref();
+        let mut components = Vec::new();
+        for request in self.events.blocked.iter().filter(|r| r.is_uncertain()) {
+            let component = request
+                .purpose
+                .as_deref()
+                .and_then(Component::parse)
+                .filter(|component| component.is_ai())
+                .context(c2m_i18n::tr!(
+                    "待确认的请求不属于笔记中可补做的部分，请调整并生成新版"
+                ))?;
+            ensure!(
+                outcomes.is_some_and(|outcomes| {
+                    failed_outcome(component_outcome(outcomes, component))
+                }),
+                c2m_i18n::tr!("待确认请求所属的部分已经完成，无需重新发送")
+            );
+            components.push(component);
+        }
+        components.sort();
+        components.dedup();
+        Ok(components)
+    }
+
     fn relocate(&mut self, old: &Path, new: &Path) {
         relocate_path(&mut self.work_dir, old, new);
         if let Some(path) = &mut self.artifact {
@@ -1156,6 +1185,12 @@ impl State {
             manifest.source_id == original.plan.source_id,
             c2m_i18n::tr!("笔记来源与任务不匹配")
         );
+        if !resend.is_empty() {
+            reconcile_receipts(&mut original)?;
+            // Resending redoes the parts the requests were made for, whatever else
+            // was chosen with them.
+            components.extend(original.uncertain_components()?);
+        }
         let outcomes = original.events.outcomes.clone();
         components.sort();
         components.dedup();
@@ -1176,7 +1211,6 @@ impl State {
             ensure!(failed, c2m_i18n::tr!("这部分无需补做"));
         }
         if !resend.is_empty() {
-            reconcile_receipts(&mut original)?;
             let unknown: BTreeSet<_> = original
                 .events
                 .blocked
@@ -1189,19 +1223,28 @@ impl State {
                 c2m_i18n::tr!("待确认请求已变化，请查看最新范围后再选择是否重新发送")
             );
             // The user is continuing the original task, including a requested
-            // summary that the uncertain proofreading prevented from starting.
-            // Any summary receipt means it has its own attempt to recover; do
-            // not infer permission to repeat it from a proofreading decision.
+            // summary that the uncertain proofreading or translation before it
+            // prevented from starting. Any summary receipt means it has its own
+            // attempt to recover; do not infer permission to repeat it from a
+            // decision about the step before.
             let summary = Component::Summary;
-            if components.contains(&Component::Proofreading)
-                && !components.contains(&Component::Summary)
+            let before_summary = |component: Component| {
+                matches!(component, Component::Proofreading | Component::Translation)
+            };
+            if !components.contains(&Component::Summary)
                 && original.plan.config.llm.summarize
                 && outcomes
                     .as_ref()
                     .is_some_and(|outcomes| failed_outcome(&outcomes.summary))
                 && original.events.blocked.iter().any(|request| {
                     request.is_uncertain()
-                        && request.purpose.as_deref() == Some(Component::Proofreading.as_str())
+                        && request
+                            .purpose
+                            .as_deref()
+                            .and_then(Component::parse)
+                            .is_some_and(|component| {
+                                before_summary(component) && components.contains(&component)
+                            })
                 })
                 && !c2m_dispatch::dispatch::receipts(&original.work_dir)?
                     .iter()
@@ -1219,10 +1262,8 @@ impl State {
         let mut plan = original.plan;
         if let Some((service, config)) = ai_service {
             ensure!(
-                components
-                    .iter()
-                    .all(|part| matches!(part, Component::Proofreading | Component::Summary)),
-                c2m_i18n::tr!("服务修复只能用于未完成的校对或摘要")
+                components.iter().all(|part| part.is_ai()),
+                c2m_i18n::tr!("服务修复只能用于未完成的校对、翻译或摘要")
             );
             plan.ai_service = Some(service);
             plan.config.llm = config.llm;
@@ -1233,6 +1274,13 @@ impl State {
         plan.config.llm.enabled = components.contains(&Component::Proofreading);
         plan.config.llm.summarize = components.contains(&Component::Summary);
         plan.config.llm.vision &= plan.config.llm.enabled;
+        // Translation is redone on its own or after the proofreading it follows.
+        if !components
+            .iter()
+            .any(|part| matches!(part, Component::Proofreading | Component::Translation))
+        {
+            plan.config.llm.translate = None;
+        }
         if only_exports {
             use c2m_config::config::OutputFormat;
             let formats: Vec<_> = [OutputFormat::Md, OutputFormat::Html, OutputFormat::Json]
@@ -4210,6 +4258,168 @@ mod tests {
         task.events.outcomes = Some(outcomes.clone());
         let request = write_unknown(task, 1);
         (id, request)
+    }
+
+    /// A published note whose `purpose` request is uncertain while `outcomes` say how
+    /// each part ended: the state a lost response leaves once the note is saved.
+    fn uncertain_note(
+        ws: &mut Workspace,
+        purpose: &str,
+        outcomes: c2m_artifact::artifact::Outcomes,
+    ) -> (String, String) {
+        let mut snapshot = plan(&ws.state.default_library);
+        snapshot.config.llm.enabled = true;
+        snapshot.config.llm.summarize = true;
+        snapshot.config.llm.translate = Some("zh-Hans".into());
+        let id = ws.state.enqueue(snapshot, None).unwrap().0;
+        let version = publish_note_with_outcomes(&ws.state, &id, outcomes.clone());
+        let task = ws.state.task_mut(&id).unwrap();
+        task.state = TaskState::Uncertain;
+        task.artifact = Some(version);
+        task.events.outcomes = Some(outcomes);
+        let request = format!("stable-{purpose}.3");
+        let receipt = c2m_dispatch::dispatch::Receipt {
+            schema: 1,
+            stable_id: format!("stable-{purpose}"),
+            request_id: request.clone(),
+            purpose: purpose.into(),
+            description: "翻译 00:00–06:38 的文字".into(),
+            service_version: "version-a".into(),
+            attempt: 3,
+            state: c2m_dispatch::dispatch::State::Uncertain,
+            http_status: None,
+            response: None,
+            message: Some("未完整收到服务响应".into()),
+            unsupported_response_format: false,
+            retry_authorized: None,
+        };
+        std::fs::create_dir_all(task.work_dir.join("requests")).unwrap();
+        std::fs::write(
+            task.work_dir
+                .join(format!("requests/stable-{purpose}.json")),
+            serde_json::to_vec(&receipt).unwrap(),
+        )
+        .unwrap();
+        reconcile_receipts(task).unwrap();
+        (id, request)
+    }
+
+    fn finished_except(
+        component: Component,
+        outcome: c2m_artifact::artifact::Outcome,
+    ) -> c2m_artifact::artifact::Outcomes {
+        use c2m_artifact::artifact::Outcome;
+        let mut outcomes = c2m_artifact::artifact::Outcomes {
+            transcript: Outcome::succeeded(),
+            screenshots: Outcome::succeeded(),
+            proofreading: Outcome::succeeded(),
+            translation: Outcome::succeeded(),
+            summary: Outcome::succeeded(),
+            ..Default::default()
+        };
+        *match component {
+            Component::Proofreading => &mut outcomes.proofreading,
+            Component::Translation => &mut outcomes.translation,
+            Component::Summary => &mut outcomes.summary,
+            _ => unreachable!(),
+        } = outcome;
+        outcomes
+    }
+
+    /// The owner's deadlock: two translation batches lost their responses while
+    /// proofreading and the summary finished. Resending them redoes the translation
+    /// alone — never the finished proofreading the old mapping chose, which the
+    /// repair refused with 「这部分无需补做」.
+    #[test]
+    fn resending_an_uncertain_translation_redoes_only_the_translation() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let partial = c2m_artifact::artifact::Outcome {
+            status: c2m_artifact::artifact::Status::Partial,
+            completed: Some(95),
+            total: Some(135),
+            ..c2m_artifact::artifact::Outcome::failed("翻译未全部完成（40/135 失败）")
+        };
+        let (id, request) = uncertain_note(
+            &mut ws,
+            "translation",
+            finished_except(Component::Translation, partial),
+        );
+        let task = ws.state.task(&id).unwrap().clone();
+        assert_eq!(
+            task.uncertain_components().unwrap(),
+            vec![Component::Translation]
+        );
+        let next = ws
+            .state
+            .reprocess(
+                &id,
+                task.uncertain_components().unwrap(),
+                vec![request.clone()],
+            )
+            .unwrap();
+        let child = ws.state.task(&next).unwrap();
+        let c2m_engine::execution::Operation::Reprocess { components, .. } = &child.plan.operation
+        else {
+            panic!("expected component recovery");
+        };
+        assert_eq!(components, &[Component::Translation]);
+        let llm = &child.plan.config.llm;
+        assert!(!llm.enabled && !llm.summarize && !llm.vision);
+        assert_eq!(llm.translate.as_deref(), Some("zh-Hans"));
+        assert_eq!(child.resend, vec![request]);
+    }
+
+    /// Every AI purpose resends through the part it was made for, so the card's
+    /// choice and the repair's check are one and the same.
+    #[test]
+    fn every_uncertain_ai_purpose_maps_to_the_part_the_repair_accepts() {
+        for component in [
+            Component::Proofreading,
+            Component::Translation,
+            Component::Summary,
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut ws = test_workspace(dir.path());
+            let (id, request) = uncertain_note(
+                &mut ws,
+                component.as_str(),
+                finished_except(
+                    component,
+                    c2m_artifact::artifact::Outcome::failed("结果尚不确定"),
+                ),
+            );
+            let task = ws.state.task(&id).unwrap().clone();
+            let chosen = task.uncertain_components().unwrap();
+            assert!(chosen.contains(&component), "{component:?}: {chosen:?}");
+            let next = ws.state.reprocess(&id, chosen, vec![request]).unwrap();
+            assert_ne!(next, id, "{component:?}");
+        }
+    }
+
+    /// When nothing unfinished explains an uncertain request, there is nothing a
+    /// repair can resend, and the reason is the same one the repair gives.
+    #[test]
+    fn an_uncertain_request_with_no_unfinished_part_says_why_it_cannot_be_resent() {
+        for purpose in ["translation", "transcription"] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut ws = test_workspace(dir.path());
+            let (id, request) = uncertain_note(
+                &mut ws,
+                purpose,
+                finished_except(
+                    Component::Summary,
+                    c2m_artifact::artifact::Outcome::succeeded(),
+                ),
+            );
+            let task = ws.state.task(&id).unwrap().clone();
+            let reason = format!("{:#}", task.uncertain_components().unwrap_err());
+            let refused = ws
+                .state
+                .reprocess(&id, Vec::new(), vec![request])
+                .unwrap_err();
+            assert_eq!(format!("{refused:#}"), reason, "{purpose}");
+        }
     }
 
     #[test]

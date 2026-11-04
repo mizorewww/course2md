@@ -265,8 +265,7 @@ pub(crate) fn stage_progress(
 /// Proofreading and summary are the AI components; remote request purposes
 /// use the same names.
 pub fn ai_component(name: &str) -> Option<Component> {
-    Component::parse(name)
-        .filter(|part| matches!(part, Component::Proofreading | Component::Summary))
+    Component::parse(name).filter(|part| part.is_ai())
 }
 
 /// A proofreading stage can close after failed requests. Published component
@@ -650,6 +649,8 @@ pub fn task_status_label(task: &TaskRecord) -> String {
         };
         return if all(Component::Proofreading) {
             c2m_i18n::tr!("AI 校对结果未确认")
+        } else if all(Component::Translation) {
+            c2m_i18n::tr!("AI 翻译结果未确认")
         } else if all(Component::Summary) {
             c2m_i18n::tr!("摘要结果未确认")
         } else if purpose.contains(TRANSCRIPTION_PURPOSE) {
@@ -673,6 +674,7 @@ pub fn request_scope(request: &workspace::BlockedRequest) -> String {
         let purpose = request.purpose.as_deref().unwrap_or_default();
         let name = match ai_component(purpose) {
             Some(Component::Proofreading) => c2m_i18n::tr!("AI 校对"),
+            Some(Component::Translation) => c2m_i18n::tr!("AI 翻译"),
             Some(Component::Summary) => c2m_i18n::tr!("生成摘要"),
             _ if purpose == TRANSCRIPTION_PURPOSE => c2m_i18n::tr!("语音识别"),
             _ => c2m_i18n::tr!("外部处理"),
@@ -707,6 +709,11 @@ pub fn task_component_failures(
             Component::Proofreading,
             NotePart::Proofreading,
             &outcomes.proofreading,
+        ),
+        (
+            Component::Translation,
+            NotePart::Translation,
+            &outcomes.translation,
         ),
         (Component::Summary, NotePart::Summary, &outcomes.summary),
     ]
@@ -863,7 +870,9 @@ pub fn task_actions(
                 actions.push(Pause);
             }
             actions.extend(recovery);
-            if uncertain && !active {
+            // A published note's requests are resent by redoing the part they were
+            // made for; when no unfinished part explains them, the card says why.
+            if uncertain && !active && (!has_note || task.uncertain_components().is_ok()) {
                 actions.push(Resend);
             }
             if !task.state.finished() {
@@ -998,6 +1007,62 @@ mod tests {
     };
     use crate::plan::tests::source;
     use c2m_protocol::progress::Stage;
+
+    /// The card offers resending a published note's uncertain requests only when the
+    /// repair accepts them: an unfinished translation's batches can be resent, and a
+    /// request whose part has finished is never offered as if it could.
+    #[test]
+    fn resend_is_offered_only_where_the_repair_accepts_it() {
+        use super::{Component, TaskAction, TaskFacts, TaskState, TaskSurface, task_actions};
+        use c2m_artifact::artifact::{Outcome, Outcomes, Status};
+        let facts = TaskFacts {
+            active: false,
+            expanded: false,
+            library: None,
+            needs_reassociation: false,
+            queue: Vec::new(),
+        };
+        let mut task = task_record("task");
+        task.state = TaskState::Uncertain;
+        task.artifact = Some("note".into());
+        task.events
+            .blocked
+            .push(desktop_store::workspace::BlockedRequest {
+                reason: c2m_protocol::progress::BlockReason::Uncertain,
+                request_id: Some("translation.3".into()),
+                purpose: Some("translation".into()),
+                description: "翻译 00:00–06:38 的文字".into(),
+                kind: Some(c2m_artifact::artifact::FailureKind::Uncertain),
+                message: "未完整收到服务响应".into(),
+            });
+        let mut outcomes = Outcomes {
+            transcript: Outcome::succeeded(),
+            proofreading: Outcome::succeeded(),
+            summary: Outcome::succeeded(),
+            translation: Outcome {
+                status: Status::Partial,
+                completed: Some(95),
+                total: Some(135),
+                ..Outcome::failed("翻译未全部完成（40/135 失败）")
+            },
+            ..Default::default()
+        };
+        task.events.outcomes = Some(outcomes.clone());
+        assert_eq!(
+            task.uncertain_components().unwrap(),
+            vec![Component::Translation]
+        );
+        assert!(task_actions(&task, TaskSurface::Menu, &facts).contains(&TaskAction::Resend));
+        assert_eq!(
+            super::task_status_label(&task),
+            c2m_i18n::tr!("AI 翻译结果未确认")
+        );
+
+        outcomes.translation = Outcome::succeeded();
+        task.events.outcomes = Some(outcomes);
+        assert!(task.uncertain_components().is_err());
+        assert!(!task_actions(&task, TaskSurface::Menu, &facts).contains(&TaskAction::Resend));
+    }
 
     fn task_record(id: &str) -> desktop_store::workspace::TaskRecord {
         desktop_store::workspace::TaskRecord {
