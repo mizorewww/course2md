@@ -480,12 +480,68 @@ pub fn blocked_summary(browser: Browser, reader: Reader) -> String {
             "macOS 不允许 course2md 读取 {} 的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开 course2md，然后退出并重新打开 course2md，再试一次。",
             name
         ),
-        Reader::Terminal => tr!(
-            "macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开你使用的终端应用（如“终端”），然后退出并重新打开它，再试一次。可运行 open \"{}\" 打开该设置。",
-            name,
-            FULL_DISK_ACCESS_SETTINGS
-        ),
+        Reader::Terminal => match terminal_app() {
+            Some(terminal) => tr!(
+                "macOS 不允许 {} 读取 {} 的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开 {}，然后退出并重新打开它，再试一次。可运行 open \"{}\" 打开该设置。",
+                terminal,
+                name,
+                terminal,
+                FULL_DISK_ACCESS_SETTINGS
+            ),
+            None => tr!(
+                "macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开你使用的终端应用（如“终端”），然后退出并重新打开它，再试一次。可运行 open \"{}\" 打开该设置。",
+                name,
+                FULL_DISK_ACCESS_SETTINGS
+            ),
+        },
     }
+}
+
+/// The command line's hint after a run macOS kept from the browser's data:
+/// names the terminal app when it is known.
+pub fn terminal_hint() -> &'static str {
+    static NAMED: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    if let Some(named) = NAMED
+        .get_or_init(|| {
+            terminal_app().map(|terminal| {
+                tr!(
+                    "提示：macOS 不允许 {} 读取所连接浏览器的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开 {}（在 course2md 应用中则打开 course2md），退出并重新打开它后重试。可运行 open \"{}\" 打开该设置。",
+                    terminal,
+                    terminal,
+                    FULL_DISK_ACCESS_SETTINGS
+                )
+            })
+        })
+        .as_deref()
+    {
+        return named;
+    }
+    tr!(
+        "提示：macOS 不允许读取所连接浏览器的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中允许你使用的终端应用（在 course2md 应用中则允许 course2md），退出并重新打开它后重试。可运行 open \"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles\" 打开该设置。 / Hint: macOS does not allow reading the connected browser's data. Allow the terminal app you use (in the course2md app, course2md itself) in System Settings › Privacy & Security › Full Disk Access, quit and reopen it, then retry. Run open \"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles\" to open that setting."
+    )
+}
+
+/// The terminal app the command line runs in, by the name System Settings lists
+/// it under, from `TERM_PROGRAM`; `None` for one this does not know (then the
+/// guidance names terminals in general).
+pub fn terminal_app() -> Option<&'static str> {
+    terminal_named(&std::env::var("TERM_PROGRAM").ok()?)
+}
+
+fn terminal_named(program: &str) -> Option<&'static str> {
+    Some(match program {
+        "Apple_Terminal" => tr!("终端"),
+        "iTerm.app" => "iTerm",
+        "vscode" => "Visual Studio Code",
+        "WarpTerminal" => "Warp",
+        "ghostty" => "Ghostty",
+        "WezTerm" => "WezTerm",
+        "Hyper" => "Hyper",
+        "Tabby" => "Tabby",
+        "rio" => "Rio",
+        "zed" => "Zed",
+        _ => return None,
+    })
 }
 
 /// The folder yt-dlp searches for `choice`'s cookies, when the system refuses to
@@ -1008,6 +1064,16 @@ mod tests {
             assert_eq!(chromium_profiles(&data), []);
         }
         restore(&data);
+    }
+
+    #[test]
+    fn the_terminal_is_named_as_system_settings_lists_it() {
+        assert_eq!(terminal_named("iTerm.app"), Some("iTerm"));
+        assert_eq!(terminal_named("vscode"), Some("Visual Studio Code"));
+        assert!(terminal_named("Apple_Terminal").is_some());
+        // tmux and unknown programs: the general wording.
+        assert_eq!(terminal_named("tmux"), None);
+        assert_eq!(terminal_named(""), None);
     }
 
     #[test]
