@@ -313,11 +313,8 @@ impl Desktop {
             .as_ref()
             .map(|preview| self.library(cx).course_display_title(&preview.course));
         if let Some(title) = title {
-            self.reader.change(cx, |reader, _| {
-                if let Some(preview) = reader.opened.preview.as_mut() {
-                    Rc::make_mut(preview).course.title = title;
-                }
-            });
+            self.reader
+                .change(cx, |reader, cx| reader.retitle(title, cx));
         }
     }
 

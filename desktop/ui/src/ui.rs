@@ -698,6 +698,14 @@ fn close_confirm(window: &mut Window, cx: &mut App) {
     window.refresh();
 }
 
+/// Withdraws the question being asked, as its cancel button does, when what it
+/// asked about is gone (or a capture moves on to its next shot).
+pub fn dismiss_confirm(window: &mut Window, cx: &mut App) {
+    if cx.try_global::<ConfirmSlot>().is_some_and(|slot| slot.1) {
+        close_confirm(window, cx);
+    }
+}
+
 /// Draws the current [`Confirm`]. Rendered once, by the shell.
 pub fn confirm_host(cx: &App) -> Option<AnyElement> {
     let ConfirmSlot(Some((confirm, on_confirm)), open) = cx.try_global::<ConfirmSlot>()? else {

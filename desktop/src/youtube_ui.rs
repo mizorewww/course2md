@@ -238,12 +238,13 @@ impl AccountsView {
                 .item(
                     MaterialMenuItem::new(course2md::tr!("更换浏览器"))
                         .leading(Icon::from(symbols::web()))
+                        // Disconnecting stands apart, below the line.
+                        .divider(true)
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(AccountsEvent::OpenYoutube))),
                 )
                 .item(
                     MaterialMenuItem::new(course2md::tr!("断开连接"))
                         .leading(Icon::from(symbols::logout()))
-                        .divider(true)
                         .on_click(cx.listener(|this, _, _, cx| this.disconnect_youtube(cx))),
                 );
             actions.push(
@@ -318,10 +319,23 @@ impl AccountsView {
                     ),
             );
         } else {
-            body = body.child(supporting_info(
+            // A folder macOS keeps closed is what stands in the way: its guidance and the
+            // way to System Settings take the explanation's place, so they show with the
+            // action at a short window's height.
+            let blocked = matches!(dialog.step, YoutubeStep::Failed { blocked: true, .. });
+            body = body.when(!blocked, |body| body.child(supporting_info(
                 "youtube-explain",
                 course2md::tr!(
                     "YouTube 不允许在其他应用中用密码登录。course2md 会让 yt-dlp 读取所选浏览器中的 YouTube 登录（Cookie），只在打开 YouTube 视频时使用，不保存这些 Cookie。连接时的检查会让 yt-dlp 把浏览器的 Cookie 短暂写入本机的私有临时文件，检查结束即删除。"
+                ),
+            )));
+            // The standing risk comes before the choice, so it stays in view above
+            // a long check result and beside the action it is about.
+            body = body.child(notice_banner(
+                "youtube-risk",
+                NoticeKind::Warning,
+                course2md::tr!(
+                    "用账号下载可能让 YouTube 限制或封禁这个账号。请适度使用，或使用不常用的账号。"
                 ),
             ));
             if names.is_empty() {
@@ -383,13 +397,11 @@ impl AccountsView {
                     );
                 }
                 // A keychain prompt is not what stands in the way of a blocked folder.
-                let blocked = matches!(dialog.step, YoutubeStep::Failed { blocked: true, .. });
                 if let Some(note) = browser.and_then(browser_note).filter(|_| !blocked) {
                     body = body.child(supporting_info("youtube-browser-note", note));
                 }
             }
-            // The check's result sits under the choice it is about, above the
-            // standing risk notice, so it shows without scrolling.
+            // The check's result sits under the choice it is about, next to the action.
             match &dialog.step {
                 YoutubeStep::Checking => {
                     body = body.child(
@@ -421,7 +433,9 @@ impl AccountsView {
                     detail,
                     blocked,
                 } => {
-                    let text = if detail.is_empty() {
+                    // A folder macOS keeps closed is named by the guidance; the system's
+                    // own message would only repeat it with a path.
+                    let text = if detail.is_empty() || *blocked {
                         summary.clone()
                     } else {
                         format!("{summary}\n{detail}")
@@ -452,13 +466,6 @@ impl AccountsView {
                 }
                 _ => {}
             }
-            body = body.child(notice_banner(
-                "youtube-risk",
-                NoticeKind::Warning,
-                course2md::tr!(
-                    "用账号下载可能让 YouTube 限制或封禁这个账号。请适度使用，或使用不常用的账号。"
-                ),
-            ));
         }
         let close = material_button(
             "youtube-close",

@@ -7,7 +7,7 @@ the thin-wrapper work up to decision 9's stopping point (`PLAN.md`) are merged i
 being released from `main` once `split/workspace` merges into it (PR #24). Every `DESIGN-RESTORE.md` restore that
 waited on the kit is in, through kit PRs #16 to #30. Open: U2 (reader resize, unmeasured: load stayed high).
 
-**Dependency form:** git, `gpui-kit-material` `main` at `1bc3ea7`, in `[workspace.dependencies]` and all six
+**Dependency form:** git, `gpui-kit-material` `main` at `2c92dff`, in `[workspace.dependencies]` and all six
 `[patch]` entries of the root `Cargo.toml`. No temporary pin. Kit #28 to #30 are in.
 
 ## Metrics
