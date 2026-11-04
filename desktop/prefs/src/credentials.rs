@@ -312,6 +312,8 @@ trait SystemStore: CredentialVault {
 #[cfg(any(test, not(target_os = "macos")))]
 pub(crate) struct FileCredentialVault {
     path: PathBuf,
+    /// How long a change waits for another writer's lock.
+    lock_wait: std::time::Duration,
 }
 
 #[cfg(any(test, not(target_os = "macos")))]
@@ -320,17 +322,17 @@ type StoredValues = BTreeMap<CredentialRef, Zeroizing<String>>;
 #[cfg(any(test, not(target_os = "macos")))]
 impl FileCredentialVault {
     pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+        Self {
+            path: path.into(),
+            lock_wait: std::time::Duration::from_secs(5),
+        }
     }
 
     fn lock(&self) -> Result<c2m_process::runtime::FileLock> {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        c2m_process::runtime::lock_file_within(
-            &self.path.with_extension("lock"),
-            std::time::Duration::from_secs(5),
-        )
+        c2m_process::runtime::lock_file_within(&self.path.with_extension("lock"), self.lock_wait)
     }
 
     fn read(&self) -> Result<StoredValues> {
@@ -637,9 +639,13 @@ mod tests {
             .map(|n| {
                 let path = path.clone();
                 std::thread::spawn(move || {
-                    let reference = FileCredentialVault::new(&path)
-                        .insert(Secret::new(format!("key-{n}")))
-                        .unwrap();
+                    // Twelve writers queue on one lock; a slow CI disk can take
+                    // longer than an app's five seconds to serve them all.
+                    let vault = FileCredentialVault {
+                        lock_wait: std::time::Duration::from_secs(120),
+                        ..FileCredentialVault::new(&path)
+                    };
+                    let reference = vault.insert(Secret::new(format!("key-{n}"))).unwrap();
                     (reference, n)
                 })
             })
