@@ -150,6 +150,7 @@ impl JobEvents {
                 message,
                 phase,
                 unit,
+                ..
             } => {
                 let activity = self.stage(stage);
                 activity.update(*current, *total, message.clone());
@@ -1151,6 +1152,7 @@ mod tests {
                 message: None,
                 phase: None,
                 unit: None,
+                found: None,
             },
             Event::Log {
                 level: c2m_protocol::progress::LogLevel::Info,
