@@ -1323,7 +1323,15 @@ impl TasksPage {
             .map(|index| {
                 let stage = &stages[index];
                 if !home {
-                    course2md::tr!("第 {} 步 · {}", index + 1, stage.title)
+                    // Steps that run side by side (scanning while speech is recognized)
+                    // are all where the task is.
+                    let titles = stages[index..]
+                        .iter()
+                        .filter(|stage| stage.status.running())
+                        .map(|stage| stage.title.as_str())
+                        .collect::<Vec<_>>()
+                        .join(course2md::tr!("、"));
+                    course2md::tr!("第 {} 步 · {}", index + 1, titles)
                 } else if stage.detail.is_empty() {
                     stage.title.clone()
                 } else {
@@ -1357,21 +1365,38 @@ impl TasksPage {
     ) -> Option<Div> {
         let id = &task.id;
         let active = self.is_running_task(id, cx);
-        let current = stages.iter().find(|stage| stage.status.running());
+        let running: Vec<&TaskStage> = stages
+            .iter()
+            .filter(|stage| stage.status.running())
+            .collect();
+        let current = running.first().copied();
         if !active || (current.is_none() && self.task_wait(task, cx).is_none()) {
             return None;
         }
-        let detail = current
-            .map(|stage| stage.detail.clone())
-            .filter(|detail| !detail.is_empty())
-            .or_else(|| {
-                self.work
-                    .read(cx)
-                    .job_started
-                    .filter(|_| self.work.read(cx).job.is_some())
-                    .map(|started| activity::elapsed_label(started.elapsed()))
-            })
-            .filter(|_| surface != TaskSurface::Home || current.is_none());
+        let lines: Vec<String> = if running.len() > 1 {
+            // Steps that run side by side each say where they are, by name. On the
+            // workbench the first one is already the line above the bar.
+            running
+                .iter()
+                .skip(usize::from(surface == TaskSurface::Home))
+                .filter(|stage| !stage.detail.is_empty())
+                .map(|stage| format!("{} · {}", stage.title, stage.detail))
+                .collect()
+        } else {
+            current
+                .map(|stage| stage.detail.clone())
+                .filter(|detail| !detail.is_empty())
+                .or_else(|| {
+                    self.work
+                        .read(cx)
+                        .job_started
+                        .filter(|_| self.work.read(cx).job.is_some())
+                        .map(|started| activity::elapsed_label(started.elapsed()))
+                })
+                .filter(|_| surface != TaskSurface::Home || current.is_none())
+                .into_iter()
+                .collect()
+        };
         Some(
             v_flex()
                 .w_full()
@@ -1385,13 +1410,16 @@ impl TasksPage {
                     .value(current.and_then(|stage| stage.fraction))
                     .muted(task.state == TaskState::Pausing || task.intent != Intent::Run),
                 )
-                .when_some(detail, |view, detail| {
-                    view.child(
-                        ui::status_line(SharedString::from(format!("task-measure-{id}")), &detail)
-                            .text_size(TEXT_AUX)
-                            .text_color(color(ColorRole::ON_SURFACE_VARIANT)),
-                    )
-                }),
+                .children(lines.iter().enumerate().map(|(index, line)| {
+                    let key = if index == 0 {
+                        format!("task-measure-{id}")
+                    } else {
+                        format!("task-measure-{id}-{index}")
+                    };
+                    ui::status_line(SharedString::from(key), line)
+                        .text_size(TEXT_AUX)
+                        .text_color(color(ColorRole::ON_SURFACE_VARIANT))
+                })),
         )
     }
 
