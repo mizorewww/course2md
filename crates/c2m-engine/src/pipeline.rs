@@ -730,49 +730,56 @@ impl Task<'_> {
             document.sections = self
                 .translate_step(sections, language, &mut outcomes)
                 .await?;
-            // As with a summary: when only the translation was asked for and no more
-            // of it finished, no new version identical to the old one is published.
-            let finished = |outcome: &Outcome| match outcome.status {
-                Status::Succeeded | Status::NotRequested => usize::MAX,
-                _ => outcome.completed.unwrap_or(0),
-            };
-            if components == [Component::Translation]
-                && finished(&outcomes.translation) <= finished(&base.outcomes.translation)
-            {
-                let message = outcomes.translation.message.clone().unwrap_or_else(|| {
-                    tr!(
-                        "翻译未完成，原笔记不受影响 / Translation did not finish; the original note is unaffected"
-                    )
-                    .into()
-                });
-                return Err(crate::dispatch::Failure {
-                    kind: outcomes
-                        .translation
-                        .kind
-                        .unwrap_or(artifact::FailureKind::Local),
-                    ..crate::dispatch::Failure::local(message)
-                }
-                .into());
-            }
         }
         if has(Component::Summary) {
             document.summary = self
                 .summarize_step(&document.sections, &document.meta, &mut outcomes)
                 .await?;
-            // As with screenshots: when the summary was the only thing asked for,
-            // a failure publishes no new version identical to the old one.
-            if components.len() == 1 && document.summary.is_none() {
-                let message = outcomes.summary.message.clone().unwrap_or_else(|| {
-                    tr!(
-                        "生成摘要未完成，原笔记不受影响 / Summary generation failed; the original note is unaffected"
-                    )
-                    .into()
-                });
+        }
+        // A repair of AI parts that finished nothing more than the saved note publishes
+        // no new version identical to it, whatever rode along: each click would add one.
+        if components.iter().all(|component| component.is_ai()) {
+            let finished = |outcome: &Outcome| match outcome.status {
+                Status::Succeeded => usize::MAX,
+                Status::Partial => outcome.completed.unwrap_or(0),
+                Status::NotRequested | Status::Failed => 0,
+            };
+            let part = |outcomes: &Outcomes, component: Component| match component {
+                Component::Proofreading => outcomes.proofreading.clone(),
+                Component::Translation => outcomes.translation.clone(),
+                _ => outcomes.summary.clone(),
+            };
+            let mut redone = components.to_vec();
+            if has(Component::Proofreading) && translation_target.is_some() {
+                redone.push(Component::Translation);
+            }
+            // Making a finished part again (a new summary of a summarized note) is
+            // something new too; only the parts that were unfinished must move on.
+            let improved = redone.iter().any(|&component| {
+                let (now, before) = (part(&outcomes, component), part(&base.outcomes, component));
+                finished(&now) > finished(&before)
+                    || (has(component)
+                        && now.status == Status::Succeeded
+                        && before.status == Status::Succeeded)
+            });
+            if !improved {
+                let unfinished = redone
+                    .iter()
+                    .map(|&component| part(&outcomes, component))
+                    .find(|outcome| outcome.status != Status::Succeeded);
+                let message = unfinished
+                    .as_ref()
+                    .and_then(|outcome| outcome.message.clone())
+                    .unwrap_or_else(|| {
+                        tr!(
+                            "补做没有完成更多内容，原笔记不受影响 / Nothing more was finished; the original note is unaffected"
+                        )
+                        .into()
+                    });
                 // Keep the recorded cause so the error event's code matches it.
                 return Err(crate::dispatch::Failure {
-                    kind: outcomes
-                        .summary
-                        .kind
+                    kind: unfinished
+                        .and_then(|outcome| outcome.kind)
                         .unwrap_or(artifact::FailureKind::Local),
                     ..crate::dispatch::Failure::local(message)
                 }

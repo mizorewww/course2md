@@ -1036,6 +1036,16 @@ fn a_translated_batch_without_its_receipt_is_not_sent_again() {
     }
 }
 
+/// A repair whose resend is lost again finishes nothing new: it sends the one
+/// authorized batch, holds the rest back, and publishes no copy of the note, even
+/// with the summary riding along.
+#[test]
+fn a_repair_that_finishes_nothing_new_publishes_no_version() {
+    if common::ffmpeg_available() {
+        translation_resend(false, true);
+    }
+}
+
 fn translation_resend(missing_receipt: bool, lose_again: bool) {
     let translations = Arc::new(AtomicUsize::new(0));
     let counted = translations.clone();
