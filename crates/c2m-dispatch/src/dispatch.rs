@@ -537,10 +537,14 @@ impl Ledger {
         // or by beginning downstream summary requests. Unrelated local work remains possible.
         // A free service resends unresolved requests when it reaches them, so
         // overlapping or downstream requests cost nothing extra either.
+        // An uncertain request the person authorized for this task is not unknown to
+        // them: it is about to be sent again, by this task, under its own lock. It holds
+        // nothing back; its resend, if that ends uncertain, has a new id and does.
         for unresolved in self
             .unresolved_receipts()?
             .into_iter()
             .filter(|_| resend == Resend::AskUser)
+            .filter(|unresolved| !control.resend.contains(&unresolved.request_id))
         {
             if unresolved.stable_id != stable_id {
                 // Live in-flight requests may run concurrently; only stale Sending from another
@@ -1060,6 +1064,150 @@ mod tests {
         let resent = ledger.send_described(&spec, success, |_| Ok(())).unwrap();
         assert!(!resent.replayed);
         assert_eq!(receipts(dir.path()).unwrap()[0].attempt, 2);
+    }
+
+    /// Lost responses leave several paid batches uncertain. Authorizing all of them
+    /// sends each once: one authorized request never holds back another, nor the
+    /// never-sent batches running beside it. An unauthorized one still holds all back.
+    #[test]
+    fn authorized_uncertain_requests_do_not_hold_each_other_back() {
+        for count in [2, 3] {
+            let dir = tempfile::tempdir().unwrap();
+            let control = dir.path().join("control.json");
+            let lost = || {
+                Err(NetworkFailure {
+                    message: "lost".into(),
+                    definitely_unsent: false,
+                })
+            };
+            let payload = |index: usize| serde_json::json!({"batch": index});
+            // Each batch is lost in its own earlier run, as concurrent batches are.
+            for index in 0..count {
+                let ledger = Ledger::new(dir.path(), None, &Default::default()).unwrap();
+                let mut seen = receipts(dir.path()).unwrap();
+                for receipt in &mut seen {
+                    receipt.state = State::Completed;
+                    receipt.response = Some(serde_json::json!({}));
+                    ledger.save(receipt).unwrap();
+                }
+                assert!(
+                    ledger
+                        .send(
+                            "llm",
+                            "translation",
+                            "http://e.test",
+                            &payload(index),
+                            lost,
+                            |_| Ok(())
+                        )
+                        .unwrap_err()
+                        .uncertain()
+                );
+                for receipt in seen {
+                    let mut back = receipt;
+                    back.state = State::Uncertain;
+                    back.response = None;
+                    ledger.save(&back).unwrap();
+                }
+            }
+            let uncertain: Vec<_> = receipts(dir.path())
+                .unwrap()
+                .into_iter()
+                .filter(|receipt| receipt.state == State::Uncertain)
+                .map(|receipt| receipt.request_id)
+                .collect();
+            assert_eq!(uncertain.len(), count);
+            let ok = |calls: &AtomicUsize| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(HttpResponse {
+                    status: 200,
+                    body: b"{}".to_vec(),
+                })
+            };
+            // Without the decision nothing goes out, a never-sent batch included.
+            let ledger = Ledger::new(dir.path(), Some(&control), &Default::default()).unwrap();
+            let calls = AtomicUsize::new(0);
+            for index in 0..=count {
+                assert!(
+                    ledger
+                        .send(
+                            "llm",
+                            "translation",
+                            "http://e.test",
+                            &payload(index),
+                            || ok(&calls),
+                            |_| Ok(())
+                        )
+                        .unwrap_err()
+                        .uncertain()
+                );
+            }
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+            // Authorizing all but one still holds everything back behind that one.
+            atomic_write(
+                &control,
+                &serde_json::to_vec(&Control {
+                    resend: uncertain[1..].to_vec(),
+                    ..Default::default()
+                })
+                .unwrap(),
+            )
+            .unwrap();
+            let ledger = Ledger::new(dir.path(), Some(&control), &Default::default()).unwrap();
+            for index in 0..=count {
+                assert!(
+                    ledger
+                        .send(
+                            "llm",
+                            "translation",
+                            "http://e.test",
+                            &payload(index),
+                            || ok(&calls),
+                            |_| Ok(())
+                        )
+                        .is_err()
+                );
+            }
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+            // Authorizing all of them: the never-sent batch first, then each uncertain
+            // one exactly once, whatever the order.
+            atomic_write(
+                &control,
+                &serde_json::to_vec(&Control {
+                    resend: uncertain.clone(),
+                    ..Default::default()
+                })
+                .unwrap(),
+            )
+            .unwrap();
+            let ledger = Ledger::new(dir.path(), Some(&control), &Default::default()).unwrap();
+            for index in std::iter::once(count).chain((0..count).rev()) {
+                ledger
+                    .send(
+                        "llm",
+                        "translation",
+                        "http://e.test",
+                        &payload(index),
+                        || ok(&calls),
+                        |_| Ok(()),
+                    )
+                    .unwrap();
+            }
+            assert_eq!(calls.load(Ordering::SeqCst), count + 1);
+            for index in 0..=count {
+                let replay = ledger
+                    .send(
+                        "llm",
+                        "translation",
+                        "http://e.test",
+                        &payload(index),
+                        || panic!("a completed request was sent again"),
+                        |_| Ok(()),
+                    )
+                    .unwrap();
+                assert!(replay.replayed);
+            }
+        }
     }
 
     #[test]
