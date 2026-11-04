@@ -157,13 +157,16 @@ impl Browser {
         if !cfg!(target_os = "macos") {
             return None;
         }
+        // Safari's container first: where current Safari keeps its cookies. A
+        // folder the system will not even look into counts as there (and closed),
+        // not as absent: `exists` would read that refusal as a missing folder
+        // and fall back to a listable legacy one, so a blocked Safari would pass.
         [
-            home.join("Library/Cookies"),
             home.join("Library/Containers/com.apple.Safari/Data/Library/Cookies"),
+            home.join("Library/Cookies"),
         ]
         .into_iter()
-        .rev()
-        .find(|dir| dir.exists())
+        .find(|dir| !matches!(dir.try_exists(), Ok(false)))
     }
 
     /// Whether this app may read the browser's cookie folder now. macOS 27 keeps
@@ -934,7 +937,10 @@ mod tests {
         assert_eq!(Browser::Safari.cookie_dir(home.path()), None);
         let legacy = home.path().join("Library/Cookies");
         std::fs::create_dir_all(&legacy).unwrap();
-        assert_eq!(Browser::Safari.cookie_dir(home.path()), Some(legacy));
+        assert_eq!(
+            Browser::Safari.cookie_dir(home.path()),
+            Some(legacy.clone())
+        );
         let container = home
             .path()
             .join("Library/Containers/com.apple.Safari/Data/Library/Cookies");
@@ -952,6 +958,21 @@ mod tests {
             assert_eq!(blocked_dir(&choice, home.path()), Some(container.clone()));
         }
         restore(&container);
+        // Safari's whole container closed, as macOS keeps it, while the legacy
+        // folder lists: Safari is blocked, not read from the legacy folder.
+        let safari = home.path().join("Library/Containers/com.apple.Safari");
+        if unlistable(&safari, 0o000).is_some() {
+            assert_eq!(
+                Browser::Safari.cookie_dir(home.path()),
+                Some(container.clone())
+            );
+            assert_eq!(access_to(&container), Access::Blocked);
+            assert_eq!(blocked_dir(&choice, home.path()), Some(container.clone()));
+        }
+        restore(&safari);
+        // No container at all: the legacy folder is the one.
+        std::fs::remove_dir_all(&safari).unwrap();
+        assert_eq!(Browser::Safari.cookie_dir(home.path()), Some(legacy));
     }
 
     /// When the folder cannot be listed but "Local State" opens by name (execute
