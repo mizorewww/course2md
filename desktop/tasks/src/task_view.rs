@@ -198,15 +198,18 @@ pub(crate) fn stage_progress(
     name: &Stage,
     done: bool,
     live: Option<&activity::Activity>,
-    current: u64,
-    total: u64,
+    stored: &activity::Activity,
     compact: bool,
 ) -> (String, Option<f32>) {
-    // AI requests have no measurable fraction; their clock and returned
-    // tokens show them moving, and stay as the record once they finish.
+    let total = stored.total;
+    // AI requests have no measurable fraction; their clock and the tokens sent
+    // and returned show them moving, and the tokens stay as the record once the
+    // task no longer runs (a saved record has no clock).
     if name.is_ai() {
         return (
-            live.map(|live| live.live_counter()).unwrap_or_default(),
+            live.map(|live| live.live_counter())
+                .or_else(|| stored.tokens_label())
+                .unwrap_or_default(),
             None,
         );
     }
@@ -223,7 +226,7 @@ pub(crate) fn stage_progress(
         )
         || name.is_model_transfer()
     {
-        activity::quantity(name, current, total)
+        activity::quantity(name, stored.current, total)
     } else {
         String::new()
     };
@@ -972,9 +975,8 @@ pub fn task_stage_rows(task: &TaskRecord, active: bool) -> Vec<TaskStage> {
                     _ => StageStatus::Failed,
                 }
             };
-            let (current, total) = (stored.current, stored.total);
-            let (detail, fraction) = stage_progress(&name, done, live, current, total, false);
-            let (compact_detail, _) = stage_progress(&name, done, live, current, total, true);
+            let (detail, fraction) = stage_progress(&name, done, live, stored, false);
+            let (compact_detail, _) = stage_progress(&name, done, live, stored, true);
             TaskStage {
                 id: format!("task-stage-{}-{name}", task.id),
                 title: activity::title(&name),
@@ -1282,7 +1284,7 @@ mod tests {
             for (current, total) in [(0, 3), (1, 3), (3, 3), (1, 1)] {
                 activity.update(current, total, None);
                 let (detail, fraction) =
-                    stage_progress(name, activity.done, Some(&activity), current, total, false);
+                    stage_progress(name, activity.done, Some(&activity), &activity, false);
                 assert!(fraction.is_none());
                 assert!(!detail.contains('%'));
                 assert!(!detail.contains("收尾"));
@@ -1290,7 +1292,7 @@ mod tests {
             }
             activity.finish();
             // The finished stage keeps its clock as the record, still without a fraction.
-            let (detail, fraction) = stage_progress(name, true, Some(&activity), 1, 1, false);
+            let (detail, fraction) = stage_progress(name, true, Some(&activity), &activity, false);
             assert_eq!(detail, "用时 0 秒");
             assert!(fraction.is_none());
         }
@@ -1301,12 +1303,41 @@ mod tests {
             &Stage::parse("scenes/extract"),
             false,
             Some(&screenshots),
-            2,
-            6,
+            &screenshots,
             false,
         );
         assert!(detail.contains("2 / 6"));
         assert_eq!(fraction, Some(2. / 6.));
+    }
+
+    #[test]
+    fn a_finished_ai_stage_keeps_its_tokens_once_the_task_no_longer_runs() {
+        use c2m_protocol::progress::{Event, StageStatus};
+        let mut events = desktop_store::activity::JobEvents::default();
+        for event in [
+            Event::Stage {
+                stage: Stage::Summary,
+                status: StageStatus::Start,
+            },
+            Event::Tokens {
+                stage: Stage::Summary,
+                prompt: 4_656,
+                completion: 94,
+            },
+            Event::Stage {
+                stage: Stage::Summary,
+                status: StageStatus::Done,
+            },
+        ] {
+            events.apply(&event);
+        }
+        let summary = &events.stages[&Stage::Summary];
+        // A saved record has no clock to show, only what was sent and received.
+        let (detail, fraction) = stage_progress(&Stage::Summary, true, None, summary, false);
+        assert_eq!(detail, "↑ 4,656 · ↓ 94 词元");
+        assert!(fraction.is_none());
+        let (detail, _) = stage_progress(&Stage::Summary, true, Some(summary), summary, false);
+        assert_eq!(detail, "用时 0 秒 · ↑ 4,656 · ↓ 94 词元");
     }
 
     #[test]

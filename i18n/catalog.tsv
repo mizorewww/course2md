@@ -115,7 +115,7 @@ yt-dlp 已结束，但没有留下视频文件 / yt-dlp finished without leaving
 {} 运行失败：	{} 运行失败：	{} failed:	{} 執行失敗：	{} が失敗しました：
 {}（{}）	{}（{}）	{} ({})	{}（{}）	{}（{}）
 {}；重跑 install.sh 可安装随包版本	{}；重跑 install.sh 可安装随包版本	{}; rerun install.sh for the bundled build	{}；重跑 install.sh 可安裝隨包版本	{}（install.sh を再実行すると同梱版をインストールできます）
-↓ {} 词元	↓ {} 词元	↓ {} tokens	↓ {} 詞元	↓ {} トークン
+↑ {} · ↓ {} 词元	↑ {} · ↓ {} 词元	↑ {} · ↓ {} tokens	↑ {} · ↓ {} 詞元	↑ {} · ↓ {} トークン
 下载 Microsoft Visual C++ 运行库	下载 Microsoft Visual C++ 运行库	Download the Microsoft Visual C++ runtime	下載 Microsoft Visual C++ 執行階段	Microsoft Visual C++ ランタイムをダウンロード
 下载视频最大高度（推荐 1080）/ Maximum download height (1080 recommended)	下载视频最大高度（推荐 1080）	Maximum download height (1080 recommended)	下載影片最大高度（建議 1080）	ダウンロードする動画の最大の高さ（推奨 1080）
 不使用 AI	不使用 AI	No AI processing	不使用 AI	AI 処理なし
