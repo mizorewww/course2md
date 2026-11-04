@@ -405,6 +405,7 @@ pub fn retry_component_label(component: &str) -> &'static str {
     match Component::parse(component) {
         Some(Component::Screenshots) => c2m_i18n::tr!("重新生成截图"),
         Some(Component::Proofreading) => c2m_i18n::tr!("重试 AI 校对"),
+        Some(Component::Translation) => c2m_i18n::tr!("重试 AI 翻译"),
         Some(Component::Summary) => c2m_i18n::tr!("重新生成摘要"),
         Some(Component::Exports) => c2m_i18n::tr!("重新导出"),
         None => c2m_i18n::tr!("补全未完成部分"),

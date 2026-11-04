@@ -2213,3 +2213,4 @@ Apple 模型从镜像下载失败，改用 Hugging Face / Apple model download f
 这个笔记库没有可以移入的文件夹。新建一个，这个文件夹会移入其中。	这个笔记库没有可以移入的文件夹。新建一个，这个文件夹会移入其中。	This library has no folder to move into. Create one and this folder moves into it.	這個筆記庫沒有可以移入的資料夾。新增一個，這個資料夾會移入其中。	このライブラリには移動先のフォルダーがありません。作成すると、このフォルダーがその中に移動します。
 设置分类	设置分类	Settings categories	設定分類	設定のカテゴリ
 机器翻译	机器翻译	Machine translation	機器翻譯	機械翻訳
+重试 AI 翻译	重试 AI 翻译	Retry AI translation	重試 AI 翻譯	AI翻訳を再試行する

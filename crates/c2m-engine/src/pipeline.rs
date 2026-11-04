@@ -596,9 +596,14 @@ impl Task<'_> {
             self.emit_done(&existing, &document.sections);
             return Ok(());
         }
-        if has(Component::Proofreading) || has(Component::Summary) {
+        if components.iter().any(|component| component.is_ai()) {
             crate::llm::validate(&cfg.llm)?;
         }
+        let translation_target = cfg.llm.translation_target();
+        anyhow::ensure!(
+            !has(Component::Translation) || translation_target.is_some(),
+            tr!("补做翻译需要选择翻译语言 / Choose a translation language to redo the translation")
+        );
         if let Some(prior) = prior_work {
             self.import_prior_work(request, &base, components, prior)
                 .await?;
@@ -711,12 +716,41 @@ impl Task<'_> {
             }
             let sections = std::mem::take(&mut document.sections);
             document.sections = self.polish_step(sections, &mut outcomes).await?;
-            // Proofreading rebuilt the paragraphs from the original transcript.
-            if let Some(language) = cfg.llm.translation_target() {
-                let sections = std::mem::take(&mut document.sections);
-                document.sections = self
-                    .translate_step(sections, language, &mut outcomes)
-                    .await?;
+        }
+        // Proofreading rebuilt the paragraphs from the original transcript, so their
+        // translation follows it. Alone, translation redoes the saved paragraphs: the
+        // batches that finished are the same requests and come back from their receipts.
+        if let Some(language) = translation_target
+            .filter(|_| has(Component::Proofreading) || has(Component::Translation))
+        {
+            job.control.check()?;
+            let sections = std::mem::take(&mut document.sections);
+            document.sections = self
+                .translate_step(sections, language, &mut outcomes)
+                .await?;
+            // As with a summary: when only the translation was asked for and no more
+            // of it finished, no new version identical to the old one is published.
+            let finished = |outcome: &Outcome| match outcome.status {
+                Status::Succeeded | Status::NotRequested => usize::MAX,
+                _ => outcome.completed.unwrap_or(0),
+            };
+            if components == [Component::Translation]
+                && finished(&outcomes.translation) <= finished(&base.outcomes.translation)
+            {
+                let message = outcomes.translation.message.clone().unwrap_or_else(|| {
+                    tr!(
+                        "翻译未完成，原笔记不受影响 / Translation did not finish; the original note is unaffected"
+                    )
+                    .into()
+                });
+                return Err(crate::dispatch::Failure {
+                    kind: outcomes
+                        .translation
+                        .kind
+                        .unwrap_or(artifact::FailureKind::Local),
+                    ..crate::dispatch::Failure::local(message)
+                }
+                .into());
             }
         }
         if has(Component::Summary) {
@@ -900,8 +934,13 @@ impl Task<'_> {
         let ledger_dir = job.dir.join("requests");
         std::fs::create_dir_all(&ledger_dir)?;
         for mut receipt in crate::dispatch::receipts(prior)? {
+            // Translation is redone with proofreading as well as on its own.
             let needed = Component::parse(&receipt.purpose).is_some_and(|c| {
-                matches!(c, Component::Proofreading | Component::Summary) && has(c)
+                c.is_ai()
+                    && (has(c)
+                        || (c == Component::Translation
+                            && has(Component::Proofreading)
+                            && self.cfg.llm.translation_target().is_some()))
             });
             let matching_service = request.service_versions.get("llm").map_or(
                 receipt

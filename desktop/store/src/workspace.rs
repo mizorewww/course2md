@@ -1549,6 +1549,7 @@ fn component_outcome(
     match component {
         Component::Screenshots => &outcomes.screenshots,
         Component::Proofreading => &outcomes.proofreading,
+        Component::Translation => &outcomes.translation,
         Component::Summary => &outcomes.summary,
         Component::Exports => &outcomes.transcript,
     }

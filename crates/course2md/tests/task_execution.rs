@@ -987,6 +987,208 @@ fn proofreading_resend_continues_unsent_summary_without_repeating_source_work() 
     );
 }
 
+/// Answers a proofreading or translation batch item for item, so the note keeps
+/// its text: proofreading echoes it, translation marks it.
+fn batch_reply(body: &serde_json::Value, translated: bool) -> serde_json::Value {
+    let user = &body["messages"][1]["content"];
+    let payload = user.as_str().or_else(|| user[0]["text"].as_str()).unwrap();
+    let items: Vec<serde_json::Value> = serde_json::from_str(payload).unwrap();
+    let segments: Vec<_> = items
+        .iter()
+        .map(|item| {
+            let text = item["text"].as_str().unwrap();
+            let text = if translated {
+                format!("译：{text}")
+            } else {
+                text.to_owned()
+            };
+            serde_json::json!({"id": item["id"], "text": text})
+        })
+        .collect();
+    chat_completion(&serde_json::json!({ "segments": segments }))
+}
+
+fn is_translation(body: &serde_json::Value) -> bool {
+    body["messages"][0]["content"]
+        .as_str()
+        .unwrap_or_default()
+        .starts_with("You translate lecture transcripts")
+}
+
+/// The owner's deadlock in the engine: a translation batch lost its response after
+/// the note was saved. Redoing the translation alone sends exactly that batch (as
+/// authorized) and the batch it held back, plus the summary the uncertain step kept
+/// from starting. The finished batch comes back from its receipt, and proofreading
+/// is never sent again.
+#[test]
+fn translation_resend_sends_only_unfinished_batches_and_the_held_back_summary() {
+    if !common::ffmpeg_available() {
+        return;
+    }
+    let translations = Arc::new(AtomicUsize::new(0));
+    let counted = translations.clone();
+    let summary = common::fake_ai()["responses"]["summary"].clone();
+    let mock = MockAi::respond_with(move |_, body| {
+        if is_translation(body) {
+            // The second translation batch is received, but its response is lost.
+            if counted.fetch_add(1, Ordering::SeqCst) == 1 {
+                return None;
+            }
+            return Some((200, batch_reply(body, true)));
+        }
+        let proofreading = body["messages"][1]["content"].is_array();
+        Some((
+            200,
+            if proofreading {
+                batch_reply(body, false)
+            } else {
+                chat_completion(&summary)
+            },
+        ))
+    });
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("unreadable-video.mp4");
+    std::fs::write(&source, b"broken").unwrap();
+    let mut original = request(root.path(), &source);
+    // Pauses between sentences keep each one its own paragraph.
+    original.duration = 450.;
+    original.subtitle_events = Some(
+        (0..45)
+            .map(|index| TranscriptEvent {
+                start: index as f64 * 10.,
+                end: index as f64 * 10. + 2.,
+                text: format!("This is spoken sentence number {index} of the lecture."),
+                raw: None,
+                translation: None,
+            })
+            .collect(),
+    );
+    let llm = &mut original.config.llm;
+    llm.enabled = true;
+    llm.summarize = true;
+    llm.translate = Some("zh-Hans".into());
+    llm.concurrency = 1;
+    llm.base_url = mock.url.clone();
+    llm.model = "test-model".into();
+    llm.api_key = "private-task-key".into();
+    original
+        .service_versions
+        .insert("llm".into(), "ai-v1".into());
+    let first = run(root.path(), &original);
+    let first_events = events(&first);
+    assert!(first.status.success(), "{first_events:#?}");
+    // Three proofreading batches, then translation: the first answered, the second lost.
+    assert_eq!(mock.calls.load(Ordering::SeqCst), 5);
+    let receipts = course2md::dispatch::receipts(&original.work_dir).unwrap();
+    let uncertain: Vec<_> = receipts
+        .iter()
+        .filter(|r| r.state == course2md::dispatch::State::Uncertain)
+        .collect();
+    assert_eq!(uncertain.len(), 1);
+    assert_eq!(uncertain[0].purpose, Component::Translation.as_str());
+    let base = original.course_dir.join("versions/version-one");
+    let manifest = artifact::read_manifest(&base.join("manifest.json")).unwrap();
+    assert_eq!(
+        manifest.outcomes.proofreading.status,
+        artifact::Status::Succeeded
+    );
+    assert_ne!(
+        manifest.outcomes.translation.status,
+        artifact::Status::Succeeded
+    );
+    assert_eq!(manifest.outcomes.summary.status, artifact::Status::Failed);
+    let untouched = std::fs::read(base.join("document.json")).unwrap();
+    std::fs::remove_file(&source).unwrap();
+
+    let mut retry = original.clone();
+    retry.task_id = "retry-translation".into();
+    retry.version_id = "retry-translation".into();
+    retry.work_dir = root.path().join("retry-work");
+    retry.control_path = Some(retry.work_dir.join("control.json"));
+    // As the desktop asks for it: no proofreading, translation and the summary.
+    retry.config.llm.enabled = false;
+    retry.operation = course2md::execution::Operation::Reprocess {
+        base_version_dir: base.clone(),
+        components: vec![Component::Translation, Component::Summary],
+        prior_work_dir: Some(original.work_dir.clone()),
+    };
+    std::fs::create_dir_all(&retry.work_dir).unwrap();
+    std::fs::write(
+        retry.control_path.as_ref().unwrap(),
+        serde_json::to_vec(&serde_json::json!({"intent":"run","resend":[uncertain[0].request_id]}))
+            .unwrap(),
+    )
+    .unwrap();
+    let sent_before = mock.bodies.lock().unwrap().len();
+    let second = run(root.path(), &retry);
+    let observed = events(&second);
+    assert!(second.status.success(), "{observed:#?}");
+    let bodies = mock.bodies.lock().unwrap()[sent_before..].to_vec();
+    let translated: Vec<_> = bodies.iter().filter(|body| is_translation(body)).collect();
+    // The lost batch once and the third batch it held back; the summary once.
+    assert_eq!(translated.len(), 2, "{bodies:#?}");
+    assert_eq!(bodies.len(), 3, "{bodies:#?}");
+    let first_sent = mock.bodies.lock().unwrap()[..sent_before].to_vec();
+    let answered = first_sent.iter().find(|body| is_translation(body)).unwrap();
+    assert!(
+        !translated.contains(&answered),
+        "a finished batch was sent again"
+    );
+    assert!(
+        !observed
+            .iter()
+            .any(|event| event["stage"] == "llm" || event["stage"] == "transcribe")
+    );
+    let updated = artifact::read_manifest(
+        &retry
+            .course_dir
+            .join("versions/retry-translation/manifest.json"),
+    )
+    .unwrap();
+    assert_eq!(
+        updated.outcomes.translation.status,
+        artifact::Status::Succeeded
+    );
+    assert_eq!(
+        updated.outcomes.proofreading.status,
+        artifact::Status::Succeeded
+    );
+    assert_eq!(updated.outcomes.summary.status, artifact::Status::Succeeded);
+    let document: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            retry
+                .course_dir
+                .join("versions/retry-translation")
+                .join(&updated.document),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let speech: Vec<_> = document["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|section| section["speech"].as_array().unwrap())
+        .collect();
+    assert_eq!(speech.len(), 45);
+    assert!(speech.iter().all(|event| {
+        event["translation"]
+            .as_str()
+            .is_some_and(|text| text.starts_with("译："))
+    }));
+    let receipts = course2md::dispatch::receipts(&retry.work_dir).unwrap();
+    let resent = receipts
+        .iter()
+        .find(|r| r.stable_id == uncertain[0].stable_id)
+        .unwrap();
+    assert_eq!(resent.state, course2md::dispatch::State::Completed);
+    assert_eq!(resent.attempt, uncertain[0].attempt + 1);
+    assert_eq!(
+        std::fs::read(base.join("document.json")).unwrap(),
+        untouched
+    );
+}
+
 #[test]
 fn export_only_recovery_uses_the_saved_version_after_source_and_subtitle_are_gone() {
     use course2md::config::OutputFormat;
