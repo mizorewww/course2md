@@ -24,6 +24,9 @@ pub(crate) enum AccountsEvent {
     /// Connected YouTube from a source preview that failed: retry it, if it is still
     /// the one shown.
     YoutubeConnected { source: (u64, String) },
+    /// Quit and open the app again, so macOS applies the Full Disk Access just
+    /// given; the guide opens again after the reopen.
+    Relaunch,
 }
 
 /// The sign-ins: the Bilibili account and its login dialog, and the YouTube

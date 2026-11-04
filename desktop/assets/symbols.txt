@@ -54,6 +54,7 @@ library_books
 light_mode
 link
 list
+lock_open
 login
 logout
 memory

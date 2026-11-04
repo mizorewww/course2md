@@ -3042,6 +3042,7 @@ impl Desktop {
                     self.inspect_source(window, cx);
                 }
             }
+            AccountsEvent::Relaunch => self.relaunch_for_access(cx),
         }
     }
 }

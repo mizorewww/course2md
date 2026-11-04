@@ -34,7 +34,11 @@
 //! `dialog:youtube~<checking|signedout|failed|connected|empty>` the YouTube
 //! connection's, with fixture text and no request; `dialog:youtube~check` runs
 //! the real check of the first installed browser, so use it only with a fixture
-//! `HOME`. Each
+//! `HOME`. `dialog:youtube~access-<blocked|reopened|waiting|restart|granted>`
+//! shows a Full Disk Access guide step whatever the folder says, and
+//! `dialog:youtube~access-open-settings` takes the guide's first action on the
+//! real look at the fixture folder. In capture runs, opening System Settings,
+//! showing the app in Finder and reopening the app are logged, not taken. Each
 //! capture first closes the dialogs an earlier one opened, so one shot shows
 //! one dialog. Nothing a dialog would change is saved unless its action is
 //! taken.
