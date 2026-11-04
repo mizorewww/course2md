@@ -26,6 +26,8 @@ pub struct Activity {
     pub unit: Option<Unit>,
     pub done: bool,
     pub workers: usize,
+    /// What the stage has found so far: a scene scan's candidate screenshots.
+    pub found: Option<u64>,
     /// Tokens the AI service reported for this stage, sent and received.
     prompt_tokens: u64,
     completion_tokens: u64,
@@ -152,12 +154,15 @@ impl JobEvents {
                 message,
                 phase,
                 unit,
-                ..
+                found,
             } => {
                 let activity = self.stage(stage);
                 activity.update(*current, *total, message.clone());
                 activity.set_phase(*phase);
                 activity.unit = *unit;
+                if found.is_some() {
+                    activity.found = *found;
+                }
                 false
             }
             Event::Tokens {
@@ -264,6 +269,7 @@ impl Activity {
             unit: None,
             done: false,
             workers: 1,
+            found: None,
             prompt_tokens: 0,
             completion_tokens: 0,
             sampled: false,
@@ -320,6 +326,22 @@ impl Activity {
             )
         })
     }
+    /// What the stage has counted, with what it has found so far: "已检查 388 张画面 ·
+    /// 已找到 4 张候选截图".
+    pub fn quantity(&self, stage: &Stage) -> String {
+        let quantity = quantity_of(stage, self.counts_bytes(stage), self.current, self.total);
+        match self.found.filter(|_| *stage == Stage::ScenesScan) {
+            Some(found) => {
+                let found = c2m_i18n::tr!("已找到 {} 张候选截图", found);
+                if quantity.is_empty() {
+                    found
+                } else {
+                    format!("{quantity} · {found}")
+                }
+            }
+            None => quantity,
+        }
+    }
     pub fn fraction(&self) -> Option<f32> {
         (self.total > 0).then(|| (self.current as f32 / self.total as f32).clamp(0., 1.))
     }
@@ -372,7 +394,7 @@ impl Activity {
             };
         }
         let byte_download = self.counts_bytes(stage);
-        let quantity = quantity_of(stage, byte_download, self.current, self.total);
+        let quantity = self.quantity(stage);
         // Apple loading and compilation report weighted stages, not throughput,
         // and do not advance at a constant rate. Its downloads report bytes.
         if *stage == Stage::ModelApple && !byte_download {
@@ -1243,6 +1265,45 @@ mod tests {
             Some("↑ 4,750 · ↓ 130 词元")
         );
         assert_eq!(Activity::new().tokens_label(), None);
+    }
+
+    #[test]
+    fn a_scene_scan_says_how_many_screenshots_it_has_found() {
+        let progress = |current, found| Event::Progress {
+            stage: Stage::ScenesScan,
+            current,
+            total: 1_205,
+            message: None,
+            phase: None,
+            unit: None,
+            found,
+        };
+        let mut events = JobEvents::default();
+        events.apply(&Event::Stage {
+            stage: Stage::ScenesScan,
+            status: StageStatus::Start,
+        });
+        events.apply(&progress(38, None));
+        let scan = &events.stages[&Stage::ScenesScan];
+        assert_eq!(scan.quantity(&Stage::ScenesScan), "已检查 38 张画面");
+        events.apply(&progress(388, Some(4)));
+        // A later sample without the count keeps the one already found.
+        events.apply(&progress(397, None));
+        let scan = &events.stages[&Stage::ScenesScan];
+        assert_eq!(
+            scan.quantity(&Stage::ScenesScan),
+            "已检查 397 张画面 · 已找到 4 张候选截图"
+        );
+        assert!(
+            scan.detail(&Stage::ScenesScan, true)
+                .starts_with("已检查 397 张画面 · 已找到 4 张候选截图")
+        );
+        // Older engines' events carry no count and still read.
+        let old: Event = serde_json::from_str(
+            r#"{"type":"progress","stage":"scenes/scan","current":5,"total":9}"#,
+        )
+        .unwrap();
+        assert!(matches!(old, Event::Progress { found: None, .. }));
     }
 
     #[test]

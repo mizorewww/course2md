@@ -712,6 +712,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 已扫码，请在手机上确认登录	已扫码，请在手机上确认登录	The code has been scanned, please confirm login on your mobile phone	已掃碼，請在手機上確認登入	コードがスキャンされました。携帯電話でのログインを確認してください。
 已扫码，请在手机上确认登录。/ Code scanned; confirm the login on your phone.	已扫码，请在手机上确认登录。	Code scanned; confirm the login on your phone.	已掃碼，請在手機上確認登入。	コードがスキャンされました。携帯電話でログインを確認してください。
 已找到	已找到	Found	已找到	見つかりました
+已找到 {} 张候选截图	已找到 {} 张候选截图	{} candidate screenshots found	已找到 {} 張候選截圖	候補スクリーンショット {} 枚
 已找到 {} 张候选截图 / Found {} candidate slides	已找到 {} 张候选截图	Found {} candidate slides	已找到 {} 張候選截圖	{} 枚の候補スクリーンショットが見つかりました
 已把 {} 个视频加入队列	已把 {} 个视频加入队列	{} videos have been queued	已把 {} 個影片加入佇列	{} 本の動画をキューに追加しました
 已收到回应，但服务未接受这项测试请求	已收到回应，但服务未接受这项测试请求	Response received, but the test request was not accepted by the service	已收到回應，但服務未接受這項測試請求	応答を受信しましたが、テスト要求はサービスによって受け入れられませんでした

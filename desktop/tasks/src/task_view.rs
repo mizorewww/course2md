@@ -226,7 +226,7 @@ pub(crate) fn stage_progress(
         )
         || name.is_model_transfer()
     {
-        activity::quantity(name, stored.current, total)
+        stored.quantity(name)
     } else {
         String::new()
     };
