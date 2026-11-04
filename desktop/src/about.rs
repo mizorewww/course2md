@@ -81,27 +81,37 @@ pub fn fields(last: ui::Field) -> Vec<ui::Field> {
                         icon: gpui_kit_material::icons::SymbolIcon,
                         corners,
                         url: &'static str| {
+                // The two tiles share the row at every width and text size: they
+                // shrink together and a long label wraps inside its tile, so the
+                // connected corners stay where they belong.
                 scale
                     .button(id, corners)
                     .flex_1()
-                    .min_w(rem(160.))
+                    .flex_basis(rems(0.))
+                    .min_w_0()
                     .accessibility_label(label)
                     .on_click(move |_, _, cx| cx.open_url(url))
                     .child(
                         scale
                             .row()
+                            .min_w_0()
                             .child(
                                 Icon::from(icon)
                                     .size(rem(24.))
                                     .color(color(ColorRole::ON_SURFACE_VARIANT)),
                             )
-                            .child(scale.label(SharedString::from(format!("{id}-label")), label)),
+                            .child(
+                                scale
+                                    .label(SharedString::from(format!("{id}-label")), label)
+                                    .flex_1()
+                                    .min_w_0()
+                                    .whitespace_normal(),
+                            ),
                     )
             };
             h_flex()
                 .w_full()
                 .min_w_0()
-                .flex_wrap()
                 .gap(TILE_GAP)
                 .child(link(
                     "about-project",

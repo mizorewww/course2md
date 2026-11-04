@@ -130,7 +130,7 @@ fn nav_destination(
 }
 
 /// The width of `text` as the window would shape it.
-fn shaped_width(text: &str, size: f32, weight: FontWeight, window: &Window) -> f32 {
+pub(crate) fn shaped_width(text: &str, size: f32, weight: FontWeight, window: &Window) -> f32 {
     let mut style = window.text_style();
     style.font_weight = weight;
     let text = SharedString::from(text.to_owned());

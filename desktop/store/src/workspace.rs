@@ -3038,6 +3038,7 @@ mod tests {
             message: None,
             phase: None,
             unit: None,
+            found: None,
         };
         ws.state.apply_task_event(&id, &counted);
         assert_eq!(ws.state.revision, revision);
