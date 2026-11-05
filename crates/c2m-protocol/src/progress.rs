@@ -188,6 +188,10 @@ pub enum ErrorCode {
     Service,
     /// A request was sent but its result is unknown.
     Uncertain,
+    /// The result did less than the saved note in a part it tried; the note was kept.
+    NoteKept,
+    /// Another task is working on the same note; nothing was done.
+    NoteBusy,
     #[default]
     Other,
 }
@@ -216,6 +220,12 @@ impl ErrorCode {
             .is_some()
         {
             return Self::InvalidConfiguration;
+        }
+        if error.downcast_ref::<crate::outcome::NoteKept>().is_some() {
+            return Self::NoteKept;
+        }
+        if error.downcast_ref::<crate::outcome::NoteBusy>().is_some() {
+            return Self::NoteBusy;
         }
         match error
             .downcast_ref::<crate::outcome::Failure>()

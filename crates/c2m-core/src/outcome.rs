@@ -125,6 +125,31 @@ pub struct NetworkFailure {
     pub definitely_unsent: bool,
 }
 
+/// A task's result was not published: the saved note holds more of a part the
+/// task tried to make, so the note was kept. The message says which parts and why.
+#[derive(Debug)]
+pub struct NoteKept(pub String);
+
+impl std::fmt::Display for NoteKept {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for NoteKept {}
+
+/// Another task is working on the note; this one stopped before any work.
+#[derive(Debug)]
+pub struct NoteBusy(pub String);
+
+impl std::fmt::Display for NoteBusy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for NoteBusy {}
+
 #[derive(Debug)]
 pub struct Failure {
     pub status: Option<u16>,

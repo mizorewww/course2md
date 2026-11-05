@@ -526,6 +526,22 @@ fn open_lock_file(path: &Path) -> Result<std::fs::File> {
         .open(path)?)
 }
 
+/// [`lock_file`] that tells a lock someone holds (`Ok(None)`) from a lock file
+/// that could not be opened or locked (`Err`).
+pub fn try_lock_file(path: &Path) -> std::io::Result<Option<FileLock>> {
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(FileLock { file })),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(error)) => Err(error),
+    }
+}
+
 /// Hold an OS file lock until the returned guard is dropped. The lock file
 /// remains in place so another process cannot open a different inode at its path.
 pub fn lock_file(path: &Path) -> Result<FileLock> {
