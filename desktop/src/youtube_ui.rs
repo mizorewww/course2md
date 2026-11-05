@@ -73,7 +73,7 @@ fn read_only_mount(_: &Path) -> bool {
 fn must_move() -> bool {
     matches!(
         app_location(),
-        AppLocation::Translocated | AppLocation::DiskImage
+        AppLocation::Translocated | AppLocation::DiskImage | AppLocation::OutsideApplications
     )
 }
 
@@ -978,6 +978,10 @@ impl AccountsView {
                     if *app_location() == AppLocation::DiskImage {
                         course2md::tr!(
                             "course2md 正从磁盘映像运行，还没有安装。请先退出 course2md，在访达中把它拖到“应用程序”文件夹，再从“应用程序”打开，然后回到这里。"
+                        )
+                    } else if *app_location() == AppLocation::OutsideApplications {
+                        course2md::tr!(
+                            "course2md 不在“应用程序”文件夹中。请先退出 course2md，在访达中把它移到“应用程序”文件夹（这台 Mac 的，或这个磁盘上的），再从那里打开，然后回到这里。"
                         )
                     } else {
                         course2md::tr!(

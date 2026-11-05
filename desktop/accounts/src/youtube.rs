@@ -342,6 +342,9 @@ pub enum AppLocation {
     /// installed: like a translocated copy, the person must copy it to
     /// /Applications and open it from there first.
     DiskImage,
+    /// On a writable volume (an external drive) but not in an Applications
+    /// folder: moved into one, it is an install the person keeps.
+    OutsideApplications,
     /// No bundle: a development build run from a terminal.
     Unbundled,
 }
@@ -349,9 +352,10 @@ pub enum AppLocation {
 /// Where `exe` runs from: the `.app` holding it, and whether that is a
 /// translocated copy or one on a disk image. `read_only` answers whether a
 /// folder is on a read-only mount (a mounted .dmg is). A bundle under
-/// /Volumes counts as a disk image when its volume is read-only, or when it
-/// is not in an Applications folder there (an external drive the person
-/// installed apps on keeps working).
+/// /Volumes is a disk image when its volume is read-only, and outside
+/// Applications when the volume is writable but the bundle is not in an
+/// Applications folder there (an external drive the person installed apps on
+/// keeps working).
 pub fn app_location_of(exe: &Path, read_only: impl Fn(&Path) -> bool) -> AppLocation {
     let Some(bundle) = exe
         .ancestors()
@@ -369,19 +373,23 @@ pub fn app_location_of(exe: &Path, read_only: impl Fn(&Path) -> bool) -> AppLoca
         .any(|part| part.as_os_str() == "AppTranslocation")
     {
         AppLocation::Translocated
-    } else if on_disk_image(&bundle, read_only(&bundle)) {
-        AppLocation::DiskImage
+    } else if let Some(location) = misplaced(&bundle, read_only(&bundle)) {
+        location
     } else {
         AppLocation::Bundle(bundle)
     }
 }
 
-fn on_disk_image(bundle: &Path, read_only: bool) -> bool {
-    read_only
-        || (bundle.starts_with("/Volumes")
-            && !bundle
-                .components()
-                .any(|part| part.as_os_str() == "Applications"))
+/// A bundle that must be moved before access can last, by what it is on.
+fn misplaced(bundle: &Path, read_only: bool) -> Option<AppLocation> {
+    if read_only {
+        return Some(AppLocation::DiskImage);
+    }
+    (bundle.starts_with("/Volumes")
+        && !bundle
+            .components()
+            .any(|part| part.as_os_str() == "Applications"))
+    .then_some(AppLocation::OutsideApplications)
 }
 
 /// Where the person was when they opened the dialog, so a reopen for access
@@ -639,20 +647,24 @@ mod tests {
         // On a read-only mount (a .dmg wherever it is mounted).
         let exe = app.join("Contents/MacOS/course2md-desktop");
         assert_eq!(app_location_of(&exe, |_| true), AppLocation::DiskImage);
-        // Under /Volumes without an Applications folder: a disk image; with one,
-        // an external drive's install.
-        assert!(on_disk_image(
-            Path::new("/Volumes/course2md/course2md.app"),
-            false
-        ));
-        assert!(!on_disk_image(
-            Path::new("/Volumes/Ext/Applications/course2md.app"),
-            false
-        ));
-        assert!(!on_disk_image(
-            Path::new("/Applications/course2md.app"),
-            false
-        ));
+        // A writable drive under /Volumes, outside an Applications folder: to be
+        // moved into one, but no disk image; inside one, an install.
+        assert_eq!(
+            misplaced(Path::new("/Volumes/Ext/course2md.app"), false),
+            Some(AppLocation::OutsideApplications)
+        );
+        assert_eq!(
+            misplaced(Path::new("/Volumes/course2md/course2md.app"), true),
+            Some(AppLocation::DiskImage)
+        );
+        assert_eq!(
+            misplaced(Path::new("/Volumes/Ext/Applications/course2md.app"), false),
+            None
+        );
+        assert_eq!(
+            misplaced(Path::new("/Applications/course2md.app"), false),
+            None
+        );
     }
 
     #[test]
