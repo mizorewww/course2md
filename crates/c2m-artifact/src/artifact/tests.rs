@@ -83,12 +83,13 @@ impl Library {
     }
 }
 
-/// Every file below `dir` with its bytes.
+/// Every file below `dir` with its bytes, but the lock an older app's course
+/// holds (flattening takes it as that app does, which creates it).
 fn snapshot(dir: &Path) -> BTreeMap<String, Vec<u8>> {
     walk(dir)
         .unwrap()
         .into_iter()
-        .filter(|(_, kind)| *kind == EntryKind::File)
+        .filter(|(path, kind)| *kind == EntryKind::File && path != LEGACY_PUBLISH_LOCK)
         .map(|(path, _)| {
             let bytes = std::fs::read(dir.join(&path)).unwrap();
             (path, bytes)
@@ -931,7 +932,7 @@ fn replaced_notes_that_cannot_be_deleted_do_not_pile_up() {
     prepare_note(&library.note).unwrap();
     assert!(!swap.join("stale-x").exists());
     // Copies the swap folder itself will not let go of stop the next task.
-    for n in 0..MAX_STUCK_OLD {
+    for n in 0..MAX_KEPT_COPIES {
         std::fs::create_dir_all(swap.join(format!("stale-{n}"))).unwrap();
     }
     std::fs::set_permissions(&swap, std::fs::Permissions::from_mode(0o555)).unwrap();
@@ -1217,10 +1218,8 @@ fn between_renames(library: &Library) -> (PathBuf, BTreeMap<String, Vec<u8>>) {
     assert!(!library.note.exists());
     let record: serde_json::Value =
         serde_json::from_slice(&std::fs::read(swap.join(LIVE_MARKER)).unwrap()).unwrap();
-    assert_eq!(
-        record,
-        serde_json::json!({"copy": "old-task-2", "placed": "task-2"})
-    );
+    assert_eq!(record["copy"], "old-task-2");
+    assert_eq!(record["publication"].as_str().unwrap().len(), 32);
     (swap, before)
 }
 
@@ -1558,4 +1557,134 @@ fn recovery_that_cannot_run_says_where_to_look() {
     );
     assert!(recover(&library.note).unwrap());
     assert_eq!(snapshot(&library.note), before);
+}
+
+/// Two notes of one task (the command line names a task after the video and
+/// its settings) are told apart: only the note this replacement made proves the
+/// recorded copy stale.
+#[test]
+fn a_note_of_the_same_task_does_not_prove_the_copy_stale() {
+    let library = Library::new();
+    let (swap, before) = between_renames(&library);
+    // Another note of task-2, made elsewhere, put at the note's place.
+    let other = another_note(&library, "task-2");
+    std::fs::rename(&other, &library.note).unwrap();
+    assert_eq!(
+        note_manifest(&library.note).unwrap().unwrap().task_id,
+        "task-2"
+    );
+    assert!(recover(&library.note).unwrap());
+    assert_eq!(snapshot(&swap.join("old-task-2")), before);
+}
+
+/// Flattening holds the lock an older app holds while it publishes a version:
+/// a publication already under way finishes first and is the one kept, and
+/// one that starts meanwhile cannot take the lock.
+#[test]
+fn flattening_waits_for_an_older_apps_publication() {
+    let legacy = Legacy::new();
+    legacy.version("v1", 1, "First");
+    legacy.point_at("v1");
+    let course = legacy.course().to_path_buf();
+    let lock = crate::runtime::lock_file(&course.join(LEGACY_PUBLISH_LOCK)).unwrap();
+    let (started, release) = std::sync::mpsc::channel();
+    let older_app = std::thread::spawn({
+        let legacy_course = course.clone();
+        move || {
+            started.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            // The older app's version lands, and its pointer moves, under its lock.
+            std::fs::rename(
+                legacy_course.join("versions/v1"),
+                legacy_course.join("versions/v2"),
+            )
+            .unwrap();
+            let path = legacy_course.join("versions/v2/manifest.json");
+            let mut value: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            value["task_id"] = "v2".into();
+            value["version_id"] = "v2".into();
+            std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+            std::fs::write(
+                legacy_course.join("current.json"),
+                r#"{"schema":1,"course_id":"course","version_id":"v2","manifest":"versions/v2/manifest.json"}"#,
+            )
+            .unwrap();
+            drop(lock);
+        }
+    });
+    release.recv().unwrap();
+    let flat = flatten_legacy(&course).unwrap().unwrap();
+    older_app.join().unwrap();
+    assert_eq!(flat.task_id, "v2", "the version published first is kept");
+    assert!(!course.join(LEGACY_PUBLISH_LOCK).exists());
+    // While a flatten holds it, the older app cannot take it.
+    let legacy = Legacy::new();
+    legacy.version("v1", 1, "First");
+    legacy.point_at("v1");
+    let held = crate::runtime::lock_file(&legacy.course().join(LEGACY_PUBLISH_LOCK)).unwrap();
+    let busy = std::thread::spawn({
+        let course = legacy.course().to_path_buf();
+        move || crate::runtime::try_lock_file(&course.join(LEGACY_PUBLISH_LOCK)).unwrap()
+    });
+    assert!(busy.join().unwrap().is_none());
+    drop(held);
+}
+
+/// Copies being made by another writer are not reported as kept.
+#[test]
+fn copies_of_a_note_another_writer_holds_are_not_reported() {
+    let library = Library::new();
+    library
+        .publish(&library.target("task-1"), "Body", "")
+        .unwrap();
+    let swap = swap_dir(&library.note).unwrap();
+    std::fs::create_dir_all(swap.join("old-x")).unwrap();
+    let writer = lock_note(&library.note).unwrap();
+    assert!(note_attention(&library.note).is_none());
+    drop(writer);
+    assert!(matches!(
+        note_attention(&library.note),
+        Some(NoteAttention::Kept { .. })
+    ));
+}
+
+/// Copies at the limit stop a new task with their own error, naming the folder
+/// and what frees it.
+#[test]
+fn copies_at_the_limit_stop_a_task_and_say_what_frees_it() {
+    use crate::i18n::Lang;
+    let library = Library::new();
+    library
+        .publish(&library.target("task-1"), "Body", "")
+        .unwrap();
+    let swap = swap_dir(&library.note).unwrap();
+    for n in 0..MAX_KEPT_COPIES {
+        std::fs::create_dir_all(swap.join(format!("displaced-{n}"))).unwrap();
+    }
+    let error = prepare_note(&library.note).unwrap_err();
+    let kept = error.downcast_ref::<crate::outcome::CopiesKept>().unwrap();
+    assert_eq!(kept.swap, swap);
+    let en = crate::outcome::copies_kept_message(&swap, Lang::En);
+    assert!(
+        en.contains("move the copies you want to keep out") && en.contains("stop"),
+        "{en}"
+    );
+    assert!(en.contains(&swap.display().to_string()));
+    for lang in [Lang::Ja, Lang::ZhHant, Lang::ZhHans] {
+        let text = crate::outcome::copies_kept_message(&swap, lang);
+        assert!(
+            text.contains(&swap.display().to_string()) && text != en,
+            "{text}"
+        );
+    }
+    // Moved out, they no longer stop it.
+    for n in 0..MAX_KEPT_COPIES {
+        std::fs::rename(
+            swap.join(format!("displaced-{n}")),
+            library.library().join(format!("kept-{n}")),
+        )
+        .unwrap();
+    }
+    prepare_note(&library.note).unwrap();
 }
