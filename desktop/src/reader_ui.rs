@@ -2489,6 +2489,9 @@ impl ReaderPage {
                 notes::ProcessingStage::Proofreading if !requires_repair => {
                     Some("proofreading".to_owned())
                 }
+                notes::ProcessingStage::Translation if !requires_repair => {
+                    Some("translation".to_owned())
+                }
                 notes::ProcessingStage::Summary if !requires_repair => Some("summary".to_owned()),
                 _ => None,
             })

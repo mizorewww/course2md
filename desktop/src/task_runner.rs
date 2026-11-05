@@ -797,7 +797,13 @@ impl Desktop {
             return;
         }
         if task.artifact.is_some() {
-            self.reprocess_task(id, run::uncertain_components(&task), requests, cx);
+            match task.uncertain_components() {
+                Ok(components) => self.reprocess_task(id, components, requests, cx),
+                Err(error) => {
+                    self.message = Some(format!("{error:#}"));
+                    cx.notify();
+                }
+            }
             return;
         }
         if self.records.read(cx).workspace.is_some()
@@ -1232,6 +1238,9 @@ impl Desktop {
                 );
                 for request in task.events.blocked.iter().filter(|b| b.is_uncertain()) {
                     question = question.text(request_scope(request));
+                }
+                for also in task.resend_also_sends() {
+                    question = question.text(also);
                 }
                 question
                     .text(course2md::tr!(

@@ -1119,7 +1119,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 服务	服务	Services	服務	サービス
 服务不接受所选模型，请检查模型 ID 和使用权限	服务不接受所选模型，请检查模型 ID 和使用权限	The service does not accept the selected model. Check the model ID and usage permissions.	服務不接受所選模型，請檢查模型 ID 和使用權限	サービスは選択したモデルを受け入れません。モデル ID と使用許可を確認してください。
 服务与账号	服务与账号	Services & accounts	服務與帳號	サービスとアカウント
-服务修复只能用于未完成的校对或摘要	服务修复只能用于未完成的校对或摘要	Service repair can only be used for unfinished proofreading or summaries	服務修復只能用於未完成的校對或摘要	サービス修復は、未完了の校正または要約にのみ使用できます。
+服务修复只能用于未完成的校对、翻译或摘要	服务修复只能用于未完成的校对、翻译或摘要	Service repair can only be used for unfinished proofreading, translation or summaries	服務修復只能用於未完成的校對、翻譯或摘要	サービス修復は、未完了の校正、翻訳または要約にのみ使用できます。
 服务凭据尚未就绪，请重新打开服务设置保存一次	服务凭据尚未就绪，请重新打开服务设置保存一次	Service credentials are not ready yet. Reopen the service settings and save them once.	服務憑證尚未就緒，請重新開啟服務設定儲存一次	サービス資格情報の準備がまだ整っていません。サービス設定をもう一度開いて保存してください
 服务可能已处理这些内容，重新发送可能产生额外费用	服务可能已处理这些内容，重新发送可能产生额外费用	The service may have processed the content and resending may incur additional charges	服務可能已處理這些內容，重新傳送可能產生額外費用	サービスがコンテンツを処理した可能性があり、再送信には追加料金が発生する可能性があります
 服务响应接收中断 / Service response was interrupted	服务响应接收中断	Service response was interrupted	服務回應接收中斷	サービス応答の受信が中断されました
@@ -2235,3 +2235,13 @@ macOS 只允许有“完全磁盘访问权限”的应用读取 {} 的数据，c
 仍然尝试连接	仍然尝试连接	Try connecting anyway	仍然嘗試連接	それでも接続を試す
 course2md 正从一份临时副本运行（macOS 对刚下载、尚未移动的应用会这样做），给它的权限在下次打开时不会保留。请先退出 course2md，在访达中把它从“下载”等位置拖到“应用程序”文件夹，再从“应用程序”打开，然后回到这里。	course2md 正从一份临时副本运行（macOS 对刚下载、尚未移动的应用会这样做），给它的权限在下次打开时不会保留。请先退出 course2md，在访达中把它从“下载”等位置拖到“应用程序”文件夹，再从“应用程序”打开，然后回到这里。	course2md is running from a temporary copy (macOS does this for an app just downloaded and not yet moved), and access given to it will not last to the next launch. Quit course2md, drag it in Finder from Downloads (or wherever it is) into the Applications folder, open it from Applications, then come back here.	course2md 正從一份暫時副本執行（macOS 對剛下載、尚未移動的 App 會這樣做），給它的權限在下次開啟時不會保留。請先結束 course2md，在 Finder 中把它從「下載項目」等位置拖到「應用程式」檔案夾，再從「應用程式」開啟，然後回到這裡。	course2md は一時的なコピーから実行されています（ダウンロード直後でまだ移動していない App に macOS がこうします）。このコピーに与えた権限は次回起動時に残りません。course2md を終了し、Finder で「ダウンロード」などから「アプリケーション」フォルダへドラッグしてから「アプリケーション」で開き、ここに戻ってください。
 course2md 正从磁盘映像运行，还没有安装。请先退出 course2md，在访达中把它拖到“应用程序”文件夹，再从“应用程序”打开，然后回到这里。	course2md 正从磁盘映像运行，还没有安装。请先退出 course2md，在访达中把它拖到“应用程序”文件夹，再从“应用程序”打开，然后回到这里。	course2md is running from a disk image and is not installed yet. Quit course2md, drag it in Finder into the Applications folder, open it from Applications, then come back here.	course2md 正從磁碟映像檔執行，還沒有安裝。請先結束 course2md，在 Finder 中把它拖到「應用程式」檔案夾，再從「應用程式」開啟，然後回到這裡。	course2md はディスクイメージから実行されていて、まだインストールされていません。course2md を終了し、Finder で「アプリケーション」フォルダへドラッグしてから「アプリケーション」で開き、ここに戻ってください。
+待确认的请求不属于笔记中可补做的部分，请调整并生成新版	待确认的请求不属于笔记中可补做的部分，请调整并生成新版	The unconfirmed requests don't belong to a part of the note that can be redone. Adjust and create a new version instead.	待確認的請求不屬於筆記中可補做的部分，請調整並產生新版	未確認のリクエストは、ノートの再処理できる部分に属していません。調整して新しい版を作成してください。
+待确认请求所属的部分已经完成，无需重新发送	待确认请求所属的部分已经完成，无需重新发送	The part these unconfirmed requests belong to is already complete; nothing needs to be resent	待確認請求所屬的部分已經完成，無需重新傳送	未確認のリクエストが属する部分はすでに完了しているため、再送信の必要はありません
+重试 AI 翻译	重试 AI 翻译	Retry AI translation	重試 AI 翻譯	AI翻訳を再試行する
+AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not confirmed	AI 翻譯結果未確認	AI翻訳の結果は未確認
+翻译	翻译	Translation	翻譯	翻訳
+校对后有变化的段落会重新翻译	校对后有变化的段落会重新翻译	Paragraphs that change in proofreading are translated again	校對後有變化的段落會重新翻譯	校正で変わった段落は再翻訳されます
+还会生成此前因此未能开始的摘要	还会生成此前因此未能开始的摘要	The summary these requests kept from starting is also generated	還會產生此前因此未能開始的摘要	これらのリクエストのために開始できなかった要約も生成されます
+{}未完成的 {} 段都会发送，包括以上内容	{}未完成的 {} 段都会发送，包括以上内容	{}: all {} unfinished paragraphs are sent, including the requests above	{}未完成的 {} 段都會傳送，包括以上內容	{}：未完了の {} 段落はすべて送信されます（上記を含む）
+还会翻译此前未能完成的 {} 段	还会翻译此前未能完成的 {} 段	The {} paragraphs not translated before are translated too	還會翻譯此前未能完成的 {} 段	以前に翻訳できなかった {} 段落も翻訳されます
+还会生成此前未能开始的翻译	还会生成此前未能开始的翻译	The translation that could not start before is made too	還會產生此前未能開始的翻譯	以前に開始できなかった翻訳も作成されます
