@@ -64,7 +64,7 @@ pub fn execution_request(
         schema: 1,
         operation: task.plan.operation.clone(),
         task_id: task.id.clone(),
-        version_id: task.id.clone(),
+        version_id: None,
         course_dir: location.root.join(&course_id),
         course_id,
         source,
