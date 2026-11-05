@@ -1000,13 +1000,17 @@ impl TasksPage {
             // A running title already says what is being generated; the chip only
             // carries the state.
             let generating = task.state == TaskState::Running && task.intent == Intent::Run;
-            status_chip(task_status_kind(task.state)).child(
-                if generating && matches!(place, CardPlace::Open { .. }) {
-                    course2md::tr!("处理中").to_owned()
-                } else {
-                    task_status_label(task)
-                },
-            )
+            // A task whose note another replaced is history, not a success.
+            status_chip(if task.replaced_by.is_some() {
+                StatusKind::Neutral
+            } else {
+                task_status_kind(task.state)
+            })
+            .child(if generating && matches!(place, CardPlace::Open { .. }) {
+                course2md::tr!("处理中").to_owned()
+            } else {
+                task_status_label(task)
+            })
         });
         let context_menu = self.task_menu(task, cx);
         // The running card's progress and actions stay in its text column.
@@ -1134,7 +1138,14 @@ impl TasksPage {
                             .child(scale.support(
                                 SharedString::from(format!("task-row-place-{id}")),
                                 self.task_destination(task, cx),
-                            )),
+                            ))
+                            // A consequence worth seeing without opening the row.
+                            .children(task_kept_edits(task).map(|text| {
+                                scale.support(
+                                    SharedString::from(format!("task-row-kept-edits-{id}")),
+                                    text,
+                                )
+                            })),
                     )
                     .child(
                         h_flex()
@@ -1693,15 +1704,22 @@ impl TasksPage {
                         .whitespace_normal()
                     }),
             )
-            .children(consequence.map(|consequence| {
-                accessible_text(
-                    SharedString::from(format!("task-consequence-{id}")),
-                    consequence,
-                )
-                .text_size(TEXT_AUX)
-                .text_color(color(ColorRole::ON_SURFACE_VARIANT))
-                .whitespace_normal()
-            }))
+            .children(
+                consequence
+                    .map(|text| ("consequence", text))
+                    .into_iter()
+                    .chain(
+                        task_kept_edits(task)
+                            .filter(|_| !row)
+                            .map(|text| ("kept-edits", text)),
+                    )
+                    .map(|(kind, text)| {
+                        accessible_text(SharedString::from(format!("task-{kind}-{id}")), text)
+                            .text_size(TEXT_AUX)
+                            .text_color(color(ColorRole::ON_SURFACE_VARIANT))
+                            .whitespace_normal()
+                    }),
+            )
             .children(self.facts.models.get(&id).map(|preparation| {
                 let key = SharedString::from(format!("task-model-{id}"));
                 match preparation {
@@ -1780,6 +1798,9 @@ impl TasksPage {
         match action {
             TaskAction::Read => (tr!("阅读笔记"), symbols::menu_book(), false),
             TaskAction::OpenNoteFolder => (tr!("打开笔记保存位置"), symbols::folder_open(), false),
+            TaskAction::OpenRecoveryFolder => {
+                (tr!("打开需要处理的文件夹"), symbols::folder_open(), false)
+            }
             TaskAction::OpenExports => (tr!("打开导出位置"), symbols::folder_open(), false),
             TaskAction::OpenSource => (tr!("打开原视频"), symbols::open_in_new(), false),
             TaskAction::CopyLink => (tr!("复制视频链接"), symbols::content_copy(), false),
@@ -1999,6 +2020,7 @@ mod tests {
             artifact: None,
             unread: false,
             resend: Vec::new(),
+            replaced_by: None,
         }
     }
 }

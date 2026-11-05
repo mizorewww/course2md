@@ -571,12 +571,11 @@ mod tests {
     }
 
     #[test]
-    fn rebuild_only_resets_classification_and_names_are_shared_across_versions() {
+    fn rebuild_only_resets_classification_and_keeps_note_names() {
         let root = tempfile::tempdir().unwrap();
         let course = root.path().join("course");
-        std::fs::create_dir_all(course.join("versions/a")).unwrap();
-        std::fs::create_dir_all(course.join("versions/b")).unwrap();
-        std::fs::write(course.join("versions/a/course.md"), "old content").unwrap();
+        std::fs::create_dir_all(&course).unwrap();
+        std::fs::write(course.join("course.md"), "old content").unwrap();
         std::fs::write(root.path().join(FILE), "damaged without backup").unwrap();
         rename_course(root.path(), &course, " Shared name ").unwrap();
         assert!(!recovery(root.path()).unwrap().unwrap().has_backup);
@@ -587,7 +586,7 @@ mod tests {
             Some("Shared name")
         );
         assert_eq!(
-            std::fs::read_to_string(course.join("versions/a/course.md")).unwrap(),
+            std::fs::read_to_string(course.join("course.md")).unwrap(),
             "old content"
         );
         assert!(rename_course(root.path(), &course, " ").is_err());

@@ -360,27 +360,6 @@ impl TaskPlan {
     pub fn options(&self) -> ConversionOptions {
         ConversionOptions::from_config(&self.config)
     }
-    pub fn same_work(&self, other: &Self) -> bool {
-        if self.operation != other.operation {
-            return false;
-        }
-        if self.library_id != other.library_id
-            || self.source_id != other.source_id
-            || self.subtitle != other.subtitle
-            || self.asr_service != other.asr_service
-            || self.ai_service != other.ai_service
-        {
-            return false;
-        }
-        let mut left = public_config(&self.config);
-        let mut right = public_config(&other.config);
-        // Display and organization are not processing parameters.
-        left.defaults.out = None;
-        right.defaults.out = None;
-        left.desktop = Default::default();
-        right.desktop = Default::default();
-        left == right
-    }
 }
 
 pub use c2m_dispatch::dispatch::Intent;
@@ -433,6 +412,11 @@ pub struct TaskRecord {
     pub unread: bool,
     #[serde(default)]
     pub resend: Vec<String>,
+    /// The task whose note replaced this task's: its result is gone, and it never
+    /// runs or is repaired again. Its note was a version an older app kept, or another
+    /// task regenerated or repaired the note since.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replaced_by: Option<String>,
     /// The later attempt that replaced this one: the task whose `parent` this is.
     #[serde(skip)]
     pub handled_by: Option<String>,
@@ -505,7 +489,7 @@ impl TaskRecord {
                 .and_then(Component::parse)
                 .filter(|component| component.is_ai())
                 .context(c2m_i18n::tr!(
-                    "待确认的请求不属于笔记中可补做的部分，请调整并生成新版"
+                    "待确认的请求不属于笔记中可补做的部分，请调整后重新生成"
                 ))?;
             ensure!(
                 outcomes.is_some_and(|outcomes| {
@@ -621,12 +605,12 @@ impl TaskRecord {
         self.plan.source.relocate(old, new);
         relocate_config(&mut self.plan.config, old, new);
         if let c2m_engine::execution::Operation::Reprocess {
-            base_version_dir,
+            note_dir,
             prior_work_dir,
             ..
         } = &mut self.plan.operation
         {
-            relocate_path(base_version_dir, old, new);
+            relocate_path(note_dir, old, new);
             if let Some(path) = prior_work_dir {
                 relocate_path(path, old, new);
             }
@@ -652,35 +636,30 @@ impl TaskRecord {
                 if !components.is_empty() && components.iter().all(|part| *part == Component::Exports)
         )
     }
+
+    /// The task whose note this task's result is: its own, or for one that only
+    /// wrote exports, the task whose note it wrote them into.
+    pub fn note_owner(&self) -> &str {
+        match &self.plan.operation {
+            c2m_engine::execution::Operation::Reprocess { base_task_id, .. }
+                if self.exports_only() =>
+            {
+                base_task_id
+            }
+            _ => &self.id,
+        }
+    }
 }
 
-/// Export publication has two destinations. Derive them from the frozen task
-/// and current library location, so moving a library needs no new path record.
+/// A task's exports are in its note's `exports/`. Derived from the frozen task and
+/// the current library location, so moving a library needs no new path record.
 fn task_export_directory(task: &TaskRecord, location: &LibraryLocation) -> Option<PathBuf> {
-    if task.plan.library_id != location.id {
-        return None;
-    }
-    if task.exports_only() {
-        let course = crate::workspace::course_dir_name(&task.plan.source_id);
-        let c2m_engine::execution::Operation::Reprocess {
-            base_version_dir, ..
-        } = &task.plan.operation
-        else {
-            return None;
-        };
-        Some(
-            location
-                .root
-                .join(course)
-                .join("exports")
-                .join(base_version_dir.file_name()?)
-                .join(&task.id),
-        )
-    } else {
-        task.artifact
-            .as_ref()
-            .map(|version| version.join("exports"))
-    }
+    (task.plan.library_id == location.id).then(|| task_note(task, location).join("exports"))
+}
+
+/// The note a task writes: the folder its source names in its library.
+pub fn task_note(task: &TaskRecord, location: &LibraryLocation) -> PathBuf {
+    location.root.join(course_dir_name(&task.plan.source_id))
 }
 
 /// No filesystem access: rendering can offer the exact successful outputs from
@@ -842,11 +821,22 @@ impl State {
         if self.reconciling {
             return None;
         }
+        // A worker from an earlier session that still runs holds its note: a task
+        // for the same note waits for it instead of stopping at its claim.
+        let note_held = |task: &TaskRecord| {
+            self.tasks.iter().any(|other| {
+                other.held
+                    && other.id != task.id
+                    && other.plan.library_id == task.plan.library_id
+                    && other.plan.source_id == task.plan.source_id
+            })
+        };
         self.tasks.iter().find(|t| {
             t.state == TaskState::Queued
                 && t.intent == Intent::Run
                 && t.handled_by.is_none()
                 && !t.held
+                && !note_held(t)
         })
     }
 
@@ -982,15 +972,27 @@ impl State {
         Ok(())
     }
 
-    /// An unfinished task already doing `plan`'s work, which `enqueue` would return
-    /// instead of a new one. The attempt `parent` names, the one `plan` replaces, is
-    /// not a duplicate of it.
+    /// Task `by` has replaced the note in `note`: the other tasks whose result it was
+    /// are replaced, as the next opening would find them.
+    pub fn note_replaced(&mut self, note: &Path, by: &str) {
+        for task in &mut self.tasks {
+            if task.id != by && task.artifact.as_deref() == Some(note) {
+                apply_artifact(task, ArtifactFact::Replaced { by: by.to_owned() });
+            }
+        }
+    }
+
+    /// The unfinished task already writing `plan`'s note, which `enqueue` returns
+    /// instead of a new one: a note has one unfinished task at a time, since each
+    /// replaces the note the last one left. The attempt `parent` names, the one
+    /// `plan` replaces, is not one.
     pub fn duplicate_of(&self, plan: &TaskPlan, parent: Option<&str>) -> Option<&TaskRecord> {
         self.tasks.iter().find(|t| {
             !t.state.finished()
                 && t.handled_by.is_none()
                 && parent != Some(t.id.as_str())
-                && t.plan.same_work(plan)
+                && t.plan.library_id == plan.library_id
+                && t.plan.source_id == plan.source_id
         })
     }
 
@@ -1039,6 +1041,7 @@ impl State {
             artifact: None,
             unread: false,
             resend: Vec::new(),
+            replaced_by: None,
             // A new task has said nothing yet.
             events: JobEvents {
                 loaded: true,
@@ -1118,7 +1121,7 @@ impl State {
         let task = self.task_mut(id).context(c2m_i18n::tr!("任务记录不存在"))?;
         ensure!(
             !task.state.finished(),
-            c2m_i18n::tr!("这项任务已结束，可在任务卡中补做或生成新版")
+            c2m_i18n::tr!("这项任务已结束，可在任务卡中补做或重新生成")
         );
         ensure!(
             task.handled_by.is_none(),
@@ -1266,14 +1269,25 @@ impl State {
             ) && !original.held,
             c2m_i18n::tr!("当前任务仍在处理，请先等候当前步骤结束")
         );
+        ensure!(
+            original.replaced_by.is_none(),
+            c2m_i18n::tr!("这份笔记已被之后的任务更新，请从最新的任务补做")
+        );
         let base = original
             .artifact
             .clone()
             .context(c2m_i18n::tr!("此任务尚无可补做的笔记正文"))?;
-        let manifest = c2m_artifact::artifact::read_manifest(&base.join("manifest.json"))?;
+        let manifest = c2m_artifact::artifact::note_manifest(&base)?
+            .context(c2m_i18n::tr!("此任务尚无可补做的笔记正文"))?;
         ensure!(
             manifest.source_id == original.plan.source_id,
             c2m_i18n::tr!("笔记来源与任务不匹配")
+        );
+        // A repair redoes what this task's note lacks; a note another task has
+        // replaced since lacks other things.
+        ensure!(
+            manifest.task_id == original.note_owner(),
+            c2m_i18n::tr!("这份笔记已被之后的任务更新，请从最新的任务补做")
         );
         if !resend.is_empty() {
             reconcile_receipts(&mut original)?;
@@ -1358,7 +1372,8 @@ impl State {
             plan.config.defaults.formats = Some(formats);
         }
         plan.operation = c2m_engine::execution::Operation::Reprocess {
-            base_version_dir: base,
+            note_dir: base,
+            base_task_id: manifest.task_id.clone(),
             components,
             prior_work_dir: Some(original.work_dir),
         };
@@ -1464,6 +1479,21 @@ pub struct Workspace {
     /// A reconciliation was handed out and its findings are not applied yet. While
     /// it runs no held check is due: its result is what the next check waits for.
     checking: bool,
+    /// Libraries whose courses saved as versions are not all flattened yet; see
+    /// `crate::migrate`. Every library is, once, when the record opens.
+    migration_due: BTreeSet<String>,
+    /// What the last migration means for the person: once older versions were
+    /// removed, the notice; whether the library must be read again.
+    migrated: Option<MigrationOutcome>,
+}
+
+/// What a migration applied by `Workspace::apply_reconciliation` changed.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MigrationOutcome {
+    /// Notes changed on disk: the library listing is out of date.
+    pub notes_changed: bool,
+    /// Older versions were removed: the notice to show once.
+    pub notice: Option<String>,
 }
 
 /// How often a task held by a worker from an earlier session is checked again.
@@ -1703,10 +1733,21 @@ pub(crate) fn create_library_marker(location: &LibraryLocation) -> Result<()> {
 #[derive(Clone)]
 enum ArtifactFact {
     Nothing,
+    /// The task published its note, which the record does not know yet.
     Published {
-        version: PathBuf,
+        note: PathBuf,
         outcomes: Box<c2m_artifact::artifact::Outcomes>,
         partial: bool,
+    },
+    /// The task's result is still its note, recorded elsewhere: a version folder an
+    /// older app kept, since flattened into the note.
+    Moved {
+        note: PathBuf,
+    },
+    /// Another task's note replaced this task's, or the note this task was to
+    /// repair: it never runs again.
+    Replaced {
+        by: String,
     },
     Exports {
         base: PathBuf,
@@ -1714,69 +1755,111 @@ enum ArtifactFact {
     },
 }
 
+/// The task the note in `note` is the result of, read without checking its files.
+/// `None` when there is no note this app reads, or it is still saved as versions.
+fn note_task(note: &Path) -> Option<String> {
+    if c2m_artifact::artifact::is_legacy(note) {
+        return None;
+    }
+    c2m_artifact::artifact::note_manifest(note)
+        .ok()
+        .flatten()
+        .map(|manifest| manifest.task_id)
+}
+
 /// The published result of a task, if any. Reads and hashes files; the
 /// result is applied by `apply_artifact`.
 fn probe_artifact(task: &TaskRecord, location: &LibraryLocation) -> Result<ArtifactFact> {
+    let note = task_note(task, location);
     if task.artifact.is_some() && !task.exports_only() {
-        return Ok(ArtifactFact::Nothing);
+        // Finished: only whose note it is now is read, never hashed.
+        return Ok(match note_task(&note) {
+            Some(owner) if owner == task.id => {
+                if task.artifact.as_ref() == Some(&note) {
+                    ArtifactFact::Nothing
+                } else {
+                    ArtifactFact::Moved { note }
+                }
+            }
+            Some(owner) => ArtifactFact::Replaced { by: owner },
+            None => ArtifactFact::Nothing,
+        });
     }
-    let course = course_dir_name(&task.plan.source_id);
-    let version = location.root.join(&course).join("versions").join(&task.id);
-    if version.join("manifest.json").is_file() {
-        let manifest = c2m_artifact::artifact::read_manifest(&version.join("manifest.json"))?;
+    // The note is this task's result while its manifest names the task.
+    if !task.exports_only()
+        && let Some(manifest) = c2m_artifact::artifact::published_by(&note, &task.id)?
+    {
         ensure!(
-            manifest.task_id == task.id && manifest.source_id == task.plan.source_id,
+            manifest.source_id == task.plan.source_id,
             c2m_i18n::tr!("已发布笔记与任务身份不匹配，原文件已保留")
         );
-        c2m_artifact::artifact::validate_version(&version, &manifest)?;
         return Ok(ArtifactFact::Published {
-            version,
+            note,
             outcomes: Box::new(manifest.outcomes),
             partial: manifest.partial,
         });
     }
     if let c2m_engine::execution::Operation::Reprocess {
-        base_version_dir,
-        components,
+        note_dir,
+        base_task_id,
         ..
     } = &task.plan.operation
-        && components
-            .iter()
-            .all(|component| *component == Component::Exports)
-        && task.work_dir.join("export-result.json").is_file()
     {
-        #[derive(serde::Deserialize)]
-        struct ExportResult {
-            #[serde(default)]
-            outcomes: BTreeMap<String, c2m_artifact::artifact::Outcome>,
+        // A repair, or exports, of a note another task has replaced since: running
+        // it would stop before any request, every time.
+        if let Some(owner) =
+            note_task(&note).filter(|owner| owner != base_task_id && *owner != task.id)
+        {
+            return Ok(ArtifactFact::Replaced { by: owner });
         }
-        let mut record: ExportResult =
-            serde_json::from_slice(&std::fs::read(task.work_dir.join("export-result.json"))?)?;
-        ensure!(
-            !record.outcomes.is_empty(),
-            c2m_i18n::tr!("导出结果记录为空")
-        );
-        let export_directory = task_export_directory(task, location)
-            .context(c2m_i18n::tr!("导出位置与任务记录不匹配"))?;
-        for (format, outcome) in &mut record.outcomes {
-            if outcome.status == c2m_artifact::artifact::Status::Succeeded {
-                let Some(format) = output_format(format) else {
-                    continue;
-                };
-                let expected = export_directory.join(c2m_artifact::portable::file_name(format));
-                if !expected.is_file() {
-                    *outcome = c2m_artifact::artifact::Outcome::failed(c2m_i18n::tr!(
-                        "导出文件已移动或无法读取，可以重新导出"
-                    ));
+        if task.exports_only() && task.work_dir.join("export-result.json").is_file() {
+            #[derive(serde::Deserialize)]
+            struct ExportResult {
+                #[serde(default)]
+                outcomes: BTreeMap<String, c2m_artifact::artifact::Outcome>,
+            }
+            let mut record: ExportResult =
+                serde_json::from_slice(&std::fs::read(task.work_dir.join("export-result.json"))?)?;
+            ensure!(
+                !record.outcomes.is_empty(),
+                c2m_i18n::tr!("导出结果记录为空")
+            );
+            let export_directory = task_export_directory(task, location)
+                .context(c2m_i18n::tr!("导出位置与任务记录不匹配"))?;
+            for (format, outcome) in &mut record.outcomes {
+                if outcome.status == c2m_artifact::artifact::Status::Succeeded {
+                    let Some(format) = output_format(format) else {
+                        continue;
+                    };
+                    let expected = export_directory.join(c2m_artifact::portable::file_name(format));
+                    if !expected.is_file() {
+                        *outcome = c2m_artifact::artifact::Outcome::failed(c2m_i18n::tr!(
+                            "导出文件已移动或无法读取，可以重新导出"
+                        ));
+                    }
                 }
             }
+            return Ok(ArtifactFact::Exports {
+                base: note_dir.clone(),
+                outcomes: record.outcomes,
+            });
         }
-        return Ok(ArtifactFact::Exports {
-            base: base_version_dir.clone(),
-            outcomes: record.outcomes,
-        });
+        // Exports an older app wrote beside a version, now in the flat note.
+        if task
+            .artifact
+            .as_ref()
+            .is_some_and(|artifact| *artifact != note)
+            && note_task(&note).as_ref() == Some(base_task_id)
+        {
+            return Ok(ArtifactFact::Moved { note });
+        }
     }
     Ok(ArtifactFact::Nothing)
+}
+
+/// Why a task stopped for good when another task's note replaced the one it was for.
+pub fn replaced_message() -> &'static str {
+    c2m_i18n::tr!("笔记已被另一项任务更新，这项任务不会再运行")
 }
 
 fn apply_artifact(task: &mut TaskRecord, fact: ArtifactFact) {
@@ -1785,11 +1868,11 @@ fn apply_artifact(task: &mut TaskRecord, fact: ArtifactFact) {
         // A result recorded meanwhile is newer than what startup found.
         ArtifactFact::Published { .. } if task.artifact.is_some() && !task.exports_only() => {}
         ArtifactFact::Published {
-            version,
+            note,
             outcomes,
             partial,
         } => {
-            task.artifact = Some(version);
+            task.artifact = Some(note);
             task.events.outcomes = Some(*outcomes);
             task.state = if partial {
                 TaskState::Partial
@@ -1798,6 +1881,18 @@ fn apply_artifact(task: &mut TaskRecord, fact: ArtifactFact) {
             };
             task.events.error = None;
             task.unread = true;
+        }
+        ArtifactFact::Moved { note } => task.artifact = Some(note),
+        ArtifactFact::Replaced { by } => {
+            task.replaced_by = Some(by);
+            task.artifact = None;
+            task.resend.clear();
+            if !task.state.finished() {
+                task.intent = Intent::Cancel;
+                task.state = TaskState::Cancelled;
+                task.events.error = Some(replaced_message().into());
+                task.unread = true;
+            }
         }
         ArtifactFact::Exports { base, outcomes } => {
             let next_state = if outcomes.values().any(failed_outcome) {
@@ -2003,12 +2098,16 @@ impl TaskFacts {
 pub struct Reconciliation {
     workspace: u64,
     tasks: Vec<(TaskRecord, Option<LibraryLocation>)>,
+    /// Libraries to migrate first, with the notes and work folders of their
+    /// unfinished tasks.
+    migrations: Vec<(LibraryLocation, Vec<(PathBuf, PathBuf)>)>,
 }
 
 /// The findings of a [`Reconciliation`], applied by `Workspace::apply_reconciliation`.
 pub struct Reconciled {
     workspace: u64,
     facts: Vec<(String, TaskFacts)>,
+    migrations: Vec<crate::migrate::Migration>,
 }
 
 fn reconcile_task(task: &TaskRecord, location: &LibraryLocation) -> Result<TaskFacts> {
@@ -2017,14 +2116,18 @@ fn reconcile_task(task: &TaskRecord, location: &LibraryLocation) -> Result<TaskF
     let uncertain = uncertain_requests(task)?;
     let events = read_task_events(task)?;
     store_task_subtitles(task)?;
-    // A task that stopped before reporting its result still has the published note's.
+    // A task that stopped before reporting its result still has its note's, while
+    // the note is still its own.
     let outcomes = task
         .artifact
         .as_ref()
         .filter(|_| events.outcomes.is_none() && !task.exports_only())
-        .and_then(|version| {
-            c2m_artifact::artifact::read_manifest(&version.join("manifest.json")).ok()
+        .and_then(|_| {
+            c2m_artifact::artifact::note_manifest(&task_note(task, location))
+                .ok()
+                .flatten()
         })
+        .filter(|manifest| manifest.task_id == task.id)
         .map(|manifest| Box::new(manifest.outcomes));
     // Catches up on writes made while disconnected. A failure here says nothing about
     // the receipts just read, so it must not turn an uncertain task into a failed one.
@@ -2046,8 +2149,25 @@ fn reconcile_task(task: &TaskRecord, location: &LibraryLocation) -> Result<TaskF
 impl Reconciliation {
     /// Blocking: run through `desktop_prefs::spawn_blocking_io`.
     pub fn run(self) -> Reconciled {
+        // Before the tasks are read: a task's record follows from the flat note.
+        let migrations = self
+            .migrations
+            .iter()
+            .filter(|(location, _)| check_library(location).is_ok())
+            .map(|(location, writers)| {
+                // A worker from an earlier session may be an older app's, which
+                // writes versions: its course waits until it lets go.
+                let busy: Vec<PathBuf> = writers
+                    .iter()
+                    .filter(|(_, work_dir)| worker_holds(work_dir))
+                    .map(|(note, _)| note.clone())
+                    .collect();
+                crate::migrate::migrate_library(location, &busy)
+            })
+            .collect();
         Reconciled {
             workspace: self.workspace,
+            migrations,
             facts: self
                 .tasks
                 .into_iter()
@@ -2367,7 +2487,6 @@ impl Workspace {
         state.retain_current_input();
         state.recover();
         hydrate_draft_subtitles(&mut state, &path);
-        state.reconciling = !state.tasks.is_empty();
         c2m_core::fsio::atomic_write(&path, &serde_json::to_vec(&state)?)?;
         let recovery = c2m_i18n::tr!(
             "已重建 {} 项任务记录，未启动处理。原始记录保存在 {}。{}",
@@ -2384,14 +2503,19 @@ impl Workspace {
 
     fn assemble(state: State, recovery: Option<String>, path: PathBuf) -> Self {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let mut state = state;
+        // The startup checks also migrate every library: nothing is dispatched first.
+        state.reconciling = true;
         Self {
-            state,
             recovery,
             path,
             library_writes: LibraryWrites::default(),
             identity: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             held_checked: None,
             checking: false,
+            migration_due: state.libraries.iter().map(|l| l.id.clone()).collect(),
+            migrated: None,
+            state,
         }
     }
 
@@ -2489,7 +2613,6 @@ impl Workspace {
             }
         }
         hydrate_draft_subtitles(&mut state, &path);
-        state.reconciling = !state.tasks.is_empty();
         Ok(Self::assemble(state, recovery, path))
     }
 
@@ -2510,8 +2633,25 @@ impl Workspace {
             return None;
         }
         self.checking = true;
+        let migrations = self
+            .state
+            .libraries
+            .iter()
+            .filter(|library| self.migration_due.contains(&library.id))
+            .map(|library| {
+                let writers = self
+                    .state
+                    .tasks
+                    .iter()
+                    .filter(|task| !task.state.finished() && task.plan.library_id == library.id)
+                    .map(|task| (task_note(task, library), task.work_dir.clone()))
+                    .collect();
+                (library.clone(), writers)
+            })
+            .collect();
         Some(Reconciliation {
             workspace: self.identity,
+            migrations,
             tasks: self
                 .state
                 .tasks
@@ -2540,13 +2680,20 @@ impl Workspace {
         })
     }
 
-    /// Tasks of a library that has come back still have to read their events.
+    /// Tasks of a library that has come back still have to read their events, and
+    /// the library may still have to be migrated.
     pub fn recheck_library(&mut self, library_id: &str) {
-        self.state.reconciling |= self
-            .state
-            .tasks
-            .iter()
-            .any(|task| !task.events.loaded && task.plan.library_id == library_id);
+        self.state.reconciling |= self.migration_due.contains(library_id)
+            || self
+                .state
+                .tasks
+                .iter()
+                .any(|task| !task.events.loaded && task.plan.library_id == library_id);
+    }
+
+    /// What the last migration changed, once.
+    pub fn take_migrated(&mut self) -> Option<MigrationOutcome> {
+        self.migrated.take()
     }
 
     /// Applies the findings to the current records (which may have changed meanwhile)
@@ -2556,7 +2703,15 @@ impl Workspace {
         if reconciled.workspace != self.identity {
             return Ok(());
         }
-        fn apply(state: &mut State, facts: Vec<(String, TaskFacts)>) {
+        fn apply(
+            state: &mut State,
+            facts: Vec<(String, TaskFacts)>,
+            migrations: &[crate::migrate::Migration],
+        ) {
+            for migration in migrations {
+                crate::migrate::rekey_positions(&mut state.positions, &migration.notes);
+            }
+            let checked: BTreeSet<String> = facts.iter().map(|(id, _)| id.clone()).collect();
             for (id, facts) in facts {
                 if let Some(task) = state.task_mut(&id)
                     && !matches!(task.state, TaskState::Running | TaskState::Pausing)
@@ -2565,6 +2720,18 @@ impl Workspace {
                 }
             }
             state.reconciling = false;
+            // A course flattened once its worker let go: the library's other tasks
+            // were read before, and are read again for the note it is now.
+            for migration in migrations.iter().filter(|m| m.flattened > 0) {
+                for task in state.tasks.iter_mut().filter(|task| {
+                    task.plan.library_id == migration.library_id
+                        && !checked.contains(&task.id)
+                        && !matches!(task.state, TaskState::Running | TaskState::Pausing)
+                }) {
+                    task.events.loaded = false;
+                    state.reconciling = true;
+                }
+            }
         }
         self.held_checked = Some(std::time::Instant::now());
         self.checking = false;
@@ -2582,13 +2749,41 @@ impl Workspace {
             })
             .map(|(id, _)| id.clone())
             .collect();
+        let migrations = reconciled.migrations;
+        for migration in &migrations {
+            if migration.ran && migration.deferred.is_empty() {
+                self.migration_due.remove(&migration.library_id);
+            }
+        }
+        if migrations.iter().any(|migration| migration.flattened > 0) {
+            let outcome = self.migrated.get_or_insert_with(Default::default);
+            outcome.notes_changed = true;
+            if migrations
+                .iter()
+                .any(|migration| migration.removed_versions > 0)
+            {
+                outcome.notice = Some(crate::migrate::removed_versions_notice().into());
+            }
+        }
+        // Nothing to record: a library migrated with no tasks and no positions to move.
+        let mut positions = self.state.positions.clone();
+        let moved = migrations
+            .iter()
+            .any(|migration| crate::migrate::rekey_positions(&mut positions, &migration.notes));
+        if reconciled.facts.is_empty()
+            && !moved
+            && migrations.iter().all(|migration| migration.flattened == 0)
+        {
+            self.state.reconciling = false;
+            return Ok(());
+        }
         let mut facts = Some(reconciled.facts);
         let result = self.transaction(|state| {
-            apply(state, facts.take().unwrap_or_default());
+            apply(state, facts.take().unwrap_or_default(), &migrations);
             Ok(())
         });
         if let Some(facts) = facts.take().filter(|_| result.is_err()) {
-            apply(&mut self.state, facts);
+            apply(&mut self.state, facts, &migrations);
         }
         self.queue_mirrors(
             self.state
@@ -2834,8 +3029,12 @@ impl Workspace {
                 state.default_library = id.clone();
             }
             state.adopt_tasks(tasks);
-            state.reconciling |= state.tasks.iter().any(|task| !task.events.loaded);
+            // A library added is migrated like one opened.
+            state.reconciling = true;
             Ok(id)
+        })
+        .inspect(|id| {
+            self.migration_due.insert(id.clone());
         })
     }
 
@@ -4197,6 +4396,35 @@ mod tests {
         assert_eq!(ws.register_prepared_library(&prepared).unwrap(), id);
     }
 
+    /// A worker from an earlier session still holds its note: another task for the
+    /// same note waits rather than start and stop at the note's claim.
+    #[test]
+    fn a_task_for_a_note_an_earlier_worker_holds_waits_for_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        ws.state.reconciling = false;
+        let library = ws.state.default_library.clone();
+        let (first, _) = ws.state.enqueue(plan(&library), None).unwrap();
+        let mut second = ws.state.task(&first).unwrap().clone();
+        second.id = "second".into();
+        ws.state.tasks.push(second);
+        let mut other = ws.state.task(&first).unwrap().clone();
+        other.id = "other-video".into();
+        other.plan.source_id = "video-b".into();
+        ws.state.tasks.push(other);
+        let held = ws.state.task_mut(&first).unwrap();
+        held.held = true;
+        held.state = TaskState::Running;
+        // Only the task for another note may start.
+        assert_eq!(ws.state.next_task().unwrap().id, "other-video");
+        ws.state.task_mut("other-video").unwrap().state = TaskState::Complete;
+        assert!(ws.state.next_task().is_none());
+        let released = ws.state.task_mut(&first).unwrap();
+        released.held = false;
+        released.state = TaskState::Complete;
+        assert_eq!(ws.state.next_task().unwrap().id, "second");
+    }
+
     fn test_workspace(dir: &Path) -> Workspace {
         Workspace::open_at_inline(
             dir.join("workspace.json"),
@@ -4237,7 +4465,7 @@ mod tests {
         let course_id = crate::workspace::course_dir_name(&task.plan.source_id);
         let target = artifact::Target {
             task_id: task.id.clone(),
-            version_id: task.id.clone(),
+            replaces: None,
             source_id: task.plan.source_id.clone(),
             course_id: course_id.clone(),
             course_dir: state
@@ -4276,7 +4504,7 @@ mod tests {
             outcomes,
         )
         .unwrap();
-        target.version_dir()
+        target.course_dir
     }
 
     fn write_unknown(task: &TaskRecord, attempt: u32) -> String {
@@ -4639,14 +4867,15 @@ mod tests {
         let child = ws.state.task(&next).unwrap();
         let c2m_engine::execution::Operation::Reprocess {
             components,
-            base_version_dir,
+            note_dir,
             prior_work_dir,
+            ..
         } = &child.plan.operation
         else {
             panic!("expected component recovery");
         };
         assert_eq!(components, &[Component::Proofreading, Component::Summary]);
-        assert_eq!(Some(base_version_dir), original.artifact.as_ref());
+        assert_eq!(Some(note_dir), original.artifact.as_ref());
         assert_eq!(prior_work_dir.as_ref(), Some(&original.work_dir));
         assert!(child.plan.config.llm.enabled && child.plan.config.llm.summarize);
         assert!(child.plan.options().llm && child.plan.options().summarize);
@@ -4967,8 +5196,8 @@ mod tests {
         assert!(!child.plan.config.llm.summarize);
         assert!(matches!(
             &child.plan.operation,
-            c2m_engine::execution::Operation::Reprocess { base_version_dir, components, .. }
-                if base_version_dir == &version && components == &[Component::Proofreading]
+            c2m_engine::execution::Operation::Reprocess { note_dir, components, .. }
+                if note_dir == &version && components == &[Component::Proofreading]
         ));
         let again = ws
             .state
@@ -5232,7 +5461,6 @@ mod tests {
             .join("exports")
             .join(portable::file_name(OutputFormat::Md));
         let old_bytes = std::fs::read(&old_markdown).unwrap();
-        let manifest_bytes = std::fs::read(base.join("manifest.json")).unwrap();
         let next = ws
             .state
             .reprocess(&id, vec![Component::Exports], vec![])
@@ -5245,7 +5473,13 @@ mod tests {
         let output = task_export_directory(child, location)
             .unwrap()
             .join(portable::file_name(OutputFormat::Html));
-        portable::export(&base, OutputFormat::Html, &output).unwrap();
+        // The engine writes the export into the note and lists it as the note's own.
+        let scratch = dir.path().join("scratch.html");
+        portable::export(&base, OutputFormat::Html, &scratch).unwrap();
+        let written =
+            artifact::write_export(&base, OutputFormat::Html, &std::fs::read(&scratch).unwrap())
+                .unwrap();
+        assert_eq!(written.path, output);
         std::fs::write(
             child.work_dir.join("export-result.json"),
             serde_json::to_vec(&serde_json::json!({
@@ -5264,7 +5498,7 @@ mod tests {
         assert_eq!(task.artifact.as_ref(), Some(&base));
         assert_eq!(task_export_files(task, location), vec![output.clone()]);
         assert_eq!(available_task_export(task, location).unwrap(), output);
-        assert!(!output.starts_with(&base));
+        assert!(output.starts_with(&base));
         assert!(task.plan == next_plan);
         assert!(restored.state.task(&id).unwrap().plan == original_plan);
         assert!(restored.state.next_task().is_none());
@@ -5299,10 +5533,8 @@ mod tests {
             Some(vec![OutputFormat::Html])
         );
         assert_eq!(std::fs::read(old_markdown).unwrap(), old_bytes);
-        assert_eq!(
-            std::fs::read(base.join("manifest.json")).unwrap(),
-            manifest_bytes
-        );
+        // The note is still the original task's.
+        assert_eq!(artifact::note_manifest(&base).unwrap().unwrap().task_id, id);
         assert!(missing.state.task(&next).unwrap().plan == next_plan);
         assert!(missing.state.task(&id).unwrap().plan == original_plan);
     }
@@ -5358,5 +5590,497 @@ mod tests {
             .is_err()
         );
         assert_eq!(std::fs::read(ws.storage_path()).unwrap(), bytes);
+    }
+
+    /// Saves `task_id`'s note the way an older app did: as the version named after
+    /// the task in its course's `versions/`.
+    fn legacy_version_of(state: &State, task_id: &str, revision: u64) -> PathBuf {
+        let task = state.task(task_id).unwrap();
+        let location = state.library(&task.plan.library_id).unwrap();
+        let target = c2m_artifact::artifact::Target {
+            task_id: task.id.clone(),
+            course_id: course_dir_name(&task.plan.source_id),
+            source_id: task.plan.source_id.clone(),
+            course_dir: task_note(task, location),
+            replaces: None,
+        };
+        crate::notes::fixtures::legacy_version(
+            &target,
+            revision,
+            &[10.],
+            c2m_artifact::artifact::Outcomes {
+                transcript: c2m_artifact::artifact::Outcome::succeeded(),
+                ..Default::default()
+            },
+        )
+    }
+
+    /// A task that finished with `artifact` as its result.
+    fn finished_task(ws: &mut Workspace, artifact: Option<PathBuf>) -> String {
+        let library = ws.state.default_library.clone();
+        let (id, created) = ws.state.enqueue(plan(&library), None).unwrap();
+        assert!(created);
+        let task = ws.state.task_mut(&id).unwrap();
+        task.state = TaskState::Complete;
+        task.intent = Intent::Run;
+        task.artifact = artifact;
+        id
+    }
+
+    /// A course an older app saved with two versions, one per task: `a` (revision 1)
+    /// and `b` (revision 2), with each task's record pointing at its version, and
+    /// reading positions saved per version.
+    struct Versioned {
+        dir: tempfile::TempDir,
+        a: String,
+        b: String,
+        note: PathBuf,
+        course: String,
+    }
+
+    fn position(offset: f32) -> ReadingPosition {
+        ReadingPosition {
+            offset,
+            ..Default::default()
+        }
+    }
+
+    /// `pointed`: `current.json` names version `a`, the older one; otherwise it is
+    /// damaged.
+    fn versioned(pointed: bool) -> Versioned {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let a = finished_task(&mut ws, None);
+        let version_a = legacy_version_of(&ws.state, &a, 1);
+        ws.state.task_mut(&a).unwrap().artifact = Some(version_a.clone());
+        let b = finished_task(&mut ws, None);
+        let version_b = legacy_version_of(&ws.state, &b, 2);
+        ws.state.task_mut(&b).unwrap().artifact = Some(version_b);
+        let note = version_a.parent().unwrap().parent().unwrap().to_path_buf();
+        let course = course_dir_name("video-a");
+        if pointed {
+            crate::notes::fixtures::point_at(&note, &course, &a);
+        } else {
+            std::fs::write(note.join("current.json"), b"{damaged").unwrap();
+        }
+        for (version, tab, offset) in [(&a, 0, 1.), (&b, 0, 2.), (&a, 1, 3.)] {
+            ws.state
+                .positions
+                .insert(format!("{course}:{version}:{tab}"), position(offset));
+        }
+        ws.save().unwrap();
+        ws.library_writes.drain();
+        Versioned {
+            dir,
+            a,
+            b,
+            note,
+            course,
+        }
+    }
+
+    /// After the migration: one flat note, `kept`'s, and every record follows it.
+    fn assert_flat(ws: &Workspace, fixture: &Versioned, kept: &str, other: &str) {
+        let note = &fixture.note;
+        assert!(!c2m_artifact::artifact::is_legacy(note));
+        assert!(!note.join("versions").exists() && !note.join("current.json").exists());
+        let manifest = c2m_artifact::artifact::note_manifest(note)
+            .unwrap()
+            .unwrap();
+        assert_eq!(manifest.task_id, kept);
+        let kept = ws.state.task(kept).unwrap();
+        assert_eq!(kept.artifact.as_ref(), Some(note));
+        assert_eq!(kept.replaced_by, None);
+        assert_eq!(kept.state, TaskState::Complete);
+        // The other version was deleted: its task's result is gone.
+        let other = ws.state.task(other).unwrap();
+        assert_eq!(
+            other.replaced_by.as_deref(),
+            Some(manifest.task_id.as_str())
+        );
+        assert_eq!(other.artifact, None);
+        assert_eq!(other.state, TaskState::Complete);
+        assert!(ws.state.next_task().is_none());
+        assert!(!ws.state.reconciling);
+    }
+
+    #[test]
+    fn the_migration_keeps_the_version_the_pointer_names_and_rewrites_the_records() {
+        // The pointer names the older version.
+        let fixture = versioned(true);
+        let mut ws = test_workspace(fixture.dir.path());
+        assert_flat(&ws, &fixture, &fixture.a, &fixture.b);
+        let course = &fixture.course;
+        // Reading positions move to the note, the kept version's first.
+        let positions: Vec<_> = ws
+            .state
+            .positions
+            .iter()
+            .map(|(key, position)| (key.clone(), position.offset))
+            .collect();
+        assert_eq!(
+            positions,
+            [(format!("{course}:0"), 1.), (format!("{course}:1"), 3.)]
+        );
+        let migrated = ws.take_migrated().unwrap();
+        assert!(migrated.notes_changed);
+        assert_eq!(
+            migrated.notice.as_deref(),
+            Some(crate::migrate::removed_versions_notice())
+        );
+        assert!(ws.take_migrated().is_none());
+        // The rewritten records are saved, and a second opening has nothing to do.
+        let mut again = test_workspace(fixture.dir.path());
+        assert_flat(&again, &fixture, &fixture.a, &fixture.b);
+        assert!(again.take_migrated().is_none());
+        assert_eq!(again.state.positions, ws.state.positions);
+        // The kept note is listed; a repair of the replaced task is refused.
+        let scan = crate::notes::scan_library(&fixture.dir.path().join("library")).unwrap();
+        assert_eq!(scan.courses.len(), 1);
+        assert!(scan.issues.is_empty(), "{:?}", scan.issues);
+        assert!(
+            again
+                .state
+                .reprocess(&fixture.b, vec![Component::Exports], vec![])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_damaged_pointer_keeps_the_newest_intact_version() {
+        let fixture = versioned(false);
+        let ws = test_workspace(fixture.dir.path());
+        assert_flat(&ws, &fixture, &fixture.b, &fixture.a);
+        assert_eq!(
+            ws.state.positions[&format!("{}:0", fixture.course)].offset,
+            2.
+        );
+    }
+
+    /// Exports an older app saved beside the course (`exports/<version>/<task>/`)
+    /// join the note's own `exports/`, and the task that wrote them finds them there.
+    #[test]
+    fn exports_saved_beside_the_course_move_into_the_note_with_their_task() {
+        use c2m_config::config::OutputFormat;
+        let fixture = versioned(true);
+        let mut ws = Workspace::open_at(
+            fixture.dir.path().join("workspace.json"),
+            fixture.dir.path().join("library"),
+            Default::default(),
+        )
+        .unwrap();
+        let version_a = fixture.note.join("versions").join(&fixture.a);
+        let mut export = ws.state.task(&fixture.a).unwrap().clone();
+        export.id = "task-export".into();
+        export.created += 1;
+        export.plan.operation = serde_json::from_value(serde_json::json!({
+            "kind": "reprocess", "base_version_dir": version_a,
+            "components": ["exports"], "prior_work_dir": null,
+        }))
+        .unwrap();
+        export.artifact = Some(version_a.clone());
+        let html = c2m_artifact::portable::file_name(OutputFormat::Html);
+        let old = fixture
+            .note
+            .join("exports")
+            .join(&fixture.a)
+            .join(&export.id);
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join(html), b"<p>exported</p>").unwrap();
+        let work = fixture
+            .dir
+            .path()
+            .join("library/.course2md/work")
+            .join(&export.id);
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::write(
+            work.join("export-result.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "schema": 1, "outputs": [old.join(html)],
+                "outcomes": {"html": {"status": "succeeded"}},
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        ws.state.tasks.push(export);
+        ws.save().unwrap();
+        ws.library_writes.drain();
+        let ws = test_workspace(fixture.dir.path());
+        assert_flat(&ws, &fixture, &fixture.a, &fixture.b);
+        let export = ws.state.task("task-export").unwrap();
+        let location = ws.state.library(&export.plan.library_id).unwrap();
+        let moved = fixture.note.join("exports").join(html);
+        assert_eq!(std::fs::read(&moved).unwrap(), b"<p>exported</p>");
+        assert_eq!(export.artifact.as_ref(), Some(&fixture.note));
+        assert_eq!(export.replaced_by, None);
+        assert_eq!(task_export_files(export, location), vec![moved.clone()]);
+        assert_eq!(available_task_export(export, location).unwrap(), moved);
+    }
+
+    /// A crash after the course was flattened but before the records were saved, or
+    /// between the flattening's two renames, is finished by the next opening.
+    #[test]
+    fn an_interrupted_migration_is_finished_by_the_next_opening() {
+        for between_renames in [false, true] {
+            let fixture = versioned(true);
+            if between_renames {
+                let swap = fixture
+                    .dir
+                    .path()
+                    .join("library/.course2md/swap")
+                    .join(fixture.note.file_name().unwrap());
+                std::fs::create_dir_all(&swap).unwrap();
+                // A replacement names the copy that is the note before it moves it.
+                std::fs::write(swap.join("live"), "old-flatten").unwrap();
+                std::fs::rename(&fixture.note, swap.join("old-flatten")).unwrap();
+            } else {
+                c2m_artifact::artifact::flatten_legacy(&fixture.note)
+                    .unwrap()
+                    .unwrap();
+            }
+            let ws = test_workspace(fixture.dir.path());
+            assert_flat(&ws, &fixture, &fixture.a, &fixture.b);
+            assert_eq!(
+                ws.state.positions[&format!("{}:0", fixture.course)].offset,
+                1.,
+                "{between_renames}"
+            );
+            assert!(
+                !fixture
+                    .dir
+                    .path()
+                    .join("library/.course2md/swap")
+                    .join(fixture.note.file_name().unwrap())
+                    .exists()
+            );
+        }
+    }
+
+    /// Tasks from the older app keep their receipts: a repair of the kept version
+    /// still asks about its uncertain request, and one of a deleted version stops for
+    /// good with its receipts left where they were.
+    #[test]
+    fn in_flight_repairs_keep_their_receipts_and_a_repair_of_a_deleted_version_stops() {
+        let fixture = versioned(true);
+        let mut ws = Workspace::open_at(
+            fixture.dir.path().join("workspace.json"),
+            fixture.dir.path().join("library"),
+            Default::default(),
+        )
+        .unwrap();
+        let mut repairs = Vec::new();
+        for (id, base) in [("repair-kept", &fixture.a), ("repair-gone", &fixture.b)] {
+            let mut repair = ws.state.task(base).unwrap().clone();
+            repair.id = id.into();
+            repair.created += 10;
+            repair.state = TaskState::Uncertain;
+            repair.intent = Intent::Pause;
+            repair.artifact = None;
+            repair.plan.operation = serde_json::from_value(serde_json::json!({
+                "kind": "reprocess",
+                "base_version_dir": fixture.note.join("versions").join(base),
+                "components": ["proofreading"], "prior_work_dir": null,
+            }))
+            .unwrap();
+            repair.work_dir = fixture.dir.path().join("library/.course2md/work").join(id);
+            receipt(&repair, c2m_dispatch::dispatch::State::Uncertain);
+            repairs.push(repair);
+        }
+        ws.state.tasks.extend(repairs);
+        ws.save().unwrap();
+        ws.library_writes.drain();
+        let ws = test_workspace(fixture.dir.path());
+        let kept = ws.state.task("repair-kept").unwrap();
+        assert_eq!(kept.state, TaskState::Uncertain);
+        assert!(kept.has_uncertain());
+        assert_eq!(kept.replaced_by, None);
+        assert!(matches!(
+            &kept.plan.operation,
+            c2m_engine::execution::Operation::Reprocess { note_dir, base_task_id, .. }
+                if *note_dir == fixture.note && *base_task_id == fixture.a
+        ));
+        let gone = ws.state.task("repair-gone").unwrap();
+        assert_eq!(gone.state, TaskState::Cancelled);
+        assert_eq!(gone.replaced_by.as_deref(), Some(fixture.a.as_str()));
+        assert_eq!(gone.events.error.as_deref(), Some(replaced_message()));
+        assert!(gone.work_dir.join("requests/stable-request.json").is_file());
+        assert!(ws.state.next_task().is_none());
+    }
+
+    /// A course a worker from an earlier session still writes is left as versions
+    /// until the worker lets go, then flattened, and its tasks read again.
+    #[test]
+    fn a_course_a_live_worker_writes_is_flattened_once_it_lets_go() {
+        let fixture = versioned(true);
+        let mut ws = Workspace::open_at(
+            fixture.dir.path().join("workspace.json"),
+            fixture.dir.path().join("library"),
+            Default::default(),
+        )
+        .unwrap();
+        let library = ws.state.default_library.clone();
+        let (writer, created) = ws.state.enqueue(plan(&library), None).unwrap();
+        assert!(created);
+        ws.state.task_mut(&writer).unwrap().state = TaskState::Running;
+        ws.save().unwrap();
+        ws.library_writes.drain();
+        let work = ws.state.task(&writer).unwrap().work_dir.clone();
+        std::fs::create_dir_all(&work).unwrap();
+        let worker = c2m_process::runtime::lock_file(&work.join(".task.lock")).unwrap();
+        let mut ws = test_workspace(fixture.dir.path());
+        assert!(ws.state.task(&writer).unwrap().held);
+        assert!(c2m_artifact::artifact::is_legacy(&fixture.note));
+        assert!(fixture.note.join("versions").join(&fixture.b).is_dir());
+        assert!(ws.take_migrated().is_none());
+        assert!(ws.state.next_task().is_none());
+        drop(worker);
+        let later = std::time::Instant::now() + 2 * HELD_CHECK_INTERVAL;
+        let check = ws.reconciliation_at(later).unwrap();
+        ws.apply_reconciliation(check.run()).unwrap();
+        assert!(!c2m_artifact::artifact::is_legacy(&fixture.note));
+        assert!(ws.take_migrated().unwrap().notes_changed);
+        // The tasks read before are read again, for the note as it is now.
+        assert!(ws.state.reconciling);
+        ws.reconcile_now();
+        assert_flat_except_queue(&ws, &fixture);
+        assert!(!ws.state.task(&writer).unwrap().held);
+        assert_eq!(ws.state.task(&writer).unwrap().replaced_by, None);
+    }
+
+    fn assert_flat_except_queue(ws: &Workspace, fixture: &Versioned) {
+        let a = ws.state.task(&fixture.a).unwrap();
+        assert_eq!(a.artifact.as_ref(), Some(&fixture.note));
+        let b = ws.state.task(&fixture.b).unwrap();
+        assert_eq!(b.replaced_by.as_deref(), Some(fixture.a.as_str()));
+        assert_eq!(b.artifact, None);
+    }
+
+    /// A note has one unfinished task at a time: starting another focuses it.
+    #[test]
+    fn a_note_takes_one_unfinished_task_at_a_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let library = ws.state.default_library.clone();
+        let (first, created) = ws.state.enqueue(plan(&library), None).unwrap();
+        assert!(created);
+        // Other options for the same video are still the same note.
+        let mut other = plan(&library);
+        other.title = "另一个名字".into();
+        other.config.llm.summarize = !other.config.llm.summarize;
+        assert_eq!(
+            ws.state.duplicate_of(&other, None).map(|t| t.id.clone()),
+            Some(first.clone())
+        );
+        assert_eq!(
+            ws.state.enqueue(other.clone(), None).unwrap(),
+            (first.clone(), false)
+        );
+        assert_eq!(ws.state.tasks.len(), 1);
+        // Another video is another note.
+        let mut video = plan(&library);
+        video.source_id = "video-b".into();
+        assert!(ws.state.enqueue(video, None).unwrap().1);
+        // Once the first has finished, the note takes the next one.
+        ws.state.task_mut(&first).unwrap().state = TaskState::Complete;
+        let (next, created) = ws.state.enqueue(other, None).unwrap();
+        assert!(created && next != first);
+    }
+
+    /// A repair whose note another task replaced since stops for good on opening and
+    /// is never queued again; a finished task whose note was replaced is not repaired.
+    #[test]
+    fn a_replaced_task_never_runs_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
+        let note = publish_note(&ws.state, &id, true);
+        let original = ws.state.task_mut(&id).unwrap();
+        original.state = TaskState::Partial;
+        original.artifact = Some(note.clone());
+        original.events.outcomes = Some(
+            c2m_artifact::artifact::note_manifest(&note)
+                .unwrap()
+                .unwrap()
+                .outcomes,
+        );
+        let repair = ws
+            .state
+            .reprocess(&id, vec![Component::Proofreading], vec![])
+            .unwrap();
+        assert_eq!(ws.state.task(&repair).unwrap().state, TaskState::Queued);
+        ws.save().unwrap();
+        ws.library_writes.drain();
+        // Another app, or the command line, regenerated the note meanwhile.
+        let task = ws.state.task(&id).unwrap();
+        let target = c2m_artifact::artifact::Target {
+            task_id: "task-elsewhere".into(),
+            course_id: course_dir_name(&task.plan.source_id),
+            source_id: task.plan.source_id.clone(),
+            course_dir: note.clone(),
+            replaces: None,
+        };
+        crate::notes::fixtures::publish(&target, 3, &[5.], Default::default(), None);
+        for _ in 0..2 {
+            let mut reopened = test_workspace(dir.path());
+            let stale = reopened.state.task(&repair).unwrap();
+            assert_eq!(stale.state, TaskState::Cancelled);
+            assert_eq!(stale.replaced_by.as_deref(), Some("task-elsewhere"));
+            assert!(reopened.state.next_task().is_none());
+            assert!(reopened.state.set_intent(&repair, Intent::Run).is_err());
+            let original = reopened.state.task(&id).unwrap();
+            assert_eq!(original.replaced_by.as_deref(), Some("task-elsewhere"));
+            assert_eq!(original.artifact, None);
+            // Its repair stays the one it had; none is made again.
+            assert_eq!(
+                reopened
+                    .state
+                    .reprocess(&id, vec![Component::Proofreading], vec![])
+                    .unwrap(),
+                repair
+            );
+            assert!(
+                reopened
+                    .state
+                    .reprocess(&repair, vec![Component::Proofreading], vec![])
+                    .is_err()
+            );
+            reopened.library_writes.drain();
+        }
+    }
+
+    /// A finished task whose note another task replaced, not yet seen by a startup
+    /// check, is refused a repair that would redo another task's note.
+    #[test]
+    fn a_repair_is_planned_only_from_the_task_whose_note_it_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
+        let note = publish_note(&ws.state, &id, true);
+        let original = ws.state.task_mut(&id).unwrap();
+        original.state = TaskState::Partial;
+        original.artifact = Some(note.clone());
+        original.events.outcomes = Some(
+            c2m_artifact::artifact::note_manifest(&note)
+                .unwrap()
+                .unwrap()
+                .outcomes,
+        );
+        let task = ws.state.task(&id).unwrap();
+        let target = c2m_artifact::artifact::Target {
+            task_id: "task-elsewhere".into(),
+            course_id: course_dir_name(&task.plan.source_id),
+            source_id: task.plan.source_id.clone(),
+            course_dir: note,
+            replaces: None,
+        };
+        crate::notes::fixtures::publish(&target, 3, &[5.], Default::default(), None);
+        let error = ws
+            .state
+            .reprocess(&id, vec![Component::Proofreading], vec![])
+            .unwrap_err();
+        assert!(error.to_string().contains("之后的任务"), "{error:#}");
+        assert_eq!(ws.state.tasks.len(), 1);
     }
 }

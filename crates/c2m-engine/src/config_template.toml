@@ -4,7 +4,7 @@
 # 查看当前设置：course2md config show / View settings: course2md config show
 
 [defaults]
-# 输出根目录，按平台/标题/ID 分类 / Output root, organized by platform/title/ID
+# 输出根目录，每个视频一份笔记，在 平台/ID/ 下 / Output root, one note per video under platform/ID/
 #out = {out_root}
 # 截图相似度 (0,1]，越高截图越多 / Similarity (0,1]; higher captures more slides
 #similarity = {similarity}

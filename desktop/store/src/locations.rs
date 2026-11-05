@@ -334,8 +334,8 @@ mod tests {
             task_id: "task-relocate".into(),
             course_id: "course-relocate".into(),
             source_id: "local:original-video".into(),
-            version_id: "v1".into(),
             course_dir: old.join("note"),
+            replaces: None,
         };
         let sections = vec![c2m_core::timeline::Section {
             t: 0.,
@@ -780,7 +780,8 @@ mod tests {
         config.defaults.model_dir = Some(old.join("models"));
         let plan = workspace::TaskPlan {
             operation: c2m_engine::execution::Operation::Reprocess {
-                base_version_dir: old.join("note/versions/old-version"),
+                note_dir: old.join("note"),
+                base_task_id: "old-version".into(),
                 components: vec![c2m_engine::execution::Component::Summary],
                 prior_work_dir: Some(old.join(".course2md/work/old-task")),
             },
@@ -901,8 +902,8 @@ mod tests {
             new.join(old_task_work.strip_prefix(&old).unwrap())
         );
         assert!(
-            matches!(&task.plan.operation, c2m_engine::execution::Operation::Reprocess {base_version_dir, prior_work_dir:Some(work),..}
-            if base_version_dir.starts_with(&new) && work.starts_with(&new))
+            matches!(&task.plan.operation, c2m_engine::execution::Operation::Reprocess {note_dir, prior_work_dir:Some(work),..}
+            if note_dir.starts_with(&new) && work.starts_with(&new))
         );
         assert_eq!(state.storage_backups[0].path, old);
         assert!(

@@ -1,4 +1,6 @@
-//! Read published versions and isolate damaged library entries.
+//! Read the library's notes and isolate damaged entries. A note is a folder with a
+//! manifest; a course an older app saved as versions is flattened by the startup
+//! migration (`crate::migrate`) before it is listed.
 use anyhow::{Context, Result};
 use c2m_artifact::artifact;
 use c2m_protocol::progress::Done;
@@ -8,15 +10,12 @@ use std::{
     time::SystemTime,
 };
 
-fn version_damaged() -> &'static str {
-    c2m_i18n::tr!("笔记版本信息已损坏")
-}
 fn body_unreadable() -> &'static str {
     c2m_i18n::tr!("笔记正文无法读取，原文件已保留")
 }
 
-/// The note was written by a newer app. Unlike damage, an older intact version is
-/// no answer: this app must not show or republish over what it cannot read.
+/// The note was written by a newer app: this app must not show or replace what it
+/// cannot read.
 #[derive(Debug)]
 struct NewerSchema;
 
@@ -34,10 +33,9 @@ pub fn newer_note_refusal() -> &'static str {
 }
 
 /// Whether the note in `dir` was written by a newer app; a missing or damaged one is
-/// not. Blocking: it reads the note's pointer and manifest.
+/// not. Blocking: it reads the note's manifest.
 pub fn note_is_newer(dir: &Path) -> bool {
-    dir.join("current.json").is_file()
-        && current_course(dir).is_err_and(|error| error.is::<NewerSchema>())
+    artifact::refuse_newer(dir).is_err_and(|error| error.is::<artifact::NewerSchema>())
 }
 
 /// The library's own wording for the engine's typed refusal.
@@ -60,7 +58,7 @@ pub struct Course {
     pub warning: Option<String>,
 }
 impl Course {
-    /// A just-published version. `read_preview` reads its manifest on open and
+    /// A just-published note. `read_preview` reads its manifest on open and
     /// reports a failure there instead of opening an empty note.
     pub fn from_completed(done: &Done) -> Self {
         Self {
@@ -86,44 +84,23 @@ impl Course {
     pub fn incomplete(&self) -> bool {
         self.manifest.as_ref().is_some_and(has_incomplete_content)
     }
-    /// Published versions live in `<note>/versions/<id>`; the note folder owns them.
-    pub fn storage_dir(&self) -> PathBuf {
-        self.dir
-            .parent()
-            .filter(|parent| parent.file_name().is_some_and(|name| name == "versions"))
-            .and_then(Path::parent)
-            .unwrap_or(&self.dir)
-            .to_path_buf()
-    }
 }
 /// Optional file exports describe a task's output, not the completeness of its note.
-/// Published manifests stay immutable when a later task successfully repairs exports.
 pub fn has_incomplete_content(manifest: &artifact::Manifest) -> bool {
     !processing_issues(manifest).is_empty()
 }
 pub struct LibraryScan {
     pub courses: Vec<Course>,
     pub issues: Vec<String>,
+    /// Notes whose interrupted replacement needs the person, or that have copies
+    /// kept beside them; a blocked note is not among `courses`.
+    pub attention: Vec<artifact::NoteAttention>,
     /// Folders of notes a newer app wrote, which this one must not publish into.
     pub newer: Vec<PathBuf>,
 }
 
-/// Listing checks that each required file exists at its recorded size; content
-/// digests are verified when the note is opened.
-fn assets_present(dir: &Path, manifest: &artifact::Manifest) -> bool {
-    manifest
-        .assets
-        .iter()
-        .filter(|asset| !asset.path.starts_with("exports/"))
-        .all(|asset| {
-            artifact::safe_asset_path(dir, &asset.path)
-                .and_then(|path| Ok(std::fs::metadata(path)?.len()))
-                .is_ok_and(|bytes| bytes == asset.bytes)
-        })
-}
-
-fn version_course(dir: &Path) -> Result<Course> {
-    let manifest = artifact::read_manifest(&dir.join("manifest.json"))?;
+fn note_course(dir: &Path) -> Result<Course> {
+    let manifest = artifact::read_manifest(&dir.join("manifest.json")).map_err(newer)?;
     anyhow::ensure!(
         artifact::safe_asset_path(dir, &manifest.document).is_ok_and(|path| path.is_file()),
         body_unreadable()
@@ -144,69 +121,56 @@ fn version_course(dir: &Path) -> Result<Course> {
     })
 }
 
-fn current_course(dir: &Path) -> Result<Course> {
-    let current = || -> Result<Course> {
-        let pointer = artifact::read_current(&dir.join("current.json")).map_err(newer)?;
-        let manifest_path = artifact::safe_asset_path(dir, &pointer.manifest)?;
-        let course =
-            version_course(manifest_path.parent().context(version_damaged())?).map_err(newer)?;
-        anyhow::ensure!(
-            course.manifest.as_ref().is_some_and(|manifest| {
-                manifest.course_id == pointer.course_id && manifest.version_id == pointer.version_id
-            }),
-            version_damaged()
-        );
-        Ok(course)
-    };
-    current().or_else(|error| {
-        if error.is::<NewerSchema>() {
-            return Err(error);
+/// Completes the replacements a crash interrupted anywhere in the library at
+/// `root`: notes can sit in subfolders (the command line's `<platform>/<id>`), and
+/// each folder of notes keeps its own `.course2md`. A note being replaced is put
+/// back, or the one it replaced deleted; a note another writer holds is left to it.
+pub fn recover_library(root: &Path) -> Vec<artifact::NoteAttention> {
+    let mut attention = Vec::new();
+    let entries = walkdir::WalkDir::new(root)
+        .max_depth(8)
+        .into_iter()
+        .filter_entry(|entry| {
+            entry.depth() == 0 || !entry.file_name().to_string_lossy().starts_with('.')
+        })
+        .flatten();
+    for entry in entries {
+        if entry.file_type().is_dir() {
+            attention.extend(artifact::recover_folder(entry.path()));
+        } else if entry.path_is_symlink() {
+            // A linked note is replaced where its link points, which the walk
+            // does not follow; while it is moved aside the link points nowhere.
+            attention.extend(artifact::note_attention(entry.path()));
         }
-        let mut intact = Vec::new();
-        for entry in std::fs::read_dir(dir.join("versions"))
-            .into_iter()
-            .flatten()
-            .filter_map(Result::ok)
-            .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
-        {
-            match version_course(&entry.path()).map_err(newer) {
-                // A version this app cannot read may be the latest one.
-                Err(error) if error.is::<NewerSchema>() => return Err(error),
-                Ok(course)
-                    if course
-                        .manifest
-                        .as_ref()
-                        .is_some_and(|manifest| assets_present(&course.dir, manifest)) =>
-                {
-                    intact.push(course)
-                }
-                _ => {}
-            }
-        }
-        intact.sort_by_key(|course| course.manifest.as_ref().map(|m| m.revision));
-        let mut course = intact.pop().ok_or(error)?;
-        course.warning = Some(c2m_i18n::tr!("最新版本无法读取，正在显示上一个完好的版本。").into());
-        Ok(course)
-    })
+    }
+    attention
 }
 
 pub fn scan_library(root: &Path) -> Result<LibraryScan> {
     let mut scan = LibraryScan {
         courses: Vec::new(),
         issues: Vec::new(),
+        attention: Vec::new(),
         newer: Vec::new(),
     };
     if !root.exists() {
         return Ok(scan);
     }
-    // Hidden folders and a note's own versions are never notes; nor is anything
-    // deeper than eight folders.
+    for attention in recover_library(root) {
+        match attention {
+            artifact::NoteAttention::Failed { note, message } => {
+                scan.issues
+                    .push(c2m_i18n::tr!("{}：{}", note.display(), message))
+            }
+            attention => scan.attention.push(attention),
+        }
+    }
+    // Hidden folders are never notes; nor is anything deeper than eight folders.
     let mut walk = walkdir::WalkDir::new(root)
         .max_depth(8)
         .into_iter()
         .filter_entry(|entry| {
-            let name = entry.file_name().to_string_lossy();
-            entry.depth() == 0 || !(name.starts_with('.') || name == "versions")
+            entry.depth() == 0 || !entry.file_name().to_string_lossy().starts_with('.')
         });
     while let Some(entry) = walk.next() {
         let entry = match entry {
@@ -220,8 +184,11 @@ pub fn scan_library(root: &Path) -> Result<LibraryScan> {
             }
         };
         let dir = entry.path();
-        if entry.file_type().is_dir() && dir.join("current.json").is_file() {
-            match current_course(dir) {
+        if !entry.file_type().is_dir() || entry.depth() == 0 {
+            continue;
+        }
+        if dir.join("manifest.json").is_file() {
+            match note_course(dir) {
                 Ok(course) => scan.courses.push(course),
                 Err(error) => {
                     if error.is::<NewerSchema>() {
@@ -231,6 +198,18 @@ pub fn scan_library(root: &Path) -> Result<LibraryScan> {
                         .push(c2m_i18n::tr!("{}：{}", dir.display(), format!("{error:#}")))
                 }
             }
+            walk.skip_current_dir();
+        } else if artifact::is_legacy(dir) {
+            // Saved as versions by an older app and not flattened yet: the startup
+            // migration does it, or waits for a task still writing it.
+            if note_is_newer(dir) {
+                scan.newer.push(dir.to_path_buf());
+            }
+            scan.issues.push(c2m_i18n::tr!(
+                "{}：{}",
+                dir.display(),
+                c2m_i18n::tr!("这份笔记仍按旧方式保存，正在等待整理")
+            ));
             walk.skip_current_dir();
         }
     }
@@ -397,7 +376,7 @@ pub fn read_preview(mut course: Course) -> Result<Preview> {
         }
     }
     let mut issues = course.warning.clone().into_iter().collect::<Vec<_>>();
-    if artifact::validate_version(&course.dir, &manifest).is_err() {
+    if artifact::validate_note(&course.dir, &manifest).is_err() {
         issues.push(c2m_i18n::tr!("部分笔记文件缺失或已改动，先显示能读到的内容。").into());
     }
     for frame in &manifest.frames {
@@ -540,7 +519,39 @@ pub mod fixtures {
         outcomes: artifact::Outcomes,
         translation: Option<&str>,
     ) -> Course {
-        let work = root.join(format!("work-{revision}"));
+        let target = artifact::Target {
+            task_id: format!("task-{revision}"),
+            course_id: "fixture-course".into(),
+            source_id: "fixture-source".into(),
+            course_dir: root.join("course"),
+            replaces: None,
+        };
+        let manifest = publish(&target, revision, times, outcomes, translation);
+        Course {
+            dir: target.course_dir.clone(),
+            title: manifest.title.clone(),
+            modified: std::time::SystemTime::now(),
+            slides: times.len(),
+            thumbnail: None,
+            manifest: Some(manifest),
+            warning: None,
+        }
+    }
+
+    /// Publishes `target`'s note: one frame and one paragraph per time, its text
+    /// naming `revision`.
+    pub fn publish(
+        target: &artifact::Target,
+        revision: u64,
+        times: &[f64],
+        outcomes: artifact::Outcomes,
+        translation: Option<&str>,
+    ) -> artifact::Manifest {
+        let work = target
+            .course_dir
+            .parent()
+            .unwrap()
+            .join(format!("work-{}-{revision}", target.task_id));
         std::fs::create_dir_all(work.join("frames")).unwrap();
         let sections = times
             .iter()
@@ -564,13 +575,6 @@ pub mod fixtures {
                 }
             })
             .collect::<Vec<_>>();
-        let target = artifact::Target {
-            task_id: format!("task-{revision}"),
-            course_id: "fixture-course".into(),
-            source_id: "fixture-source".into(),
-            version_id: format!("v{revision}"),
-            course_dir: root.join("course"),
-        };
         let meta = VideoMeta {
             title: "测试课程".into(),
             uploader: "作者".into(),
@@ -580,17 +584,61 @@ pub mod fixtures {
             id: "fixture".into(),
         };
         let manifest =
-            artifact::publish_blocking(&target, &work, &meta, &sections, None, &[], outcomes)
+            artifact::publish_blocking(target, &work, &meta, &sections, None, &[], outcomes)
                 .unwrap();
-        Course {
-            dir: target.version_dir(),
-            title: meta.title,
-            modified: std::time::SystemTime::now(),
-            slides: times.len(),
-            thumbnail: None,
-            manifest: Some(manifest),
-            warning: None,
-        }
+        std::fs::remove_dir_all(work).unwrap();
+        manifest
+    }
+
+    /// Adds version `task_id` to the course `target.course_dir` as an older app
+    /// saved it: `versions/<task_id>/` with a schema 1 manifest. Its version id is its
+    /// task id, as the desktop named them.
+    pub fn legacy_version(
+        target: &artifact::Target,
+        revision: u64,
+        times: &[f64],
+        outcomes: artifact::Outcomes,
+    ) -> std::path::PathBuf {
+        let course = &target.course_dir;
+        let scratch = course
+            .parent()
+            .unwrap()
+            .join(format!("scratch-{}", target.task_id));
+        publish(
+            &artifact::Target {
+                course_dir: scratch.clone(),
+                ..target.clone()
+            },
+            revision,
+            times,
+            outcomes,
+            None,
+        );
+        let dir = course.join("versions").join(&target.task_id);
+        std::fs::create_dir_all(dir.parent().unwrap()).unwrap();
+        std::fs::rename(&scratch, &dir).unwrap();
+        let path = dir.join("manifest.json");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        value["schema"] = 1.into();
+        value["version_id"] = target.task_id.clone().into();
+        value["revision"] = revision.into();
+        value["created_at_ms"] = (1000 + revision).into();
+        std::fs::write(&path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+        dir
+    }
+
+    /// Points the course `course` at its version `version`, as `current.json` did.
+    pub fn point_at(course: &Path, course_id: &str, version: &str) {
+        std::fs::write(
+            course.join("current.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "schema": 1, "course_id": course_id, "version_id": version,
+                "manifest": format!("versions/{version}/manifest.json"),
+            }))
+            .unwrap(),
+        )
+        .unwrap();
     }
 }
 
@@ -639,6 +687,50 @@ mod tests {
         assert!(course.incomplete());
     }
 
+    /// A note whose replacement cannot be finished is not listed silently: the
+    /// scan names it, with the folder to look at.
+    #[test]
+    fn a_blocked_note_is_named_by_the_scan() {
+        let root = tempfile::tempdir().unwrap();
+        let note = published_note(root.path(), 1, &[10.], Default::default());
+        let swap = root.path().join(".course2md/swap/course");
+        std::fs::create_dir_all(&swap).unwrap();
+        std::fs::rename(&note.dir, swap.join("old-task")).unwrap();
+        std::fs::write(swap.join("live"), "garbage").unwrap();
+        let scan = scan_library(root.path()).unwrap();
+        assert!(scan.courses.is_empty());
+        assert_eq!(
+            scan.attention,
+            vec![artifact::NoteAttention::Blocked {
+                note: note.dir.clone(),
+                swap: swap.clone()
+            }]
+        );
+        assert!(swap.join("old-task/manifest.json").is_file());
+    }
+
+    /// The command line keeps notes in `<platform>/<id>`, each folder with its own
+    /// `.course2md`: a replacement a crash interrupted there is completed too.
+    #[test]
+    fn an_interrupted_replacement_in_a_subfolder_is_recovered() {
+        let root = tempfile::tempdir().unwrap();
+        let platform = root.path().join("youtube");
+        let note = published_note(&platform, 1, &[10.], Default::default());
+        let before = std::fs::read(note.dir.join("manifest.json")).unwrap();
+        // As a crash between the two renames leaves it: the note moved aside.
+        let swap = platform.join(".course2md/swap/course");
+        std::fs::create_dir_all(&swap).unwrap();
+        // A replacement names the copy that is the note before it moves it.
+        std::fs::write(swap.join("live"), "old-task").unwrap();
+        std::fs::rename(&note.dir, swap.join("old-task")).unwrap();
+        assert!(scan_library(root.path()).unwrap().courses.len() == 1);
+        assert_eq!(
+            std::fs::read(note.dir.join("manifest.json")).unwrap(),
+            before
+        );
+        assert!(!swap.exists());
+    }
+
     #[test]
     fn library_discovers_published_notes_and_ignores_task_leftovers() {
         let root = tempfile::tempdir().unwrap();
@@ -650,10 +742,6 @@ mod tests {
         assert_eq!(scan.courses.len(), 1);
         assert!(scan.issues.is_empty());
         assert_eq!(scan.courses[0].dir, note.dir);
-        assert_eq!(
-            scan.courses[0].storage_dir().canonicalize().unwrap(),
-            root.path().join("course").canonicalize().unwrap()
-        );
         let preview = read_preview(scan.courses[0].clone()).unwrap();
         assert!(preview.plain_text.contains("10 秒的正文"));
         assert!(preview.issues.is_empty());
@@ -666,21 +754,21 @@ mod tests {
     }
 
     #[test]
-    fn a_damaged_latest_version_falls_back_to_the_last_intact_one() {
+    fn a_regenerated_note_is_listed_once_and_a_damaged_one_is_reported() {
         let root = tempfile::tempdir().unwrap();
-        let old = published_note(root.path(), 1, &[10.], Default::default());
-        let new = published_note(root.path(), 2, &[20.], Default::default());
-        std::fs::remove_file(new.dir.join("document.json")).unwrap();
-        let course = scan_library(root.path()).unwrap().courses.remove(0);
-        assert_eq!(course.dir, old.dir);
-        assert!(course.warning.is_some());
+        published_note(root.path(), 1, &[10.], Default::default());
+        let note = published_note(root.path(), 2, &[20.], Default::default());
+        let scan = scan_library(root.path()).unwrap();
+        assert_eq!(scan.courses.len(), 1);
+        assert_eq!(scan.courses[0].manifest.as_ref().unwrap().task_id, "task-2");
         // A completed task's course reads its manifest on open.
         let opened = read_preview(Course::from_completed(&Done {
-            out_dir: old.dir.clone(),
+            out_dir: note.dir.clone(),
             ..Default::default()
         }))
         .unwrap();
-        assert_eq!(opened.course.storage_dir(), old.storage_dir());
+        assert_eq!(opened.course.dir, note.dir);
+        assert!(opened.plain_text.contains("第 2 版"));
         assert!(
             read_preview(Course::from_completed(&Done {
                 out_dir: root.path().join("missing"),
@@ -688,44 +776,63 @@ mod tests {
             }))
             .is_err()
         );
-    }
-
-    #[test]
-    fn a_note_from_a_newer_app_asks_for_an_update_instead_of_falling_back() {
-        let root = tempfile::tempdir().unwrap();
-        published_note(root.path(), 1, &[10.], Default::default());
-        let pointer = root.path().join("course/current.json");
-        let mut value: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&pointer).unwrap()).unwrap();
-        value["schema"] = 2.into();
-        std::fs::write(&pointer, serde_json::to_vec(&value).unwrap()).unwrap();
+        // No older note stands in for a damaged one.
+        std::fs::remove_file(note.dir.join("document.json")).unwrap();
         let scan = scan_library(root.path()).unwrap();
         assert!(scan.courses.is_empty());
-        assert!(
-            scan.issues[0].contains("更新版本的应用"),
-            "{:?}",
-            scan.issues
-        );
+        assert_eq!(scan.issues.len(), 1, "{:?}", scan.issues);
     }
 
-    /// The pointer is one this app reads; the manifest it names is not.
     #[test]
-    fn a_newer_manifest_under_a_current_pointer_is_not_replaced_by_an_older_version() {
+    fn a_note_from_a_newer_app_asks_for_an_update() {
         let root = tempfile::tempdir().unwrap();
-        published_note(root.path(), 1, &[10.], Default::default());
-        let newer = published_note(root.path(), 2, &[20.], Default::default());
-        let manifest = newer.dir.join("manifest.json");
+        let note = published_note(root.path(), 1, &[10.], Default::default());
+        let manifest = note.dir.join("manifest.json");
         let mut value: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&manifest).unwrap()).unwrap();
-        value["schema"] = 2.into();
+        value["schema"] = (artifact::MANIFEST_SCHEMA + 1).into();
         std::fs::write(&manifest, serde_json::to_vec(&value).unwrap()).unwrap();
         let scan = scan_library(root.path()).unwrap();
-        assert!(scan.courses.is_empty(), "{:?}", scan.courses[0].dir);
+        assert!(scan.courses.is_empty());
+        assert_eq!(scan.newer, vec![note.dir.clone()]);
         assert!(
             scan.issues[0].contains("更新版本的应用"),
             "{:?}",
             scan.issues
         );
+        assert!(note_is_newer(&note.dir));
+        assert!(!note_is_newer(&root.path().join("missing")));
+    }
+
+    /// A course an older app saved as versions waits for the startup migration; a
+    /// replacement a crash interrupted is completed by the scan.
+    #[test]
+    fn a_scan_finishes_an_interrupted_replacement_and_waits_for_versions_to_be_flattened() {
+        let root = tempfile::tempdir().unwrap();
+        let note = published_note(root.path(), 1, &[10.], Default::default());
+        // A crash between the two renames: the note is in the swap folder.
+        let swap = root.path().join(".course2md/swap/course");
+        std::fs::create_dir_all(&swap).unwrap();
+        // A replacement names the copy that is the note before it moves it.
+        std::fs::write(swap.join("live"), "old-task-2").unwrap();
+        std::fs::rename(&note.dir, swap.join("old-task-2")).unwrap();
+        let scan = scan_library(root.path()).unwrap();
+        assert_eq!(scan.courses.len(), 1, "{:?}", scan.issues);
+        assert!(!swap.exists());
+
+        let target = artifact::Target {
+            task_id: "old-task".into(),
+            course_id: "course-legacy".into(),
+            source_id: "legacy-source".into(),
+            course_dir: root.path().join("legacy"),
+            replaces: None,
+        };
+        fixtures::legacy_version(&target, 1, &[5.], Default::default());
+        fixtures::point_at(&target.course_dir, "course-legacy", "old-task");
+        let scan = scan_library(root.path()).unwrap();
+        assert_eq!(scan.courses.len(), 1);
+        assert_eq!(scan.issues.len(), 1, "{:?}", scan.issues);
+        assert!(scan.issues[0].contains("旧方式保存"), "{:?}", scan.issues);
     }
 
     #[test]

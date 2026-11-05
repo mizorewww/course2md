@@ -42,7 +42,7 @@ use desktop_ui::{note_text, symbols, ui};
 
 use desktop_prefs::conversion::{provider_from_id, provider_label, providers};
 use desktop_reader_core::reader::note_read_failure;
-use desktop_reader_core::reader::{carry_repaired_reading_positions, settle_reader_notice};
+use desktop_reader_core::reader::settle_reader_notice;
 use desktop_store::library::FolderFilter;
 use desktop_store::page::{Kind, Page};
 use desktop_tasks::job::{Work, earliest_deadline, job_exit_status, poll_timeout};
@@ -86,7 +86,7 @@ impl Field {
 /// Debug builds: open a note in a given reader state at startup, so native
 /// layout can be checked without synthetic input. Release builds ignore it.
 struct ValidationOpen {
-    /// Matched against note titles and version directories.
+    /// Matched against note titles and folders.
     note: Option<String>,
     /// Comma-separated reader panels: `find`, `info`.
     panels: String,
@@ -157,6 +157,8 @@ struct Desktop {
     // virtualized list may unmount and remount while scrolling.
     entered: HashSet<String>,
     message: Option<String>,
+    /// Older versions were removed at startup: said in the library until dismissed.
+    pub(crate) migration_notice: Option<String>,
     _subscriptions: Vec<Subscription>,
     _poll: Task<()>,
 }
@@ -491,6 +493,7 @@ impl Desktop {
             candidate_scroll: ScrollHandle::new(),
             entered: HashSet::new(),
             message,
+            migration_notice: None,
             _subscriptions: subscriptions,
             _poll: poll,
         };
@@ -566,6 +569,19 @@ impl Desktop {
                 {
                     this.workspace_error =
                         Some(course2md::tr!("任务进度尚未保存：{}", format!("{error:#}")));
+                }
+                // Courses saved as versions were flattened: list the notes again, and
+                // say once that the older versions are gone.
+                if let Some(Some(migrated)) =
+                    this.with_workspace(cx, |workspace| workspace.take_migrated())
+                {
+                    if let Some(notice) = migrated.notice {
+                        this.message = Some(notice.clone());
+                        this.migration_notice = Some(notice);
+                    }
+                    if migrated.notes_changed {
+                        this.refresh_library(cx);
+                    }
                 }
                 this.start_next_task(cx);
                 // The loop's deadline was computed while the check ran.
@@ -1026,15 +1042,11 @@ impl Desktop {
         self.save_reading_position(cx);
         let opened = &self.reader.read(cx).opened;
         let reader_revision = opened.read_generation;
-        let reader_origin = follow.as_ref().and_then(|follow| {
-            if !matches!(
+        let reader_origin = follow.as_ref().is_some_and(|follow| {
+            matches!(
                 follow,
                 desktop_tasks::import::ConversionFollow::ReaderTask { .. }
-            ) {
-                return None;
-            }
-            let manifest = opened.preview.as_ref()?.course.manifest.as_ref()?;
-            Some((manifest.course_id.clone(), manifest.version_id.clone()))
+            )
         });
         cx.notify();
         let reading_path = course.dir.clone();
@@ -1086,27 +1098,15 @@ impl Desktop {
                         if follow.is_none() {
                             this.import.following_conversion = None;
                         }
-                        // The old note remains scrollable during the read. Its
+                        // The note as it was remains scrollable during the read. Its
                         // current anchor, after all ownership guards pass, is the
-                        // one that belongs in the repaired version.
-                        if reader_origin.is_some() {
+                        // one that belongs in the repaired note, under the same key.
+                        if reader_origin {
                             this.save_reading_position(cx);
                         }
                         let artifact = preview.course.dir.clone();
                         let saved = this.with_workspace(cx, |workspace| {
                             workspace.transaction(|state| {
-                                // A repair publishes a new version of the same note.
-                                // Carry its existing anchors into both reading modes;
-                                // the reader resolves changed paragraphs by timestamp.
-                                if let (Some((course_id, previous)), Some(manifest)) =
-                                    (&reader_origin, &preview.course.manifest)
-                                {
-                                    carry_repaired_reading_positions(
-                                        &mut state.positions,
-                                        (course_id, previous),
-                                        (&manifest.course_id, &manifest.version_id),
-                                    );
-                                }
                                 for task in &mut state.tasks {
                                     if task.artifact.as_ref() == Some(&artifact) {
                                         task.unread = false;
@@ -1122,7 +1122,7 @@ impl Desktop {
                         let message = &mut this.message;
                         this.reader.change(cx, |reader, cx| {
                             settle_reader_notice(message, &mut reader.opened.reader_failure_notice);
-                            if reader_origin.is_none() {
+                            if !reader_origin {
                                 reader.opened.result_tab = 0;
                             }
                             reader.opened.preview = Some(Rc::new(preview));

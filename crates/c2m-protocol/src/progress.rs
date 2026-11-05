@@ -188,8 +188,39 @@ pub enum ErrorCode {
     Service,
     /// A request was sent but its result is unknown.
     Uncertain,
+    /// The result did less than the saved note in a part it tried; the note was kept.
+    NoteKept,
+    /// Another task is working on the same note; nothing was done.
+    NoteBusy,
+    /// A replacement of the note stopped and cannot be finished on its own;
+    /// `path` names the folder to look at. Nothing was changed.
+    NoteRecoveryBlocked,
+    /// Copies kept beside the note reached the limit; `path` names their folder.
+    /// New tasks for the note stop until the person sorts them out.
+    NoteCopiesKept,
     #[default]
     Other,
+}
+
+/// The folder a `note_recovery_blocked` or `note_copies_kept` error names;
+/// `None` for any other error.
+pub fn blocked_path(error: &anyhow::Error) -> Option<PathBuf> {
+    error
+        .downcast_ref::<crate::outcome::RecoveryBlocked>()
+        .map(|blocked| blocked.swap.clone())
+        .or_else(|| {
+            error
+                .downcast_ref::<crate::outcome::CopiesKept>()
+                .map(|kept| kept.swap.clone())
+        })
+}
+
+/// The parts a `note_kept` error names; empty for any other error.
+pub fn kept_parts(error: &anyhow::Error) -> Vec<crate::outcome::KeptPart> {
+    error
+        .downcast_ref::<crate::outcome::NoteKept>()
+        .map(|kept| kept.parts.clone())
+        .unwrap_or_default()
 }
 
 impl ErrorCode {
@@ -217,6 +248,21 @@ impl ErrorCode {
         {
             return Self::InvalidConfiguration;
         }
+        if error.downcast_ref::<crate::outcome::NoteKept>().is_some() {
+            return Self::NoteKept;
+        }
+        if error.downcast_ref::<crate::outcome::NoteBusy>().is_some() {
+            return Self::NoteBusy;
+        }
+        if error
+            .downcast_ref::<crate::outcome::RecoveryBlocked>()
+            .is_some()
+        {
+            return Self::NoteRecoveryBlocked;
+        }
+        if error.downcast_ref::<crate::outcome::CopiesKept>().is_some() {
+            return Self::NoteCopiesKept;
+        }
         match error
             .downcast_ref::<crate::outcome::Failure>()
             .map(|failure| failure.kind)
@@ -232,16 +278,17 @@ impl ErrorCode {
     }
 }
 
-/// The published note version a finished task reports.
+/// The note a finished task reports. Events from engines that published note
+/// versions also carry a `version_id`, which is ignored.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Done {
-    /// Set when the task only produced exports for an existing version.
+    /// Set when the task only produced exports for an existing note.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation: Option<String>,
     pub task_id: String,
     pub course_id: String,
-    pub version_id: String,
+    /// The note folder.
     pub out_dir: PathBuf,
     pub manifest: Option<PathBuf>,
     pub title: String,
@@ -252,6 +299,10 @@ pub struct Done {
     pub partial: Option<bool>,
     pub outcomes: Option<crate::outcome::Outcomes>,
     pub elapsed_secs: f64,
+    /// Files of the replaced note kept beside the new one under another name,
+    /// relative to the note: a hand-edited `course.md` as `course.edited.md`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kept_edits: Vec<PathBuf>,
 }
 
 /// One NDJSON line of the `--json` / `run-task` stream.
@@ -310,6 +361,14 @@ pub enum Event {
         /// Stable for consumers; the message is for people and may change.
         #[serde(default)]
         code: ErrorCode,
+        /// With `note_kept`: the parts the result did less of, and why, so a
+        /// reader shows the message in its own language.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        parts: Vec<crate::outcome::KeptPart>,
+        /// With `note_recovery_blocked` or `note_copies_kept`: the note's swap
+        /// folder, to look at.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<PathBuf>,
     },
     Done(Box<Done>),
     ModelReady {

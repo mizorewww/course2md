@@ -5,6 +5,7 @@
 pub mod activity;
 pub mod library;
 pub mod locations;
+pub mod migrate;
 pub mod notes;
 pub mod organize;
 pub mod page;

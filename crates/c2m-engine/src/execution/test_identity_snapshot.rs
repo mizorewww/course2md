@@ -24,7 +24,7 @@ fn request(source: &str, source_id: &str, config: ConfigFile) -> execution::Requ
         operation: execution::Operation::Generate,
         task_id: "task-1".into(),
         course_id: "course-1".into(),
-        version_id: "version-1".into(),
+        version_id: Some("version-1".into()),
         source: source.into(),
         source_id: source_id.into(),
         title: "Lecture".into(),

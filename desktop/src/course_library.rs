@@ -91,7 +91,7 @@ fn list_surface(outer: OuterCorners) -> Div {
 /// A note picked up to file into a folder of the tree.
 fn note_drag(course: &Course) -> NoteDrag {
     NoteDrag {
-        storage: course.storage_dir(),
+        storage: course.dir.clone(),
         title: course.title.clone().into(),
     }
 }
@@ -102,6 +102,8 @@ enum LibraryItem {
     /// Work in progress, with its message.
     Status(&'static str),
     Recovery(crate::storage::LibraryAccess),
+    /// What the startup migration removed, until the person closes it.
+    Migrated(String),
     Coverage(String),
     Issues(Vec<String>),
     Empty,
@@ -138,6 +140,7 @@ impl LibraryItem {
         match self {
             LibraryItem::Status(message) => format!("status-{message}"),
             LibraryItem::Recovery(_) => "recovery".to_owned(),
+            LibraryItem::Migrated(_) => "migrated".to_owned(),
             LibraryItem::Coverage(_) => "coverage".to_owned(),
             LibraryItem::Issues(_) => "issues".to_owned(),
             LibraryItem::Empty => "empty".to_owned(),
@@ -334,12 +337,12 @@ impl Desktop {
             cx.notify();
             return;
         };
-        let storage = course.storage_dir();
+        let storage = course.dir.clone();
         self.begin_naming(NameTarget::Note { root, storage }, window, cx);
     }
 
-    /// Asks before moving a note to the system trash. A note that a running
-    /// task is still writing a version into cannot be deleted yet.
+    /// Asks before moving a note to the system trash. A note that an unfinished
+    /// task will replace cannot be deleted yet.
     pub fn confirm_course_delete(
         &mut self,
         course: Course,
@@ -391,7 +394,7 @@ impl Desktop {
 
     fn delete_course(&mut self, root: PathBuf, course: Course, cx: &mut Context<Self>) {
         let title = self.library(cx).course_display_title(&course);
-        let dir = course.storage_dir();
+        let dir = course.dir.clone();
         let worker_dir = dir.clone();
         self.in_background(
             move || organize::delete_course(&root, &worker_dir),
@@ -401,7 +404,7 @@ impl Desktop {
                         .opened(cx)
                         .preview
                         .as_ref()
-                        .is_some_and(|preview| preview.course.storage_dir() == dir);
+                        .is_some_and(|preview| preview.course.dir == dir);
                     if reading && this.page == Page::Result {
                         this.navigate(Page::Library, cx);
                     } else {
@@ -429,7 +432,7 @@ impl Desktop {
     /// 打开 → 处理 → 管理: behind its ⋮ button and on right-click.
     fn note_commands(&self, course: &Rc<Course>, cx: &mut Context<Self>) -> Vec<Command> {
         let desktop = cx.weak_entity();
-        let path = course.storage_dir();
+        let path = course.dir.clone();
         let link = self
             .library(cx)
             .note_source(course)
@@ -488,7 +491,7 @@ impl Desktop {
                 symbols::drive_file_move(),
                 |this, course, _, cx| {
                     let root = this.folder_context(Some(course.dir.clone()), cx).root;
-                    this.begin_move(root, Moving::Note(course.storage_dir()), cx)
+                    this.begin_move(root, Moving::Note(course.dir.clone()), cx)
                 },
             ),
             on_course(
@@ -580,7 +583,7 @@ impl Desktop {
                         .title_recovery
                         .contains_key(&location.root)
             })
-        })
+        }) || !self.library(cx).note_attention.is_empty()
     }
 
     fn library_recovery_view(
@@ -701,6 +704,67 @@ impl Desktop {
                 );
             }
         }
+        // A note whose replacement stopped is not listed until it is sorted out;
+        // copies kept beside a note are named so they do not pile up unseen.
+        use course2md::artifact::NoteAttention;
+        for (index, attention) in self
+            .library(cx)
+            .note_attention
+            .clone()
+            .into_iter()
+            .enumerate()
+        {
+            let (kind, message, folder) = match attention {
+                NoteAttention::Blocked { swap, .. } => (
+                    NoticeKind::Danger,
+                    course2md::outcome::recovery_blocked_message(&swap, course2md::i18n::lang()),
+                    swap,
+                ),
+                // At the limit, new tasks for the note stop: say so and what frees it.
+                NoteAttention::Kept { swap, copies, .. }
+                    if copies.len() >= course2md::artifact::MAX_KEPT_COPIES =>
+                {
+                    (
+                        NoticeKind::Danger,
+                        course2md::outcome::copies_kept_message(&swap, course2md::i18n::lang()),
+                        swap,
+                    )
+                }
+                NoteAttention::Kept { note, swap, copies } => (
+                    NoticeKind::Info,
+                    course2md::tr!(
+                        "{} 旁保留了 {} 份副本（替换中断时留下，无法确认是否还需要），请查看后删除不需要的",
+                        note.display(),
+                        copies.len()
+                    )
+                    .to_string(),
+                    swap,
+                ),
+                NoteAttention::Failed { .. } => continue,
+            };
+            // The message holds long paths: its actions take a row of their own below
+            // it instead of narrowing it.
+            notices.push(
+                notice_banner(("note-attention", index), kind, message).child(
+                    h_flex()
+                        .w_full()
+                        .flex_wrap()
+                        .gap(rem(8.))
+                        .child(
+                            material_button(("open-note-attention", index), ButtonVariant::Tonal)
+                                .icon(symbols::folder_open())
+                                .child(course2md::tr!("打开需要处理的文件夹"))
+                                .on_click(move |_, _, cx| cx.open_with_system(&folder)),
+                        )
+                        .child(
+                            material_button(("recheck-note-attention", index), ButtonVariant::Text)
+                                .icon(symbols::refresh())
+                                .child(course2md::tr!("重新检查保存位置"))
+                                .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx))),
+                        ),
+                ),
+            );
+        }
         (!notices.is_empty()).then(|| v_flex().gap(rem(12.)).children(notices))
     }
 
@@ -807,7 +871,7 @@ impl Desktop {
                                 .library(cx)
                                 .view_cache
                                 .locations
-                                .get(&course.storage_dir())
+                                .get(&course.dir)
                                 .is_some_and(|location| scope.available.contains(&location.root))
                     });
                 if !in_scope || !course.title.to_lowercase().contains(&query) {
@@ -841,6 +905,9 @@ impl Desktop {
             .collect();
         if self.library_needs_recovery(&all_access, cx) {
             items.push(LibraryItem::Recovery(all_access.clone()));
+        }
+        if let Some(notice) = &self.migration_notice {
+            items.push(LibraryItem::Migrated(notice.clone()));
         }
         use crate::storage::LibraryCoverage;
         match coverage {
@@ -1184,6 +1251,19 @@ impl Desktop {
                 .library_recovery_view(access, cx)
                 .unwrap_or_else(div)
                 .into_any_element(),
+            LibraryItem::Migrated(message) => {
+                notice_banner("library-migrated", NoticeKind::Info, message.clone())
+                    .child(
+                        material_button("dismiss-library-migrated", ButtonVariant::Text)
+                            .icon(symbols::close())
+                            .child(course2md::tr!("关闭"))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.migration_notice = None;
+                                cx.notify();
+                            })),
+                    )
+                    .into_any_element()
+            }
             LibraryItem::Coverage(message) => TileScale::Regular
                 .support("library-search-coverage", message.clone())
                 .into_any_element(),
@@ -1429,8 +1509,7 @@ impl Desktop {
 
     /// Where a note lives and came from, on one line; a card's shorter line leaves out
     /// where it came from. Its folder is named only where the place does not already
-    /// say it; source identity helps recognize a note; routine revision numbers remain
-    /// in the reader's version history.
+    /// say it; source identity helps recognize a note.
     fn note_line(&self, course: &Course, card: bool, cx: &App) -> String {
         use chrono::Datelike;
         let ms = course
@@ -1495,11 +1574,7 @@ impl Desktop {
 
     fn course_has_reading_position(&self, course: &Course, cx: &App) -> bool {
         course.manifest.as_ref().is_some_and(|manifest| {
-            let key = desktop_reader_core::reader::manifest_reading_key(
-                &manifest.course_id,
-                &manifest.version_id,
-                0,
-            );
+            let key = desktop_reader_core::reader::manifest_reading_key(&manifest.course_id, 0);
             self.workspace(cx)
                 .and_then(|workspace| workspace.state.positions.get(&key))
                 .is_some_and(desktop_reader_core::reader::has_reading_position)
@@ -1519,7 +1594,7 @@ impl Desktop {
             .as_ref()
             .filter(|(path, _)| path == &course.dir)?;
         let retry = course.clone();
-        let path = course.storage_dir();
+        let path = course.dir.clone();
         Some(
             v_flex()
                 .w_full()
@@ -1590,7 +1665,7 @@ impl Desktop {
     }
 
     /// A note's real state worth flagging on its cover or row: opening now, a task
-    /// still writing a version of it, or content that still needs completing.
+    /// still replacing it, or content that still needs completing.
     fn note_status(&self, course: &Course, cx: &App) -> Option<Div> {
         let busy = self
             .course_location(course, cx)

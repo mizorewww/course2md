@@ -960,7 +960,7 @@ impl Desktop {
             .selectable_candidates(cx)
             .filter(|candidate| self.import.selected_candidates.contains(&candidate.input))
             .count();
-        // A checked candidate that already has a note gets a new version; say so beside the action.
+        // A checked candidate that already has a note has it replaced; say so beside the action.
         let noted_selected = self
             .import
             .source_candidates
@@ -1032,8 +1032,8 @@ impl Desktop {
                         .when(noted_selected > 0, |row| {
                             row.child(
                                 accessible_text(
-                                    "candidates-new-version",
-                                    course2md::tr!("{} 个已有笔记，将生成新版", noted_selected),
+                                    "candidates-replace-notes",
+                                    course2md::tr!("{} 个已有笔记将被覆盖", noted_selected),
                                 )
                                 .flex_1()
                                 .min_w_0()
@@ -2862,6 +2862,7 @@ impl Desktop {
                     .into_any_element(),
                 );
             }
+            let title = self.library(cx).course_display_title(&course);
             actions.push(
                 button(
                     "open-existing-note",
@@ -2876,10 +2877,10 @@ impl Desktop {
             );
             actions.push(
                 button(
-                    "generate-new-version",
+                    "regenerate-note",
                     ButtonVariant::Outlined,
                     symbols::refresh(),
-                    course2md::tr!("生成新版笔记"),
+                    course2md::tr!("重新生成（覆盖当前笔记）"),
                 )
                 .track_focus(&self.import_submit_focus)
                 .disabled(
@@ -2888,10 +2889,26 @@ impl Desktop {
                         || self.records.read(cx).workspace.is_none()
                         || preferences_blocked,
                 )
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.import.following_conversion =
-                        Some(ConversionFollow::Preparing(this.import.preview_generation));
-                    this.enqueue_current(window, cx);
+                .on_click(cx.listener(move |_, _, window, cx| {
+                    // The note is replaced, not kept beside the new one: ask first.
+                    ui::Confirm::new(
+                        course2md::tr!("重新生成笔记"),
+                        course2md::tr!("保留当前笔记"),
+                        course2md::tr!("重新生成"),
+                    )
+                    .text(course2md::tr!(
+                        "《{}》将被新生成的笔记覆盖。你手动改过的文件会以 .edited 为名保留在笔记旁。",
+                        title
+                    ))
+                    .ask(
+                        cx.listener(|this, _, window, cx| {
+                            this.import.following_conversion =
+                                Some(ConversionFollow::Preparing(this.import.preview_generation));
+                            this.enqueue_current(window, cx);
+                        }),
+                        window,
+                        cx,
+                    );
                 })),
             );
         } else if let Some(purpose) = self.missing_import_service(cx) {

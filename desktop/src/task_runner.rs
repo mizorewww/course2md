@@ -382,7 +382,7 @@ impl Desktop {
             }
             if duplicates > 0 {
                 parts.push(course2md::tr!(
-                    "{} 个与进行中的任务相同，未重复加入",
+                    "{} 个已有进行中的任务，未重复加入",
                     duplicates
                 ));
             }
@@ -480,7 +480,8 @@ impl Desktop {
             self.import.pending_conversion = None;
             self.import.source_validation = None;
             self.import.title_required = false;
-            self.message = (!created).then(|| course2md::tr!("已有相同任务，未重复加入").into());
+            self.message =
+                (!created).then(|| course2md::tr!("这份笔记已有进行中的任务，已为你打开").into());
             if created {
                 self.import.following_conversion = self
                     .import
@@ -1020,14 +1021,15 @@ impl Desktop {
                         .following_conversion
                         .as_ref()
                         .is_some_and(|follow| {
+                            let preview = self.opened(cx).preview.as_ref();
                             follow.completed_reader_task(
                                 &task,
                                 self.page,
                                 self.opened(cx).read_generation,
-                                self.opened(cx)
-                                    .preview
-                                    .as_ref()
-                                    .map(|preview| preview.course.dir.as_path()),
+                                preview.map(|preview| preview.course.dir.as_path()),
+                                preview
+                                    .and_then(|preview| preview.course.manifest.as_ref())
+                                    .map(|manifest| manifest.task_id.as_str()),
                             )
                         });
                 if let Some(done) = done {
@@ -1036,6 +1038,7 @@ impl Desktop {
                     let root = self.task_library(&task, cx).map(|l| l.root.clone());
                     let open = !task.exports_only()
                         && (follow_input_completion || follow_reader_completion);
+                    let exports_only = task.exports_only();
                     let publication = run::Publication::new(&task, root, &done, manifest.as_ref());
                     // Cover copy, folder assignment and thumbnail lookup touch the
                     // library disk; the record above is already committed.
@@ -1064,6 +1067,8 @@ impl Desktop {
                             this.refresh_library(cx);
                             if open {
                                 this.open_completed_conversion(Course::from_completed(&done), cx);
+                            } else {
+                                this.reload_replaced_note(&done.out_dir, exports_only, cx);
                             }
                             cx.notify();
                         });
@@ -1081,6 +1086,39 @@ impl Desktop {
             ),
         }
         cx.notify();
+    }
+
+    /// A note open in the reader that a task has just replaced is read again in place,
+    /// at the same moment of the video, wherever the person is.
+    fn reload_replaced_note(
+        &mut self,
+        note: &std::path::Path,
+        exports_only: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let shown = self
+            .opened(cx)
+            .preview
+            .as_ref()
+            .is_some_and(|preview| preview.course.dir == note);
+        if !shown {
+            return;
+        }
+        let course = self.records.read(cx).note_at(note).map_or_else(
+            || {
+                let mut course = self.opened(cx).preview.as_ref().unwrap().course.clone();
+                course.manifest = None;
+                course
+            },
+            |course| (*course).clone(),
+        );
+        let reload = if exports_only {
+            crate::reader_ui::Reload::Reread
+        } else {
+            crate::reader_ui::Reload::Replaced
+        };
+        self.reader
+            .change(cx, |reader, cx| reader.reload_note(course, reload, cx));
     }
 
     pub(crate) fn open_task_export_location(&mut self, id: String, cx: &mut Context<Self>) {
@@ -1197,6 +1235,11 @@ impl Desktop {
             TaskAction::OpenNoteFolder => {
                 if let Some(path) = &task.artifact {
                     cx.open_with_system(path);
+                }
+            }
+            TaskAction::OpenRecoveryFolder => {
+                if let Some(folder) = task.events.blocked_folder() {
+                    cx.open_with_system(folder);
                 }
             }
             TaskAction::OpenExports => self.open_task_export_location(id, cx),

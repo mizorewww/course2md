@@ -67,8 +67,6 @@ pub struct LibraryViewCache {
     pub sources: std::collections::HashMap<String, NoteSource>,
     /// Source identity → indices into `LibraryState::courses` of its notes.
     pub notes_by_source: std::collections::HashMap<String, Vec<usize>>,
-    /// Course identity → index into `LibraryState::courses` of its newest version.
-    pub newest_by_course: std::collections::HashMap<String, usize>,
     pub recovery: BTreeMap<PathBuf, organize::Recovery>,
     pub title_recovery: BTreeMap<PathBuf, organize::Recovery>,
     pub aliases: BTreeMap<PathBuf, BTreeMap<PathBuf, String>>,
@@ -76,29 +74,6 @@ pub struct LibraryViewCache {
 }
 
 impl LibraryViewCache {
-    /// A newer version of the note `manifest` belongs to, when the library has one.
-    pub fn newer_version(
-        &self,
-        courses: &[Rc<Course>],
-        manifest: &c2m_artifact::artifact::Manifest,
-    ) -> Option<Rc<Course>> {
-        self.newest_by_course
-            .get(&manifest.course_id)
-            .and_then(|index| courses.get(*index))
-            .filter(|course| {
-                course
-                    .manifest
-                    .as_ref()
-                    // Indices are rebuilt after each scan; until then an inserted
-                    // note can shift them, so the identity is checked too.
-                    .is_some_and(|newest| {
-                        newest.course_id == manifest.course_id
-                            && newest.revision > manifest.revision
-                    })
-            })
-            .cloned()
-    }
-
     pub fn inspect(
         location: &workspace::LibraryLocation,
         scan: Option<&notes::LibraryScan>,
@@ -126,8 +101,8 @@ impl LibraryViewCache {
         }
         if let Some(scan) = scan {
             for course in &scan.courses {
-                let storage = course.storage_dir();
-                let Ok(relative) = organize::relative_key(&location.root, &storage) else {
+                let storage = &course.dir;
+                let Ok(relative) = organize::relative_key(&location.root, storage) else {
                     continue;
                 };
                 let membership = CourseLocation {
@@ -135,15 +110,10 @@ impl LibraryViewCache {
                     root: location.root.clone(),
                     relative: relative.clone(),
                 };
-                // Imported versions can use canonical paths while a registered
+                // A published note can use a canonical path while a registered
                 // root uses a symlink or /tmp alias. Resolve once in this worker.
-                let mut paths = vec![
-                    course.dir.clone(),
-                    storage.clone(),
-                    location.root.join(relative),
-                ];
+                let mut paths = vec![storage.clone(), location.root.join(relative)];
                 paths.extend(storage.canonicalize().ok());
-                paths.extend(course.dir.canonicalize().ok());
                 for path in paths {
                     cache.locations.insert(path, membership.clone());
                 }
@@ -168,7 +138,7 @@ impl LibraryViewCache {
     }
 }
 
-/// Whether an unfinished task is still writing a version of the note with
+/// Whether an unfinished task is still writing the note with
 /// `source_id` into the library `library_id`. Tasks name their library by
 /// `LibraryLocation::id`, never by its path.
 pub fn note_has_unfinished_task(
@@ -176,14 +146,22 @@ pub fn note_has_unfinished_task(
     library_id: &str,
     source_id: Option<&str>,
 ) -> bool {
-    source_id.is_some_and(|source| {
-        tasks.iter().any(|task| {
-            // An attempt a follow-up replaced stays unfinished, but is no longer worked on.
-            !task.state.finished()
-                && task.handled_by.is_none()
-                && task.plan.source_id == source
-                && task.plan.library_id == library_id
-        })
+    note_unfinished_task(tasks, library_id, source_id).is_some()
+}
+
+/// The one unfinished task that will replace the note of `source_id` in `library_id`.
+pub fn note_unfinished_task<'a>(
+    tasks: &'a [crate::workspace::TaskRecord],
+    library_id: &str,
+    source_id: Option<&str>,
+) -> Option<&'a crate::workspace::TaskRecord> {
+    let source = source_id?;
+    tasks.iter().find(|task| {
+        // An attempt a follow-up replaced stays unfinished, but is no longer worked on.
+        !task.state.finished()
+            && task.handled_by.is_none()
+            && task.plan.source_id == source
+            && task.plan.library_id == library_id
     })
 }
 
@@ -215,8 +193,12 @@ pub struct LibraryState {
     pub courses: Vec<Rc<Course>>,
     pub cover_by_source: BTreeMap<String, PathBuf>,
     pub loading: bool,
-    /// Note folders a newer app wrote; see `notes::LibraryScan::newer`.
+    /// Note folders a newer app wrote, which this one must not replace; see
+    /// `notes::LibraryScan::newer`.
     pub newer_notes: std::collections::BTreeSet<PathBuf>,
+    /// Notes whose interrupted replacement needs the person, or with copies kept
+    /// beside them; see `notes::LibraryScan::attention`.
+    pub note_attention: Vec<c2m_artifact::artifact::NoteAttention>,
 }
 
 impl LibraryState {
@@ -233,6 +215,7 @@ impl LibraryState {
             courses: Vec::new(),
             cover_by_source: BTreeMap::new(),
             newer_notes: Default::default(),
+            note_attention: Vec::new(),
             loading: false,
         }
     }
@@ -251,6 +234,7 @@ impl LibraryState {
         self.cover_by_source.clear();
         self.issues.clear();
         self.newer_notes.clear();
+        self.note_attention.clear();
         self.indexes.clear();
         self.view_cache = Default::default();
         for (location, _, (scan, organization, cache)) in results {
@@ -269,6 +253,7 @@ impl LibraryState {
                     }
                     self.courses.extend(scan.courses.into_iter().map(Rc::new));
                     self.newer_notes.extend(scan.newer);
+                    self.note_attention.extend(scan.attention);
                     self.issues
                         .extend(scan.issues.into_iter().map(|message| LibraryIssue {
                             root: location.root.clone(),
@@ -329,7 +314,7 @@ impl LibraryState {
         registered: &'a [workspace::LibraryLocation],
         course: &Course,
     ) -> Option<&'a workspace::LibraryLocation> {
-        let cached = self.view_cache.locations.get(&course.storage_dir())?;
+        let cached = self.view_cache.locations.get(&course.dir)?;
         registered
             .iter()
             .find(|lib| lib.id == cached.id && lib.root == cached.root)
@@ -342,7 +327,7 @@ impl LibraryState {
         course: &Course,
     ) -> Option<u64> {
         let root = &self.course_location(registered, course)?.root;
-        let cached = self.view_cache.locations.get(&course.storage_dir())?;
+        let cached = self.view_cache.locations.get(&course.dir)?;
         self.indexes.get(root)?.folder_key(&cached.relative)
     }
 
@@ -375,18 +360,6 @@ impl LibraryState {
             }
         }
         self.view_cache.notes_by_source = notes_by_source;
-        let mut newest: std::collections::HashMap<String, usize> = Default::default();
-        for (index, course) in self.courses.iter().enumerate() {
-            let Some(manifest) = &course.manifest else {
-                continue;
-            };
-            let current = newest.entry(manifest.course_id.clone()).or_insert(index);
-            let revision = |i: usize| self.courses[i].manifest.as_ref().map(|m| m.revision);
-            if revision(*current) < Some(manifest.revision) {
-                *current = index;
-            }
-        }
-        self.view_cache.newest_by_course = newest;
         let wanted: std::collections::HashSet<&str> = self
             .courses
             .iter()
@@ -420,7 +393,7 @@ impl LibraryState {
     pub fn course_display_title(&self, course: &Course) -> String {
         self.courses
             .iter()
-            .find(|item| item.storage_dir() == course.storage_dir())
+            .find(|item| item.dir == course.dir)
             .map(|item| item.title.clone())
             .unwrap_or_else(|| course.title.clone())
     }
@@ -472,6 +445,7 @@ mod tests {
                 Ok(notes::LibraryScan {
                     courses: Vec::new(),
                     issues: vec!["一份笔记无法读取".into()],
+                    attention: Vec::new(),
                     newer: Vec::new(),
                 }),
                 if folders {
@@ -550,6 +524,7 @@ mod tests {
             artifact: None,
             unread: false,
             resend: vec![],
+            replaced_by: None,
         };
         let busy = super::note_has_unfinished_task;
         let running = [task(TaskState::Running)];

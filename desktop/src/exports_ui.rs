@@ -3,7 +3,7 @@
 //! shows in the other and only one runs at a time.
 use crate::{Course, symbols, ui};
 use desktop_reader_core::reader::{
-    ExportFeedback, ExportState, export_file_name, export_version, exported_file_label,
+    ExportFeedback, ExportState, export_file_name, export_note, exported_file_label,
 };
 use desktop_store::records::Records;
 use gpui::{prelude::*, *};
@@ -14,7 +14,7 @@ use std::{collections::BTreeMap, path::PathBuf, rc::Rc};
 pub(crate) struct NoteExports {
     records: Entity<Records>,
     state: ExportState,
-    /// The file each version was last exported to.
+    /// The file each note was last exported to.
     exported: BTreeMap<PathBuf, PathBuf>,
     /// The note each export was of, for its retry.
     courses: BTreeMap<PathBuf, Rc<Course>>,
@@ -35,15 +35,15 @@ impl NoteExports {
         self.state.pending.is_some()
     }
 
-    /// The export running is of the version at `dir`.
-    pub(crate) fn exporting_version(&self, dir: &std::path::Path) -> bool {
+    /// The export running is of the note at `dir`.
+    pub(crate) fn exporting_note(&self, dir: &std::path::Path) -> bool {
         self.state
             .pending
             .as_ref()
             .is_some_and(|(_, source)| source == dir)
     }
 
-    /// The file the version at `dir` was last exported to.
+    /// The file the note at `dir` was last exported to.
     pub(crate) fn exported(&self, dir: &std::path::Path) -> Option<PathBuf> {
         self.exported.get(dir).cloned()
     }
@@ -55,12 +55,12 @@ impl NoteExports {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let version = course.dir.clone();
-        let Some(generation) = self.state.begin(version.clone()) else {
+        let note = course.dir.clone();
+        let Some(generation) = self.state.begin(note.clone()) else {
             return;
         };
         let title = self.records.read(cx).library.course_display_title(&course);
-        self.courses.insert(version.clone(), course);
+        self.courses.insert(note.clone(), course);
         let suggested = export_file_name(&title, format);
         let receiver = cx.prompt_for_new_path(&self.records.read(cx).output(), Some(&suggested));
         cx.notify();
@@ -69,7 +69,7 @@ impl NoteExports {
                 Ok(Ok(Some(path))) => path,
                 Ok(Ok(None)) => {
                     let _ = this.update(cx, |this, cx| {
-                        if this.state.cancel(generation, &version) {
+                        if this.state.cancel(generation, &note) {
                             cx.notify();
                         }
                     });
@@ -79,7 +79,7 @@ impl NoteExports {
                     let _ = this.update(cx, |this, cx| {
                         if this.state.finish(
                             generation,
-                            &version,
+                            &note,
                             ExportFeedback {
                                 title,
                                 format,
@@ -93,19 +93,16 @@ impl NoteExports {
                 }
             };
             if !this
-                .update(cx, |this, _| this.state.is_pending(generation, &version))
+                .update(cx, |this, _| this.state.is_pending(generation, &note))
                 .unwrap_or(false)
             {
                 return;
             }
             let target = path.clone();
-            let source = version.clone();
-            let exported =
-                crate::spawn_blocking_io(move || export_version(&source, format, &target))
-                    .await
-                    .unwrap_or_else(|| {
-                        Err(anyhow::anyhow!(course2md::tr!("导出时意外中断，请重试")))
-                    });
+            let source = note.clone();
+            let exported = crate::spawn_blocking_io(move || export_note(&source, format, &target))
+                .await
+                .unwrap_or_else(|| Err(anyhow::anyhow!(course2md::tr!("导出时意外中断，请重试"))));
             let _ = this.update(cx, |this, cx| {
                 let result = exported
                     .map(|()| path.clone())
@@ -113,7 +110,7 @@ impl NoteExports {
                 let success = result.is_ok();
                 if !this.state.finish(
                     generation,
-                    &version,
+                    &note,
                     ExportFeedback {
                         title,
                         format,
@@ -123,7 +120,7 @@ impl NoteExports {
                     return;
                 }
                 if success {
-                    this.exported.insert(version, path);
+                    this.exported.insert(note, path);
                 }
                 cx.notify();
             });

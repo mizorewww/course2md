@@ -8,7 +8,6 @@ use c2m_config::{config::TranscriptSource, settings::ConfigFile};
 use c2m_engine::execution::{Component, Request};
 use desktop_prefs::preferences::{self, ServiceRefs};
 use desktop_store::{
-    notes::Course,
     organize,
     workspace::{self, Intent, LibraryLocation, LibraryWrites, TaskRecord, TaskState},
 };
@@ -64,7 +63,7 @@ pub fn execution_request(
         schema: 1,
         operation: task.plan.operation.clone(),
         task_id: task.id.clone(),
-        version_id: task.id.clone(),
+        version_id: None,
         course_dir: location.root.join(&course_id),
         course_id,
         source,
@@ -228,6 +227,11 @@ pub fn record_finish(
         .and_then(|done| done.outcomes.clone())
         .or_else(|| manifest.map(|manifest| manifest.outcomes.clone()));
     workspace::reconcile_receipts(task)?;
+    // The note is this task's now, unless it left the note as it was.
+    let replaced = done
+        .zip(manifest)
+        .filter(|(_, manifest)| manifest.task_id == id && !task.exports_only())
+        .map(|(done, _)| done.out_dir.clone());
     if let (Some(done), Some(manifest)) = (done, manifest) {
         task.artifact = Some(done.out_dir.clone());
         let partial = done.partial.unwrap_or(manifest.partial);
@@ -260,6 +264,9 @@ pub fn record_finish(
         }
     }
     let record = task.clone();
+    if let Some(note) = replaced {
+        state.note_replaced(&note, id);
+    }
     if record.state == TaskState::Complete && state.selected_task.as_deref() == Some(id) {
         state.selected_task = None;
     }
@@ -271,9 +278,11 @@ pub struct Publication {
     root: Option<PathBuf>,
     source: source::Source,
     folder: Option<u64>,
-    out_dir: PathBuf,
-    storage_dir: PathBuf,
+    /// The note folder.
+    note: PathBuf,
     frames: Vec<c2m_core::timeline::FrameEvent>,
+    /// Hand-edited files of the replaced note, kept beside it under another name.
+    kept_edits: Vec<PathBuf>,
 }
 
 impl Publication {
@@ -287,25 +296,27 @@ impl Publication {
             root,
             source: task.plan.source.clone(),
             folder: task.plan.folder,
-            out_dir: done.out_dir.clone(),
-            storage_dir: Course::from_completed(done).storage_dir(),
+            note: done.out_dir.clone(),
+            kept_edits: done.kept_edits.clone(),
             frames: manifest
                 .map(|manifest| manifest.frames.clone())
                 .unwrap_or_default(),
         }
     }
 
-    /// Saves the cover, files the note in its folder and finds the card's picture.
+    /// Saves the note's cover beside it (a file of its own, which the next task
+    /// replacing the note keeps), files the note in its folder and finds the card's
+    /// picture.
     /// Returns what could not be done, in the interface language, and the picture.
     /// Blocking: it touches the library's disk.
     pub fn file(self) -> (Vec<String>, Option<PathBuf>) {
-        let mut issues = Vec::new();
+        let mut issues: Vec<String> = kept_edits_notice(&self.kept_edits).into_iter().collect();
         if let Some(root) = &self.root {
-            if let Err(error) = source::save_cover(&self.source, &self.out_dir) {
+            if let Err(error) = source::save_cover(&self.source, &self.note) {
                 issues.push(c2m_i18n::tr!("封面暂未保存：{}", format!("{error:#}")));
             }
             if let Err(error) = organize::Library::edit(root, |library| {
-                library.assign(root, &self.storage_dir, self.folder)
+                library.assign(root, &self.note, self.folder)
             }) {
                 issues.push(c2m_i18n::tr!(
                     "文件夹归属暂未更新：{}",
@@ -313,14 +324,28 @@ impl Publication {
                 ));
             }
         }
-        let cover = self.out_dir.join("cover.jpg");
+        let cover = self.note.join("cover.jpg");
         let thumbnail = cover.is_file().then_some(cover).or_else(|| {
             self.frames.iter().find_map(|frame| {
-                c2m_artifact::artifact::safe_asset_path(&self.out_dir, &frame.image).ok()
+                c2m_artifact::artifact::safe_asset_path(&self.note, &frame.image).ok()
             })
         });
         (issues, thumbnail)
     }
+}
+
+/// What the person is told when a task replaced a note they had edited: the edited
+/// files were kept beside the new note under these names.
+pub fn kept_edits_notice(kept: &[PathBuf]) -> Option<String> {
+    (!kept.is_empty()).then(|| {
+        c2m_i18n::tr!(
+            "你改过的文件已另存为 {}",
+            kept.iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(c2m_i18n::tr!("、"))
+        )
+    })
 }
 
 /// The paid requests of a task whose answers never arrived, by id.
@@ -461,5 +486,133 @@ mod tests {
             serde_json::from_slice(&task_control(&preferences, &task).unwrap()).unwrap();
         assert_eq!(control["stopped_services"], serde_json::json!(["removed"]));
         assert_eq!(control["intent"], serde_json::json!("run"));
+    }
+
+    /// A note the person had edited is replaced; the task's result tells them where
+    /// their edits were kept, then and after a restart.
+    #[test]
+    fn edits_kept_beside_a_replaced_note_are_reported_with_the_result() {
+        use c2m_protocol::progress::Event;
+        let (_root, mut workspace, id) = queued_task();
+        let state = &mut workspace.state;
+        let note = state
+            .library(&state.default_library)
+            .unwrap()
+            .root
+            .join("course");
+        let kept = vec![PathBuf::from("course.edited.md")];
+        let done = Done {
+            task_id: id.clone(),
+            out_dir: note.clone(),
+            kept_edits: kept.clone(),
+            ..Default::default()
+        };
+        let event = Event::Done(Box::new(done.clone()));
+        state.apply_task_event(&id, &event);
+        let manifest: Manifest = serde_json::from_value(serde_json::json!({
+            "schema": 2, "task_id": id, "course_id": "course", "source_id": "source",
+            "title": "课程", "created_at_ms": 1, "document": "document.json",
+            "markdown": "course.md", "frames": [], "assets": [], "outputs": [],
+            "outcomes": {}, "partial": false,
+        }))
+        .unwrap();
+        let task =
+            record_finish(state, &id, Some(&done), Some(&manifest), true, true, false).unwrap();
+        assert_eq!(task.state, TaskState::Complete);
+        assert_eq!(task.artifact.as_ref(), Some(&note));
+        let notice = task_view::task_kept_edits(&task).unwrap();
+        assert!(notice.contains("course.edited.md"), "{notice}");
+        // Filing the note says so too, with what it could not do.
+        let (issues, _) = Publication::new(&task, None, &done, Some(&manifest)).file();
+        assert_eq!(issues, vec![notice.clone()]);
+        // A restart reads it back from the saved events; a later run of the same
+        // task, which finds its note already published, reports none and changes
+        // nothing.
+        let mut events = desktop_store::activity::JobEvents::default();
+        let mut again = done.clone();
+        again.kept_edits.clear();
+        let stream = [event, Event::Done(Box::new(again))]
+            .iter()
+            .map(|event| serde_json::to_string(event).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        events.replay(stream.as_bytes());
+        assert_eq!(events.kept_edits, kept);
+        assert!(kept_edits_notice(&[]).is_none());
+    }
+    /// A task that replaces a note leaves the task whose note it was replaced, at
+    /// once, as the next opening would; one that left the note as it was does not.
+    #[test]
+    fn a_published_note_replaces_the_earlier_task_s_result() {
+        let (_root, mut workspace, first) = queued_task();
+        let state = &mut workspace.state;
+        let note = state
+            .library(&state.default_library)
+            .unwrap()
+            .root
+            .join("course");
+        let manifest = |task: &str| -> Manifest {
+            serde_json::from_value(serde_json::json!({
+                "schema": 2, "task_id": task, "course_id": "course", "source_id": "source",
+                "title": "课程", "created_at_ms": 1, "document": "document.json",
+                "markdown": "course.md", "frames": [], "assets": [], "outputs": [],
+                "outcomes": {}, "partial": false,
+            }))
+            .unwrap()
+        };
+        let done = |task: &str| Done {
+            task_id: task.into(),
+            out_dir: note.clone(),
+            ..Default::default()
+        };
+        record_finish(
+            state,
+            &first,
+            Some(&done(&first)),
+            Some(&manifest(&first)),
+            true,
+            true,
+            false,
+        )
+        .unwrap();
+        let mut plan = state.task(&first).unwrap().plan.clone();
+        plan.title = "重新生成".into();
+        let (second, _) = state.enqueue(plan.clone(), None).unwrap();
+        // A run that left the note as the first task wrote it replaces nothing.
+        record_finish(
+            state,
+            &second,
+            Some(&done(&second)),
+            Some(&manifest(&first)),
+            true,
+            true,
+            false,
+        )
+        .unwrap();
+        assert_eq!(state.task(&first).unwrap().replaced_by, None);
+        let (third, _) = state.enqueue(plan, None).unwrap();
+        record_finish(
+            state,
+            &third,
+            Some(&done(&third)),
+            Some(&manifest(&third)),
+            true,
+            true,
+            false,
+        )
+        .unwrap();
+        let replaced = state.task(&first).unwrap();
+        assert_eq!(replaced.replaced_by.as_deref(), Some(third.as_str()));
+        assert_eq!(replaced.artifact, None);
+        assert_eq!(replaced.state, TaskState::Complete);
+        assert_eq!(
+            state.task(&second).unwrap().replaced_by.as_deref(),
+            Some(third.as_str())
+        );
+        assert_eq!(state.task(&third).unwrap().artifact.as_ref(), Some(&note));
+        assert_eq!(
+            task_view::task_status_label(state.task(&first).unwrap()),
+            c2m_i18n::tr!("笔记已被之后的任务更新")
+        );
     }
 }

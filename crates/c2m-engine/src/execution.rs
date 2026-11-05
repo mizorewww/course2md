@@ -17,15 +17,73 @@ pub const REQUEST_SCHEMA: u32 = 1;
 pub(crate) const MAX_REQUEST_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", try_from = "OperationWire")]
 pub enum Operation {
     #[default]
     Generate,
+    /// Redoes `components` of the note in `note_dir` and replaces it in place.
     Reprocess {
-        base_version_dir: PathBuf,
+        /// The note folder; the same as the request's `course_dir`.
+        note_dir: PathBuf,
+        /// The task whose note this repair was planned from, as its manifest
+        /// recorded it. A note since replaced by another task is not repaired.
+        base_task_id: String,
         components: Vec<Component>,
         prior_work_dir: Option<PathBuf>,
     },
+}
+
+/// What a stored plan holds. Plans saved before notes were flat name the base
+/// version folder `<note>/versions/<id>`, whose id was the task id of its task.
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum OperationWire {
+    Generate,
+    Reprocess {
+        #[serde(default)]
+        note_dir: Option<PathBuf>,
+        #[serde(default)]
+        base_task_id: Option<String>,
+        #[serde(default)]
+        base_version_dir: Option<PathBuf>,
+        components: Vec<Component>,
+        #[serde(default)]
+        prior_work_dir: Option<PathBuf>,
+    },
+}
+
+impl TryFrom<OperationWire> for Operation {
+    type Error = String;
+
+    fn try_from(wire: OperationWire) -> std::result::Result<Self, String> {
+        let OperationWire::Reprocess {
+            note_dir,
+            base_task_id,
+            base_version_dir,
+            components,
+            prior_work_dir,
+        } = wire
+        else {
+            return Ok(Self::Generate);
+        };
+        let legacy = base_version_dir.as_deref().and_then(|version| {
+            let id = version.file_name()?.to_str()?.to_owned();
+            let versions = version.parent()?;
+            let note = versions.parent()?.to_path_buf();
+            (versions.file_name()? == "versions").then_some((note, id))
+        });
+        let (note_dir, base_task_id) = match (note_dir, base_task_id, legacy) {
+            (Some(note_dir), Some(base_task_id), _) => (note_dir, base_task_id),
+            (_, _, Some(legacy)) => legacy,
+            _ => return Err("reprocess needs note_dir and base_task_id".into()),
+        };
+        Ok(Self::Reprocess {
+            note_dir,
+            base_task_id,
+            components,
+            prior_work_dir,
+        })
+    }
 }
 
 /// A version component that a reprocess task can redo. The wire format stays the
@@ -88,7 +146,10 @@ pub struct Request {
     pub operation: Operation,
     pub task_id: String,
     pub course_id: String,
-    pub version_id: String,
+    /// The id a task's identity records as `version_id`: always its task id since
+    /// notes are flat. Only a task bound before then may carry another.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version_id: Option<String>,
     pub source: String,
     pub source_id: String,
     pub title: String,
@@ -104,6 +165,7 @@ pub struct Request {
     #[serde(default)]
     pub allow_unauthenticated_asr: bool,
     pub work_dir: PathBuf,
+    /// The note folder.
     pub course_dir: PathBuf,
     /// Reserved for the cooperative pause/cancel protocol; never sent as argv.
     #[serde(default)]
@@ -119,9 +181,17 @@ impl Request {
             task_id: self.task_id.clone(),
             course_id: self.course_id.clone(),
             source_id: self.source_id.clone(),
-            version_id: self.version_id.clone(),
             course_dir: self.course_dir.clone(),
+            replaces: match &self.operation {
+                Operation::Generate => None,
+                Operation::Reprocess { base_task_id, .. } => Some(base_task_id.clone()),
+            },
         }
+    }
+
+    /// The id the identity records as `version_id`.
+    fn identity_version_id(&self) -> &str {
+        self.version_id.as_deref().unwrap_or(&self.task_id)
     }
 
     pub fn read(reader: impl Read) -> Result<Self> {
@@ -157,9 +227,9 @@ impl Request {
             tr!("不支持此任务格式 / Unsupported task schema")
         );
         for (name, value) in [
-            ("task_id", &self.task_id),
+            ("task_id", self.task_id.as_str()),
             ("course_id", &self.course_id),
-            ("version_id", &self.version_id),
+            ("version_id", self.identity_version_id()),
         ] {
             anyhow::ensure!(
                 valid_id(value),
@@ -183,9 +253,11 @@ impl Request {
             tr!("任务与笔记位置必须是绝对路径 / Task paths must be absolute")
         );
         anyhow::ensure!(
-            self.work_dir != self.course_dir
-                && !self.work_dir.starts_with(self.course_dir.join("versions")),
-            tr!("工作目录不能位于已发布版本内 / Work directory overlaps published versions")
+            !self.work_dir.starts_with(&self.course_dir)
+                && !self.course_dir.starts_with(&self.work_dir),
+            tr!(
+                "工作目录不能位于笔记文件夹内 / The work directory must be outside the note folder"
+            )
         );
         anyhow::ensure!(
             self.subtitle.is_none() || self.subtitle_events.is_none(),
@@ -201,14 +273,15 @@ impl Request {
             validate_events(events)?;
         }
         if let Operation::Reprocess {
-            base_version_dir,
+            note_dir,
+            base_task_id,
             components,
             prior_work_dir,
         } = &self.operation
         {
             anyhow::ensure!(
-                base_version_dir.is_absolute(),
-                tr!("原笔记版本需要绝对路径 / Base version requires an absolute path")
+                note_dir == &self.course_dir && valid_id(base_task_id),
+                tr!("补做的笔记与任务不一致 / The repaired note does not match the task")
             );
             anyhow::ensure!(
                 !components.is_empty(),
@@ -293,22 +366,22 @@ impl Request {
                 )
             );
         }
+        // The keys and values tasks bound before notes were flat recorded: a base
+        // version's id was its task's id, and a repair's source is the note's.
         let operation = match &self.operation {
             Operation::Generate => serde_json::json!({"kind":"generate"}),
             Operation::Reprocess {
-                base_version_dir,
+                base_task_id,
                 components,
                 ..
             } => {
-                let manifest =
-                    crate::artifact::read_manifest(&base_version_dir.join("manifest.json"))?;
-                serde_json::json!({"kind":"reprocess", "source_id":manifest.source_id, "base_version_id":manifest.version_id,"components":components})
+                serde_json::json!({"kind":"reprocess", "source_id":self.source_id, "base_version_id":base_task_id,"components":components})
             }
         };
         Ok(serde_json::json!({
             "operation":operation,
             "schema": self.schema, "task_id": self.task_id, "course_id": self.course_id,
-            "version_id": self.version_id, "source_id": self.source_id, "title": self.title,
+            "version_id": self.identity_version_id(), "source_id": self.source_id, "title": self.title,
             "author": self.author, "duration": self.duration, "config": config,
             "subtitle_digest": subtitle_digest,
             "subtitle_events": self.subtitle_events, "local_digest": local_digest,
@@ -516,6 +589,90 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(dir.path().join("asr.jsonl")).unwrap(),
             "saved result"
+        );
+    }
+
+    #[test]
+    fn a_plan_saved_with_its_base_version_folder_still_loads() {
+        let legacy: Operation = serde_json::from_value(serde_json::json!({
+            "kind": "reprocess",
+            "base_version_dir": "/library/course/versions/task-0",
+            "components": ["summary"],
+            "prior_work_dir": "/library/.course2md/work/task-0",
+        }))
+        .unwrap();
+        let flat = Operation::Reprocess {
+            note_dir: "/library/course".into(),
+            base_task_id: "task-0".into(),
+            components: vec![Component::Summary],
+            prior_work_dir: Some("/library/.course2md/work/task-0".into()),
+        };
+        assert_eq!(legacy, flat);
+        let saved = serde_json::to_value(&flat).unwrap();
+        assert!(saved.get("base_version_dir").is_none());
+        assert_eq!(serde_json::from_value::<Operation>(saved).unwrap(), flat);
+        assert_eq!(
+            serde_json::from_value::<Operation>(serde_json::json!({"kind":"generate"})).unwrap(),
+            Operation::Generate
+        );
+        assert!(
+            serde_json::from_value::<Operation>(
+                serde_json::json!({"kind":"reprocess","components":["summary"]})
+            )
+            .is_err()
+        );
+    }
+
+    /// A repair's identity keeps the keys and values a task bound before notes
+    /// were flat, so its saved receipts still belong to it.
+    #[test]
+    fn a_repair_identity_records_its_task_and_base_as_versions() {
+        // An absolute path on every platform (`/library` is not one on Windows).
+        let root = std::env::temp_dir().join("library");
+        let at = |rel: &str| root.join(rel);
+        let mut request = Request {
+            schema: REQUEST_SCHEMA,
+            operation: Operation::Reprocess {
+                note_dir: at("course"),
+                base_task_id: "task-0".into(),
+                components: vec![Component::Summary],
+                prior_work_dir: None,
+            },
+            task_id: "repair-1".into(),
+            course_id: "course".into(),
+            version_id: None,
+            source: "https://example.invalid/video".into(),
+            source_id: "example:video".into(),
+            title: "Lecture".into(),
+            author: String::new(),
+            duration: 1.,
+            subtitle: None,
+            subtitle_events: None,
+            config: ConfigFile::default(),
+            allow_unauthenticated_asr: false,
+            work_dir: at(".course2md/work/repair-1"),
+            course_dir: at("course"),
+            control_path: None,
+            service_versions: Default::default(),
+        };
+        request.validate().unwrap();
+        let cfg = request.resolve().unwrap();
+        let binding = request.binding(&cfg).unwrap();
+        assert_eq!(binding["version_id"], "repair-1");
+        assert_eq!(
+            binding["operation"],
+            serde_json::json!({"kind":"reprocess","source_id":"example:video","base_version_id":"task-0","components":["summary"]})
+        );
+        request.version_id = Some("repair-1".into());
+        assert_eq!(request.binding(&cfg).unwrap(), binding);
+        // The work directory and the note never overlap: the note is replaced whole.
+        request.work_dir = at("course/.work/repair-1");
+        assert!(request.validate().is_err());
+        request.work_dir = at(".course2md/work/repair-1");
+        request.course_dir = at("other");
+        assert!(
+            request.validate().is_err(),
+            "the repaired note is the task's"
         );
     }
 

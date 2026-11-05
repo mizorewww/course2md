@@ -23,10 +23,10 @@ pub fn file_name(format: OutputFormat) -> &'static str {
 }
 
 /// Exact destination, with no overwrite. UI may explicitly confirm replacing a separate
-/// exported file, but must never mutate the immutable note version itself.
-pub fn export(version_dir: &Path, format: OutputFormat, destination: &Path) -> Result<PathBuf> {
+/// exported file; an export into the note itself goes through `artifact::write_export`.
+pub fn export(note_dir: &Path, format: OutputFormat, destination: &Path) -> Result<PathBuf> {
     export_in_task(
-        version_dir,
+        note_dir,
         format,
         destination,
         &crate::dispatch::TaskControl::default(),
@@ -35,18 +35,18 @@ pub fn export(version_dir: &Path, format: OutputFormat, destination: &Path) -> R
 
 /// [`export`] that stops at the task's safe boundaries.
 pub fn export_in_task(
-    version_dir: &Path,
+    note_dir: &Path,
     format: OutputFormat,
     destination: &Path,
     control: &crate::dispatch::TaskControl,
 ) -> Result<PathBuf> {
-    let manifest = artifact::read_manifest(&version_dir.join("manifest.json"))?;
-    artifact::validate_version_in_task(version_dir, &manifest, control)?;
+    let manifest = artifact::read_manifest(&note_dir.join("manifest.json"))?;
+    artifact::validate_note_in_task(note_dir, &manifest, control)?;
     let document: Document = serde_json::from_slice(&std::fs::read(artifact::safe_asset_path(
-        version_dir,
+        note_dir,
         &manifest.document,
     )?)?)?;
-    write_document(version_dir, &document, format, destination)
+    write_document(note_dir, &document, format, destination)
 }
 
 #[derive(serde::Serialize)]

@@ -30,7 +30,7 @@ fn request(root: &Path, source: &Path) -> Request {
         operation: Default::default(),
         task_id: "task-one".into(),
         course_id: "course-one".into(),
-        version_id: "version-one".into(),
+        version_id: None,
         source: source.display().to_string(),
         source_id: format!(
             "local:sha256:{}",
@@ -247,10 +247,11 @@ fn explicit_subtitles_zero_exports_and_confirmed_title_survive_real_conversion_a
             .iter()
             .any(|event| event["stage"] == "transcribe" || event["stage"] == "audio")
     );
-    let version = request.course_dir.join("versions/version-one");
+    let version = request.course_dir.clone();
     let manifest = artifact::read_manifest(&version.join("manifest.json")).unwrap();
     assert!(!manifest.frames.is_empty());
-    artifact::validate_version(&version, &manifest).unwrap();
+    assert_eq!(manifest.task_id, request.task_id);
+    artifact::validate_note(&version, &manifest).unwrap();
     let original = std::fs::read(version.join("document.json")).unwrap();
     assert!(String::from_utf8_lossy(&original).contains("这里是已选字幕中的实际正文"));
     let resumed = run(root.path(), &request);
@@ -289,9 +290,7 @@ fn a_selected_subtitle_file_is_decoded_like_any_other_sidecar() {
     request.subtitle = Some(subtitle);
     let output = run(root.path(), &request);
     assert!(output.status.success(), "{:#?}", events(&output));
-    let document = request
-        .course_dir
-        .join("versions/version-one/document.json");
+    let document = request.course_dir.join("document.json");
     let text = std::fs::read_to_string(document).unwrap();
     assert!(text.contains("来自 UTF-16 字幕的正文"), "{text}");
 }
@@ -308,20 +307,14 @@ fn broken_video_preserves_readable_subtitles_as_partial_note_without_phantom_ima
     let output = run(root.path(), &request);
     let observed = events(&output);
     assert!(output.status.success(), "{observed:#?}");
-    let manifest = artifact::read_manifest(
-        &request
-            .course_dir
-            .join("versions/version-one/manifest.json"),
-    )
-    .unwrap();
+    let manifest = artifact::read_manifest(&request.course_dir.join("manifest.json")).unwrap();
     assert!(manifest.partial);
     assert!(manifest.frames.is_empty());
     assert_eq!(
         manifest.outcomes.screenshots.status,
         artifact::Status::Failed
     );
-    let body =
-        std::fs::read_to_string(request.course_dir.join("versions/version-one/course.md")).unwrap();
+    let body = std::fs::read_to_string(request.course_dir.join("course.md")).unwrap();
     assert!(body.contains("这里是已选字幕"));
     assert!(!body.contains("![]"));
     assert!(!body.contains("本段无语音"));
@@ -349,7 +342,7 @@ fn missing_frozen_cloud_credentials_fail_before_download_and_ignore_environment(
                 .contains("API Key")
     }));
     assert!(!request.work_dir.join("media.mp4").exists());
-    assert!(!request.course_dir.join("current.json").exists());
+    assert!(!request.course_dir.join("manifest.json").exists());
 }
 
 #[test]
@@ -371,7 +364,7 @@ fn changed_local_source_is_rejected_before_using_the_confirmed_subtitles() {
                 .is_some_and(|s| s.contains("视频文件已在读取后发生变化"))
     }));
     assert!(!observed.iter().any(|event| event["type"] == "stage"));
-    assert!(!request.course_dir.join("current.json").exists());
+    assert!(!request.course_dir.join("manifest.json").exists());
 }
 
 /// An OpenAI-compatible chat endpoint on a loopback port. `respond` receives
@@ -586,12 +579,7 @@ fn proofreading_images_and_custom_rules_match_the_requested_outputs() {
         .insert("llm".into(), "service-v1".into());
     let output = run(root.path(), &initial);
     assert!(output.status.success(), "{:?}", events(&output));
-    let manifest = artifact::read_manifest(
-        &initial
-            .course_dir
-            .join("versions/version-one/manifest.json"),
-    )
-    .unwrap();
+    let manifest = artifact::read_manifest(&initial.course_dir.join("manifest.json")).unwrap();
     assert!(!manifest.partial, "{manifest:?}");
     assert_eq!(
         manifest.outcomes.proofreading.status,
@@ -654,7 +642,7 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
         2,
         "an explicit response_format rejection allows one resend without it; the following arbitrary HTTP 400 must not change and resend the payload"
     );
-    let base = initial.course_dir.join("versions/version-one");
+    let base = initial.course_dir.clone();
     let first_manifest = artifact::read_manifest(&base.join("manifest.json")).unwrap();
     assert_eq!(
         first_manifest.outcomes.summary.status,
@@ -667,34 +655,34 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
     let reason = first_manifest.outcomes.summary.message.as_deref().unwrap();
     assert!(reason.contains("HTTP 400"));
     assert!(!reason.contains(" / ") && !reason.contains("private-task-key"));
-    std::fs::write(
-        base.join("course.md"),
-        "# 我的人工补充\n\n旧版本不能被补摘要覆盖。\n",
-    )
-    .unwrap();
-    let original_files = std::fs::read_dir(&base)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .filter(|p| p.is_file())
-        .map(|p| {
-            let bytes = std::fs::read(&p).unwrap();
-            (p, bytes)
-        })
-        .collect::<Vec<_>>();
+    let edit = "# 我的人工补充\n\n补摘要不能丢掉这份修改。\n";
+    std::fs::write(base.join("course.md"), edit).unwrap();
+    let note_files = || {
+        std::fs::read_dir(&base)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|p| p.is_file())
+            .map(|p| {
+                let bytes = std::fs::read(&p).unwrap();
+                (p, bytes)
+            })
+            .collect::<Vec<_>>()
+    };
+    let original_files = note_files();
     std::fs::remove_file(&source).unwrap();
     let mut retry = initial.clone();
     retry.task_id = "summary-retry".into();
-    retry.version_id = "summary-retry".into();
     retry.work_dir = root.path().join("retry-work");
     retry.operation = course2md::execution::Operation::Reprocess {
-        base_version_dir: base.clone(),
+        note_dir: base.clone(),
+        base_task_id: initial.task_id.clone(),
         components: vec![Component::Summary],
         prior_work_dir: Some(initial.work_dir.clone()),
     };
     let second = run(root.path(), &retry);
     let second_events = events(&second);
-    // The summary was the only thing asked for and failed again, so no new
-    // version repeats the old one; the error says why.
+    // The summary was the only thing asked for and failed again, so the note
+    // stays as it was; the error says why.
     assert!(!second.status.success(), "{second_events:#?}");
     assert!(second_events.iter().any(|event| {
         event["type"] == "error"
@@ -703,7 +691,7 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
                 .as_str()
                 .is_some_and(|m| m.contains("HTTP 400"))
     }));
-    assert!(!initial.course_dir.join("versions/summary-retry").exists());
+    assert_eq!(note_files(), original_files);
     assert_eq!(
         mock.calls.load(Ordering::SeqCst),
         3,
@@ -739,20 +727,25 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
     );
     let mut final_retry = retry.clone();
     final_retry.task_id = "summary-final".into();
-    final_retry.version_id = "summary-final".into();
     final_retry.work_dir = root.path().join("final-work");
     final_retry.operation = course2md::execution::Operation::Reprocess {
-        base_version_dir: base.clone(),
+        note_dir: base.clone(),
+        base_task_id: initial.task_id.clone(),
         components: vec![Component::Summary],
-        // A failed retry left no version; the next repair starts from the
-        // base version's own task, as the desktop's repair does.
+        // A failed retry left the note as it was; the next repair starts from
+        // the note's own task, as the desktop's repair does.
         prior_work_dir: Some(initial.work_dir.clone()),
     };
     let third = run(root.path(), &final_retry);
-    assert!(third.status.success(), "{:?}", events(&third));
+    let third_events = events(&third);
+    assert!(third.status.success(), "{third_events:#?}");
     assert_eq!(mock.calls.load(Ordering::SeqCst), 4);
-    let final_dir = initial.course_dir.join("versions/summary-final");
+    let done = third_events.iter().find(|e| e["type"] == "done").unwrap();
+    assert_eq!(done["kept_edits"], serde_json::json!(["course.edited.md"]));
+    assert!(done.get("version_id").is_none());
+    let final_dir = initial.course_dir.clone();
     let manifest = artifact::read_manifest(&final_dir.join("manifest.json")).unwrap();
+    assert_eq!(manifest.task_id, "summary-final");
     assert_eq!(
         manifest.outcomes.summary.status,
         artifact::Status::Succeeded
@@ -763,9 +756,40 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
         document.summary.unwrap().tldr,
         common::fake_ai()["responses"]["summary"]["tldr"]
     );
-    for (path, bytes) in original_files {
-        assert_eq!(std::fs::read(path).unwrap(), bytes);
-    }
+    // The summary is in the note, and the hand edit is kept beside it.
+    assert_eq!(
+        std::fs::read_to_string(final_dir.join("course.edited.md")).unwrap(),
+        edit
+    );
+    assert!(
+        std::fs::read_to_string(final_dir.join("course.md"))
+            .unwrap()
+            .contains(
+                common::fake_ai()["responses"]["summary"]["tldr"]
+                    .as_str()
+                    .unwrap()
+            )
+    );
+    // A restart after the note was replaced, before the task recorded it, sends
+    // nothing and leaves the note alone.
+    let replaced = std::fs::read(final_dir.join("manifest.json")).unwrap();
+    let restarted = run(root.path(), &final_retry);
+    assert!(restarted.status.success(), "{:?}", events(&restarted));
+    assert_eq!(mock.calls.load(Ordering::SeqCst), 4);
+    assert_eq!(
+        std::fs::read(final_dir.join("manifest.json")).unwrap(),
+        replaced
+    );
+    // The older repair, planned from the note it replaced, no longer applies.
+    let stale = run(root.path(), &retry);
+    assert!(!stale.status.success());
+    assert!(events(&stale).iter().any(|event| {
+        event["type"] == "error"
+            && event["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("计划补做后笔记已被更改"))
+    }));
+    assert_eq!(mock.calls.load(Ordering::SeqCst), 4);
     let bodies = mock.bodies.lock().unwrap();
     // The single sanctioned resend drops response_format and changes nothing else.
     assert!(bodies[0].get("response_format").is_some());
@@ -808,7 +832,7 @@ fn trace_log_events_never_carry_the_api_key() {
 }
 
 #[test]
-fn summarize_command_adds_a_summary_as_a_new_version() {
+fn summarize_command_adds_a_summary_to_the_note() {
     if !common::ffmpeg_available() {
         return;
     }
@@ -823,7 +847,7 @@ fn summarize_command_adds_a_summary_as_a_new_version() {
     let initial = request(root.path(), &source);
     let first = run(root.path(), &initial);
     assert!(first.status.success(), "{:?}", events(&first));
-    let base = initial.course_dir.join("versions/version-one");
+    let base = initial.course_dir.clone();
     let config = root.path().join("cli-config/course2md");
     std::fs::create_dir_all(&config).unwrap();
     std::fs::write(
@@ -856,18 +880,24 @@ fn summarize_command_adds_a_summary_as_a_new_version() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(mock.calls.load(Ordering::SeqCst), 1);
-    let versions: Vec<_> = std::fs::read_dir(initial.course_dir.join("versions"))
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
-        .filter(|name| name.starts_with("summary-"))
-        .collect();
-    assert_eq!(versions.len(), 1, "{versions:?}");
-    let version = initial.course_dir.join("versions").join(&versions[0]);
-    let manifest = artifact::read_manifest(&version.join("manifest.json")).unwrap();
+    let manifest = artifact::read_manifest(&base.join("manifest.json")).unwrap();
+    assert!(
+        manifest.task_id.starts_with("summary-"),
+        "{}",
+        manifest.task_id
+    );
     assert_eq!(
         manifest.outcomes.summary.status,
         artifact::Status::Succeeded
     );
+    // Its work stays outside the note.
+    assert!(std::fs::read_dir(&base).unwrap().all(|entry| {
+        !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with('.')
+    }));
     assert_eq!(manifest.source_id, initial.source_id);
     let markdown = std::fs::read_dir(&exported)
         .unwrap()
@@ -884,6 +914,94 @@ fn summarize_command_adds_a_summary_as_a_new_version() {
         String::from_utf8_lossy(&again.stderr)
     );
     assert_eq!(mock.calls.load(Ordering::SeqCst), 1);
+}
+
+/// A course an older app saved as versions is flattened, its other versions
+/// deleted, and summarized like any note, whether the command names the course
+/// or one of its version folders.
+#[test]
+fn summarize_command_flattens_a_course_saved_as_versions() {
+    if !common::ffmpeg_available() {
+        return;
+    }
+    fn copy_tree(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                copy_tree(&entry.path(), &to.join(entry.file_name()));
+            } else {
+                std::fs::copy(entry.path(), to.join(entry.file_name())).unwrap();
+            }
+        }
+    }
+    let mock = MockAi::respond_with(|_, _| Some((200, summary_response())));
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("video.mp4");
+    std::fs::write(
+        &source,
+        b"unreadable video; the selected subtitles carry the text",
+    )
+    .unwrap();
+    let initial = request(root.path(), &source);
+    assert!(run(root.path(), &initial).status.success());
+    // The layout an older app wrote: two versions, a pointer at the newer one.
+    let course = initial.course_dir.clone();
+    let flat = root.path().join("flat-copy");
+    std::fs::rename(&course, &flat).unwrap();
+    for (version, revision) in [("older", 1), ("task-one", 2)] {
+        let dir = course.join("versions").join(version);
+        copy_tree(&flat, &dir);
+        let path = dir.join("manifest.json");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        value["schema"] = 1.into();
+        value["task_id"] = version.into();
+        value["version_id"] = version.into();
+        value["revision"] = revision.into();
+        std::fs::write(&path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+    }
+    std::fs::write(
+        course.join("current.json"),
+        br#"{"schema":1,"course_id":"course-one","version_id":"task-one","manifest":"versions/task-one/manifest.json"}"#,
+    )
+    .unwrap();
+    let config = root.path().join("cli-config/course2md");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(
+        config.join("config.toml"),
+        format!(
+            "[llm]\nbase_url = {:?}\nmodel = \"summary-model\"\napi_key = \"cli-key\"\n",
+            mock.url
+        ),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_course2md"))
+        .env("COURSE2MD_LANG", "zh-Hans")
+        .env("XDG_CONFIG_HOME", root.path().join("cli-config"))
+        .env("XDG_CACHE_HOME", root.path().join("cache"))
+        .env_remove("RUST_LOG")
+        .args(["summarize"])
+        .arg(course.join("versions/task-one"))
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.contains("摘要已加入笔记"), "{stdout}");
+    assert_eq!(mock.calls.load(Ordering::SeqCst), 1);
+    assert!(!course.join("versions").exists());
+    assert!(!course.join("current.json").exists());
+    let manifest = artifact::read_manifest(&course.join("manifest.json")).unwrap();
+    assert!(
+        manifest.task_id.starts_with("summary-"),
+        "{}",
+        manifest.task_id
+    );
+    assert_eq!(manifest.schema, artifact::MANIFEST_SCHEMA);
 }
 
 #[test]
@@ -941,18 +1059,17 @@ fn proofreading_resend_continues_unsent_summary_without_repeating_source_work() 
     assert_eq!(receipt.purpose, "proofreading");
     assert!(receipt.description.contains("00:00–00:07"));
     assert!(!String::from_utf8_lossy(&first.stdout).contains("private-task-key"));
-    let base = original.course_dir.join("versions/version-one");
+    let base = original.course_dir.clone();
     let manifest = artifact::read_manifest(&base.join("manifest.json")).unwrap();
     assert_eq!(manifest.outcomes.summary.status, artifact::Status::Failed);
-    let untouched = std::fs::read(base.join("document.json")).unwrap();
     std::fs::remove_file(&source).unwrap();
     let mut retry = original.clone();
     retry.task_id = "retry-polish".into();
-    retry.version_id = "retry-polish".into();
     retry.work_dir = root.path().join("retry-work");
     retry.control_path = Some(retry.work_dir.join("control.json"));
     retry.operation = course2md::execution::Operation::Reprocess {
-        base_version_dir: base.clone(),
+        note_dir: base.clone(),
+        base_task_id: original.task_id.clone(),
         components: vec![Component::Proofreading, Component::Summary],
         prior_work_dir: Some(original.work_dir.clone()),
     };
@@ -972,9 +1089,8 @@ fn proofreading_resend_continues_unsent_summary_without_repeating_source_work() 
             .iter()
             .any(|event| event["stage"] == "transcribe" || event["stage"] == "download")
     );
-    let updated =
-        artifact::read_manifest(&retry.course_dir.join("versions/retry-polish/manifest.json"))
-            .unwrap();
+    let updated = artifact::read_manifest(&base.join("manifest.json")).unwrap();
+    assert_eq!(updated.task_id, "retry-polish");
     assert_eq!(
         updated.outcomes.proofreading.status,
         artifact::Status::Succeeded
@@ -987,10 +1103,6 @@ fn proofreading_resend_continues_unsent_summary_without_repeating_source_work() 
         assert_eq!(receipt.state, course2md::dispatch::State::Completed);
         assert_eq!(receipt.attempt, attempt);
     }
-    assert_eq!(
-        std::fs::read(base.join("document.json")).unwrap(),
-        untouched
-    );
 }
 
 /// Answers a proofreading or translation batch item for item, so the note keeps
@@ -1043,10 +1155,10 @@ fn a_translated_batch_without_its_receipt_is_not_sent_again() {
 }
 
 /// A repair whose resend is lost again finishes nothing new: it sends the one
-/// authorized batch, holds the rest back, and publishes no copy of the note, even
+/// authorized batch, holds the rest back, and leaves the note as it was, even
 /// with the summary riding along.
 #[test]
-fn a_repair_that_finishes_nothing_new_publishes_no_version() {
+fn a_repair_that_finishes_nothing_new_leaves_the_note_unchanged() {
     if common::ffmpeg_available() {
         translation_resend(false, true);
     }
@@ -1119,7 +1231,7 @@ fn translation_resend(missing_receipt: bool, lose_again: bool) {
         .collect();
     assert_eq!(uncertain.len(), 1);
     assert_eq!(uncertain[0].purpose, Component::Translation.as_str());
-    let base = original.course_dir.join("versions/version-one");
+    let base = original.course_dir.clone();
     let manifest = artifact::read_manifest(&base.join("manifest.json")).unwrap();
     assert_eq!(
         manifest.outcomes.proofreading.status,
@@ -1131,6 +1243,7 @@ fn translation_resend(missing_receipt: bool, lose_again: bool) {
     );
     assert_eq!(manifest.outcomes.summary.status, artifact::Status::Failed);
     let untouched = std::fs::read(base.join("document.json")).unwrap();
+    let untouched_manifest = std::fs::read(base.join("manifest.json")).unwrap();
     std::fs::remove_file(&source).unwrap();
     if missing_receipt {
         let finished = receipts
@@ -1151,13 +1264,13 @@ fn translation_resend(missing_receipt: bool, lose_again: bool) {
 
     let mut retry = original.clone();
     retry.task_id = "retry-translation".into();
-    retry.version_id = "retry-translation".into();
     retry.work_dir = root.path().join("retry-work");
     retry.control_path = Some(retry.work_dir.join("control.json"));
     // As the desktop asks for it: no proofreading, translation and the summary.
     retry.config.llm.enabled = false;
     retry.operation = course2md::execution::Operation::Reprocess {
-        base_version_dir: base.clone(),
+        note_dir: base.clone(),
+        base_task_id: original.task_id.clone(),
         components: vec![Component::Translation, Component::Summary],
         prior_work_dir: Some(original.work_dir.clone()),
     };
@@ -1178,9 +1291,14 @@ fn translation_resend(missing_receipt: bool, lose_again: bool) {
         // The authorized batch once; lost again, it holds the rest and the summary back.
         assert_eq!(translated.len(), 1, "{bodies:#?}");
         assert_eq!(bodies.len(), 1, "{bodies:#?}");
-        assert!(
-            !retry.course_dir.join("versions/retry-translation").exists(),
-            "a version identical to the saved note was published"
+        assert_eq!(
+            std::fs::read(base.join("manifest.json")).unwrap(),
+            untouched_manifest,
+            "the note was replaced by an identical one"
+        );
+        assert_eq!(
+            std::fs::read(base.join("document.json")).unwrap(),
+            untouched
         );
         return;
     }
@@ -1199,12 +1317,8 @@ fn translation_resend(missing_receipt: bool, lose_again: bool) {
             .iter()
             .any(|event| event["stage"] == "llm" || event["stage"] == "transcribe")
     );
-    let updated = artifact::read_manifest(
-        &retry
-            .course_dir
-            .join("versions/retry-translation/manifest.json"),
-    )
-    .unwrap();
+    let updated = artifact::read_manifest(&base.join("manifest.json")).unwrap();
+    assert_eq!(updated.task_id, "retry-translation");
     assert_eq!(
         updated.outcomes.translation.status,
         artifact::Status::Succeeded
@@ -1214,16 +1328,8 @@ fn translation_resend(missing_receipt: bool, lose_again: bool) {
         artifact::Status::Succeeded
     );
     assert_eq!(updated.outcomes.summary.status, artifact::Status::Succeeded);
-    let document: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(
-            retry
-                .course_dir
-                .join("versions/retry-translation")
-                .join(&updated.document),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    let document: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(base.join(&updated.document)).unwrap()).unwrap();
     let speech: Vec<_> = document["sections"]
         .as_array()
         .unwrap()
@@ -1243,10 +1349,6 @@ fn translation_resend(missing_receipt: bool, lose_again: bool) {
         .unwrap();
     assert_eq!(resent.state, course2md::dispatch::State::Completed);
     assert_eq!(resent.attempt, uncertain[0].attempt + 1);
-    assert_eq!(
-        std::fs::read(base.join("document.json")).unwrap(),
-        untouched
-    );
 }
 
 /// Several paid batches lose their responses while in flight together, so each is
@@ -1336,10 +1438,9 @@ fn several_uncertain_batches(lost_kind: &'static str, lost: usize) {
     let answered_before: Vec<_> = mock.bodies.lock().unwrap().clone();
     losing.store(false, Ordering::SeqCst);
 
-    let base = original.course_dir.join("versions/version-one");
+    let base = original.course_dir.clone();
     let mut retry = original.clone();
     retry.task_id = "retry".into();
-    retry.version_id = "retry".into();
     retry.work_dir = root.path().join("retry-work");
     retry.control_path = Some(retry.work_dir.join("control.json"));
     // As the desktop asks for it: the uncertain part and the summary it held back.
@@ -1350,7 +1451,8 @@ fn several_uncertain_batches(lost_kind: &'static str, lost: usize) {
         Component::Proofreading
     };
     retry.operation = course2md::execution::Operation::Reprocess {
-        base_version_dir: base,
+        note_dir: base,
+        base_task_id: original.task_id.clone(),
         components: vec![part, Component::Summary],
         prior_work_dir: Some(original.work_dir.clone()),
     };
@@ -1407,8 +1509,8 @@ fn several_uncertain_batches(lost_kind: &'static str, lost: usize) {
         sent.iter().all(|body| !answered.contains(&body)),
         "{lost_kind} {lost}: an answered request was sent again"
     );
-    let updated =
-        artifact::read_manifest(&retry.course_dir.join("versions/retry/manifest.json")).unwrap();
+    let updated = artifact::read_manifest(&retry.course_dir.join("manifest.json")).unwrap();
+    assert_eq!(updated.task_id, "retry");
     for outcome in [
         &updated.outcomes.proofreading,
         &updated.outcomes.translation,
@@ -1423,7 +1525,7 @@ fn several_uncertain_batches(lost_kind: &'static str, lost: usize) {
 }
 
 #[test]
-fn export_only_recovery_uses_the_saved_version_after_source_and_subtitle_are_gone() {
+fn export_only_recovery_uses_the_saved_note_after_source_and_subtitle_are_gone() {
     use course2md::config::OutputFormat;
     if !common::ffmpeg_available() {
         return;
@@ -1433,16 +1535,16 @@ fn export_only_recovery_uses_the_saved_version_after_source_and_subtitle_are_gon
     std::fs::write(&source, b"broken").unwrap();
     let original = request(root.path(), &source);
     assert!(run(root.path(), &original).status.success());
-    let base = original.course_dir.join("versions/version-one");
-    let pointer = std::fs::read(original.course_dir.join("current.json")).unwrap();
+    let note = original.course_dir.clone();
+    let document = std::fs::read(note.join("document.json")).unwrap();
     let mut export = original.clone();
     export.task_id = "exports".into();
-    export.version_id = "unused-new-body".into();
     export.work_dir = root.path().join("export-work");
     export.subtitle_events = None;
     export.subtitle = Some(root.path().join("deleted-subtitles.srt"));
     export.operation = course2md::execution::Operation::Reprocess {
-        base_version_dir: base,
+        note_dir: note.clone(),
+        base_task_id: original.task_id.clone(),
         components: vec![Component::Exports],
         prior_work_dir: None,
     };
@@ -1461,17 +1563,197 @@ fn export_only_recovery_uses_the_saved_version_after_source_and_subtitle_are_gon
         let done = events.iter().find(|event| event["type"] == "done").unwrap();
         assert_eq!(done["partial"], false);
         assert_eq!(done["outputs"].as_array().unwrap().len(), 3);
+        assert!(done.get("kept_edits").is_none(), "{done:#}");
     }
+    // The exports are the note's own files; the rest of the note is as it was.
+    let manifest = artifact::read_manifest(&note.join("manifest.json")).unwrap();
+    assert_eq!(manifest.task_id, original.task_id);
+    for name in ["course.zip", "course.html", "structured.json"] {
+        assert!(note.join("exports").join(name).is_file(), "{name}");
+        assert!(manifest.outputs.contains(&format!("exports/{name}")));
+    }
+    assert_eq!(std::fs::read(note.join("document.json")).unwrap(), document);
+    artifact::validate_note(&note, &manifest).unwrap();
+}
+
+/// A repair of a summary and the exports in which the summary fails still makes
+/// the exports, and keeps the summary the note had rather than clear it.
+#[test]
+fn a_failed_part_of_a_mixed_repair_keeps_what_the_note_had() {
+    use course2md::config::OutputFormat;
+    if !common::ffmpeg_available() {
+        return;
+    }
+    let failing = Arc::new(AtomicBool::new(false));
+    let fail = failing.clone();
+    let mock = MockAi::respond_with(move |_, _| {
+        Some(if fail.load(Ordering::SeqCst) {
+            (
+                400,
+                serde_json::json!({"error":{"message":"Invalid model"}}),
+            )
+        } else {
+            (200, summary_response())
+        })
+    });
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("video.mp4");
+    std::fs::write(&source, b"broken video, readable selected subtitles").unwrap();
+    let mut original = request(root.path(), &source);
+    original.config.llm.summarize = true;
+    original.config.llm.base_url = mock.url.clone();
+    original.config.llm.model = "summary-model".into();
+    original.config.llm.api_key = "private-task-key".into();
+    original
+        .service_versions
+        .insert("llm".into(), "service-v1".into());
+    assert!(run(root.path(), &original).status.success());
+    let note = original.course_dir.clone();
+    let summarized: artifact::Document =
+        serde_json::from_slice(&std::fs::read(note.join("document.json")).unwrap()).unwrap();
+    let summary = serde_json::to_value(summarized.summary.as_ref().unwrap()).unwrap();
+    failing.store(true, Ordering::SeqCst);
+    let mut repair = original.clone();
+    repair.task_id = "repair".into();
+    repair.work_dir = root.path().join("repair-work");
+    repair.config.defaults.formats = Some(vec![OutputFormat::Json]);
+    repair.operation = course2md::execution::Operation::Reprocess {
+        note_dir: note.clone(),
+        base_task_id: original.task_id.clone(),
+        components: vec![Component::Summary, Component::Exports],
+        // Without the original's receipts the summary is asked for again, and fails.
+        prior_work_dir: None,
+    };
+    let output = run(root.path(), &repair);
+    assert!(output.status.success(), "{:#?}", events(&output));
+    assert_eq!(mock.calls.load(Ordering::SeqCst), 2);
+    let manifest = artifact::read_manifest(&note.join("manifest.json")).unwrap();
+    assert_eq!(manifest.task_id, "repair");
+    assert_eq!(manifest.outputs, vec!["exports/structured.json"]);
     assert_eq!(
-        std::fs::read(original.course_dir.join("current.json")).unwrap(),
-        pointer
+        manifest.outcomes.summary.status,
+        artifact::Status::Succeeded
     );
-    assert!(
-        !original
-            .course_dir
-            .join("versions/unused-new-body")
-            .exists()
+    let repaired: artifact::Document =
+        serde_json::from_slice(&std::fs::read(note.join("document.json")).unwrap()).unwrap();
+    assert_eq!(
+        serde_json::to_value(repaired.summary.unwrap()).unwrap(),
+        summary
     );
+}
+
+/// A regenerate whose AI service is unreachable ends failed and leaves the
+/// complete note, its summary and its exports as they were; a later repair that
+/// asks for no export still keeps every export the note had.
+#[test]
+fn a_regenerate_that_loses_paid_work_leaves_the_note() {
+    use course2md::config::OutputFormat;
+    if !common::ffmpeg_available() {
+        return;
+    }
+    let mock = MockAi::respond_with(|_, _| Some((200, summary_response())));
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("video.mp4");
+    std::fs::write(&source, b"broken video, readable selected subtitles").unwrap();
+    let mut original = request(root.path(), &source);
+    original.config.defaults.formats = Some(vec![OutputFormat::Md]);
+    original.config.llm.summarize = true;
+    original.config.llm.base_url = mock.url.clone();
+    original.config.llm.model = "summary-model".into();
+    original.config.llm.api_key = "private-task-key".into();
+    assert!(run(root.path(), &original).status.success());
+    let note = original.course_dir.clone();
+    let before: Vec<_> = ["manifest.json", "document.json", "exports/course.zip"]
+        .iter()
+        .map(|name| std::fs::read(note.join(name)).unwrap())
+        .collect();
+    // The service is gone: nothing listens there any more.
+    let mut regenerate = original.clone();
+    regenerate.task_id = "regenerate".into();
+    regenerate.work_dir = root.path().join("regenerate-work");
+    regenerate.config.llm.base_url = "http://127.0.0.1:9".into();
+    let output = run(root.path(), &regenerate);
+    let observed = events(&output);
+    assert!(!output.status.success(), "{observed:#?}");
+    assert!(observed.iter().any(|event| {
+        event["type"] == "error"
+            && event["code"] == "note_kept"
+            && event["message"].as_str().is_some_and(|m| {
+                m.contains("不如现有笔记") && m.contains("摘要") && m.contains("（")
+            })
+    }));
+    let after: Vec<_> = ["manifest.json", "document.json", "exports/course.zip"]
+        .iter()
+        .map(|name| std::fs::read(note.join(name)).unwrap())
+        .collect();
+    assert_eq!(after, before);
+    // A summary-only repair asks for no export; the note keeps its archive.
+    let mut repair = original.clone();
+    repair.task_id = "repair".into();
+    repair.work_dir = root.path().join("repair-work");
+    repair.config.defaults.formats = Some(vec![]);
+    repair.operation = course2md::execution::Operation::Reprocess {
+        note_dir: note.clone(),
+        base_task_id: original.task_id.clone(),
+        components: vec![Component::Summary],
+        prior_work_dir: None,
+    };
+    let output = run(root.path(), &repair);
+    assert!(output.status.success(), "{:#?}", events(&output));
+    let manifest = artifact::read_manifest(&note.join("manifest.json")).unwrap();
+    assert_eq!(manifest.task_id, "repair");
+    assert_eq!(manifest.outputs, vec!["exports/course.zip"]);
+    assert!(note.join("exports/course.zip").is_file());
+}
+
+/// A note a newer app wrote is refused before anything is sent.
+#[test]
+fn a_newer_apps_note_is_refused_before_any_request() {
+    if !common::ffmpeg_available() {
+        return;
+    }
+    let mock = MockAi::respond_with(|_, _| Some((200, summary_response())));
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("video.mp4");
+    std::fs::write(&source, b"broken video, readable selected subtitles").unwrap();
+    let original = request(root.path(), &source);
+    assert!(run(root.path(), &original).status.success());
+    let note = original.course_dir.clone();
+    let path = note.join("manifest.json");
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    value["schema"] = 3.into();
+    std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    let newer = std::fs::read(&path).unwrap();
+    let mut repair = original.clone();
+    repair.task_id = "repair".into();
+    repair.work_dir = root.path().join("repair-work");
+    repair.config.llm.summarize = true;
+    repair.config.llm.base_url = mock.url.clone();
+    repair.config.llm.model = "summary-model".into();
+    repair.config.llm.api_key = "private-task-key".into();
+    repair.operation = course2md::execution::Operation::Reprocess {
+        note_dir: note.clone(),
+        base_task_id: original.task_id.clone(),
+        components: vec![Component::Summary],
+        prior_work_dir: None,
+    };
+    let mut regenerate = original.clone();
+    regenerate.task_id = "regenerate".into();
+    regenerate.work_dir = root.path().join("regenerate-work");
+    regenerate.config = repair.config.clone();
+    for task in [&repair, &regenerate] {
+        let output = run(root.path(), task);
+        assert!(!output.status.success(), "{}", task.task_id);
+        assert!(events(&output).iter().any(|event| {
+            event["type"] == "error"
+                && event["message"]
+                    .as_str()
+                    .is_some_and(|m| m.contains("此笔记需要更新版本的软件"))
+        }));
+    }
+    assert_eq!(mock.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(std::fs::read(&path).unwrap(), newer);
 }
 
 #[test]

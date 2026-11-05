@@ -252,15 +252,17 @@ pub enum ConversionFollow {
         id: String,
         source_revision: u64,
     },
+    /// A repair started from the reader, which reopens its note once the repair
+    /// has replaced it, while the reader still shows the note as it was.
     ReaderTask {
         id: String,
-        base_version: PathBuf,
+        note: PathBuf,
         reader_revision: u64,
     },
 }
 
 impl ConversionFollow {
-    /// Opening a viewer owns the old version until the person closes it. Do not
+    /// Opening a viewer owns the note as it is until the person closes it. Do not
     /// restore this intent afterwards, even if an in-flight read is still pending.
     pub fn interrupt_for_reader_viewer(follow: &mut Option<Self>) {
         if matches!(follow, Some(Self::ReaderTask { .. })) {
@@ -282,21 +284,21 @@ impl ConversionFollow {
 
     pub fn reader_reprocess(
         task: &workspace::TaskRecord,
-        version: &std::path::Path,
+        note: &std::path::Path,
         revision: u64,
     ) -> Option<Self> {
         let c2m_engine::execution::Operation::Reprocess {
-            base_version_dir,
+            note_dir,
             components,
             ..
         } = &task.plan.operation
         else {
             return None;
         };
-        (base_version_dir == version && !components.is_empty() && !task.exports_only()).then(|| {
+        (note_dir == note && !components.is_empty() && !task.exports_only()).then(|| {
             Self::ReaderTask {
                 id: task.id.clone(),
-                base_version: base_version_dir.clone(),
+                note: note_dir.clone(),
                 reader_revision: revision,
             }
         })
@@ -309,7 +311,7 @@ impl ConversionFollow {
         page: Page,
         source_revision: u64,
         reader_revision: u64,
-        version: Option<&std::path::Path>,
+        note: Option<&std::path::Path>,
     ) -> bool {
         match self {
             Self::Preparing(_) => false,
@@ -318,41 +320,42 @@ impl ConversionFollow {
                 ..
             } => page == Page::New && *expected == source_revision,
             Self::ReaderTask {
-                base_version,
+                note: followed,
                 reader_revision: expected,
                 ..
             } => {
                 page == Page::Result
                     && *expected == reader_revision
-                    && version == Some(base_version.as_path())
+                    && note == Some(followed.as_path())
             }
         }
     }
 
+    /// The followed repair finished with the note replaced, and the reader still
+    /// shows the note `opened_task` wrote before it: the note is read again.
     pub fn completed_reader_task(
         &self,
         task: &workspace::TaskRecord,
         page: Page,
         reader_revision: u64,
-        version: Option<&std::path::Path>,
+        note: Option<&std::path::Path>,
+        opened_task: Option<&str>,
     ) -> bool {
         let Self::ReaderTask {
-            id, base_version, ..
+            id, note: followed, ..
         } = self
         else {
             return false;
         };
         task.id == *id
-            && self.context_is_current(page, 0, reader_revision, version)
-            && Self::reader_reprocess(task, base_version, reader_revision).as_ref() == Some(self)
+            && self.context_is_current(page, 0, reader_revision, note)
+            && Self::reader_reprocess(task, followed, reader_revision).as_ref() == Some(self)
             && matches!(
                 task.state,
                 workspace::TaskState::Complete | workspace::TaskState::Partial
             )
-            && task
-                .artifact
-                .as_ref()
-                .is_some_and(|path| path != base_version)
+            && task.artifact.as_ref() == Some(followed)
+            && opened_task.is_some_and(|opened| opened != task.id)
     }
 
     pub fn completed_task<'a>(
@@ -701,10 +704,10 @@ mod tests {
     }
 
     #[test]
-    fn explicit_new_version_follows_new_task_instead_of_previous_result() {
+    fn an_explicit_regenerate_follows_the_new_task_instead_of_the_previous_result() {
         let (mut draft, mut tasks) = submitted_recovery_chain();
         tasks[0].state = workspace::TaskState::Complete;
-        tasks[0].artifact = Some("versions/previous".into());
+        tasks[0].artifact = Some("note".into());
         tasks[0].handled_by = None;
         tasks[0].events.error = None;
         tasks[1].id = "new-version".into();
@@ -714,14 +717,14 @@ mod tests {
         let following = ConversionFollow::Preparing(7)
             .submitted(7, tasks[1].id.clone())
             .unwrap();
-        // The old version remains readable but is not the explicit new intent.
+        // The note as it was remains readable but is not the explicit new intent.
         assert!(
             following
                 .completed_task(true, 7, &draft, &tasks, &draft.input)
                 .is_none()
         );
         tasks[1].state = workspace::TaskState::Complete;
-        tasks[1].artifact = Some("versions/new-version".into());
+        tasks[1].artifact = Some("note".into());
         assert_eq!(
             following
                 .completed_task(true, 7, &draft, &tasks, &draft.input)
@@ -753,7 +756,7 @@ mod tests {
                 .completed_task(true, 7, &draft, &tasks, &draft.input)
                 .is_none()
         );
-        tasks[1].artifact = Some("versions/recovery".into());
+        tasks[1].artifact = Some("note".into());
         assert_eq!(
             followed
                 .completed_task(true, 7, &draft, &tasks, &draft.input)
@@ -794,13 +797,20 @@ mod tests {
     }
 
     #[test]
-    fn reader_repair_opens_the_new_version_only_while_the_original_note_is_still_open() {
+    fn reader_repair_reopens_the_note_only_while_it_still_shows_the_note_before_it() {
         let (_, mut tasks) = submitted_recovery_chain();
-        let original = std::path::Path::new("versions/original");
-        let follow = ConversionFollow::reader_reprocess(&tasks[1], original, 12).unwrap();
+        let note = std::path::Path::new("note");
+        let before = Some("original");
+        let follow = ConversionFollow::reader_reprocess(&tasks[1], note, 12).unwrap();
         // Submitting a recovery is not enough: it must publish a readable result.
-        assert!(!follow.completed_reader_task(&tasks[1], super::Page::Result, 12, Some(original)));
-        tasks[1].artifact = Some("versions/recovery".into());
+        assert!(!follow.completed_reader_task(
+            &tasks[1],
+            super::Page::Result,
+            12,
+            Some(note),
+            before
+        ));
+        tasks[1].artifact = Some(note.into());
         for state in [
             workspace::TaskState::Complete,
             workspace::TaskState::Partial,
@@ -810,7 +820,18 @@ mod tests {
                 &tasks[1],
                 super::Page::Result,
                 12,
-                Some(original)
+                Some(note),
+                before
+            ));
+        }
+        // The reader already shows what the repair wrote, or shows no manifest.
+        for opened in [Some("recovery"), None] {
+            assert!(!follow.completed_reader_task(
+                &tasks[1],
+                super::Page::Result,
+                12,
+                Some(note),
+                opened
             ));
         }
         for page in [
@@ -819,20 +840,33 @@ mod tests {
             super::Page::Task,
             super::Page::Settings,
         ] {
-            assert!(!follow.completed_reader_task(&tasks[1], page, 12, Some(original)));
+            assert!(!follow.completed_reader_task(&tasks[1], page, 12, Some(note), before));
         }
         // Leaving and returning to the same note has a new read generation.
-        assert!(!follow.completed_reader_task(&tasks[1], super::Page::Result, 13, Some(original)));
+        assert!(!follow.completed_reader_task(
+            &tasks[1],
+            super::Page::Result,
+            13,
+            Some(note),
+            before
+        ));
         assert!(!follow.completed_reader_task(
             &tasks[1],
             super::Page::Result,
             12,
-            Some(std::path::Path::new("versions/another-note")),
+            Some(std::path::Path::new("another-note")),
+            before,
         ));
-        assert!(!follow.completed_reader_task(&tasks[1], super::Page::Result, 12, None));
+        assert!(!follow.completed_reader_task(&tasks[1], super::Page::Result, 12, None, before));
         let mut unrelated = tasks[1].clone();
         unrelated.id = "another-repair".into();
-        assert!(!follow.completed_reader_task(&unrelated, super::Page::Result, 12, Some(original)));
+        assert!(!follow.completed_reader_task(
+            &unrelated,
+            super::Page::Result,
+            12,
+            Some(note),
+            before
+        ));
         for state in [
             workspace::TaskState::Running,
             workspace::TaskState::Paused,
@@ -843,7 +877,8 @@ mod tests {
                 &tasks[1],
                 super::Page::Result,
                 12,
-                Some(original)
+                Some(note),
+                before
             ));
         }
     }
@@ -851,16 +886,17 @@ mod tests {
     #[test]
     fn reader_repair_guard_excludes_exports_and_rechecks_the_note_when_loading_finishes() {
         let (_, mut tasks) = submitted_recovery_chain();
-        let original = std::path::Path::new("versions/original");
-        let follow = ConversionFollow::reader_reprocess(&tasks[1], original, 12).unwrap();
-        assert!(follow.context_is_current(super::Page::Result, 99, 12, Some(original)));
-        assert!(!follow.context_is_current(super::Page::Result, 99, 13, Some(original)));
-        assert!(!follow.context_is_current(super::Page::Library, 99, 12, Some(original)));
+        let note = std::path::Path::new("note");
+        let before = Some("original");
+        let follow = ConversionFollow::reader_reprocess(&tasks[1], note, 12).unwrap();
+        assert!(follow.context_is_current(super::Page::Result, 99, 12, Some(note)));
+        assert!(!follow.context_is_current(super::Page::Result, 99, 13, Some(note)));
+        assert!(!follow.context_is_current(super::Page::Library, 99, 12, Some(note)));
         assert!(!follow.context_is_current(
             super::Page::Result,
             99,
             12,
-            Some(std::path::Path::new("versions/other")),
+            Some(std::path::Path::new("other")),
         ));
 
         let c2m_engine::execution::Operation::Reprocess { components, .. } =
@@ -870,23 +906,28 @@ mod tests {
         };
         *components = vec![c2m_engine::execution::Component::Exports];
         tasks[1].state = workspace::TaskState::Complete;
-        tasks[1].artifact = Some(original.to_owned());
-        assert!(ConversionFollow::reader_reprocess(&tasks[1], original, 12).is_none());
-        assert!(!follow.completed_reader_task(&tasks[1], super::Page::Result, 12, Some(original)));
-        // Even a spurious new artifact cannot turn an export-only task into navigation.
-        tasks[1].artifact = Some("versions/recovery".into());
-        assert!(!follow.completed_reader_task(&tasks[1], super::Page::Result, 12, Some(original)));
+        tasks[1].artifact = Some(note.to_owned());
+        assert!(ConversionFollow::reader_reprocess(&tasks[1], note, 12).is_none());
+        // An export-only task never turns into navigation.
+        assert!(!follow.completed_reader_task(
+            &tasks[1],
+            super::Page::Result,
+            12,
+            Some(note),
+            before
+        ));
         tasks[1].plan.operation = Default::default();
-        assert!(ConversionFollow::reader_reprocess(&tasks[1], original, 12).is_none());
+        assert!(ConversionFollow::reader_reprocess(&tasks[1], note, 12).is_none());
     }
 
     #[test]
     fn opening_a_reader_viewer_ends_repair_following_even_if_it_closes_before_the_read_finishes() {
         let (_, mut tasks) = submitted_recovery_chain();
-        let original = std::path::Path::new("versions/original");
-        let captured = ConversionFollow::reader_reprocess(&tasks[1], original, 12).unwrap();
+        let note = std::path::Path::new("note");
+        let before = Some("original");
+        let captured = ConversionFollow::reader_reprocess(&tasks[1], note, 12).unwrap();
         tasks[1].state = workspace::TaskState::Complete;
-        tasks[1].artifact = Some("versions/recovery".into());
+        tasks[1].artifact = Some(note.into());
         for read_started in [false, true] {
             let mut active = Some(captured.clone());
             if read_started {
@@ -894,7 +935,8 @@ mod tests {
                     &tasks[1],
                     super::Page::Result,
                     12,
-                    Some(original),
+                    Some(note),
+                    before,
                 ));
             }
             ConversionFollow::interrupt_for_reader_viewer(&mut active);
@@ -909,7 +951,8 @@ mod tests {
                         &tasks[1],
                         super::Page::Result,
                         12,
-                        Some(original),
+                        Some(note),
+                        before,
                     ))
             );
         }
@@ -1106,9 +1149,10 @@ mod tests {
                 error: Some("原摘要请求结果未确认".into()),
                 ..Default::default()
             },
-            artifact: Some("versions/original".into()),
+            artifact: Some("note".into()),
             unread: false,
             resend: Vec::new(),
+            replaced_by: None,
         };
         let mut recovery = original.clone();
         recovery.id = "recovery".into();
@@ -1119,7 +1163,8 @@ mod tests {
         recovery.artifact = None;
         recovery.work_dir = "work/recovery".into();
         recovery.plan.operation = c2m_engine::execution::Operation::Reprocess {
-            base_version_dir: "versions/original".into(),
+            note_dir: "note".into(),
+            base_task_id: original.id.clone(),
             components: vec![c2m_engine::execution::Component::Summary],
             prior_work_dir: Some(original.work_dir.clone()),
         };
@@ -1137,7 +1182,7 @@ mod tests {
             workspace::TaskState::Cancelled,
         ] {
             tasks[1].state = state;
-            tasks[1].artifact = Some("versions/recovery".into());
+            tasks[1].artifact = Some("note".into());
             assert_eq!(
                 super::retired_input_task(&draft, &tasks, &draft.input)
                     .unwrap()
@@ -1202,7 +1247,7 @@ mod tests {
         }
         tasks[1].state = workspace::TaskState::Complete;
         assert!(completed_input_task(&draft, &tasks, &draft.input).is_none());
-        tasks[1].artifact = Some("versions/recovery".into());
+        tasks[1].artifact = Some("note".into());
         assert_eq!(
             completed_input_task(&draft, &tasks, &draft.input)
                 .unwrap()
@@ -1226,7 +1271,7 @@ mod tests {
         );
         assert!(completed_input_task(&draft, &tasks, &draft.input).is_none());
         tasks[2].state = workspace::TaskState::Complete;
-        tasks[2].artifact = Some("versions/final-attempt".into());
+        tasks[2].artifact = Some("note".into());
         assert_eq!(
             completed_input_task(&draft, &tasks, &draft.input)
                 .unwrap()
@@ -1303,7 +1348,7 @@ mod tests {
     fn a_recovered_result_cannot_replace_new_or_changed_input() {
         let (mut draft, mut tasks) = submitted_recovery_chain();
         tasks[1].state = workspace::TaskState::Complete;
-        tasks[1].artifact = Some("versions/recovery".into());
+        tasks[1].artifact = Some("note".into());
         for input in ["", "https://www.bilibili.com/video/BVnext"] {
             assert!(submitted_input_task(&draft, &tasks, input).is_none());
             assert!(completed_input_task(&draft, &tasks, input).is_none());

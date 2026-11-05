@@ -505,8 +505,8 @@ mod tests {
     #[test]
     fn engine_text_with_values_reads_in_the_interface_language() {
         assert_eq!(
-            engine_message_for("此笔记版本需要其他版本的软件", Lang::En),
-            "Unsupported manifest schema"
+            engine_message_for("此笔记需要更新版本的软件", Lang::En),
+            "This note needs a newer version of course2md"
         );
         assert_eq!(
             engine_message_for("校对 00:00–00:17 的文字", Lang::En),

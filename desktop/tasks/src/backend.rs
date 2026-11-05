@@ -31,6 +31,8 @@ impl Event {
         Self::Engine(EngineEvent::Error {
             message,
             code: Default::default(),
+            parts: Vec::new(),
+            path: None,
         })
     }
 }
@@ -567,8 +569,8 @@ mod tests {
             task_id: "task-1".into(),
             course_id: "course-1".into(),
             source_id: "source-1".into(),
-            version_id: "v1".into(),
             course_dir: root.path().join("note"),
+            replaces: None,
         };
         let meta = c2m_source::fetch::VideoMeta {
             title: "course".into(),
@@ -589,7 +591,7 @@ mod tests {
         )
         .unwrap();
         let preview = read_preview(Course {
-            dir: target.version_dir(),
+            dir: target.course_dir.clone(),
             title: "course".into(),
             modified: SystemTime::now(),
             slides: 0,
@@ -627,8 +629,8 @@ mod tests {
             task_id: "task-1".into(),
             course_id: "course-1".into(),
             source_id: "source-1".into(),
-            version_id: "v1".into(),
             course_dir: dir.path().join("course"),
+            replaces: None,
         };
         let meta = c2m_source::fetch::VideoMeta {
             title: "Course".into(),
@@ -648,7 +650,7 @@ mod tests {
             Default::default(),
         )
         .unwrap();
-        let version = target.version_dir();
+        let version = target.course_dir.clone();
         // Tamper with the published records: the frame reference now escapes the note.
         let mut manifest: c2m_artifact::artifact::Manifest =
             serde_json::from_slice(&std::fs::read(version.join("manifest.json")).unwrap()).unwrap();

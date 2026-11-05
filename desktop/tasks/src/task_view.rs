@@ -13,10 +13,14 @@ pub(crate) const TRANSCRIPTION_PURPOSE: &str = "transcription";
 
 /// A settled task that waits for the person.
 pub fn needs_person(task: &TaskRecord) -> bool {
-    matches!(
-        task.state,
-        TaskState::NeedsAttention | TaskState::Uncertain | TaskState::Paused | TaskState::Partial
-    )
+    task.replaced_by.is_none()
+        && matches!(
+            task.state,
+            TaskState::NeedsAttention
+                | TaskState::Uncertain
+                | TaskState::Paused
+                | TaskState::Partial
+        )
 }
 
 /// Page order: the work in progress, what waits on the person, what follows,
@@ -56,7 +60,7 @@ impl TaskGroup {
 }
 
 pub fn task_group(task: &TaskRecord) -> TaskGroup {
-    if task.handled_by.is_some() {
+    if task.handled_by.is_some() || task.replaced_by.is_some() {
         TaskGroup::History
     } else if task.held {
         TaskGroup::Running
@@ -294,6 +298,30 @@ pub(crate) fn ai_stage_outcome(
 /// The hint older engines attached to failures no account could fix (V1).
 const LEGACY_LOGIN_HINT: &str = "提示：请在设置的账号中重新登录 B 站后重试。 / Hint: sign in to Bilibili again in Settings and retry.";
 
+/// A task's failure in the interface language. A refused result names its parts
+/// from the error's structure, not from the engine's Simplified Chinese words.
+fn task_error_summary(task: &TaskRecord) -> Option<String> {
+    task_error_summary_in(task, c2m_i18n::i18n::lang())
+}
+
+fn task_error_summary_in(task: &TaskRecord, lang: c2m_i18n::i18n::Lang) -> Option<String> {
+    // What to do, with the full paths: never cut short.
+    if let Some(folder) = task.events.blocked_folder() {
+        let message = if task.events.blocked_by_copies() {
+            c2m_core::outcome::copies_kept_message(folder, lang)
+        } else {
+            c2m_core::outcome::recovery_blocked_message(folder, lang)
+        };
+        return failure_summary_in(task.state, task.events.error.as_deref(), lang).map(|_| message);
+    }
+    match task.events.kept_parts() {
+        Some(parts) => failure_summary_in(task.state, task.events.error.as_deref(), lang)
+            .map(|_| c2m_core::outcome::note_kept_message(parts, lang)),
+        None => failure_summary_in(task.state, task.events.error.as_deref(), lang),
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn task_failure_summary(state: TaskState, error: Option<&str>) -> Option<String> {
     failure_summary_in(state, error, c2m_i18n::i18n::lang())
 }
@@ -349,8 +377,7 @@ pub fn task_attention_summary(task: &TaskRecord) -> String {
     if let Some(reason) = task_service_repair_reason(task) {
         return reason.into();
     }
-    task_failure_summary(task.state, task.events.error.as_deref())
-        .unwrap_or_else(|| task_status_label(task))
+    task_error_summary(task).unwrap_or_else(|| task_status_label(task))
 }
 
 /// Only concrete configuration rejections change recovery from Retry to Repair.
@@ -437,6 +464,8 @@ pub enum TaskSurface {
 pub enum TaskAction {
     Read,
     OpenNoteFolder,
+    /// The folder a stopped replacement of the task's note left, to sort out by hand.
+    OpenRecoveryFolder,
     OpenExports,
     OpenSource,
     CopyLink,
@@ -505,10 +534,7 @@ pub fn task_reasons(task: &TaskRecord) -> Vec<String> {
     if task.state != TaskState::Partial || failures.is_empty() {
         return task_service_repair_reason(task)
             .map(str::to_owned)
-            .or_else(|| {
-                task_failure_summary(task.state, task.events.error.as_deref())
-                    .filter(|_| !task.has_uncertain())
-            })
+            .or_else(|| task_error_summary(task).filter(|_| !task.has_uncertain()))
             .into_iter()
             .collect();
     }
@@ -590,12 +616,20 @@ pub fn resumable(task: &TaskRecord) -> bool {
 
 pub fn adjust_label(task: &TaskRecord) -> &'static str {
     if task.artifact.is_some() {
-        c2m_i18n::tr!("调整并生成新版")
+        c2m_i18n::tr!("调整并重新生成")
     } else if task.state == TaskState::Paused {
         c2m_i18n::tr!("调整选项")
     } else {
         c2m_i18n::tr!("调整后重试")
     }
+}
+
+/// What a finished task's note kept of the one it replaced: the files the person
+/// had edited, saved beside it under another name.
+pub fn task_kept_edits(task: &TaskRecord) -> Option<String> {
+    task.artifact
+        .as_ref()
+        .and_then(|_| crate::run::kept_edits_notice(&task.events.kept_edits))
 }
 
 /// The worker's log, failure and blocked-request text, when there is any.
@@ -627,6 +661,9 @@ pub fn task_text_source(task: &TaskRecord) -> &'static str {
 pub fn task_status_label(task: &TaskRecord) -> String {
     if task.handled_by.is_some() {
         return c2m_i18n::tr!("已有后续处理任务").into();
+    }
+    if task.replaced_by.is_some() {
+        return c2m_i18n::tr!("笔记已被之后的任务更新").into();
     }
     // What the folder holds is not known until the earlier worker lets go.
     if task.held {
@@ -743,6 +780,7 @@ impl TaskAction {
         match self {
             Self::Read
             | Self::OpenNoteFolder
+            | Self::OpenRecoveryFolder
             | Self::OpenExports
             | Self::OpenSource
             | Self::CopyLink => 0,
@@ -813,10 +851,16 @@ pub fn task_actions(
     let mut recovery = Vec::new();
     if let Some(next) = &task.handled_by {
         recovery.push(Followup(next.clone()));
+    } else if task.replaced_by.is_some() {
+        // Its note is another task's now: nothing here can be redone.
     } else {
         let repair = task_requires_service_repair(task);
         if repair && has_note {
             recovery.push(Repair);
+        }
+        // Continuing stops again until the person sorts out the note's folder.
+        if task.events.blocked_folder().is_some() {
+            recovery.push(OpenRecoveryFolder);
         }
         // Continuing would only stop again until the model is there.
         if task.state == TaskState::NeedsAttention && task.events.model_required && !uncertain {
@@ -872,7 +916,11 @@ pub fn task_actions(
             actions.extend(recovery);
             // A published note's requests are resent by redoing the part they were
             // made for; when no unfinished part explains them, the card says why.
-            if uncertain && !active && (!has_note || task.uncertain_components().is_ok()) {
+            if uncertain
+                && !active
+                && task.replaced_by.is_none()
+                && (!has_note || task.uncertain_components().is_ok())
+            {
                 actions.push(Resend);
             }
             if !task.state.finished() {
@@ -1094,6 +1142,7 @@ mod tests {
             artifact: None,
             unread: false,
             resend: Vec::new(),
+            replaced_by: None,
         }
     }
 
@@ -1172,6 +1221,8 @@ mod tests {
         task.events.apply(&Event::Error {
             message: "识别模型 qwen3 尚未下载，请先下载并准备模型，再继续".into(),
             code: ErrorCode::ModelRequired,
+            parts: Vec::new(),
+            path: None,
         });
         let actions = task_actions(&task, TaskSurface::Card, &facts());
         assert!(actions.contains(&Action::Resume));
@@ -1183,9 +1234,141 @@ mod tests {
         task.events.apply(&Event::Error {
             message: "其他错误".into(),
             code: ErrorCode::Other,
+            parts: Vec::new(),
+            path: None,
         });
         let actions = task_actions(&task, TaskSurface::Card, &facts());
         assert!(!actions.contains(&Action::PrepareModel));
+    }
+
+    /// Copies at the limit stop a task: the card says, in full and in the
+    /// interface language, to move the copies to keep out of the folder, and offers
+    /// to open it.
+    #[test]
+    fn copies_at_the_limit_tell_the_task_what_frees_it() {
+        use super::{
+            TaskAction as Action, TaskFacts, TaskSurface, task_actions, task_error_summary_in,
+        };
+        use c2m_i18n::i18n::Lang;
+        use c2m_protocol::progress::{ErrorCode, Event};
+        let swap = std::path::PathBuf::from(
+            "/Users/someone/Documents/course2md/a-rather-long-library-name/.course2md/swap/course-0123456789abcdef",
+        );
+        let mut task = task_record("task");
+        task.state = TaskState::NeedsAttention;
+        task.events.apply(&Event::Error {
+            message: c2m_core::outcome::copies_kept_message(&swap, Lang::ZhHans),
+            code: ErrorCode::NoteCopiesKept,
+            parts: Vec::new(),
+            path: Some(swap.clone()),
+        });
+        for lang in [Lang::En, Lang::Ja, Lang::ZhHant] {
+            let text = task_error_summary_in(&task, lang).unwrap();
+            assert_eq!(text, c2m_core::outcome::copies_kept_message(&swap, lang));
+        }
+        let facts = TaskFacts {
+            active: false,
+            expanded: false,
+            library: None,
+            needs_reassociation: false,
+            queue: Vec::new(),
+        };
+        assert!(
+            task_actions(&task, TaskSurface::Card, &facts).contains(&Action::OpenRecoveryFolder)
+        );
+    }
+
+    /// A note whose replacement cannot be finished says what to do with the full
+    /// path in the interface language, and offers to open that folder.
+    #[test]
+    fn a_blocked_note_tells_the_task_what_to_do() {
+        use super::{
+            TaskAction as Action, TaskFacts, TaskSurface, task_actions, task_error_summary_in,
+        };
+        use c2m_i18n::i18n::Lang;
+        use c2m_protocol::progress::{ErrorCode, Event};
+        let swap = std::path::PathBuf::from(
+            "/Users/someone/Documents/course2md/a-rather-long-library-name/.course2md/swap/course-0123456789abcdef",
+        );
+        let mut task = task_record("task");
+        task.state = TaskState::NeedsAttention;
+        task.events.apply(&Event::Error {
+            message: c2m_core::outcome::recovery_blocked_message(&swap, Lang::ZhHans),
+            code: ErrorCode::NoteRecoveryBlocked,
+            parts: Vec::new(),
+            path: Some(swap.clone()),
+        });
+        for lang in [Lang::En, Lang::Ja, Lang::ZhHant] {
+            let text = task_error_summary_in(&task, lang).unwrap();
+            assert_eq!(
+                text,
+                c2m_core::outcome::recovery_blocked_message(&swap, lang)
+            );
+            assert!(text.contains(&swap.display().to_string()), "{text}");
+            assert!(!text.ends_with('…'), "{text}");
+        }
+        let facts = TaskFacts {
+            active: false,
+            expanded: false,
+            library: None,
+            needs_reassociation: false,
+            queue: Vec::new(),
+        };
+        assert!(
+            task_actions(&task, TaskSurface::Card, &facts).contains(&Action::OpenRecoveryFolder)
+        );
+    }
+
+    /// A refused result is shown in the interface language from the parts the
+    /// error names, not from the worker's Simplified Chinese words.
+    #[test]
+    fn a_kept_note_is_explained_in_the_interface_language() {
+        use super::task_error_summary_in;
+        use c2m_core::outcome::{KeptPart, NoteKept};
+        use c2m_i18n::i18n::Lang;
+        use c2m_protocol::progress::{ErrorCode, Event};
+        let parts = vec![
+            KeptPart {
+                part: "proofreading".into(),
+                cause: Some("校对未全部完成（1/1 失败），原文已保留；首个错误：HTTP 503".into()),
+            },
+            KeptPart {
+                part: "translation".into(),
+                cause: Some("翻译未全部完成（2/2 失败）".into()),
+            },
+            KeptPart {
+                part: "summary".into(),
+                cause: None,
+            },
+        ];
+        let mut task = task_record("task");
+        task.state = TaskState::NeedsAttention;
+        task.events.apply(&Event::Error {
+            message: NoteKept::new(parts.clone()).message,
+            code: ErrorCode::NoteKept,
+            parts,
+            path: None,
+        });
+        let han = |text: &str| text.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+        let en = task_error_summary_in(&task, Lang::En).unwrap();
+        assert!(en.contains("Proofreading, Translation, Summary"), "{en}");
+        assert!(en.contains("Proofreading incomplete (1/1 failed)"), "{en}");
+        assert!(en.contains("Translation incomplete (2/2 failed)"), "{en}");
+        assert!(!han(&en), "{en}");
+        let ja = task_error_summary_in(&task, Lang::Ja).unwrap();
+        assert!(ja.contains("校正、翻訳、要約"), "{ja}");
+        assert!(ja.contains("翻訳が完了していません（2/2 件失敗）"), "{ja}");
+        let hant = task_error_summary_in(&task, Lang::ZhHant).unwrap();
+        assert!(hant.contains("校對、翻譯、摘要"), "{hant}");
+        assert!(hant.contains("翻譯未全部完成（2/2 失敗）"), "{hant}");
+        // Another failure afterwards is shown as that failure.
+        task.events.apply(&Event::Error {
+            message: "其他错误".into(),
+            code: ErrorCode::Other,
+            parts: Vec::new(),
+            path: None,
+        });
+        assert_eq!(task_error_summary_in(&task, Lang::En).unwrap(), "其他错误");
     }
 
     /// Once the model a task stopped for is ready, that task continues; one the
@@ -1203,6 +1386,8 @@ mod tests {
             task.events.apply(&Event::Error {
                 message: "识别模型尚未下载".into(),
                 code: ErrorCode::ModelRequired,
+                parts: Vec::new(),
+                path: None,
             });
             task
         };
@@ -1217,6 +1402,8 @@ mod tests {
         other_failure.events.apply(&Event::Error {
             message: "其他错误".into(),
             code: ErrorCode::Other,
+            parts: Vec::new(),
+            path: None,
         });
         let request = task_model_request(&waiting, AsrProvider::Coreml);
         let mut other_model = stopped("other-model", None);
@@ -1574,6 +1761,7 @@ mod tests {
             artifact: Some(path.clone()),
             unread: false,
             resend: Vec::new(),
+            replaced_by: None,
         };
         // The first recovery action in Recent Notes and every action in the
         // task cards must target actual incomplete work, never the first success.
