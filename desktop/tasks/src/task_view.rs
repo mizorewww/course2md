@@ -598,6 +598,14 @@ pub fn adjust_label(task: &TaskRecord) -> &'static str {
     }
 }
 
+/// What a finished task's note kept of the one it replaced: the files the person
+/// had edited, saved beside it under another name.
+pub fn task_kept_edits(task: &TaskRecord) -> Option<String> {
+    task.artifact
+        .as_ref()
+        .and_then(|_| crate::run::kept_edits_notice(&task.events.kept_edits))
+}
+
 /// The worker's log, failure and blocked-request text, when there is any.
 pub fn task_log_text(task: &TaskRecord) -> Option<String> {
     let text = task

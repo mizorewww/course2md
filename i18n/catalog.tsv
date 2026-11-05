@@ -2240,12 +2240,13 @@ AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not conf
 笔记文件已被手动修改；这次补做以原始记录为准，你修改的文件会另存为 course.edited.md / The note file was edited by hand; this run uses the original record and keeps your edited file as course.edited.md	笔记文件已被手动修改；这次补做以原始记录为准，你修改的文件会另存为 course.edited.md	The note file was edited by hand; this run uses the original record and keeps your edited file as course.edited.md	筆記檔案已被手動修改；這次補做以原始紀錄為準，你修改的檔案會另存為 course.edited.md	ノートのファイルが手動で編集されています。今回のやり直しは元の記録に基づき、編集したファイルは course.edited.md として保存します
 补做没有完成更多内容，笔记未改动 / Nothing more was finished; the note is unchanged	补做没有完成更多内容，笔记未改动	Nothing more was finished; the note is unchanged	補做沒有完成更多內容，筆記未變動	やり直しで新たに完了したものはありません。ノートは変更されていません
 已将笔记的旧版本整理为一份笔记 / Turned the note's versions into one note: {}	已将笔记的旧版本整理为一份笔记：{}	Turned the note's versions into one note: {}	已將筆記的舊版本整理為一份筆記：{}	ノートの古い版を 1 つのノートにまとめました：{}
+{} 个已有进行中的任务，未重复加入	{} 个已有进行中的任务，未重复加入	{} already have a task in progress and were not added again	{} 個已有進行中的任務，未重複加入	{} 件は進行中のタスクがあるため、追加しませんでした
+你改过的文件已另存为 {}	你改过的文件已另存为 {}	Your edited files were kept as {}	你改過的檔案已另存為 {}	編集したファイルは {} として保存しました
 待确认的请求不属于笔记中可补做的部分，请调整后重新生成	待确认的请求不属于笔记中可补做的部分，请调整后重新生成	The unconfirmed requests are not part of the note that can be filled in; adjust the options and regenerate	待確認的請求不屬於筆記中可補做的部分，請調整後重新產生	未確認のリクエストはノートの未完了分ではありません。設定を調整して再生成してください
 现在每门课只保留一份笔记：旧版本已删除，重新生成或补做会直接更新这份笔记。	现在每门课只保留一份笔记：旧版本已删除，重新生成或补做会直接更新这份笔记。	Each course now keeps one note: older versions were removed, and regenerating or filling in missing steps updates the note in place.	現在每門課只保留一份筆記：舊版本已刪除，重新產生或補做會直接更新這份筆記。	各講座のノートは 1 つだけになりました。古いバージョンは削除され、再生成や未完了分の処理はこのノートを直接更新します。
 笔记已被另一项任务更新，这项任务不会再运行	笔记已被另一项任务更新，这项任务不会再运行	Another task has updated the note; this task will not run again	筆記已被另一項任務更新，這項任務不會再執行	ノートは別のタスクで更新されたため、このタスクは再実行されません
 调整并重新生成	调整并重新生成	Adjust and regenerate	調整並重新產生	調整して再生成
 这份笔记仍按旧方式保存，正在等待整理	这份笔记仍按旧方式保存，正在等待整理	This note is still saved the old way and is waiting to be tidied up	這份筆記仍按舊方式儲存，正在等待整理	このノートはまだ古い形式で保存されており、整理を待っています
+这份笔记已有进行中的任务，已为你打开	这份笔记已有进行中的任务，已为你打开	This note already has a task in progress; it is open now	這份筆記已有進行中的任務，已為你開啟	このノートには進行中のタスクがあるため、そのタスクを開きました
 这份笔记已被之后的任务更新，请从最新的任务补做	这份笔记已被之后的任务更新，请从最新的任务补做	A later task has updated this note; fill in missing steps from the latest task	這份筆記已被之後的任務更新，請從最新的任務補做	このノートは後のタスクで更新されています。最新のタスクから未完了分を処理してください
 这项任务已结束，可在任务卡中补做或重新生成	这项任务已结束，可在任务卡中补做或重新生成	This task has ended; fill in missing steps or regenerate from its card	這項任務已結束，可在任務卡中補做或重新產生	このタスクは終了しました。タスクカードから未完了分を処理するか再生成できます
-{} 个已有进行中的任务，未重复加入	{} 个已有进行中的任务，未重复加入	{} already have a task in progress and were not added again	{} 個已有進行中的任務，未重複加入	{} 件は進行中のタスクがあるため、追加しませんでした
-这份笔记已有进行中的任务，已为你打开	这份笔记已有进行中的任务，已为你打开	This note already has a task in progress; it is open now	這份筆記已有進行中的任務，已為你開啟	このノートには進行中のタスクがあるため、そのタスクを開きました

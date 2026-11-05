@@ -273,6 +273,8 @@ pub struct Publication {
     /// The note folder.
     note: PathBuf,
     frames: Vec<c2m_core::timeline::FrameEvent>,
+    /// Hand-edited files of the replaced note, kept beside it under another name.
+    kept_edits: Vec<PathBuf>,
 }
 
 impl Publication {
@@ -287,6 +289,7 @@ impl Publication {
             source: task.plan.source.clone(),
             folder: task.plan.folder,
             note: done.out_dir.clone(),
+            kept_edits: done.kept_edits.clone(),
             frames: manifest
                 .map(|manifest| manifest.frames.clone())
                 .unwrap_or_default(),
@@ -299,7 +302,7 @@ impl Publication {
     /// Returns what could not be done, in the interface language, and the picture.
     /// Blocking: it touches the library's disk.
     pub fn file(self) -> (Vec<String>, Option<PathBuf>) {
-        let mut issues = Vec::new();
+        let mut issues: Vec<String> = kept_edits_notice(&self.kept_edits).into_iter().collect();
         if let Some(root) = &self.root {
             if let Err(error) = source::save_cover(&self.source, &self.note) {
                 issues.push(c2m_i18n::tr!("封面暂未保存：{}", format!("{error:#}")));
@@ -321,6 +324,20 @@ impl Publication {
         });
         (issues, thumbnail)
     }
+}
+
+/// What the person is told when a task replaced a note they had edited: the edited
+/// files were kept beside the new note under these names.
+pub fn kept_edits_notice(kept: &[PathBuf]) -> Option<String> {
+    (!kept.is_empty()).then(|| {
+        c2m_i18n::tr!(
+            "你改过的文件已另存为 {}",
+            kept.iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(c2m_i18n::tr!("、"))
+        )
+    })
 }
 
 /// The paid requests of a task whose answers never arrived, by id.
@@ -461,5 +478,58 @@ mod tests {
             serde_json::from_slice(&task_control(&preferences, &task).unwrap()).unwrap();
         assert_eq!(control["stopped_services"], serde_json::json!(["removed"]));
         assert_eq!(control["intent"], serde_json::json!("run"));
+    }
+
+    /// A note the person had edited is replaced; the task's result tells them where
+    /// their edits were kept, then and after a restart.
+    #[test]
+    fn edits_kept_beside_a_replaced_note_are_reported_with_the_result() {
+        use c2m_protocol::progress::Event;
+        let (_root, mut workspace, id) = queued_task();
+        let state = &mut workspace.state;
+        let note = state
+            .library(&state.default_library)
+            .unwrap()
+            .root
+            .join("course");
+        let kept = vec![PathBuf::from("course.edited.md")];
+        let done = Done {
+            task_id: id.clone(),
+            out_dir: note.clone(),
+            kept_edits: kept.clone(),
+            ..Default::default()
+        };
+        let event = Event::Done(Box::new(done.clone()));
+        state.apply_task_event(&id, &event);
+        let manifest: Manifest = serde_json::from_value(serde_json::json!({
+            "schema": 2, "task_id": id, "course_id": "course", "source_id": "source",
+            "title": "课程", "created_at_ms": 1, "document": "document.json",
+            "markdown": "course.md", "frames": [], "assets": [], "outputs": [],
+            "outcomes": {}, "partial": false,
+        }))
+        .unwrap();
+        let task =
+            record_finish(state, &id, Some(&done), Some(&manifest), true, true, false).unwrap();
+        assert_eq!(task.state, TaskState::Complete);
+        assert_eq!(task.artifact.as_ref(), Some(&note));
+        let notice = task_view::task_kept_edits(&task).unwrap();
+        assert!(notice.contains("course.edited.md"), "{notice}");
+        // Filing the note says so too, with what it could not do.
+        let (issues, _) = Publication::new(&task, None, &done, Some(&manifest)).file();
+        assert_eq!(issues, vec![notice.clone()]);
+        // A restart reads it back from the saved events; a later run of the same
+        // task, which finds its note already published, reports none and changes
+        // nothing.
+        let mut events = desktop_store::activity::JobEvents::default();
+        let mut again = done.clone();
+        again.kept_edits.clear();
+        let stream = [event, Event::Done(Box::new(again))]
+            .iter()
+            .map(|event| serde_json::to_string(event).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        events.replay(stream.as_bytes());
+        assert_eq!(events.kept_edits, kept);
+        assert!(kept_edits_notice(&[]).is_none());
     }
 }

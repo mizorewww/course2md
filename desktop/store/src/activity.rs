@@ -96,6 +96,11 @@ pub struct JobEvents {
     pub blocked: Vec<BlockedRequest>,
     #[serde(default, skip_serializing)]
     pub outcomes: Option<c2m_artifact::artifact::Outcomes>,
+    /// Files of the note this task replaced that were hand-edited and kept beside
+    /// the new note under another name, relative to the note. Read back from the
+    /// task's saved result.
+    #[serde(default, skip_serializing)]
+    pub kept_edits: Vec<std::path::PathBuf>,
     /// The last error was a speech model that must be prepared first.
     #[serde(default, skip_serializing)]
     pub model_required: bool,
@@ -220,6 +225,11 @@ impl JobEvents {
             Event::Done(done) => {
                 if done.outcomes.is_some() {
                     self.outcomes.clone_from(&done.outcomes);
+                }
+                // A task publishes once; a run that finds its note already published
+                // reports none, and the earlier report stands.
+                if !done.kept_edits.is_empty() {
+                    self.kept_edits.clone_from(&done.kept_edits);
                 }
                 self.done = Some((**done).clone());
                 true
