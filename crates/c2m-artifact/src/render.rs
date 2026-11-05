@@ -305,6 +305,35 @@ mod tests {
         assert!(link.ends_with("a%20lesson.mp4#t=4"));
     }
 
+    /// A video played from a playlist, a part or a short is played there, only later.
+    #[test]
+    fn timestamps_keep_where_the_video_plays() {
+        for (source, expected) in [
+            (
+                "https://www.youtube.com/watch?v=abc&list=PLx&index=3",
+                "https://www.youtube.com/watch?v=abc&list=PLx&index=3&t=90",
+            ),
+            (
+                "https://youtu.be/abc?list=PLx",
+                "https://youtu.be/abc?list=PLx&t=90",
+            ),
+            (
+                "https://www.youtube.com/shorts/abc",
+                "https://www.youtube.com/shorts/abc?t=90",
+            ),
+            (
+                "https://www.bilibili.com/video/BV1xx?p=2",
+                "https://www.bilibili.com/video/BV1xx?p=2&t=90",
+            ),
+            (
+                "https://www.youtube.com/watch?v=abc&t=4&list=PLx#old",
+                "https://www.youtube.com/watch?v=abc&list=PLx&t=90",
+            ),
+        ] {
+            assert_eq!(ts_url_from(source, 90.9), expected, "{source}");
+        }
+    }
+
     #[test]
     fn render_basics() {
         let m = VideoMeta {

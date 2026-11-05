@@ -121,6 +121,14 @@ impl Desktop {
             return;
         }
         let previous_source = self.import.source_preview.clone();
+        // Reading a confirmed video again (after adjusting a task, or signing in)
+        // keeps it one video, though its link names the playlist it plays in.
+        let single = [
+            previous_source.as_ref(),
+            self.draft(cx).and_then(|draft| draft.source.as_ref()),
+        ]
+        .into_iter()
+        .any(|known| source::reads_one_video(&input, known));
         self.invalidate_source();
         if input.is_empty() {
             self.import.source_validation = Some(
@@ -195,7 +203,8 @@ impl Desktop {
         let online = self.online(cx);
         let handle = window.window_handle();
         // probe is blocking network/subprocess work; see crate::spawn_blocking_io.
-        let task = crate::spawn_blocking_result(move || source::probe(input, online, cancel));
+        let task =
+            crate::spawn_blocking_result(move || source::probe(input, online, single, cancel));
         cx.spawn(async move |this, cx| {
             let result = task.await;
             // Always return the worker count, window or not (request_close waits for zero).

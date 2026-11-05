@@ -680,6 +680,76 @@ exit 1
     assert!(text.contains("for 'en'"), "{text}");
 }
 
+/// A video opened from a playlist (#32) is that video: the CLI reads it with
+/// `--no-playlist` instead of stopping at the playlist, and the video's link,
+/// from which the note's timestamp links are made, keeps the playlist it plays in.
+#[cfg(unix)]
+#[test]
+fn a_video_opened_from_a_playlist_is_processed_in_its_playlist() {
+    use std::os::unix::fs::PermissionsExt;
+    let cli = CliTest::new();
+    let log = cli.dir.path().join("yt-dlp.log");
+    let fake = cli.dir.path().join("yt-dlp");
+    // Lists the playlist unless asked for one video, as yt-dlp does; records the
+    // link each subtitle read is given, then refuses the video download.
+    std::fs::write(
+        &fake,
+        format!(
+            r#"#!/bin/sh
+if [ "$1" = "--version" ]; then echo 2026.08.19; exit 0; fi
+video='{{"id":"abcdefghijk","title":"Lecture 3","duration":240,"webpage_url":"https://www.youtube.com/watch?v=abcdefghijk","extractor":"youtube","extractor_key":"Youtube","_type":"video","language":"en","subtitles":{{"en":[{{"ext":"vtt","url":"http://127.0.0.1:1/en.vtt"}}]}},"automatic_captions":{{}}}}'
+playlist='{{"_type":"playlist","id":"PLcourse","title":"Course","extractor":"youtube:tab","entries":[{{"_type":"url","id":"abcdefghijk","url":"https://www.youtube.com/watch?v=abcdefghijk","ie_key":"Youtube","title":"Lecture 3"}},{{"_type":"url","id":"zyxwvutsrqp","url":"https://www.youtube.com/watch?v=zyxwvutsrqp","ie_key":"Youtube","title":"Lecture 4"}}]}}'
+prev=""; out=""; skip=""; single=""; dump=""; link=""
+for arg in "$@"; do
+  [ "$prev" = "-o" ] && out="$arg"
+  [ "$arg" = "--skip-download" ] && skip=1
+  [ "$arg" = "--no-playlist" ] && single=1
+  [ "$arg" = "--dump-single-json" ] && dump=1
+  prev="$arg"; link="$arg"
+done
+if [ -n "$skip" ]; then
+  echo "$link" >> "{log}"
+  printf '1\n00:00:00,000 --> 00:00:02,000\nhello\n' > "$out.en.srt"
+  echo "$video"; exit 0
+fi
+if [ -n "$dump" ]; then
+  if [ -n "$single" ]; then echo "$video"; else echo "$playlist"; fi
+  exit 0
+fi
+echo "ERROR: [youtube] abcdefghijk: Private video" >&2
+exit 1
+"#,
+            log = log.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_course2md"))
+        .arg("https://www.youtube.com/watch?v=abcdefghijk&list=PLcourse&index=3&si=share")
+        .args(["--transcript-source", "subtitle", "--no-resume", "-o"])
+        .arg(cli.dir.path().join("out"))
+        .current_dir(cli.dir.path())
+        .env("HOME", cli.dir.path())
+        .env("XDG_CONFIG_HOME", cli.dir.path().join("config"))
+        .env("XDG_CACHE_HOME", cli.dir.path().join("cache"))
+        .env("COURSE2MD_LANG", "en")
+        .env("COURSE2MD_YTDLP", &fake)
+        .env_remove("RUST_LOG")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    let text = stderr(&output);
+    assert!(!output.status.success());
+    assert!(!text.contains("multiple videos"), "{text}");
+    assert_eq!(
+        std::fs::read_to_string(&log).unwrap_or_default().trim(),
+        "https://www.youtube.com/watch?v=abcdefghijk&list=PLcourse&index=3",
+        "{text}"
+    );
+    // The note is the video's, not the playlist's.
+    assert!(cli.dir.path().join("out/youtube").is_dir(), "{text}");
+}
+
 /// Password and SMS login type into a terminal; without one the error says what
 /// to do instead, in the interface language, before anything is sent.
 #[test]

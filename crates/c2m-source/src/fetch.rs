@@ -49,7 +49,8 @@ fn is_deterministic_download_error(error_text: &str) -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SourceCandidate {
-    /// The extractor's concrete video URL, never the original playlist URL.
+    /// The extractor's concrete video URL, never the original playlist URL; a
+    /// YouTube video keeps the playlist it plays in (`list`), not its identity.
     pub input: String,
     pub title: String,
     pub identity: Option<String>,
@@ -158,10 +159,11 @@ pub fn parse_online_probe(bytes: &[u8], input: &str, diagnostics: &str) -> Resul
                 unavailable_entries += 1;
                 continue;
             };
-            let Some(input) = concrete_url(&entry) else {
+            let Some(entry_input) = concrete_url(&entry) else {
                 unavailable_entries += 1;
                 continue;
             };
+            let input = crate::playback::entry_url(&entry_input, input);
             if matches!(entry.kind.as_str(), "playlist" | "multi_video") || entry.entries.is_some()
             {
                 unavailable_entries += 1;
@@ -208,7 +210,10 @@ pub fn parse_online_probe(bytes: &[u8], input: &str, diagnostics: &str) -> Resul
         .context(tr!("无法识别这个链接对应的视频，请粘贴具体视频的链接 / Cannot identify the video for this link; paste the link to a specific video"))?;
     let identity = online_identity(&extractor, id)
         .context(tr!("无法识别这个链接对应的视频，请粘贴具体视频的链接 / Cannot identify the video for this link; paste the link to a specific video"))?;
-    let input = concrete_url(&info).unwrap_or_else(|| input.to_owned());
+    let input = match concrete_url(&info) {
+        Some(concrete) => crate::playback::video_url(&concrete, input, id),
+        None => input.to_owned(),
+    };
     // The original concrete part link is authoritative if the extractor returns a
     // canonical base URL: do not erase an explicitly selected Bilibili part.
     let input = if extractor.to_ascii_lowercase().starts_with("bilibili") {
@@ -637,6 +642,9 @@ pub(crate) async fn probe_online(
 ) -> Result<OnlineProbe> {
     let (mut cmd, _cookies) = ytdlp_command(url)?;
     cmd.args(probe_args(true));
+    if crate::playback::names_youtube_video(url) {
+        cmd.arg("--no-playlist");
+    }
     let out = run_ytdlp(url, &mut cmd, control, false).await?;
     parse_online_probe(&out.stdout, url, &String::from_utf8_lossy(&out.stderr))
 }
@@ -1505,6 +1513,50 @@ mod tests {
             bilibili_part_number("https://www.bilibili.com/video/BV1CAxaeHEeH"),
             None
         );
+    }
+
+    /// The playlist a YouTube video was opened in stays where it plays; which
+    /// video it is, and so every identity built from it, does not change.
+    #[test]
+    fn a_youtube_video_keeps_its_playlist_but_not_a_new_identity() {
+        let video = br#"{"id":"abc123","title":"Lecture 3","extractor":"youtube","webpage_url":"https://www.youtube.com/watch?v=abc123"}"#;
+        let read = |input: &str| {
+            let OnlineProbe::Video { video } = parse_online_probe(video, input, "").unwrap() else {
+                panic!("expected video")
+            };
+            video
+        };
+        let plain = read("https://www.youtube.com/watch?v=abc123");
+        let listed = read("https://www.youtube.com/watch?v=abc123&list=PLcourse&index=3&si=x");
+        assert_eq!(
+            plain.meta.webpage_url,
+            "https://www.youtube.com/watch?v=abc123"
+        );
+        assert_eq!(
+            listed.meta.webpage_url,
+            "https://www.youtube.com/watch?v=abc123&list=PLcourse&index=3"
+        );
+        assert_eq!(listed.identity, plain.identity);
+        assert_eq!(listed.identity, "online:youtube:6:abc123");
+        assert_eq!(
+            (&listed.meta.id, &listed.meta.extractor),
+            (&plain.meta.id, &plain.meta.extractor)
+        );
+
+        let playlist = br#"{"_type":"playlist","id":"PLcourse","title":"Course","extractor":"youtube:tab","entries":[{"_type":"url","id":"abc123","url":"https://www.youtube.com/watch?v=abc123","ie_key":"Youtube","title":"Lecture 3"}]}"#;
+        let OnlineProbe::Collection { candidates, .. } = parse_online_probe(
+            playlist,
+            "https://www.youtube.com/watch?v=first&list=PLcourse&index=1",
+            "",
+        )
+        .unwrap() else {
+            panic!("expected collection")
+        };
+        assert_eq!(
+            candidates[0].input,
+            "https://www.youtube.com/watch?v=abc123&list=PLcourse"
+        );
+        assert_eq!(candidates[0].identity, Some(plain.identity));
     }
 
     #[test]
