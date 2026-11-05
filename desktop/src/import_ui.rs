@@ -2893,11 +2893,11 @@ impl Desktop {
                     // The note is replaced, not kept beside the new one: ask first.
                     ui::Confirm::new(
                         course2md::tr!("重新生成笔记"),
-                        course2md::tr!("取消"),
+                        course2md::tr!("保留当前笔记"),
                         course2md::tr!("重新生成"),
                     )
                     .text(course2md::tr!(
-                        "《{}》将被新生成的笔记替换。你手动改过的文件会以 .edited 为名保留在笔记旁。",
+                        "《{}》将被新生成的笔记覆盖。你手动改过的文件会以 .edited 为名保留在笔记旁。",
                         title
                     ))
                     .ask(

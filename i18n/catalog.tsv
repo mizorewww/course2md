@@ -2240,7 +2240,6 @@ AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not conf
 这份笔记已被之后的任务更新，请从最新的任务补做	这份笔记已被之后的任务更新，请从最新的任务补做	A later task has updated this note; fill in missing steps from the latest task	這份筆記已被之後的任務更新，請從最新的任務補做	このノートは後のタスクで更新されています。最新のタスクから未完了分を処理してください
 这项任务已结束，可在任务卡中补做或重新生成	这项任务已结束，可在任务卡中补做或重新生成	This task has ended; fill in missing steps or regenerate from its card	這項任務已結束，可在任務卡中補做或重新產生	このタスクは終了しました。タスクカードから未完了分を処理するか再生成できます
 {} 个已有笔记将被覆盖	{} 个已有笔记将被覆盖	Existing notes to be replaced: {}	{} 個已有筆記將被覆寫	{} 件の既存のノートは上書きされます
-《{}》将被新生成的笔记替换。你手动改过的文件会以 .edited 为名保留在笔记旁。	《{}》将被新生成的笔记替换。你手动改过的文件会以 .edited 为名保留在笔记旁。	“{}” will be replaced by the new note. Files you edited by hand are kept beside it under an .edited name.	《{}》將被新產生的筆記取代。你手動改過的檔案會以 .edited 為名保留在筆記旁。	「{}」は新しく生成されたノートに置き換えられます。手で編集したファイルは .edited の名前でノートの横に残ります。
 笔记已被之后的任务更新	笔记已被之后的任务更新	Note updated by a later task	筆記已被之後的任務更新	後のタスクでノートが更新されました
 笔记暂时无法读取：{}	笔记暂时无法读取：{}	The note cannot be read right now: {}	筆記暫時無法讀取：{}	ノートを現在読み込めません: {}
 重新生成	重新生成	Regenerate	重新產生	再生成
@@ -2253,3 +2252,5 @@ AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not conf
 笔记已更新，但暂时无法读取	笔记已更新，但暂时无法读取	The note was updated but cannot be read right now	筆記已更新，但暫時無法讀取	ノートは更新されましたが、現在読み込めません
 笔记已更新	笔记已更新	Note updated	筆記已更新	ノートを更新しました
 生成日期	生成日期	Generated	產生日期	生成日
+《{}》将被新生成的笔记覆盖。你手动改过的文件会以 .edited 为名保留在笔记旁。	《{}》将被新生成的笔记覆盖。你手动改过的文件会以 .edited 为名保留在笔记旁。	“{}” will be replaced by the new note. Files you edited by hand are kept beside it under an .edited name.	《{}》將被新產生的筆記覆寫。你手動改過的檔案會以 .edited 為名保留在筆記旁。	「{}」は新しく生成されたノートで上書きされます。手で編集したファイルは .edited の名前でノートの横に残ります。
+保留当前笔记	保留当前笔记	Keep the current note	保留目前筆記	現在のノートを残す
