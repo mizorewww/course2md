@@ -183,6 +183,9 @@ impl AccountsView {
             }
         }
         self.youtube.dialog = Some(dialog);
+        // A dialog opens at its top, not where the last one was left scrolled.
+        self.youtube_scroll.set_offset(point(px(0.), px(0.)));
+        self.youtube_scroll_step.set(0);
         self.watch_youtube_access(cx);
         window.refresh();
         cx.notify();
