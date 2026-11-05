@@ -232,16 +232,17 @@ impl ErrorCode {
     }
 }
 
-/// The published note version a finished task reports.
+/// The note a finished task reports. Events from engines that published note
+/// versions also carry a `version_id`, which is ignored.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Done {
-    /// Set when the task only produced exports for an existing version.
+    /// Set when the task only produced exports for an existing note.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation: Option<String>,
     pub task_id: String,
     pub course_id: String,
-    pub version_id: String,
+    /// The note folder.
     pub out_dir: PathBuf,
     pub manifest: Option<PathBuf>,
     pub title: String,
@@ -252,6 +253,10 @@ pub struct Done {
     pub partial: Option<bool>,
     pub outcomes: Option<crate::outcome::Outcomes>,
     pub elapsed_secs: f64,
+    /// Files of the replaced note kept beside the new one under another name,
+    /// relative to the note: a hand-edited `course.md` as `course.edited.md`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kept_edits: Vec<PathBuf>,
 }
 
 /// One NDJSON line of the `--json` / `run-task` stream.

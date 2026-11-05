@@ -1,4 +1,4 @@
-//! Convert a fixed task into a separately published, immutable note version.
+//! Convert a fixed task into a note, published by replacing the course's note in place.
 
 use crate::progress::Stage;
 use crate::{
@@ -53,7 +53,7 @@ pub enum ModelDownload<'a> {
 }
 
 /// Traditional CLI entry. Its generated task directory is stable for compatible recovery.
-/// New settings or --no-resume use another work directory and never overwrite old notes.
+/// New settings or --no-resume use another work directory; a new result replaces the note.
 pub async fn run(cfg: &PipelineConfig, models: ModelDownload<'_>) -> Result<()> {
     let started = Instant::now();
     cfg.validate()
@@ -123,11 +123,16 @@ pub async fn run(cfg: &PipelineConfig, models: ModelDownload<'_>) -> Result<()> 
         task_id: task_id.clone(),
         course_id,
         source_id,
-        version_id: task_id.clone(),
         course_dir,
+        replaces: None,
     };
+    // Before the work directory: an older app kept task progress inside the note.
+    {
+        let note = target.course_dir.clone();
+        blocking(move || artifact::prepare_note(&note)).await?;
+    }
     let work = execution::enter_work_dir(
-        &target.course_dir.join(".work").join(&task_id),
+        &artifact::work_dir(&target.course_dir, &task_id)?,
         &binding,
         ControlSource::default(),
     )?;
@@ -142,7 +147,6 @@ pub async fn run(cfg: &PipelineConfig, models: ModelDownload<'_>) -> Result<()> 
         if let Some(error) = local_duration_error {
             return Err(error);
         }
-        task.refuse_newer_note().await?;
         task.generate(
             &meta,
             SubtitleInput::Discover(probed),
@@ -169,6 +173,31 @@ pub(crate) async fn run_task(
     // The caller (`execution::run`) validates through `Request::resolve`.
     let started = Instant::now();
     let target = request.target();
+    {
+        let note = target.course_dir.clone();
+        blocking(move || artifact::prepare_note(&note)).await?;
+    }
+    if let execution::Operation::Reprocess {
+        note_dir,
+        base_task_id,
+        ..
+    } = &request.operation
+    {
+        // A repair that already replaced the note is done: restarting it after a
+        // crash sends nothing, whatever its saved progress says.
+        let (note, task_id) = (note_dir.clone(), request.task_id.clone());
+        if let Some(manifest) = blocking(move || artifact::published_by(&note, &task_id)).await? {
+            let document = read_document(note_dir, &manifest)?;
+            emit_done(&target, &manifest, &[], &document.sections, started);
+            return Ok(());
+        }
+        let note = note_dir.clone();
+        let current = blocking(move || artifact::note_manifest(&note)).await?;
+        anyhow::ensure!(
+            current.is_some_and(|manifest| &manifest.task_id == base_task_id),
+            artifact::NoteChanged
+        );
+    }
     let binding = {
         let (request, cfg) = (request.clone(), cfg.clone());
         blocking(move || request.binding(&cfg)).await?
@@ -196,20 +225,15 @@ pub(crate) async fn run_task(
         started,
     };
     task.recording_failure(&platform, &request.source_id, async {
-        task.refuse_newer_note().await?;
         if let execution::Operation::Reprocess {
-            base_version_dir,
+            note_dir,
             components,
             prior_work_dir,
+            ..
         } = &request.operation
         {
             return task
-                .reprocess(
-                    request,
-                    base_version_dir,
-                    components,
-                    prior_work_dir.as_deref(),
-                )
+                .reprocess(request, note_dir, components, prior_work_dir.as_deref())
                 .await;
         }
         task.generate_requested(request, platform.clone()).await
@@ -262,16 +286,60 @@ struct FramesCache {
     files: Vec<(String, String)>,
 }
 
+/// The note's document, as its manifest names it.
+fn read_document(note_dir: &Path, manifest: &artifact::Manifest) -> Result<artifact::Document> {
+    Ok(serde_json::from_slice(&std::fs::read(
+        artifact::safe_asset_path(note_dir, &manifest.document)?,
+    )?)?)
+}
+
+/// Reports the note a task published.
+fn emit_done(
+    target: &Target,
+    manifest: &artifact::Manifest,
+    kept_edits: &[String],
+    sections: &[timeline::Section],
+    started: Instant,
+) {
+    let note = &target.course_dir;
+    progress::emit(&progress::Event::Done(Box::new(progress::Done {
+        task_id: target.task_id.clone(),
+        course_id: target.course_id.clone(),
+        out_dir: note.clone(),
+        manifest: Some(note.join("manifest.json")),
+        title: manifest.title.clone(),
+        slides: manifest.frames.len(),
+        outputs: manifest.outputs.iter().map(PathBuf::from).collect(),
+        partial: Some(manifest.partial),
+        outcomes: Some(manifest.outcomes.clone()),
+        kept_edits: kept_edits.iter().map(PathBuf::from).collect(),
+        ..done_counts(sections, started)
+    })));
+    if !kept_edits.is_empty() && !progress::is_json() && !progress::is_quiet() {
+        for kept in kept_edits {
+            eprintln_tr!(
+                "你修改过的文件已另存为 / Your edited file was kept as: {}",
+                note.join(kept).display()
+            );
+        }
+    }
+}
+
+/// Transcript scale and elapsed time, shared by every "done" event.
+fn done_counts(sections: &[timeline::Section], started: Instant) -> progress::Done {
+    let speech = || sections.iter().flat_map(|section| &section.speech);
+    progress::Done {
+        segments: speech().count(),
+        chars: speech().map(|event| event.text.chars().count()).sum(),
+        elapsed_secs: started.elapsed().as_secs_f64(),
+        ..Default::default()
+    }
+}
+
 impl Task<'_> {
     /// Any failure once the work directory is known leaves a diagnostic run.json:
     /// version, source, provider, asr_model, error text, elapsed time. A failed write
     /// only warns, since the original error is the outcome.
-    /// Nothing is fetched or sent for a note this app could not publish.
-    async fn refuse_newer_note(&self) -> Result<()> {
-        let target = self.target.clone();
-        blocking(move || artifact::refuse_newer(&target)).await
-    }
-
     async fn recording_failure(
         &self,
         platform: &str,
@@ -317,7 +385,7 @@ impl Task<'_> {
         summary: Option<&summarize::Summary>,
         formats: &[config::OutputFormat],
         outcomes: Outcomes,
-    ) -> Result<artifact::Manifest> {
+    ) -> Result<artifact::Publication> {
         let (target, work_dir, control) = (
             self.target.clone(),
             self.job.dir.clone(),
@@ -344,32 +412,14 @@ impl Task<'_> {
         .await
     }
 
-    fn emit_done(&self, manifest: &artifact::Manifest, sections: &[timeline::Section]) {
-        let target = self.target;
-        progress::emit(&progress::Event::Done(Box::new(progress::Done {
-            task_id: target.task_id.clone(),
-            course_id: target.course_id.clone(),
-            version_id: target.version_id.clone(),
-            out_dir: target.version_dir(),
-            manifest: Some(target.version_dir().join("manifest.json")),
-            title: manifest.title.clone(),
-            slides: manifest.frames.len(),
-            outputs: manifest.outputs.iter().map(PathBuf::from).collect(),
-            partial: Some(manifest.partial),
-            outcomes: Some(manifest.outcomes.clone()),
-            ..self.done_counts(sections)
-        })));
-    }
-
-    /// Transcript scale and elapsed time, shared by every "done" event.
-    fn done_counts(&self, sections: &[timeline::Section]) -> progress::Done {
-        let speech = || sections.iter().flat_map(|section| &section.speech);
-        progress::Done {
-            segments: speech().count(),
-            chars: speech().map(|event| event.text.chars().count()).sum(),
-            elapsed_secs: self.started.elapsed().as_secs_f64(),
-            ..Default::default()
-        }
+    fn emit_done(&self, publication: &artifact::Publication, sections: &[timeline::Section]) {
+        emit_done(
+            self.target,
+            &publication.manifest,
+            &publication.kept_edits,
+            sections,
+            self.started,
+        );
     }
 
     /// A desktop generate task. A batch task carries no selected subtitles: in Auto or
@@ -427,22 +477,11 @@ impl Task<'_> {
             cfg, job, target, ..
         } = *self;
         job.control.check()?;
-        let published_target = target.clone();
-        if let Some(manifest) = blocking(move || artifact::published(&published_target)).await? {
-            // Also finish a publication interrupted between the directory and pointer commits.
-            let document: artifact::Document = serde_json::from_slice(&std::fs::read(
-                target.version_dir().join(&manifest.document),
-            )?)?;
-            let manifest = self
-                .publish(
-                    &document.meta,
-                    &document.sections,
-                    document.summary.as_ref(),
-                    &cfg.formats,
-                    manifest.outcomes,
-                )
-                .await?;
-            self.emit_done(&manifest, &document.sections);
+        let (note, task_id) = (target.course_dir.clone(), target.task_id.clone());
+        if let Some(manifest) = blocking(move || artifact::published_by(&note, &task_id)).await? {
+            // This task already replaced the note: a restart sends nothing again.
+            let document = read_document(&target.course_dir, &manifest)?;
+            emit_done(target, &manifest, &[], &document.sections, self.started);
             return Ok(());
         }
         if cfg.llm.uses_service() {
@@ -505,14 +544,15 @@ impl Task<'_> {
         let (sections, summary) = self.enrich(sections, meta, &mut outcomes).await?;
         job.control.check()?;
         progress::start(Stage::Render);
-        let manifest = self
+        let publication = self
             .publish(meta, &sections, summary.as_ref(), &cfg.formats, outcomes)
             .await?;
+        let manifest = &publication.manifest;
         progress::done(Stage::Render);
         // Diagnostics remain in work space; a failure record can never become a library entry.
         self.write_json(
             "run.json",
-            &serde_json::json!({"success":true,"task_id":target.task_id,"version_id":target.version_id,"transcript_source":transcript.source,"outcomes":manifest.outcomes,"out_dir":target.version_dir()}),
+            &serde_json::json!({"success":true,"task_id":target.task_id,"transcript_source":transcript.source,"outcomes":manifest.outcomes,"out_dir":target.course_dir}),
         )?;
         if should_delete_media(
             self.is_local,
@@ -522,7 +562,7 @@ impl Task<'_> {
         ) {
             let _ = std::fs::remove_file(&media_path);
         }
-        self.emit_done(&manifest, &sections);
+        self.emit_done(&publication, &sections);
         if !progress::is_json() && !progress::is_quiet() {
             eprintln_tr!(
                 "{}：{}",
@@ -531,7 +571,7 @@ impl Task<'_> {
                 } else {
                     tr!("笔记已生成 / Notes ready")
                 },
-                target.version_dir().display()
+                target.course_dir.display()
             );
             if !cfg.llm.enabled && !cfg.llm.disable_hint {
                 eprintln_tr!(
@@ -549,25 +589,17 @@ impl Task<'_> {
         components: &[execution::Component],
         prior_work: Option<&Path>,
     ) -> Result<()> {
+        // `base_dir` is the note itself, read until the repaired note replaces it.
         use execution::Component;
-        let Self {
-            cfg, job, target, ..
-        } = *self;
+        let Self { cfg, job, .. } = *self;
         job.control.check()?;
         let base = {
             let (base_dir, control) = (base_dir.to_path_buf(), job.control.clone());
             blocking(move || {
                 let base = artifact::read_manifest(&base_dir.join("manifest.json"))?;
-                // Reprocessing consumes the internal document, timeline and image assets.
-                // A manually edited presentation file must stay intact, and does not make
-                // these verified inputs unusable.
-                let mut inputs = base.clone();
-                inputs.assets.retain(|asset| {
-                    asset.path != base.markdown
-                        || asset.path == base.document
-                        || base.frames.iter().any(|frame| frame.image == asset.path)
-                });
-                artifact::validate_version_in_task(&base_dir, &inputs, &control)?;
+                // Reprocessing consumes the internal document, timeline and image assets;
+                // a hand-edited Markdown file does not make them unusable.
+                artifact::validate_note_in_task(&base_dir, &base, &control)?;
                 Ok(base)
             })
             .await?
@@ -578,7 +610,7 @@ impl Task<'_> {
                 .is_ok_and(|digest| digest == markdown.sha256);
             if !unchanged {
                 tracing::info!(
-                    "笔记文件已被手动修改；这次补做以原始记录为准，你修改的文件不会被覆盖 / The note file was edited by hand; this run uses the original record and leaves your edited file untouched"
+                    "笔记文件已被手动修改；这次补做以原始记录为准，你修改的文件会另存为 course.edited.md / The note file was edited by hand; this run uses the original record and keeps your edited file as course.edited.md"
                 );
             }
         }
@@ -587,14 +619,9 @@ impl Task<'_> {
             tr!("补做任务与原笔记来源不一致 / Reprocessing source does not match the base note")
         );
         let has = |component: Component| components.contains(&component);
-        let mut document: artifact::Document =
-            serde_json::from_slice(&std::fs::read(base_dir.join(&base.document))?)?;
+        let mut document = read_document(base_dir, &base)?;
         if components.iter().all(|&c| c == Component::Exports) {
             return self.export_only(request, base_dir, &base, &document);
-        }
-        if let Some(existing) = artifact::published(target)? {
-            self.emit_done(&existing, &document.sections);
-            return Ok(());
         }
         if components.iter().any(|component| component.is_ai()) {
             crate::llm::validate(&cfg.llm)?;
@@ -609,7 +636,7 @@ impl Task<'_> {
                 .await?;
         }
         // Copy verified base images into a separate namespace; a failed new screenshot pass
-        // cannot mix old and new frames or mutate the old version through shared hard links.
+        // cannot mix old and new frames or change the note before it is replaced.
         let images: Vec<String> = document
             .sections
             .iter()
@@ -648,6 +675,7 @@ impl Task<'_> {
         let mut outcomes = base.outcomes.clone();
         outcomes.exports.clear();
         document.meta.title = request.title.clone();
+        let mut new_screenshots = false;
         if has(Component::Screenshots) {
             job.control.check()?;
             crate::error::require_cmd("ffmpeg")?;
@@ -670,16 +698,21 @@ impl Task<'_> {
             if !frames.is_empty() {
                 let speech = all_speech(&document.sections);
                 document.sections = timeline::merge(frames, speech, document.meta.duration);
+                outcomes.screenshots = screenshots;
+                new_screenshots = true;
             } else if components.len() == 1 {
                 anyhow::bail!(tr!(
                     "截图失败，原笔记不受影响 / Screenshot extraction failed; the original note is unaffected"
                 ));
             }
-            outcomes.screenshots = screenshots;
+            // Without new screenshots the note keeps its own, and their record.
         }
+        // What the note says before any AI part is redone: a part that finishes
+        // nothing more falls back to it.
+        let before_ai = (document.sections.clone(), document.summary.clone());
         if has(Component::Proofreading) {
             job.control.check()?;
-            // The original complete transcript is an immutable version asset. Rebuild the
+            // The original complete transcript is a verified note asset. Rebuild the
             // original batches (including entries an earlier successful polish removed).
             if base_dir.join("timeline.jsonl").is_file() {
                 let mut speech = Vec::new();
@@ -736,55 +769,73 @@ impl Task<'_> {
                 .summarize_step(&document.sections, &document.meta, &mut outcomes)
                 .await?;
         }
-        // A repair of AI parts that finished nothing more than the saved note publishes
-        // no new version identical to it, whatever rode along: each click would add one.
-        if components.iter().all(|component| component.is_ai()) {
-            let finished = |outcome: &Outcome| match outcome.status {
-                Status::Succeeded => usize::MAX,
-                Status::Partial => outcome.completed.unwrap_or(0),
-                Status::NotRequested | Status::Failed => 0,
-            };
-            let part = |outcomes: &Outcomes, component: Component| match component {
-                Component::Proofreading => outcomes.proofreading.clone(),
-                Component::Translation => outcomes.translation.clone(),
-                _ => outcomes.summary.clone(),
-            };
-            let mut redone = components.to_vec();
+        // A redone AI part that finished nothing more than the note had must not
+        // replace what the note had: a failed summary never clears the old one.
+        let finished = |outcome: &Outcome| match outcome.status {
+            Status::Succeeded => usize::MAX,
+            Status::Partial => outcome.completed.unwrap_or(0),
+            Status::NotRequested | Status::Failed => 0,
+        };
+        let part = |outcomes: &Outcomes, component: Component| match component {
+            Component::Proofreading => outcomes.proofreading.clone(),
+            Component::Translation => outcomes.translation.clone(),
+            _ => outcomes.summary.clone(),
+        };
+        // Making a finished part again (a new summary of a summarized note) is
+        // something new too; only the parts that were unfinished must move on.
+        let improved = |component: Component| {
+            let (now, before) = (part(&outcomes, component), part(&base.outcomes, component));
+            finished(&now) > finished(&before)
+                || (has(component)
+                    && now.status == Status::Succeeded
+                    && before.status == Status::Succeeded)
+        };
+        let text_redone = has(Component::Proofreading)
+            && (improved(Component::Proofreading)
+                || (translation_target.is_some() && improved(Component::Translation)));
+        let translation_redone = has(Component::Translation) && improved(Component::Translation);
+        let summary_redone = has(Component::Summary) && improved(Component::Summary);
+        if has(Component::Proofreading) && !text_redone {
+            document.sections = before_ai.0;
+            outcomes.proofreading = base.outcomes.proofreading.clone();
+            outcomes.translation = base.outcomes.translation.clone();
+        }
+        if has(Component::Summary) && !summary_redone {
+            document.summary = before_ai.1;
+            outcomes.summary = base.outcomes.summary.clone();
+        }
+        if !(text_redone
+            || translation_redone
+            || summary_redone
+            || new_screenshots
+            || has(Component::Exports))
+        {
+            let mut redone: Vec<Component> =
+                components.iter().copied().filter(|c| c.is_ai()).collect();
             if has(Component::Proofreading) && translation_target.is_some() {
                 redone.push(Component::Translation);
             }
-            // Making a finished part again (a new summary of a summarized note) is
-            // something new too; only the parts that were unfinished must move on.
-            let improved = redone.iter().any(|&component| {
-                let (now, before) = (part(&outcomes, component), part(&base.outcomes, component));
-                finished(&now) > finished(&before)
-                    || (has(component)
-                        && now.status == Status::Succeeded
-                        && before.status == Status::Succeeded)
-            });
-            if !improved {
-                let unfinished = redone
-                    .iter()
-                    .map(|&component| part(&outcomes, component))
-                    .find(|outcome| outcome.status != Status::Succeeded);
-                let message = unfinished
-                    .as_ref()
-                    .and_then(|outcome| outcome.message.clone())
-                    .unwrap_or_else(|| {
-                        tr!(
-                            "补做没有完成更多内容，原笔记不受影响 / Nothing more was finished; the original note is unaffected"
-                        )
-                        .into()
-                    });
-                // Keep the recorded cause so the error event's code matches it.
-                return Err(crate::dispatch::Failure {
-                    kind: unfinished
-                        .and_then(|outcome| outcome.kind)
-                        .unwrap_or(artifact::FailureKind::Local),
-                    ..crate::dispatch::Failure::local(message)
-                }
-                .into());
+            let unfinished = redone
+                .iter()
+                .map(|&component| part(&outcomes, component))
+                .find(|outcome| outcome.status != Status::Succeeded);
+            let message = unfinished
+                .as_ref()
+                .and_then(|outcome| outcome.message.clone())
+                .unwrap_or_else(|| {
+                    tr!(
+                        "补做没有完成更多内容，笔记未改动 / Nothing more was finished; the note is unchanged"
+                    )
+                    .into()
+                });
+            // Keep the recorded cause so the error event's code matches it.
+            return Err(crate::dispatch::Failure {
+                kind: unfinished
+                    .and_then(|outcome| outcome.kind)
+                    .unwrap_or(artifact::FailureKind::Local),
+                ..crate::dispatch::Failure::local(message)
             }
+            .into());
         }
         job.control.check()?;
         let formats: &[_] = if has(Component::Exports) {
@@ -792,7 +843,7 @@ impl Task<'_> {
         } else {
             &[]
         };
-        let manifest = self
+        let publication = self
             .publish(
                 &document.meta,
                 &document.sections,
@@ -801,15 +852,16 @@ impl Task<'_> {
                 outcomes,
             )
             .await?;
-        self.emit_done(&manifest, &document.sections);
+        self.emit_done(&publication, &document.sections);
         Ok(())
     }
 
-    /// Export-only reprocessing writes beside the base version and never publishes a new one.
+    /// Export-only reprocessing writes each export into the note's `exports/`,
+    /// one file at a time, and leaves the rest of the note as it is.
     fn export_only(
         &self,
         request: &execution::Request,
-        base_dir: &Path,
+        note_dir: &Path,
         base: &artifact::Manifest,
         document: &artifact::Document,
     ) -> Result<()> {
@@ -817,19 +869,14 @@ impl Task<'_> {
             !self.cfg.formats.is_empty(),
             tr!("请选择需要导出的文件格式 / Select an export format")
         );
-        let export_root = self
-            .target
-            .course_dir
-            .join("exports")
-            .join(&base.version_id)
-            .join(&self.target.task_id);
         let mut exports = std::collections::BTreeMap::new();
         let mut outputs = Vec::new();
+        let mut kept_edits = Vec::new();
         for format in &self.cfg.formats {
-            let destination = export_root.join(crate::portable::file_name(*format));
-            let outcome = match export_for_task(base_dir, *format, &destination, self.job) {
-                Ok(path) => {
-                    outputs.push(path);
+            let outcome = match export_for_task(note_dir, *format, self.job) {
+                Ok(written) => {
+                    outputs.push(written.path);
+                    kept_edits.extend(written.kept_edit.map(PathBuf::from));
                     Outcome::succeeded()
                 }
                 Err(error) => Outcome::from_error(&error),
@@ -847,9 +894,8 @@ impl Task<'_> {
             operation: Some("exports".into()),
             task_id: request.task_id.clone(),
             course_id: base.course_id.clone(),
-            version_id: base.version_id.clone(),
-            out_dir: base_dir.to_path_buf(),
-            manifest: Some(base_dir.join("manifest.json")),
+            out_dir: note_dir.to_path_buf(),
+            manifest: Some(note_dir.join("manifest.json")),
             title: document.meta.title.clone(),
             slides: base.frames.len(),
             outputs,
@@ -858,7 +904,8 @@ impl Task<'_> {
                 exports,
                 ..Default::default()
             }),
-            ..self.done_counts(&document.sections)
+            kept_edits,
+            ..done_counts(&document.sections, self.started)
         })));
         Ok(())
     }
@@ -1343,41 +1390,16 @@ fn frames_outcome(
 }
 
 fn export_for_task(
-    base: &Path,
+    note_dir: &Path,
     format: config::OutputFormat,
-    destination: &Path,
     job: &Job,
-) -> Result<PathBuf> {
-    let work = &job.dir;
-    let marker = work.join(format!("export-{format}.json"));
-    if destination.exists() {
-        if marker.exists() {
-            let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&marker)?)?;
-            anyhow::ensure!(
-                saved["sha256"].as_str() == Some(execution::file_digest(destination)?.as_str()),
-                tr!("导出文件已被修改，原文件已保留 / Export file changed; original retained")
-            );
-        } else {
-            // Publication can finish just before a crash loses its receipt. Compare a
-            // fresh local rendering and claim ownership only when the bytes match.
-            let scratch = tempfile::tempdir_in(work)?;
-            let comparison = scratch.path().join(crate::portable::file_name(format));
-            crate::portable::export_in_task(base, format, &comparison, &job.control)?;
-            anyhow::ensure!(
-                execution::file_digest(&comparison)? == execution::file_digest(destination)?,
-                tr!("导出位置已有不同文件，未覆盖 / Existing export differs; not overwritten")
-            );
-        }
-    } else {
-        crate::portable::export_in_task(base, format, destination, &job.control)?;
-    }
-    crate::fsio::atomic_write(
-        &marker,
-        &serde_json::to_vec_pretty(
-            &serde_json::json!({"sha256":execution::file_digest(destination)?}),
-        )?,
-    )?;
-    Ok(destination.to_path_buf())
+) -> Result<artifact::ExportWrite> {
+    // Rendered in the work directory, then written into the note in one step.
+    let scratch = tempfile::tempdir_in(&job.dir)?;
+    let rendered = scratch.path().join(crate::portable::file_name(format));
+    crate::portable::export_in_task(note_dir, format, &rendered, &job.control)?;
+    let bytes = std::fs::read(&rendered)?;
+    artifact::write_export(note_dir, format, &bytes)
 }
 
 /// File hashing, publishing and AI batches block for long; off the async workers,
@@ -1688,14 +1710,14 @@ mod tests {
         let course = dir
             .join("local")
             .join(crate::digest::digest(source_id.as_bytes()));
-        let work = std::fs::read_dir(course.join(".work"))
+        let work = std::fs::read_dir(course.parent().unwrap().join(".course2md/work"))
             .unwrap()
             .next()
             .unwrap()
             .unwrap()
             .path();
         let text = std::fs::read_to_string(work.join("run.json")).expect("失败也应写 run.json");
-        assert!(!course.join("current.json").exists());
+        assert!(!course.join("manifest.json").exists());
         let v: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(v["success"], false);
         assert!(!v["error"].as_str().unwrap_or_default().is_empty());
