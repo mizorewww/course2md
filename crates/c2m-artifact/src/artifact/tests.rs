@@ -1215,9 +1215,11 @@ fn between_renames(library: &Library) -> (PathBuf, BTreeMap<String, Vec<u8>>) {
     );
     let swap = swap_dir(&library.note).unwrap();
     assert!(!library.note.exists());
+    let record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(swap.join(LIVE_MARKER)).unwrap()).unwrap();
     assert_eq!(
-        std::fs::read_to_string(swap.join(LIVE_MARKER)).unwrap(),
-        "old-task-2"
+        record,
+        serde_json::json!({"copy": "old-task-2", "placed": "task-2"})
     );
     (swap, before)
 }
@@ -1373,4 +1375,187 @@ fn copy_tree(from: &Path, to: &Path) {
             }
         }
     }
+}
+
+fn another_note(library: &Library, task: &str) -> PathBuf {
+    let elsewhere = library.library().join(format!("elsewhere-{task}"));
+    library
+        .publish(
+            &Target {
+                course_dir: elsewhere.clone(),
+                ..library.target(task)
+            },
+            "Another body",
+            "",
+        )
+        .unwrap();
+    elsewhere
+}
+
+/// After a crash between the renames, a different note appeared at the note's
+/// place: restored from a backup, or written by an older app running a task for
+/// the same video. It is not the replacement, so the recorded copy is not stale:
+/// both are kept, the copy for the person to look at.
+#[test]
+fn a_different_note_in_place_never_costs_the_recorded_copy() {
+    for how in ["backup", "versions", "prepare"] {
+        let library = Library::new();
+        let (swap, before) = between_renames(&library);
+        let other = another_note(&library, "restored");
+        if how == "versions" {
+            // An alpha.2 course: current.json and versions/, no manifest of its own.
+            let version = library.note.join("versions/v1");
+            std::fs::create_dir_all(&version).unwrap();
+            copy_tree(&other, &version);
+            std::fs::write(
+                library.note.join("current.json"),
+                r#"{"schema":1,"course_id":"course","version_id":"v1","manifest":"versions/v1/manifest.json"}"#,
+            )
+            .unwrap();
+        } else {
+            std::fs::rename(&other, &library.note).unwrap();
+        }
+        let in_place = snapshot(&library.note);
+        if how == "prepare" {
+            prepare_note(&library.note).unwrap();
+        } else {
+            assert!(recover(&library.note).unwrap(), "{how}");
+        }
+        assert_eq!(snapshot(&swap.join("old-task-2")), before, "{how}");
+        if how != "versions" {
+            assert_eq!(snapshot(&library.note), in_place, "{how}");
+        }
+        assert!(!swap.join(LIVE_MARKER).exists(), "{how}");
+        assert_eq!(kept_copies(&library.note), vec![swap.join("old-task-2")]);
+        assert!(matches!(
+            note_attention(&library.note),
+            Some(NoteAttention::Kept { .. })
+        ));
+    }
+}
+
+/// A record an earlier build wrote names only the copy: it never proves the note
+/// in place is the replacement, so the copy is kept.
+#[test]
+fn a_record_without_the_new_notes_task_keeps_the_copy() {
+    let library = Library::new();
+    library
+        .publish(&library.target("note-a"), "Body", "")
+        .unwrap();
+    let swap = swap_dir(&library.note).unwrap();
+    std::fs::create_dir_all(&swap).unwrap();
+    copy_tree(&library.note, &swap.join("old-C"));
+    std::fs::write(swap.join("old-C/unique.txt"), b"only here").unwrap();
+    std::fs::write(swap.join(LIVE_MARKER), "old-C").unwrap();
+    assert!(recover(&library.note).unwrap());
+    assert_eq!(
+        std::fs::read(swap.join("old-C/unique.txt")).unwrap(),
+        b"only here"
+    );
+}
+
+/// A damaged record beside a note in place does not make the note unusable: it
+/// stays readable and tasks run, while the record and every copy are kept.
+#[test]
+fn a_damaged_record_beside_a_whole_note_keeps_the_note_usable() {
+    let library = Library::new();
+    library
+        .publish(&library.target("task-1"), "Body", "")
+        .unwrap();
+    let swap = swap_dir(&library.note).unwrap();
+    std::fs::create_dir_all(swap.join("old-x")).unwrap();
+    std::fs::write(swap.join(LIVE_MARKER), "garbage").unwrap();
+    let before = snapshot(&library.note);
+    assert!(recover(&library.note).unwrap());
+    prepare_note(&library.note).unwrap();
+    assert_eq!(snapshot(&library.note), before);
+    assert!(swap.join(LIVE_MARKER).is_file() && swap.join("old-x").is_dir());
+    library
+        .publish(&library.target("task-2"), "Next", "")
+        .unwrap();
+    assert!(swap.join("old-x").is_dir());
+}
+
+/// With no note and no record, several copies leave which one was the note
+/// unknown: all are kept and the note is blocked. Exactly one, even an older
+/// app's course moved aside by flattening, goes back.
+#[test]
+fn record_less_copies_go_back_only_when_there_is_one() {
+    let library = Library::new();
+    library
+        .publish(&library.target("note-b"), "Body B", "")
+        .unwrap();
+    let swap = swap_dir(&library.note).unwrap();
+    std::fs::create_dir_all(&swap).unwrap();
+    std::fs::rename(&library.note, swap.join("old-Q")).unwrap();
+    let older = another_note(&library, "note-a");
+    std::fs::rename(&older, swap.join("old-P")).unwrap();
+    assert!(recover(&library.note).unwrap());
+    assert!(!library.note.exists());
+    assert!(swap.join("old-P").is_dir() && swap.join("old-Q").is_dir());
+    assert!(matches!(
+        note_attention(&library.note),
+        Some(NoteAttention::Kept { .. })
+    ));
+    // One older app's course, moved aside by a flatten that stopped.
+    let legacy = Legacy::new();
+    legacy.version("v1", 1, "Only");
+    legacy.point_at("v1");
+    let swap = swap_dir(legacy.course()).unwrap();
+    std::fs::create_dir_all(&swap).unwrap();
+    std::fs::rename(legacy.course(), swap.join("old-flatten")).unwrap();
+    assert!(recover(legacy.course()).unwrap());
+    assert!(is_legacy(legacy.course()));
+}
+
+/// A blocked note says what to do, with the paths, in each language.
+#[test]
+fn a_blocked_note_says_what_to_do_in_each_language() {
+    use crate::i18n::Lang;
+    let library = Library::new();
+    let (swap, _) = between_renames(&library);
+    std::fs::write(swap.join(LIVE_MARKER), "garbage").unwrap();
+    let error = recover(&library.note).unwrap_err();
+    let blocked = error
+        .downcast_ref::<crate::outcome::RecoveryBlocked>()
+        .unwrap();
+    assert_eq!(blocked.swap, swap);
+    assert_eq!(
+        crate::outcome::RecoveryBlocked::note(&swap).unwrap(),
+        library.note
+    );
+    for (lang, word) in [
+        (Lang::En, "Open"),
+        (Lang::Ja, "開き"),
+        (Lang::ZhHant, "開啟"),
+        (Lang::ZhHans, "打开"),
+    ] {
+        let text = crate::outcome::recovery_blocked_message(&swap, lang);
+        assert!(text.contains(word), "{text}");
+        assert!(text.contains(&swap.display().to_string()), "{text}");
+        assert!(text.contains("live") && text.contains("course"), "{text}");
+    }
+    assert!(matches!(
+        note_attention(&library.note),
+        Some(NoteAttention::Blocked { .. })
+    ));
+}
+
+/// Recovery that cannot read or write says where and what to check.
+#[cfg(unix)]
+#[test]
+fn recovery_that_cannot_run_says_where_to_look() {
+    use std::os::unix::fs::PermissionsExt;
+    let library = Library::new();
+    let (swap, before) = between_renames(&library);
+    std::fs::set_permissions(&swap, std::fs::Permissions::from_mode(0o300)).unwrap();
+    let error = recover(&library.note);
+    std::fs::set_permissions(&swap, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let text = format!("{:#}", error.unwrap_err());
+    assert!(
+        text.contains(&swap.display().to_string()) && !text.starts_with("Permission"),
+        "{text}"
+    );
+    assert!(recover(&library.note).unwrap());
+    assert_eq!(snapshot(&library.note), before);
 }

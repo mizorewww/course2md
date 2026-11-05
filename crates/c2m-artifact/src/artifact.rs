@@ -286,20 +286,54 @@ pub fn claim_note(note_dir: &Path) -> Result<crate::runtime::FileLock> {
     }
 }
 
+/// A note in a folder of notes that needs the person after recovery.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NoteAttention {
+    /// Its replacement stopped and cannot be finished on its own; nothing changed.
+    Blocked { note: PathBuf, swap: PathBuf },
+    /// Copies are kept beside it for the person to look at.
+    Kept {
+        note: PathBuf,
+        swap: PathBuf,
+        copies: Vec<PathBuf>,
+    },
+    /// Recovery could not run (permissions, a full disk).
+    Failed { note: PathBuf, message: String },
+}
+
 /// Completes the interrupted replacements of every note whose swap folder is in
-/// `folder/.course2md/swap`: the notes directly in `folder`. Returns the notes
-/// that could not be recovered, with why.
-pub fn recover_folder(folder: &Path) -> Vec<(PathBuf, anyhow::Error)> {
+/// `folder/.course2md/swap`, the notes directly in `folder`, and returns those
+/// that need the person.
+pub fn recover_folder(folder: &Path) -> Vec<NoteAttention> {
     let Ok(entries) = std::fs::read_dir(folder.join(".course2md").join("swap")) else {
         return Vec::new();
     };
     entries
         .flatten()
-        .filter_map(|entry| {
-            let note = folder.join(entry.file_name());
-            recover(&note).err().map(|error| (note, error))
-        })
+        .filter_map(|entry| note_attention(&folder.join(entry.file_name())))
         .collect()
+}
+
+/// Completes an interrupted replacement of the note, and says whether the note
+/// needs the person.
+pub fn note_attention(note: &Path) -> Option<NoteAttention> {
+    let note = note.to_path_buf();
+    let swap = resolve_note(&note)
+        .and_then(|real| swap_dir(&real))
+        .unwrap_or_default();
+    match recover(&note) {
+        Err(error) if error.is::<crate::outcome::RecoveryBlocked>() => {
+            Some(NoteAttention::Blocked { note, swap })
+        }
+        Err(error) => Some(NoteAttention::Failed {
+            note,
+            message: format!("{error:#}"),
+        }),
+        Ok(_) => {
+            let copies = kept_copies(&note);
+            (!copies.is_empty()).then_some(NoteAttention::Kept { note, swap, copies })
+        }
+    }
 }
 
 /// The folder that holds a note's replacement and the note it replaces.
@@ -641,7 +675,7 @@ pub fn publish(
             return Err(disk_full(error));
         }
     };
-    swap_in(note, &staging, &target.task_id)?;
+    swap_in(note, &staging, &target.task_id, &target.task_id)?;
     Ok(publication)
 }
 
@@ -698,7 +732,9 @@ pub fn refuse_worse(saved: &Outcomes, new: &Outcomes) -> Result<()> {
 
 /// Replaces `note` with the finished `staging`, which is on the same volume.
 /// Each step leaves a state [`recover`] completes or undoes.
-fn swap_in(note: &Path, staging: &Path, label: &str) -> Result<()> {
+/// `placed` is the task id the new note's manifest records: recovery deletes the
+/// replaced copy only when the note in place is that one.
+fn swap_in(note: &Path, staging: &Path, label: &str, placed: &str) -> Result<()> {
     let parent = note_parent(note)?;
     let swap = swap_dir(note)?;
     if !note.exists() {
@@ -722,8 +758,13 @@ fn swap_in(note: &Path, staging: &Path, label: &str) -> Result<()> {
     // Names the copy that is the note while it is moved aside, before it is: only
     // that copy is ever put back, never one an earlier replacement left behind.
     let live = swap.join(LIVE_MARKER);
-    if let Err(error) =
-        crate::fsio::atomic_write(&live, name.as_bytes()).and_then(|()| sync_dir(&swap))
+    if let Err(error) = serde_json::to_vec(&LiveRecord {
+        copy: name.clone(),
+        placed: placed.to_owned(),
+    })
+    .map_err(anyhow::Error::from)
+    .and_then(|bytes| crate::fsio::atomic_write(&live, &bytes))
+    .and_then(|()| sync_dir(&swap))
     {
         let _ = remove_tree(staging);
         // The record's own temporary file, which a failed write may leave.
@@ -1047,15 +1088,7 @@ fn discard_old(note: &Path, old: &Path) {
 const MAX_STUCK_OLD: usize = 3;
 
 fn stuck_olds(note: &Path) -> Result<Vec<PathBuf>> {
-    let swap = swap_dir(note)?;
-    let Ok(entries) = std::fs::read_dir(&swap) else {
-        return Ok(Vec::new());
-    };
-    Ok(entries
-        .flatten()
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with("stale-"))
-        .map(|entry| entry.path())
-        .collect())
+    Ok(kept_copies(note))
 }
 
 /// Lets the owner delete everything below `root`.
@@ -1127,18 +1160,31 @@ pub fn recover(note_dir: &Path) -> Result<bool> {
 
 fn recover_locked(note: &Path) -> Result<()> {
     let swap = swap_dir(note)?;
+    recover_in(note, &swap).map_err(|error| {
+        if error.is::<crate::outcome::RecoveryBlocked>() {
+            return error;
+        }
+        // The message names both causes: the error below says which it was.
+        error.context(tr!(
+            "无法完成这份笔记的恢复，所有文件都已保留；请检查 {} 的权限和可用空间后重试",
+            swap.display()
+        ))
+    })
+}
+
+fn recover_in(note: &Path, swap: &Path) -> Result<()> {
     if !swap.is_dir() {
         return Ok(());
     }
     // Everything is read before anything changes.
-    let record = read_record(&swap);
+    let record = read_record(swap);
     let mut olds = Vec::new();
     let mut discardable = Vec::new();
-    for entry in std::fs::read_dir(&swap)? {
+    for entry in std::fs::read_dir(swap)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
         let kind = entry.file_type()?;
-        if name == LIVE_MARKER || name.starts_with("displaced-") {
+        if name == LIVE_MARKER || name.starts_with("displaced") {
             continue;
         }
         if name.starts_with("old-") {
@@ -1151,59 +1197,69 @@ fn recover_locked(note: &Path) -> Result<()> {
             discardable.push(entry.path());
         }
     }
-    let record = match record {
-        Record::Damaged(why) => anyhow::bail!(tr!(
-            "笔记的替换记录无法读取，已全部原样保留，请检查 {}：{} / The note's replacement record cannot be read; everything was left as it is; check {}: {}",
-            swap.display(),
-            why,
-            swap.display(),
-            why
-        )),
-        Record::Names(name) => Some(name),
-        Record::None => None,
+    let blocked = || -> anyhow::Error {
+        crate::outcome::RecoveryBlocked {
+            swap: swap.to_path_buf(),
+        }
+        .into()
     };
-    let note_whole = note_in_place(note);
-    match &record {
-        Some(name) => {
-            let copy = swap.join(name);
-            if note_whole {
-                // Stopped after the new note was in place: the named copy is the
-                // replaced note.
-                if copy.symlink_metadata().is_ok() {
-                    let stale = unused_name(&swap, &format!("stale-{}", &name["old-".len()..]));
-                    std::fs::rename(&copy, &stale)?;
+    let note_whole = holds_note(note);
+    match record {
+        // A note is in place: it stays usable, and every copy and the record stay
+        // for the person to look at.
+        Record::Damaged(why) if note_whole => {
+            tracing::warn!(
+                "笔记的替换记录无法读取，已保留 / The note's replacement record cannot be read; kept: {}: {why}",
+                swap.display()
+            );
+            return Ok(());
+        }
+        Record::Damaged(_) => return Err(blocked()),
+        Record::Names { copy, placed } => {
+            let copy_path = swap.join(&copy);
+            // Only the note this replacement made proves the copy is the one it
+            // replaced: a note restored from a backup, or written by another app
+            // meanwhile, does not.
+            let replacement = note_whole
+                && placed.as_deref().is_some_and(|placed| {
+                    note_manifest(note).is_ok_and(|manifest| {
+                        manifest.is_some_and(|manifest| manifest.task_id == placed)
+                    })
+                });
+            if replacement {
+                if copy_path.symlink_metadata().is_ok() {
+                    let stale = unused_name(swap, &format!("stale-{}", &copy["old-".len()..]));
+                    std::fs::rename(&copy_path, &stale)?;
+                    sync_dir(swap)?;
                     discardable.push(stale);
-                    olds.retain(|(old, _)| old != name);
+                    olds.retain(|(old, _)| old != &copy);
                 }
-            } else if holds_note(&copy) {
-                restore(note, &copy, &swap)?;
-                olds.retain(|(old, _)| old != name);
+            } else if note_whole {
+                // Another note is in place: both are kept, the copy for the person.
+                tracing::warn!(
+                    "笔记位置上是另一份笔记，替换前的副本已保留 / Another note is in place; the copy from before the replacement was kept: {}",
+                    copy_path.display()
+                );
+            } else if holds_note(&copy_path) {
+                restore(note, &copy_path, swap)?;
+                olds.retain(|(old, _)| old != &copy);
             } else {
-                anyhow::bail!(tr!(
-                    "笔记的替换记录指向的副本无法放回，已全部原样保留，请检查 {} / The copy the note's replacement record names cannot be put back; everything was left as it is; check {}",
-                    swap.display(),
-                    swap.display()
-                ));
+                return Err(blocked());
             }
             std::fs::remove_file(swap.join(LIVE_MARKER))?;
-            sync_dir(&swap)?;
+            sync_dir(swap)?;
         }
-        // No record: a copy is kept, as an earlier build left it. With no note in
-        // place, the newest copy that holds one is put back.
-        None if !note_whole => {
-            let newest = olds
-                .iter()
-                .filter_map(|(name, path)| {
-                    let manifest = read_manifest(&path.join("manifest.json")).ok()?;
-                    Some((manifest.created_at_ms, name.clone(), path.clone()))
-                })
-                .max();
-            if let Some((_, name, path)) = newest {
-                restore(note, &path, &swap)?;
+        // No record and no note: the one copy that holds a note goes back. With
+        // several, which one was the note is not known: all stay for the person.
+        Record::None if !note_whole => {
+            let notes: Vec<_> = olds.iter().filter(|(_, path)| holds_note(path)).collect();
+            if let [(name, path)] = notes[..] {
+                let name = name.clone();
+                restore(note, path, swap)?;
                 olds.retain(|(old, _)| old != &name);
             }
         }
-        None => {}
+        Record::None => {}
     }
     for path in discardable {
         if path.is_dir() {
@@ -1212,21 +1268,29 @@ fn recover_locked(note: &Path) -> Result<()> {
             let _ = std::fs::remove_file(&path);
         }
     }
-    if !olds.is_empty() {
-        tracing::warn!(
-            "笔记旁保留了无法确认的旧副本 / Kept copies beside the note that could not be confirmed stale: {}",
-            swap.display()
-        );
-    }
-    let _ = std::fs::remove_dir(&swap);
+    let _ = std::fs::remove_dir(swap);
     Ok(())
+}
+
+/// What a replacement records before it moves the note aside.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LiveRecord {
+    /// The copy that holds the note while it is moved aside.
+    copy: String,
+    /// The task id the new note's manifest records.
+    placed: String,
 }
 
 /// What a note's swap folder records about a replacement in progress.
 enum Record {
     None,
-    /// The copy that holds the note while it is moved aside.
-    Names(String),
+    /// The copy that holds the note while it is moved aside, and the task id of the
+    /// note that replaces it (unknown in a record of an earlier build).
+    Names {
+        copy: String,
+        placed: Option<String>,
+    },
     /// A record that exists but cannot be trusted: nothing may be decided from it.
     Damaged(String),
 }
@@ -1238,17 +1302,45 @@ fn read_record(swap: &Path) -> Record {
         Err(error) => return Record::Damaged(error.to_string()),
         Ok(metadata) => metadata,
     };
-    if !metadata.file_type().is_file() || metadata.len() > 256 {
+    if !metadata.file_type().is_file() || metadata.len() > 1024 {
         return Record::Damaged(path.display().to_string());
     }
-    match std::fs::read(&path).map(String::from_utf8) {
-        // One line, as written; a single line ending is allowed.
-        Ok(Ok(text)) if is_copy_name(text.strip_suffix('\n').unwrap_or(&text)) => {
-            Record::Names(text.strip_suffix('\n').unwrap_or(&text).to_owned())
-        }
-        Ok(_) => Record::Damaged(path.display().to_string()),
-        Err(error) => Record::Damaged(error.to_string()),
+    let text = match std::fs::read(&path).map(String::from_utf8) {
+        Ok(Ok(text)) => text,
+        Ok(Err(_)) => return Record::Damaged(path.display().to_string()),
+        Err(error) => return Record::Damaged(error.to_string()),
+    };
+    if let Ok(record) = serde_json::from_str::<LiveRecord>(&text) {
+        return if is_copy_name(&record.copy) && valid_placed(&record.placed) {
+            Record::Names {
+                copy: record.copy,
+                placed: Some(record.placed),
+            }
+        } else {
+            Record::Damaged(path.display().to_string())
+        };
     }
+    // An earlier build wrote the copy's name alone; one line ending is allowed.
+    let name = text.strip_suffix('\n').unwrap_or(&text);
+    if is_copy_name(name) {
+        Record::Names {
+            copy: name.to_owned(),
+            placed: None,
+        }
+    } else {
+        Record::Damaged(path.display().to_string())
+    }
+}
+
+/// A task id as a record holds it.
+fn valid_placed(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 160
+        && id != "."
+        && id != ".."
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
 }
 
 /// `old-<task>` or `old-<task>-<n>`, as a replacement names the copy it moves aside.
@@ -1274,11 +1366,6 @@ fn holds_note(dir: &Path) -> bool {
             })
 }
 
-/// The note path holds a note.
-fn note_in_place(note: &Path) -> bool {
-    holds_note(note)
-}
-
 /// Puts the copy back as the note. Whatever stands at the note path instead is
 /// moved aside into the swap folder, never deleted.
 fn restore(note: &Path, copy: &Path, swap: &Path) -> Result<()> {
@@ -1293,6 +1380,30 @@ fn restore(note: &Path, copy: &Path, swap: &Path) -> Result<()> {
     std::fs::rename(copy, note)?;
     sync_dir(swap)?;
     sync_dir(&note_parent(note)?)
+}
+
+/// Copies kept beside a note for the person to look at: copies from before a
+/// replacement that could not be confirmed stale, folders moved aside from the
+/// note's place, and replaced notes that could not be deleted.
+pub fn kept_copies(note_dir: &Path) -> Vec<PathBuf> {
+    let Ok(swap) = resolve_note(note_dir).and_then(|note| swap_dir(&note)) else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(&swap) else {
+        return Vec::new();
+    };
+    let mut copies: Vec<PathBuf> = entries
+        .flatten()
+        .filter(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            ["old-", "displaced", "stale-"]
+                .iter()
+                .any(|prefix| name.starts_with(prefix))
+        })
+        .map(|entry| entry.path())
+        .collect();
+    copies.sort();
+    copies
 }
 
 /// `<dir>/<base>`, or `<base>-2`, … — the first that does not exist.
@@ -1320,9 +1431,7 @@ pub fn prepare_note(note_dir: &Path) -> Result<()> {
     let stuck = stuck_olds(note_dir)?;
     if stuck.len() >= MAX_STUCK_OLD {
         anyhow::bail!(tr!(
-            "这份笔记有 {} 份旧副本无法删除，请检查 {} 的权限后再试 / {} replaced copies of this note could not be deleted; check the permissions of {} and try again",
-            stuck.len(),
-            swap_dir(note_dir)?.display(),
+            "这份笔记旁已保留 {} 份副本，请打开 {} 查看，留下需要的、删除其余的，然后重试",
             stuck.len(),
             swap_dir(note_dir)?.display()
         ));
@@ -1491,7 +1600,7 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
         }
         return Err(disk_full(error));
     }
-    swap_in(note, &staging, "flatten")?;
+    swap_in(note, &staging, "flatten", &manifest.task_id)?;
     Ok(Some(manifest))
 }
 
