@@ -417,7 +417,7 @@ mod tests {
         let out = std::process::Command::new(py)
             .arg("-B")
             .arg("-c")
-            .arg("import sys; compile(open(sys.argv[1]).read(), sys.argv[1], 'exec')")
+            .arg("import sys; compile(open(sys.argv[1], encoding='utf-8').read(), sys.argv[1], 'exec')")
             .arg(&script)
             .env("PYTHONDONTWRITEBYTECODE", "1")
             .env("PYTHONPYCACHEPREFIX", dir.path())
