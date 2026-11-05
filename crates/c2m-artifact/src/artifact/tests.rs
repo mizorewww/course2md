@@ -265,7 +265,12 @@ fn a_crash_before_deleting_the_old_note_keeps_the_new_one() {
         .unwrap_err();
     assert!(simulated_crash(&error));
     let after = snapshot(&library.note);
-    assert!(swap_dir(&library.note).unwrap().join("old-task-2").is_dir());
+    assert!(
+        swap_dir(&library.note)
+            .unwrap()
+            .join("stale-task-2")
+            .is_dir()
+    );
     // A restart of the task finds its note in place and leaves it.
     let restarted = library
         .publish(&library.target("task-2"), "New body", "")
@@ -616,7 +621,12 @@ fn an_interrupted_flatten_is_finished_by_running_it_again() {
             FailPoint::BetweenRenames => assert!(!course.exists()),
             FailPoint::AfterRenames | FailPoint::BeforeDeletingOld => {
                 assert!(!is_legacy(course));
-                let old = swap_dir(course).unwrap().join("old-flatten");
+                let name = if point == FailPoint::AfterRenames {
+                    "old-flatten"
+                } else {
+                    "stale-flatten"
+                };
+                let old = swap_dir(course).unwrap().join(name);
                 assert!(old.join("versions/v1").is_dir() && old.join("versions/v3").is_dir());
             }
         }
@@ -911,18 +921,18 @@ fn replaced_notes_that_cannot_be_deleted_do_not_pile_up() {
         .unwrap();
     let swap = swap_dir(&library.note).unwrap();
     // A read-only folder inside a replaced note is made writable and deleted.
-    std::fs::create_dir_all(swap.join("old-x/locked")).unwrap();
-    std::fs::write(swap.join("old-x/locked/file"), b"x").unwrap();
+    std::fs::create_dir_all(swap.join("stale-x/locked")).unwrap();
+    std::fs::write(swap.join("stale-x/locked/file"), b"x").unwrap();
     std::fs::set_permissions(
-        swap.join("old-x/locked"),
+        swap.join("stale-x/locked"),
         std::fs::Permissions::from_mode(0o555),
     )
     .unwrap();
     prepare_note(&library.note).unwrap();
-    assert!(!swap.join("old-x").exists());
+    assert!(!swap.join("stale-x").exists());
     // Copies the swap folder itself will not let go of stop the next task.
     for n in 0..MAX_STUCK_OLD {
-        std::fs::create_dir_all(swap.join(format!("old-{n}"))).unwrap();
+        std::fs::create_dir_all(swap.join(format!("stale-{n}"))).unwrap();
     }
     std::fs::set_permissions(&swap, std::fs::Permissions::from_mode(0o555)).unwrap();
     let error = prepare_note(&library.note);
@@ -977,7 +987,7 @@ fn a_crash_puts_back_the_note_that_was_in_place_not_a_stuck_older_copy() {
         .publish(&library.target("note-b"), "Body B", "")
         .unwrap();
     let swap = swap_dir(&library.note).unwrap();
-    let stuck = swap.join("old-note-b");
+    let stuck = swap.join("stale-note-b");
     assert!(stuck.join("frames/a.jpg").is_file(), "A's copy is stuck");
     std::fs::write(library.note.join("mine.txt"), b"added to B").unwrap();
     let before = snapshot(&library.note);
@@ -1031,8 +1041,10 @@ fn only_the_copy_named_live_is_ever_put_back() {
     std::fs::write(swap.join("old-earlier/manifest.json"), b"{}").unwrap();
     assert!(recover(&library.note).unwrap());
     assert_eq!(snapshot(&library.note), before);
-    assert!(!swap.exists());
-    // Missing note, no record of a replacement: nothing is put back.
+    // A copy not named by a record is never deleted either.
+    assert!(swap.join("old-earlier/manifest.json").is_file());
+    std::fs::remove_dir_all(swap.join("old-earlier")).unwrap();
+    // Missing note, no record, no copy that holds a note: nothing is put back.
     std::fs::create_dir_all(swap.join("old-stray")).unwrap();
     std::fs::write(swap.join("old-stray/manifest.json"), b"{}").unwrap();
     let moved = library.library().join("moved-away");
@@ -1040,6 +1052,7 @@ fn only_the_copy_named_live_is_ever_put_back() {
     assert!(recover(&library.note).unwrap());
     assert!(!library.note.exists());
     std::fs::rename(&moved, &library.note).unwrap();
+    std::fs::remove_dir_all(swap.join("old-stray")).unwrap();
     // A crash after both renames keeps the new note and clears the record.
     crash_at(FailPoint::AfterRenames);
     assert!(
@@ -1185,4 +1198,179 @@ fn a_crash_while_naming_the_live_copy_is_recovered() {
     assert!(recover(&library.note).unwrap());
     assert!(!swap.exists());
     assert_eq!(snapshot(&library.note), before);
+}
+
+/// The note moved aside between the renames, with its record intact.
+fn between_renames(library: &Library) -> (PathBuf, BTreeMap<String, Vec<u8>>) {
+    library
+        .publish(&library.target("task-1"), "Body", "frames/a.jpg")
+        .unwrap();
+    std::fs::write(library.note.join("mine.txt"), b"added").unwrap();
+    let before = snapshot(&library.note);
+    crash_at(FailPoint::BetweenRenames);
+    assert!(
+        library
+            .publish(&library.target("task-2"), "New", "")
+            .is_err()
+    );
+    let swap = swap_dir(&library.note).unwrap();
+    assert!(!library.note.exists());
+    assert_eq!(
+        std::fs::read_to_string(swap.join(LIVE_MARKER)).unwrap(),
+        "old-task-2"
+    );
+    (swap, before)
+}
+
+/// A record that exists but cannot be trusted stops recovery: the copy holding
+/// the note stays where it is, and the task says what to check.
+#[test]
+fn a_damaged_record_leaves_everything_as_it_is() {
+    let cases: Vec<(&str, Vec<u8>)> = vec![
+        ("empty", b"".to_vec()),
+        ("garbage", b"garbage".to_vec()),
+        ("parent", b"../course".to_vec()),
+        ("traversal", b"old-task-2/../old-task-2".to_vec()),
+        ("upper", b"OLD-task-2".to_vec()),
+        ("spaced", b" old-task-2  ".to_vec()),
+        ("two lines", b"old-task-2\nold-x".to_vec()),
+        ("huge", vec![b'a'; 70_000]),
+        ("not utf-8", b"\xff\xfeold-task-2".to_vec()),
+    ];
+    for (case, bytes) in cases {
+        let library = Library::new();
+        let (swap, before) = between_renames(&library);
+        std::fs::write(swap.join(LIVE_MARKER), &bytes).unwrap();
+        assert!(recover(&library.note).is_err(), "{case}");
+        assert!(prepare_note(&library.note).is_err(), "{case}");
+        assert!(!library.note.exists(), "{case}");
+        assert_eq!(snapshot(&swap.join("old-task-2")), before, "{case}");
+    }
+    // A folder, a link, a record naming a file: the same.
+    let library = Library::new();
+    let (swap, before) = between_renames(&library);
+    std::fs::remove_file(swap.join(LIVE_MARKER)).unwrap();
+    std::fs::create_dir(swap.join(LIVE_MARKER)).unwrap();
+    assert!(recover(&library.note).is_err());
+    assert_eq!(snapshot(&swap.join("old-task-2")), before);
+    #[cfg(unix)]
+    {
+        let library = Library::new();
+        let (swap, before) = between_renames(&library);
+        let outside = library.library().join("outside");
+        std::fs::write(&outside, "old-task-2").unwrap();
+        std::fs::remove_file(swap.join(LIVE_MARKER)).unwrap();
+        std::os::unix::fs::symlink(&outside, swap.join(LIVE_MARKER)).unwrap();
+        assert!(recover(&library.note).is_err());
+        assert_eq!(snapshot(&swap.join("old-task-2")), before);
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "old-task-2");
+    }
+    let library = Library::new();
+    let (swap, before) = between_renames(&library);
+    std::fs::write(swap.join("old-file"), b"hi").unwrap();
+    std::fs::write(swap.join(LIVE_MARKER), "old-file").unwrap();
+    assert!(recover(&library.note).is_err());
+    assert_eq!(snapshot(&swap.join("old-task-2")), before);
+    assert!(!library.note.exists());
+}
+
+/// A record nobody may read (mode 000) is damaged too.
+#[cfg(unix)]
+#[test]
+fn an_unreadable_record_leaves_everything_as_it_is() {
+    use std::os::unix::fs::PermissionsExt;
+    let library = Library::new();
+    let (swap, before) = between_renames(&library);
+    std::fs::set_permissions(
+        swap.join(LIVE_MARKER),
+        std::fs::Permissions::from_mode(0o000),
+    )
+    .unwrap();
+    let readable = std::fs::read(swap.join(LIVE_MARKER)).is_ok();
+    let result = recover(&library.note);
+    std::fs::set_permissions(
+        swap.join(LIVE_MARKER),
+        std::fs::Permissions::from_mode(0o644),
+    )
+    .unwrap();
+    if !readable {
+        assert!(result.is_err());
+        assert_eq!(snapshot(&swap.join("old-task-2")), before);
+    }
+    assert!(recover(&library.note).unwrap());
+    assert_eq!(snapshot(&library.note), before);
+}
+
+/// Something recreated the note's folder before recovery ran: an empty folder,
+/// or one a sync tool or Finder made. It is not a note: the copy goes back and
+/// that folder is kept aside, not deleted.
+#[test]
+fn a_folder_recreated_at_the_note_is_moved_aside_and_the_note_put_back() {
+    for contents in [None, Some(".DS_Store")] {
+        let library = Library::new();
+        let (swap, before) = between_renames(&library);
+        std::fs::create_dir(&library.note).unwrap();
+        if let Some(name) = contents {
+            std::fs::write(library.note.join(name), b"x").unwrap();
+        }
+        assert!(recover(&library.note).unwrap());
+        assert_eq!(snapshot(&library.note), before, "{contents:?}");
+        assert!(swap.join("displaced").is_dir(), "{contents:?}");
+        if let Some(name) = contents {
+            assert!(swap.join("displaced").join(name).is_file());
+        }
+    }
+}
+
+/// A copy an earlier build of the replacement left without a record is kept
+/// while a note is in place, and put back when none is.
+#[test]
+fn a_copy_without_a_record_is_kept() {
+    let library = Library::new();
+    library
+        .publish(&library.target("task-1"), "Body", "")
+        .unwrap();
+    let swap = swap_dir(&library.note).unwrap();
+    std::fs::create_dir_all(&swap).unwrap();
+    let copy = swap.join("old-NESTED");
+    copy_tree(&library.note, &copy);
+    let kept = snapshot(&copy);
+    assert!(recover(&library.note).unwrap());
+    prepare_note(&library.note).unwrap();
+    assert_eq!(snapshot(&copy), kept);
+    // With the note gone, it is the note again.
+    std::fs::remove_dir_all(&library.note).unwrap();
+    assert!(recover(&library.note).unwrap());
+    assert_eq!(snapshot(&library.note), kept);
+    assert!(!copy.exists());
+}
+
+/// A record left after the new note was in place names a copy no longer there:
+/// the record goes, and nothing else changes.
+#[test]
+fn a_record_after_a_finished_replacement_is_cleared() {
+    let library = Library::new();
+    library
+        .publish(&library.target("task-1"), "Body", "")
+        .unwrap();
+    let before = snapshot(&library.note);
+    let swap = swap_dir(&library.note).unwrap();
+    std::fs::create_dir_all(&swap).unwrap();
+    // Written by hand with a line ending, as `echo` does.
+    std::fs::write(swap.join(LIVE_MARKER), "old-gone\n").unwrap();
+    assert!(recover(&library.note).unwrap());
+    assert_eq!(snapshot(&library.note), before);
+    assert!(!swap.exists());
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    for (relative, kind) in walk(from).unwrap() {
+        match kind {
+            EntryKind::Dir => std::fs::create_dir_all(to.join(&relative)).unwrap(),
+            _ => {
+                std::fs::create_dir_all(to.join(&relative).parent().unwrap()).unwrap();
+                std::fs::copy(from.join(&relative), to.join(&relative)).unwrap();
+            }
+        }
+    }
 }

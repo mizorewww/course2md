@@ -499,10 +499,10 @@ pub fn publish(
     }
     let formats = &formats[..];
     let swap = swap_dir(note)?;
-    std::fs::create_dir_all(&swap)?;
+    std::fs::create_dir_all(&swap).map_err(|error| disk_full(error.into()))?;
     let staging = swap.join(format!("new-{}", target.task_id));
     remove_tree(&staging)?;
-    std::fs::create_dir(&staging)?;
+    std::fs::create_dir(&staging).map_err(|error| disk_full(error.into()))?;
     let built = (|| {
         let mut frames = Vec::new();
         let mut copied = std::collections::HashSet::new();
@@ -722,8 +722,18 @@ fn swap_in(note: &Path, staging: &Path, label: &str) -> Result<()> {
     // Names the copy that is the note while it is moved aside, before it is: only
     // that copy is ever put back, never one an earlier replacement left behind.
     let live = swap.join(LIVE_MARKER);
-    crate::fsio::atomic_write(&live, name.as_bytes()).map_err(disk_full)?;
-    sync_dir(&swap)?;
+    if let Err(error) =
+        crate::fsio::atomic_write(&live, name.as_bytes()).and_then(|()| sync_dir(&swap))
+    {
+        let _ = remove_tree(staging);
+        // The record's own temporary file, which a failed write may leave.
+        for entry in std::fs::read_dir(&swap).into_iter().flatten().flatten() {
+            if entry.file_name().to_string_lossy().starts_with(".tmp") {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+        return Err(disk_full(error));
+    }
     if let Err(error) = std::fs::rename(note, &old) {
         let _ = std::fs::remove_file(&live);
         let _ = remove_tree(staging);
@@ -747,10 +757,22 @@ fn swap_in(note: &Path, staging: &Path, label: &str) -> Result<()> {
     sync_dir(&swap)?;
     sync_dir(&parent)?;
     fail_point(FailPoint::AfterRenames)?;
-    std::fs::remove_file(&live)?;
-    sync_dir(&swap)?;
+    // The new note is in place: what is left is tidying, which recovery finishes
+    // from the record if it fails here. The replaced note is now known to be
+    // stale; only a stale copy is ever deleted.
+    let stale = unused_name(&swap, &format!("stale-{}", &name["old-".len()..]));
+    let tidied = std::fs::rename(&old, &stale)
+        .and_then(|()| sync_dir(&swap).map_err(std::io::Error::other))
+        .and_then(|()| std::fs::remove_file(&live))
+        .and_then(|()| sync_dir(&swap).map_err(std::io::Error::other));
+    if let Err(error) = tidied {
+        tracing::warn!(
+            "新笔记已就位，旧笔记稍后清理 / The new note is in place; the replaced one is cleared later: {error}"
+        );
+        return Ok(());
+    }
     fail_point(FailPoint::BeforeDeletingOld)?;
-    discard_old(note, &old);
+    discard_old(note, &stale);
     let _ = std::fs::remove_dir(&swap);
     Ok(())
 }
@@ -1031,7 +1053,7 @@ fn stuck_olds(note: &Path) -> Result<Vec<PathBuf>> {
     };
     Ok(entries
         .flatten()
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with("old-"))
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("stale-"))
         .map(|entry| entry.path())
         .collect())
 }
@@ -1108,48 +1130,180 @@ fn recover_locked(note: &Path) -> Result<()> {
     if !swap.is_dir() {
         return Ok(());
     }
-    let marker = swap.join(LIVE_MARKER);
-    // The copy that was the note when a replacement stopped, if one did between
-    // its two renames. Nothing is inferred from times: a copy an earlier
-    // replacement could not delete is never put back.
-    let live = std::fs::read_to_string(&marker)
-        .ok()
-        .map(|name| name.trim().to_owned())
-        .filter(|name| name.starts_with("old-") && !name.contains(['/', '\\']));
+    // Everything is read before anything changes.
+    let record = read_record(&swap);
     let mut olds = Vec::new();
+    let mut discardable = Vec::new();
     for entry in std::fs::read_dir(&swap)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name == LIVE_MARKER {
+        let kind = entry.file_type()?;
+        if name == LIVE_MARKER || name.starts_with("displaced-") {
             continue;
         }
         if name.starts_with("old-") {
             olds.push((name, entry.path()));
-        } else if entry.file_type()?.is_dir() {
-            remove_tree(&entry.path())?;
-        } else {
-            // The temporary file of a marker a crash stopped writing.
-            std::fs::remove_file(entry.path())?;
+        } else if name.starts_with("stale-") || name.starts_with("new-") {
+            // A replaced note known to be stale, or a new note never put in place.
+            discardable.push(entry.path());
+        } else if kind.is_file() && name.starts_with(".tmp") {
+            // The temporary file of a record a crash stopped writing.
+            discardable.push(entry.path());
         }
     }
-    if !note.exists()
-        && let Some(live) = &live
-        && let Some(index) = olds.iter().position(|(name, _)| name == live)
-    {
-        let (_, path) = olds.remove(index);
-        std::fs::rename(&path, note)?;
-        sync_dir(&swap)?;
-        sync_dir(&note_parent(note)?)?;
+    let record = match record {
+        Record::Damaged(why) => anyhow::bail!(tr!(
+            "笔记的替换记录无法读取，已全部原样保留，请检查 {}：{} / The note's replacement record cannot be read; everything was left as it is; check {}: {}",
+            swap.display(),
+            why,
+            swap.display(),
+            why
+        )),
+        Record::Names(name) => Some(name),
+        Record::None => None,
+    };
+    let note_whole = note_in_place(note);
+    match &record {
+        Some(name) => {
+            let copy = swap.join(name);
+            if note_whole {
+                // Stopped after the new note was in place: the named copy is the
+                // replaced note.
+                if copy.symlink_metadata().is_ok() {
+                    let stale = unused_name(&swap, &format!("stale-{}", &name["old-".len()..]));
+                    std::fs::rename(&copy, &stale)?;
+                    discardable.push(stale);
+                    olds.retain(|(old, _)| old != name);
+                }
+            } else if holds_note(&copy) {
+                restore(note, &copy, &swap)?;
+                olds.retain(|(old, _)| old != name);
+            } else {
+                anyhow::bail!(tr!(
+                    "笔记的替换记录指向的副本无法放回，已全部原样保留，请检查 {} / The copy the note's replacement record names cannot be put back; everything was left as it is; check {}",
+                    swap.display(),
+                    swap.display()
+                ));
+            }
+            std::fs::remove_file(swap.join(LIVE_MARKER))?;
+            sync_dir(&swap)?;
+        }
+        // No record: a copy is kept, as an earlier build left it. With no note in
+        // place, the newest copy that holds one is put back.
+        None if !note_whole => {
+            let newest = olds
+                .iter()
+                .filter_map(|(name, path)| {
+                    let manifest = read_manifest(&path.join("manifest.json")).ok()?;
+                    Some((manifest.created_at_ms, name.clone(), path.clone()))
+                })
+                .max();
+            if let Some((_, name, path)) = newest {
+                restore(note, &path, &swap)?;
+                olds.retain(|(old, _)| old != &name);
+            }
+        }
+        None => {}
     }
-    if marker.exists() {
-        std::fs::remove_file(&marker)?;
-        sync_dir(&swap)?;
+    for path in discardable {
+        if path.is_dir() {
+            discard_old(note, &path);
+        } else {
+            let _ = std::fs::remove_file(&path);
+        }
     }
-    for (_, old) in olds {
-        discard_old(note, &old);
+    if !olds.is_empty() {
+        tracing::warn!(
+            "笔记旁保留了无法确认的旧副本 / Kept copies beside the note that could not be confirmed stale: {}",
+            swap.display()
+        );
     }
     let _ = std::fs::remove_dir(&swap);
     Ok(())
+}
+
+/// What a note's swap folder records about a replacement in progress.
+enum Record {
+    None,
+    /// The copy that holds the note while it is moved aside.
+    Names(String),
+    /// A record that exists but cannot be trusted: nothing may be decided from it.
+    Damaged(String),
+}
+
+fn read_record(swap: &Path) -> Record {
+    let path = swap.join(LIVE_MARKER);
+    let metadata = match std::fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Record::None,
+        Err(error) => return Record::Damaged(error.to_string()),
+        Ok(metadata) => metadata,
+    };
+    if !metadata.file_type().is_file() || metadata.len() > 256 {
+        return Record::Damaged(path.display().to_string());
+    }
+    match std::fs::read(&path).map(String::from_utf8) {
+        // One line, as written; a single line ending is allowed.
+        Ok(Ok(text)) if is_copy_name(text.strip_suffix('\n').unwrap_or(&text)) => {
+            Record::Names(text.strip_suffix('\n').unwrap_or(&text).to_owned())
+        }
+        Ok(_) => Record::Damaged(path.display().to_string()),
+        Err(error) => Record::Damaged(error.to_string()),
+    }
+}
+
+/// `old-<task>` or `old-<task>-<n>`, as a replacement names the copy it moves aside.
+fn is_copy_name(name: &str) -> bool {
+    name.strip_prefix("old-").is_some_and(|rest| {
+        !rest.is_empty()
+            && !rest.contains("..")
+            && rest
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+    })
+}
+
+/// A folder holding a note this or a newer app can recognize: one with a
+/// manifest, or a course in the layout of versions (what flattening moves aside).
+/// An empty folder, or one a sync tool made, is not one.
+fn holds_note(dir: &Path) -> bool {
+    std::fs::symlink_metadata(dir).is_ok_and(|m| m.is_dir())
+        && (is_legacy(dir)
+            || match read_manifest(&dir.join("manifest.json")) {
+                Ok(_) => true,
+                Err(error) => error.is::<NewerSchema>(),
+            })
+}
+
+/// The note path holds a note.
+fn note_in_place(note: &Path) -> bool {
+    holds_note(note)
+}
+
+/// Puts the copy back as the note. Whatever stands at the note path instead is
+/// moved aside into the swap folder, never deleted.
+fn restore(note: &Path, copy: &Path, swap: &Path) -> Result<()> {
+    if note.symlink_metadata().is_ok() {
+        let aside = unused_name(swap, "displaced");
+        std::fs::rename(note, &aside)?;
+        tracing::warn!(
+            "笔记位置上的文件夹不是笔记，已移到 / The folder at the note's place was not a note; moved to {}",
+            aside.display()
+        );
+    }
+    std::fs::rename(copy, note)?;
+    sync_dir(swap)?;
+    sync_dir(&note_parent(note)?)
+}
+
+/// `<dir>/<base>`, or `<base>-2`, … — the first that does not exist.
+fn unused_name(dir: &Path, base: &str) -> PathBuf {
+    (1..)
+        .map(|n| match n {
+            1 => dir.join(base),
+            n => dir.join(format!("{base}-{n}")),
+        })
+        .find(|path| path.symlink_metadata().is_err())
+        .expect("an unused name")
 }
 
 /// Makes `note_dir` ready for a task, before any paid work: completes an
@@ -1214,7 +1368,7 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
     }
     let (version, mut manifest, passed_over) = current_version(note)?;
     let swap = swap_dir(note)?;
-    std::fs::create_dir_all(&swap)?;
+    std::fs::create_dir_all(&swap).map_err(|error| disk_full(error.into()))?;
     let staging = swap.join("new-flatten");
     remove_tree(&staging)?;
     let built = (|| {
