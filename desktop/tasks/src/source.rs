@@ -459,13 +459,20 @@ fn ends_link(c: char) -> bool {
 /// Read metadata and subtitle candidates without downloading video or running AI.
 /// The caller owns draft/revision matching; every successful return also checks
 /// cancellation, including after optional cover work and local content hashing.
-pub fn probe(input: String, online: bool, cancel: Arc<AtomicBool>) -> Result<SourceProbe> {
+/// `single` reads a link as the one video it names even when it also names a
+/// playlist; see [`reads_one_video`].
+pub fn probe(
+    input: String,
+    online: bool,
+    single: bool,
+    cancel: Arc<AtomicBool>,
+) -> Result<SourceProbe> {
     check_cancel(&cancel)?;
     if !online {
         return inspect_local(input, &cancel).map(|source| SourceProbe::Single(Box::new(source)));
     }
     validate_url(&input)?;
-    let output = online_metadata(&input, false, true, &cancel);
+    let output = online_metadata(&input, single, true, &cancel);
     let (metadata, subtitle_failure) = match output {
         Ok(output) => (
             c2m_source::fetch::parse_online_probe(&output.stdout, &input, &output.stderr)?,
@@ -475,7 +482,7 @@ pub fn probe(input: String, online: bool, cancel: Arc<AtomicBool>) -> Result<Sou
             check_cancel(&cancel)?;
             // A subtitle channel can fail while basic metadata remains available.
             // Preserve that video and the failure evidence instead of claiming no captions.
-            let basic = online_metadata(&input, false, false, &cancel)?;
+            let basic = online_metadata(&input, single, false, &cancel)?;
             (
                 c2m_source::fetch::parse_online_probe(&basic.stdout, &input, &basic.stderr)?,
                 Some(subtitle_failure_message(&error)),
@@ -540,6 +547,13 @@ pub fn probe(input: String, online: bool, cancel: Arc<AtomicBool>) -> Result<Sou
     Ok(result)
 }
 
+/// Whether `input` is the link of `known`, a video already confirmed: reading it
+/// again reads that one video, not the playlist its link also names (a pasted
+/// playlist link is listed so a video can be chosen from it).
+pub fn reads_one_video(input: &str, known: Option<&Source>) -> bool {
+    known.is_some_and(|source| source.online && source.input.trim() == input.trim())
+}
+
 /// `single` reads the one video a source names, even one opened from a playlist;
 /// a preview lists a pasted playlist so a video can be chosen from it.
 fn online_metadata(
@@ -548,6 +562,14 @@ fn online_metadata(
     with_subtitles: bool,
     cancel: &AtomicBool,
 ) -> Result<CommandOutput> {
+    command_output(
+        "yt-dlp",
+        &metadata_args(input, single, with_subtitles),
+        cancel,
+    )
+}
+
+fn metadata_args(input: &str, single: bool, with_subtitles: bool) -> Vec<&str> {
     let socket_timeout = c2m_source::fetch::YTDLP_SOCKET_TIMEOUT;
     let mut args = vec!["--ignore-config", "--socket-timeout", socket_timeout];
     args.extend(c2m_source::fetch::probe_args(with_subtitles));
@@ -555,7 +577,7 @@ fn online_metadata(
         args.push("--no-playlist");
     }
     args.extend(["--", input]);
-    command_output("yt-dlp", &args, cancel)
+    args
 }
 
 /// The cache file for `key`: the same cover or track reuses one file instead
@@ -1099,10 +1121,41 @@ mod tests {
     use super::*;
 
     fn single_video(input: String, online: bool, cancel: Arc<AtomicBool>) -> Result<Source> {
-        match probe(input, online, cancel)? {
+        match probe(input, online, false, cancel)? {
             SourceProbe::Single(source) => Ok(*source),
             _ => anyhow::bail!("not a single video"),
         }
+    }
+
+    /// Re-reading a confirmed video, whose link keeps the playlist it plays in,
+    /// reads that video; a playlist link pasted afresh is listed to choose from.
+    #[test]
+    fn a_confirmed_video_is_read_again_as_one_video() {
+        let link = "https://www.youtube.com/watch?v=abc123&list=PLcourse";
+        let confirmed = Source {
+            input: link.into(),
+            online: true,
+            ..Source::default()
+        };
+        assert!(reads_one_video(link, Some(&confirmed)));
+        assert!(reads_one_video(&format!(" {link} "), Some(&confirmed)));
+        assert!(!reads_one_video(link, None));
+        assert!(!reads_one_video(
+            "https://www.youtube.com/watch?v=other&list=PLcourse",
+            Some(&confirmed)
+        ));
+        let local = Source {
+            online: false,
+            ..confirmed.clone()
+        };
+        assert!(!reads_one_video(link, Some(&local)));
+
+        assert!(metadata_args(link, true, true).contains(&"--no-playlist"));
+        assert!(!metadata_args(link, false, true).contains(&"--no-playlist"));
+        // A part of a Bilibili video is already one video; the flag would pick part 1.
+        let part = "https://www.bilibili.com/video/BV1xx";
+        assert!(!metadata_args(part, true, true).contains(&"--no-playlist"));
+        assert_eq!(metadata_args(link, true, false).last(), Some(&link));
     }
 
     #[test]
