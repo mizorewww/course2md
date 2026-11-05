@@ -109,11 +109,12 @@ pub struct JobEvents {
     /// while `error` is still that message.
     #[serde(default, skip_serializing)]
     pub note_kept: Option<(String, Vec<c2m_core::outcome::KeptPart>)>,
-    /// The last error found the note's replacement interrupted and not finishable:
-    /// the error's message and the folder to look at. Used only while `error` is
-    /// still that message.
+    /// The last error stopped at the note's folder of copies: its replacement was
+    /// interrupted and not finishable, or copies kept there reached the limit
+    /// (`true`). The error's message and the folder to look at; used only while
+    /// `error` is still that message.
     #[serde(default, skip_serializing)]
-    pub recovery_blocked: Option<(String, std::path::PathBuf)>,
+    pub recovery_blocked: Option<(String, std::path::PathBuf, bool)>,
     /// The result of the run in progress, until the job exits.
     #[serde(skip)]
     pub done: Option<Done>,
@@ -140,8 +141,17 @@ impl JobEvents {
     pub fn blocked_folder(&self) -> Option<&std::path::Path> {
         self.recovery_blocked
             .as_ref()
-            .filter(|(message, _)| self.error.as_deref() == Some(message.as_str()))
-            .map(|(_, path)| path.as_path())
+            .filter(|(message, ..)| self.error.as_deref() == Some(message.as_str()))
+            .map(|(_, path, _)| path.as_path())
+    }
+
+    /// The folder [`Self::blocked_folder`] names holds copies that reached the limit.
+    pub fn blocked_by_copies(&self) -> bool {
+        self.blocked_folder().is_some()
+            && self
+                .recovery_blocked
+                .as_ref()
+                .is_some_and(|(.., copies)| *copies)
     }
 
     /// The parts the task's last error names when it refused a result and kept
@@ -229,10 +239,22 @@ impl JobEvents {
                 parts,
                 path,
             } => {
+                use c2m_protocol::progress::ErrorCode;
                 self.recovery_blocked = path
                     .as_ref()
-                    .filter(|_| *code == c2m_protocol::progress::ErrorCode::NoteRecoveryBlocked)
-                    .map(|path| (message.clone(), path.clone()));
+                    .filter(|_| {
+                        matches!(
+                            code,
+                            ErrorCode::NoteRecoveryBlocked | ErrorCode::NoteCopiesKept
+                        )
+                    })
+                    .map(|path| {
+                        (
+                            message.clone(),
+                            path.clone(),
+                            *code == ErrorCode::NoteCopiesKept,
+                        )
+                    });
                 self.error = Some(message.clone());
                 self.model_required = *code == c2m_protocol::progress::ErrorCode::ModelRequired;
                 self.note_kept = (*code == c2m_protocol::progress::ErrorCode::NoteKept

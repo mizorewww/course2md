@@ -781,6 +781,7 @@ pub mod tests {
             task_id: "old".into(),
             course_id: "course".into(),
             source_id: "same-source".into(),
+            publication: String::new(),
             version_id: String::new(),
             title: "原始课程名".into(),
             created_at_ms: 1_000,

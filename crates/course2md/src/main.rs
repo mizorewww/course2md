@@ -599,6 +599,14 @@ fn collect_targets(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>, dep
                 "{}",
                 course2md::outcome::recovery_blocked_message(&swap, course2md::i18n::lang())
             ),
+            NoteAttention::Kept { swap, copies, .. }
+                if copies.len() >= course2md::artifact::MAX_KEPT_COPIES =>
+            {
+                eprintln!(
+                    "{}",
+                    course2md::outcome::copies_kept_message(&swap, course2md::i18n::lang())
+                )
+            }
             NoteAttention::Kept { swap, copies, .. } => eprintln_tr!(
                 "笔记旁保留了 {} 份副本，请查看：{}",
                 copies.len(),

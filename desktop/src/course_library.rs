@@ -720,6 +720,16 @@ impl Desktop {
                     course2md::outcome::recovery_blocked_message(&swap, course2md::i18n::lang()),
                     swap,
                 ),
+                // At the limit, new tasks for the note stop: say so and what frees it.
+                NoteAttention::Kept { swap, copies, .. }
+                    if copies.len() >= course2md::artifact::MAX_KEPT_COPIES =>
+                {
+                    (
+                        NoticeKind::Danger,
+                        course2md::outcome::copies_kept_message(&swap, course2md::i18n::lang()),
+                        swap,
+                    )
+                }
                 NoteAttention::Kept { note, swap, copies } => (
                     NoticeKind::Info,
                     course2md::tr!(
@@ -732,20 +742,27 @@ impl Desktop {
                 ),
                 NoteAttention::Failed { .. } => continue,
             };
+            // The message holds long paths: its actions take a row of their own below
+            // it instead of narrowing it.
             notices.push(
-                notice_banner(("note-attention", index), kind, message)
-                    .child(
-                        material_button(("open-note-attention", index), ButtonVariant::Tonal)
-                            .icon(symbols::folder_open())
-                            .child(course2md::tr!("打开需要处理的文件夹"))
-                            .on_click(move |_, _, cx| cx.open_with_system(&folder)),
-                    )
-                    .child(
-                        material_button(("recheck-note-attention", index), ButtonVariant::Text)
-                            .icon(symbols::refresh())
-                            .child(course2md::tr!("重新检查保存位置"))
-                            .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx))),
-                    ),
+                notice_banner(("note-attention", index), kind, message).child(
+                    h_flex()
+                        .w_full()
+                        .flex_wrap()
+                        .gap(rem(8.))
+                        .child(
+                            material_button(("open-note-attention", index), ButtonVariant::Tonal)
+                                .icon(symbols::folder_open())
+                                .child(course2md::tr!("打开需要处理的文件夹"))
+                                .on_click(move |_, _, cx| cx.open_with_system(&folder)),
+                        )
+                        .child(
+                            material_button(("recheck-note-attention", index), ButtonVariant::Text)
+                                .icon(symbols::refresh())
+                                .child(course2md::tr!("重新检查保存位置"))
+                                .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx))),
+                        ),
+                ),
             );
         }
         (!notices.is_empty()).then(|| v_flex().gap(rem(12.)).children(notices))

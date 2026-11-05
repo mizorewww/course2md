@@ -307,8 +307,12 @@ fn task_error_summary(task: &TaskRecord) -> Option<String> {
 fn task_error_summary_in(task: &TaskRecord, lang: c2m_i18n::i18n::Lang) -> Option<String> {
     // What to do, with the full paths: never cut short.
     if let Some(folder) = task.events.blocked_folder() {
-        return failure_summary_in(task.state, task.events.error.as_deref(), lang)
-            .map(|_| c2m_core::outcome::recovery_blocked_message(folder, lang));
+        let message = if task.events.blocked_by_copies() {
+            c2m_core::outcome::copies_kept_message(folder, lang)
+        } else {
+            c2m_core::outcome::recovery_blocked_message(folder, lang)
+        };
+        return failure_summary_in(task.state, task.events.error.as_deref(), lang).map(|_| message);
     }
     match task.events.kept_parts() {
         Some(parts) => failure_summary_in(task.state, task.events.error.as_deref(), lang)
@@ -1235,6 +1239,43 @@ mod tests {
         });
         let actions = task_actions(&task, TaskSurface::Card, &facts());
         assert!(!actions.contains(&Action::PrepareModel));
+    }
+
+    /// Copies at the limit stop a task: the card says, in full and in the
+    /// interface language, to move the copies to keep out of the folder, and offers
+    /// to open it.
+    #[test]
+    fn copies_at_the_limit_tell_the_task_what_frees_it() {
+        use super::{
+            TaskAction as Action, TaskFacts, TaskSurface, task_actions, task_error_summary_in,
+        };
+        use c2m_i18n::i18n::Lang;
+        use c2m_protocol::progress::{ErrorCode, Event};
+        let swap = std::path::PathBuf::from(
+            "/Users/someone/Documents/course2md/a-rather-long-library-name/.course2md/swap/course-0123456789abcdef",
+        );
+        let mut task = task_record("task");
+        task.state = TaskState::NeedsAttention;
+        task.events.apply(&Event::Error {
+            message: c2m_core::outcome::copies_kept_message(&swap, Lang::ZhHans),
+            code: ErrorCode::NoteCopiesKept,
+            parts: Vec::new(),
+            path: Some(swap.clone()),
+        });
+        for lang in [Lang::En, Lang::Ja, Lang::ZhHant] {
+            let text = task_error_summary_in(&task, lang).unwrap();
+            assert_eq!(text, c2m_core::outcome::copies_kept_message(&swap, lang));
+        }
+        let facts = TaskFacts {
+            active: false,
+            expanded: false,
+            library: None,
+            needs_reassociation: false,
+            queue: Vec::new(),
+        };
+        assert!(
+            task_actions(&task, TaskSurface::Card, &facts).contains(&Action::OpenRecoveryFolder)
+        );
     }
 
     /// A note whose replacement cannot be finished says what to do with the full
