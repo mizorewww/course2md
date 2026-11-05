@@ -673,44 +673,27 @@ fn finished(outcome: &Outcome) -> usize {
 /// and the task ends failed, naming the parts; what it paid for stays in its work.
 pub fn refuse_worse(saved: &Outcomes, new: &Outcomes) -> Result<()> {
     let parts = [
-        (&saved.transcript, &new.transcript, tr!("文字")),
-        (&saved.screenshots, &new.screenshots, tr!("截图")),
-        (&saved.proofreading, &new.proofreading, tr!("校对")),
-        (&saved.translation, &new.translation, tr!("翻译")),
-        (&saved.summary, &new.summary, tr!("摘要")),
+        ("transcript", &saved.transcript, &new.transcript),
+        ("screenshots", &saved.screenshots, &new.screenshots),
+        ("proofreading", &saved.proofreading, &new.proofreading),
+        ("translation", &saved.translation, &new.translation),
+        ("summary", &saved.summary, &new.summary),
     ];
-    let worse: Vec<_> = parts
+    let worse: Vec<crate::outcome::KeptPart> = parts
         .iter()
-        .filter(|(saved, new, _)| {
+        .filter(|(_, saved, new)| {
             matches!(new.status, Status::Failed | Status::Partial)
                 && finished(new) < finished(saved)
         })
+        .map(|(part, _, new)| crate::outcome::KeptPart {
+            part: (*part).to_owned(),
+            cause: new.message.clone(),
+        })
         .collect();
-    let Some((_, first, _)) = worse.first() else {
+    if worse.is_empty() {
         return Ok(());
-    };
-    let separator = match crate::i18n::lang() {
-        crate::i18n::Lang::En => ", ",
-        _ => "、",
-    };
-    let names = worse
-        .iter()
-        .map(|(_, _, name)| name.to_string())
-        .collect::<Vec<_>>()
-        .join(separator);
-    // Why the first of them came out worse, as its outcome recorded it.
-    let message = match first.message.as_deref().filter(|m| !m.trim().is_empty()) {
-        Some(cause) => tr!(
-            "这次的结果在这些部分不如现有笔记，现有笔记已保留：{}（{}）",
-            names,
-            cause
-        ),
-        None => tr!(
-            "这次的结果在这些部分不如现有笔记，现有笔记已保留：{}",
-            names
-        ),
-    };
-    Err(crate::outcome::NoteKept(message.to_string()).into())
+    }
+    Err(crate::outcome::NoteKept::new(worse).into())
 }
 
 /// Replaces `note` with the finished `staging`, which is on the same volume.

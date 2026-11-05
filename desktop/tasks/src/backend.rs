@@ -31,6 +31,7 @@ impl Event {
         Self::Engine(EngineEvent::Error {
             message,
             code: Default::default(),
+            parts: Vec::new(),
         })
     }
 }

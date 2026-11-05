@@ -298,6 +298,21 @@ pub(crate) fn ai_stage_outcome(
 /// The hint older engines attached to failures no account could fix (V1).
 const LEGACY_LOGIN_HINT: &str = "提示：请在设置的账号中重新登录 B 站后重试。 / Hint: sign in to Bilibili again in Settings and retry.";
 
+/// A task's failure in the interface language. A refused result names its parts
+/// from the error's structure, not from the engine's Simplified Chinese words.
+fn task_error_summary(task: &TaskRecord) -> Option<String> {
+    task_error_summary_in(task, c2m_i18n::i18n::lang())
+}
+
+fn task_error_summary_in(task: &TaskRecord, lang: c2m_i18n::i18n::Lang) -> Option<String> {
+    match task.events.kept_parts() {
+        Some(parts) => failure_summary_in(task.state, task.events.error.as_deref(), lang)
+            .map(|_| c2m_core::outcome::note_kept_message(parts, lang)),
+        None => failure_summary_in(task.state, task.events.error.as_deref(), lang),
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn task_failure_summary(state: TaskState, error: Option<&str>) -> Option<String> {
     failure_summary_in(state, error, c2m_i18n::i18n::lang())
 }
@@ -353,8 +368,7 @@ pub fn task_attention_summary(task: &TaskRecord) -> String {
     if let Some(reason) = task_service_repair_reason(task) {
         return reason.into();
     }
-    task_failure_summary(task.state, task.events.error.as_deref())
-        .unwrap_or_else(|| task_status_label(task))
+    task_error_summary(task).unwrap_or_else(|| task_status_label(task))
 }
 
 /// Only concrete configuration rejections change recovery from Retry to Repair.
@@ -509,10 +523,7 @@ pub fn task_reasons(task: &TaskRecord) -> Vec<String> {
     if task.state != TaskState::Partial || failures.is_empty() {
         return task_service_repair_reason(task)
             .map(str::to_owned)
-            .or_else(|| {
-                task_failure_summary(task.state, task.events.error.as_deref())
-                    .filter(|_| !task.has_uncertain())
-            })
+            .or_else(|| task_error_summary(task).filter(|_| !task.has_uncertain()))
             .into_iter()
             .collect();
     }
@@ -1194,6 +1205,7 @@ mod tests {
         task.events.apply(&Event::Error {
             message: "识别模型 qwen3 尚未下载，请先下载并准备模型，再继续".into(),
             code: ErrorCode::ModelRequired,
+            parts: Vec::new(),
         });
         let actions = task_actions(&task, TaskSurface::Card, &facts());
         assert!(actions.contains(&Action::Resume));
@@ -1205,9 +1217,60 @@ mod tests {
         task.events.apply(&Event::Error {
             message: "其他错误".into(),
             code: ErrorCode::Other,
+            parts: Vec::new(),
         });
         let actions = task_actions(&task, TaskSurface::Card, &facts());
         assert!(!actions.contains(&Action::PrepareModel));
+    }
+
+    /// A refused result is shown in the interface language from the parts the
+    /// error names, not from the worker's Simplified Chinese words.
+    #[test]
+    fn a_kept_note_is_explained_in_the_interface_language() {
+        use super::task_error_summary_in;
+        use c2m_core::outcome::{KeptPart, NoteKept};
+        use c2m_i18n::i18n::Lang;
+        use c2m_protocol::progress::{ErrorCode, Event};
+        let parts = vec![
+            KeptPart {
+                part: "proofreading".into(),
+                cause: Some("校对未全部完成（1/1 失败），原文已保留；首个错误：HTTP 503".into()),
+            },
+            KeptPart {
+                part: "translation".into(),
+                cause: Some("翻译未全部完成（2/2 失败）".into()),
+            },
+            KeptPart {
+                part: "summary".into(),
+                cause: None,
+            },
+        ];
+        let mut task = task_record("task");
+        task.state = TaskState::NeedsAttention;
+        task.events.apply(&Event::Error {
+            message: NoteKept::new(parts.clone()).message,
+            code: ErrorCode::NoteKept,
+            parts,
+        });
+        let han = |text: &str| text.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+        let en = task_error_summary_in(&task, Lang::En).unwrap();
+        assert!(en.contains("Proofreading, Translation, Summary"), "{en}");
+        assert!(en.contains("Proofreading incomplete (1/1 failed)"), "{en}");
+        assert!(en.contains("Translation incomplete (2/2 failed)"), "{en}");
+        assert!(!han(&en), "{en}");
+        let ja = task_error_summary_in(&task, Lang::Ja).unwrap();
+        assert!(ja.contains("校正、翻訳、要約"), "{ja}");
+        assert!(ja.contains("翻訳が完了していません（2/2 件失敗）"), "{ja}");
+        let hant = task_error_summary_in(&task, Lang::ZhHant).unwrap();
+        assert!(hant.contains("校對、翻譯、摘要"), "{hant}");
+        assert!(hant.contains("翻譯未全部完成（2/2 失敗）"), "{hant}");
+        // Another failure afterwards is shown as that failure.
+        task.events.apply(&Event::Error {
+            message: "其他错误".into(),
+            code: ErrorCode::Other,
+            parts: Vec::new(),
+        });
+        assert_eq!(task_error_summary_in(&task, Lang::En).unwrap(), "其他错误");
     }
 
     /// Once the model a task stopped for is ready, that task continues; one the
@@ -1225,6 +1288,7 @@ mod tests {
             task.events.apply(&Event::Error {
                 message: "识别模型尚未下载".into(),
                 code: ErrorCode::ModelRequired,
+                parts: Vec::new(),
             });
             task
         };
@@ -1239,6 +1303,7 @@ mod tests {
         other_failure.events.apply(&Event::Error {
             message: "其他错误".into(),
             code: ErrorCode::Other,
+            parts: Vec::new(),
         });
         let request = task_model_request(&waiting, AsrProvider::Coreml);
         let mut other_model = stopped("other-model", None);

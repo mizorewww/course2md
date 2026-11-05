@@ -104,6 +104,11 @@ pub struct JobEvents {
     /// The last error was a speech model that must be prepared first.
     #[serde(default, skip_serializing)]
     pub model_required: bool,
+    /// The last error refused a result and kept the note: the error's message and
+    /// the parts it names, so it is shown in the reader's language. Used only
+    /// while `error` is still that message.
+    #[serde(default, skip_serializing)]
+    pub note_kept: Option<(String, Vec<c2m_core::outcome::KeptPart>)>,
     /// The result of the run in progress, until the job exits.
     #[serde(skip)]
     pub done: Option<Done>,
@@ -125,6 +130,15 @@ impl PartialEq for JobEvents {
 }
 
 impl JobEvents {
+    /// The parts the task's last error names when it refused a result and kept
+    /// the note; `None` once another error has taken its place.
+    pub fn kept_parts(&self) -> Option<&[c2m_core::outcome::KeptPart]> {
+        self.note_kept
+            .as_ref()
+            .filter(|(message, _)| self.error.as_deref() == Some(message.as_str()))
+            .map(|(_, parts)| parts.as_slice())
+    }
+
     /// Applies one event. Returns whether it changes what a person sees right away;
     /// logs and steady progress can wait for the next repaint.
     pub fn apply(&mut self, event: &Event) -> bool {
@@ -195,9 +209,16 @@ impl JobEvents {
                 self.stage(stage).workers = *workers;
                 false
             }
-            Event::Error { message, code } => {
+            Event::Error {
+                message,
+                code,
+                parts,
+            } => {
                 self.error = Some(message.clone());
                 self.model_required = *code == c2m_protocol::progress::ErrorCode::ModelRequired;
+                self.note_kept = (*code == c2m_protocol::progress::ErrorCode::NoteKept
+                    && !parts.is_empty())
+                .then(|| (message.clone(), parts.clone()));
                 true
             }
             Event::Blocked {

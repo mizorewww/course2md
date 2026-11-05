@@ -782,7 +782,9 @@ fn a_result_worse_in_a_part_it_tried_never_replaces_the_note() {
         };
         let error = publish_with(&library, "worse", outcomes(partial, screenshots)).unwrap_err();
         let failure = error.downcast_ref::<crate::outcome::NoteKept>().unwrap();
-        assert!(failure.0.contains("现有笔记已保留") || failure.0.contains("saved note"));
+        assert!(
+            failure.message.contains("现有笔记已保留") || failure.message.contains("saved note")
+        );
         assert_eq!(snapshot(&library.note), before);
     }
     // A part the new task did not ask for is a choice, not a loss.
@@ -1160,12 +1162,12 @@ fn a_refusal_names_the_parts_in_the_language_and_why() {
         _ => "、",
     };
     assert!(
-        kept.0
+        kept.message
             .contains(&format!("{}{separator}{}", tr!("截图"), tr!("摘要"))),
         "{}",
-        kept.0
+        kept.message
     );
-    assert!(kept.0.contains("no frames"), "{}", kept.0);
+    assert!(kept.message.contains("no frames"), "{}", kept.message);
 }
 
 /// A crash while the marker itself is written leaves its temporary file in the

@@ -166,6 +166,7 @@ fn main() -> std::process::ExitCode {
                 progress::emit(&progress::Event::Error {
                     message: tr!("参数无效：{}", error),
                     code: progress::ErrorCode::InvalidArguments,
+                    parts: Vec::new(),
                 });
             } else if course2md::i18n::lang() == course2md::i18n::Lang::En {
                 let _ = error.print();
@@ -242,6 +243,7 @@ fn main() -> std::process::ExitCode {
                 progress::emit(&progress::Event::Error {
                     code: progress::ErrorCode::of(&error),
                     message,
+                    parts: progress::kept_parts(&error),
                 });
             } else if helper.is_some() {
                 // The parent puts the helper's words into its own error.

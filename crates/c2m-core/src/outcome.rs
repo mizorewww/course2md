@@ -125,14 +125,96 @@ pub struct NetworkFailure {
     pub definitely_unsent: bool,
 }
 
-/// A task's result was not published: the saved note holds more of a part the
-/// task tried to make, so the note was kept. The message says which parts and why.
+/// A part of a note a refused result did less of than the saved note: its id
+/// (`transcript`, `screenshots`, `proofreading`, `translation`, `summary`) and
+/// the cause its outcome recorded, in the words the engine wrote.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeptPart {
+    pub part: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<String>,
+}
+
+/// A task's result was not published: the saved note holds more of the `parts`
+/// the task tried to make, so the note was kept. `message` says so in the
+/// engine's language; [`note_kept_message`] says it in any other.
 #[derive(Debug)]
-pub struct NoteKept(pub String);
+pub struct NoteKept {
+    pub message: String,
+    pub parts: Vec<KeptPart>,
+}
+
+impl NoteKept {
+    pub fn new(parts: Vec<KeptPart>) -> Self {
+        Self {
+            message: note_kept_message(&parts, c2m_i18n::i18n::lang()),
+            parts,
+        }
+    }
+}
 
 impl std::fmt::Display for NoteKept {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.message)
+    }
+}
+
+/// Why a result was refused and the note kept, in `lang`: the parts by name,
+/// in the language's list form, and their causes.
+pub fn note_kept_message(parts: &[KeptPart], lang: c2m_i18n::i18n::Lang) -> String {
+    use c2m_i18n::i18n::{Lang, engine_message_for, t_for};
+    let name = |part: &str| match part {
+        "transcript" => t_for("文字", lang).to_owned(),
+        "screenshots" => t_for("截图", lang).to_owned(),
+        "proofreading" => t_for("校对", lang).to_owned(),
+        "translation" => t_for("翻译", lang).to_owned(),
+        "summary" => t_for("摘要", lang).to_owned(),
+        other => other.to_owned(),
+    };
+    let (list, causes_separator) = match lang {
+        Lang::En => (", ", "; "),
+        _ => ("、", "；"),
+    };
+    let names = parts
+        .iter()
+        .map(|part| name(&part.part))
+        .collect::<Vec<_>>()
+        .join(list);
+    let mut causes: Vec<String> = Vec::new();
+    for cause in parts
+        .iter()
+        .filter_map(|part| part.cause.as_deref())
+        .filter(|cause| !cause.trim().is_empty())
+    {
+        let cause = engine_message_for(cause, lang);
+        if !causes.contains(&cause) {
+            causes.push(cause);
+        }
+    }
+    let fill = |template: &str, values: &[&str]| {
+        let mut out = String::new();
+        let mut values = values.iter();
+        let mut pieces = template.split("{}");
+        out.push_str(pieces.next().unwrap_or_default());
+        for piece in pieces {
+            out.push_str(values.next().copied().unwrap_or_default());
+            out.push_str(piece);
+        }
+        out
+    };
+    if causes.is_empty() {
+        fill(
+            t_for("这次的结果在这些部分不如现有笔记，现有笔记已保留：{}", lang),
+            &[&names],
+        )
+    } else {
+        fill(
+            t_for(
+                "这次的结果在这些部分不如现有笔记，现有笔记已保留：{}（{}）",
+                lang,
+            ),
+            &[&names, &causes.join(causes_separator)],
+        )
     }
 }
 

@@ -196,6 +196,14 @@ pub enum ErrorCode {
     Other,
 }
 
+/// The parts a `note_kept` error names; empty for any other error.
+pub fn kept_parts(error: &anyhow::Error) -> Vec<crate::outcome::KeptPart> {
+    error
+        .downcast_ref::<crate::outcome::NoteKept>()
+        .map(|kept| kept.parts.clone())
+        .unwrap_or_default()
+}
+
 impl ErrorCode {
     /// The code a typed error carries; untyped errors are `Other`.
     pub fn of(error: &anyhow::Error) -> Self {
@@ -325,6 +333,10 @@ pub enum Event {
         /// Stable for consumers; the message is for people and may change.
         #[serde(default)]
         code: ErrorCode,
+        /// With `note_kept`: the parts the result did less of, and why, so a
+        /// reader shows the message in its own language.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        parts: Vec<crate::outcome::KeptPart>,
     },
     Done(Box<Done>),
     ModelReady {
