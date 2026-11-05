@@ -150,7 +150,12 @@ impl YoutubeDialog {
             return;
         };
         self.step = YoutubeStep::Choose;
-        let mut guide = AccessGuide::new(browser, AccessStep::Blocked, now);
+        // A guide the person had already moved along (a check run anyway from
+        // it) keeps its step; otherwise the guide starts.
+        let mut guide = match self.guide.take() {
+            Some(guide) if guide.step != AccessStep::Granted => AccessGuide { browser, ..guide },
+            _ => AccessGuide::new(browser, AccessStep::Blocked, now),
+        };
         if access != Access::Blocked {
             guide.step = AccessStep::Restart;
             // The app's own look will keep finding the folder open; only a reopen
@@ -327,13 +332,21 @@ pub enum AppLocation {
     /// opens next time, and reopening it would open that copy again. The app
     /// must be moved (to /Applications) and opened from there first.
     Translocated,
+    /// Run from a disk image (or another read-only volume) rather than
+    /// installed: like a translocated copy, the person must copy it to
+    /// /Applications and open it from there first.
+    DiskImage,
     /// No bundle: a development build run from a terminal.
     Unbundled,
 }
 
 /// Where `exe` runs from: the `.app` holding it, and whether that is a
-/// translocated copy.
-pub fn app_location_of(exe: &Path) -> AppLocation {
+/// translocated copy or one on a disk image. `read_only` answers whether a
+/// folder is on a read-only mount (a mounted .dmg is). A bundle under
+/// /Volumes counts as a disk image when its volume is read-only, or when it
+/// is not in an Applications folder there (an external drive the person
+/// installed apps on keeps working).
+pub fn app_location_of(exe: &Path, read_only: impl Fn(&Path) -> bool) -> AppLocation {
     let Some(bundle) = exe
         .ancestors()
         .skip(1)
@@ -350,9 +363,19 @@ pub fn app_location_of(exe: &Path) -> AppLocation {
         .any(|part| part.as_os_str() == "AppTranslocation")
     {
         AppLocation::Translocated
+    } else if on_disk_image(&bundle, read_only(&bundle)) {
+        AppLocation::DiskImage
     } else {
         AppLocation::Bundle(bundle)
     }
+}
+
+fn on_disk_image(bundle: &Path, read_only: bool) -> bool {
+    read_only
+        || (bundle.starts_with("/Volumes")
+            && !bundle
+                .components()
+                .any(|part| part.as_os_str() == "Applications"))
 }
 
 /// Where the person was when they opened the dialog, so a reopen for access
@@ -570,6 +593,10 @@ mod tests {
         // Settings opened again from there: waiting once more.
         dialog.guide.as_mut().unwrap().opened_settings(now);
         assert_eq!(step(&dialog), Some(AccessStep::Waiting));
+        // A check run anyway from there, refused again: the step reached stays.
+        dialog.step = YoutubeStep::Checking;
+        dialog.check_blocked(Access::Blocked, now);
+        assert_eq!(step(&dialog), Some(AccessStep::Waiting));
     }
 
     #[test]
@@ -578,12 +605,17 @@ mod tests {
         let app = dir.path().join("Apps/course2md.app");
         let exe = app.join("Contents/MacOS/course2md-desktop");
         std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
-        assert_eq!(app_location_of(&exe), AppLocation::Unbundled);
+        assert_eq!(app_location_of(&exe, |_| false), AppLocation::Unbundled);
         std::fs::write(app.join("Contents/Info.plist"), "").unwrap();
-        assert_eq!(app_location_of(&exe), AppLocation::Bundle(app.clone()));
+        assert_eq!(
+            app_location_of(&exe, |_| false),
+            AppLocation::Bundle(app.clone())
+        );
         // A development build is no bundle.
         assert_eq!(
-            app_location_of(&dir.path().join("target/debug/course2md-desktop")),
+            app_location_of(&dir.path().join("target/debug/course2md-desktop"), |_| {
+                false
+            }),
             AppLocation::Unbundled
         );
         // A quarantined download run from its randomized copy.
@@ -593,7 +625,24 @@ mod tests {
         let exe = moved.join("Contents/MacOS/course2md-desktop");
         std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
         std::fs::write(moved.join("Contents/Info.plist"), "").unwrap();
-        assert_eq!(app_location_of(&exe), AppLocation::Translocated);
+        assert_eq!(app_location_of(&exe, |_| false), AppLocation::Translocated);
+        // On a read-only mount (a .dmg wherever it is mounted).
+        let exe = app.join("Contents/MacOS/course2md-desktop");
+        assert_eq!(app_location_of(&exe, |_| true), AppLocation::DiskImage);
+        // Under /Volumes without an Applications folder: a disk image; with one,
+        // an external drive's install.
+        assert!(on_disk_image(
+            Path::new("/Volumes/course2md/course2md.app"),
+            false
+        ));
+        assert!(!on_disk_image(
+            Path::new("/Volumes/Ext/Applications/course2md.app"),
+            false
+        ));
+        assert!(!on_disk_image(
+            Path::new("/Applications/course2md.app"),
+            false
+        ));
     }
 
     #[test]

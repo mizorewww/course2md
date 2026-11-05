@@ -16,9 +16,16 @@ use desktop_accounts::youtube::*;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
 use gpui_kit_material::{color::ColorRole, icons::Icon, prelude::*};
-use std::{path::PathBuf, time::Instant};
+use std::{
+    path::{Path, PathBuf},
+    time::Instant,
+};
 
 const YOUTUBE_DIALOG_WIDTH: f32 = 480.;
+
+/// Below this window height, in the text's own rems, the guide's stepper is one
+/// line: 620pt tall at 150% text and beyond.
+const COMPACT_GUIDE_REMS: f32 = 32.;
 
 /// One look at `browser`'s cookie folder. Only macOS has a switch to guide the
 /// person to; elsewhere a refusal is the check's to report.
@@ -34,8 +41,40 @@ fn look(browser: Browser) -> Access {
 fn app_location() -> &'static AppLocation {
     static LOCATION: std::sync::OnceLock<AppLocation> = std::sync::OnceLock::new();
     LOCATION.get_or_init(|| {
-        std::env::current_exe().map_or(AppLocation::Unbundled, |exe| app_location_of(&exe))
+        std::env::current_exe().map_or(AppLocation::Unbundled, |exe| {
+            app_location_of(&exe, read_only_mount)
+        })
     })
+}
+
+/// Whether `path` is on a read-only mount, as a mounted disk image is.
+#[cfg(unix)]
+fn read_only_mount(path: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt as _;
+    let Ok(path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    // SAFETY: `path` is NUL-terminated and `stat` is written by the call; it is
+    // read only when the call succeeded.
+    unsafe {
+        libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) == 0
+            && stat.assume_init().f_flag & libc::ST_RDONLY != 0
+    }
+}
+
+#[cfg(not(unix))]
+fn read_only_mount(_: &Path) -> bool {
+    false
+}
+
+/// A copy that must be moved to Applications before access can last: a
+/// translocated download, or one run from a disk image.
+fn must_move() -> bool {
+    matches!(
+        app_location(),
+        AppLocation::Translocated | AppLocation::DiskImage
+    )
 }
 
 /// The bundle to show in Finder and to reopen: none for a development build,
@@ -83,10 +122,9 @@ impl AccountsView {
             let choice = youtube::saved_choice()?;
             let access = choice.as_ref().map(|choice| look(choice.browser));
             let marker = resume_marker_path();
+            // Used now, or expired: either way it is done with.
             let resume = resume_due(&marker, std::time::SystemTime::now());
-            if resume.is_some() {
-                let _ = std::fs::remove_file(&marker);
-            }
+            let _ = std::fs::remove_file(&marker);
             anyhow::Ok((choice, access, resume))
         });
         cx.spawn(async move |this, cx| {
@@ -217,6 +255,12 @@ impl AccountsView {
                 let _ = this.update(cx, |this, cx| {
                     if let Some(dialog) = &mut this.youtube.dialog {
                         dialog.probed(browser, access, active, Instant::now());
+                        // Access given in this run: no reopen to come back from.
+                        if dialog.guide.as_ref().map(|guide| guide.step)
+                            == Some(AccessStep::Granted)
+                        {
+                            let _ = std::fs::remove_file(resume_marker_path());
+                        }
                     }
                     if this.youtube.choice.as_ref().map(|choice| choice.browser) == Some(browser) {
                         this.youtube.access = Some(access);
@@ -264,7 +308,15 @@ impl AccountsView {
     }
 
     /// Has yt-dlp read the chosen browser's session; connects it when signed in.
-    fn check_youtube(&mut self, choice: BrowserChoice, save: bool, cx: &mut Context<Self>) {
+    /// `anyway`: the person asked to try although the look found the folder
+    /// closed, so yt-dlp reads the browser without that look first.
+    fn check_youtube(
+        &mut self,
+        choice: BrowserChoice,
+        save: bool,
+        anyway: bool,
+        cx: &mut Context<Self>,
+    ) {
         let generation = self.youtube.generation;
         if save {
             if let Some(dialog) = &mut self.youtube.dialog {
@@ -276,7 +328,9 @@ impl AccountsView {
         }
         let task = crate::spawn_blocking_result(move || {
             // A browser folder macOS keeps from the app needs no yt-dlp to report.
-            youtube::ensure_readable(&choice, Reader::App)?;
+            if !anyway {
+                youtube::ensure_readable(&choice, Reader::App)?;
+            }
             let program = course2md::ytdlp::resolve_in(Some(&crate::environment::tool_path()))
                 .ok_or_else(|| {
                     anyhow::anyhow!(course2md::tr!(
@@ -285,7 +339,11 @@ impl AccountsView {
                 })?;
             // Only the check runs here: the choice is saved below, and only
             // while the dialog that asked for it is still open.
-            let session = youtube::check_session(&program, &choice, Reader::App)?;
+            let session = if anyway {
+                youtube::read_session(&program, &choice, Reader::App)?
+            } else {
+                youtube::check_session(&program, &choice, Reader::App)?
+            };
             anyhow::Ok((choice, session))
         });
         cx.spawn(async move |this, cx| {
@@ -310,6 +368,11 @@ impl AccountsView {
                     Ok((choice, Session::SignedIn)) => {
                         if save {
                             this.youtube.choice = Some(choice);
+                            // Connected: nothing for a later launch to resume.
+                            let _ = std::fs::remove_file(resume_marker_path());
+                            if let Some(dialog) = &mut this.youtube.dialog {
+                                dialog.guide = None;
+                            }
                         }
                         YoutubeStep::Connected
                     }
@@ -458,7 +521,7 @@ impl AccountsView {
                         .leading(Icon::from(symbols::refresh()))
                         .disabled(self.youtube.checking)
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.check_youtube(choice.clone(), false, cx)
+                            this.check_youtube(choice.clone(), false, false, cx)
                         })),
                 )
                 .item(
@@ -523,6 +586,10 @@ impl AccountsView {
             .as_ref()
             .is_some_and(|guide| guide.step != AccessStep::Granted);
         let mut body = v_flex().w_full().min_w_0().px(rem(24.)).gap(rem(16.));
+        // A window short for its text size (enlarged text, a small window): the
+        // stepper becomes one line, so the step's instruction keeps the room.
+        let compact = f32::from(window.viewport_size().height) / f32::from(window.rem_size())
+            < COMPACT_GUIDE_REMS;
         if connected {
             let label = dialog
                 .choice()
@@ -552,23 +619,23 @@ impl AccountsView {
                     ),
             );
         } else {
-            // While macOS keeps the folder closed, the guide comes first: one line
-            // of why, then where the person stands and the step's own actions, so
-            // they show without scrolling; the choice and what course2md does with
-            // the cookies follow.
+            // While macOS keeps the folder closed, the guide comes first: where
+            // the person stands, the current step's instruction and its actions,
+            // so they show before anything scrolls; why, the choice and what
+            // course2md does with the cookies follow.
             body = body.child(match (&guide, guiding) {
                 (Some(guide), true) => v_flex()
                     .w_full()
                     .min_w_0()
                     .gap(rem(16.))
+                    .child(self.access_guide(guide, compact, cx))
                     .child(supporting_info(
                         "youtube-access-why",
                         course2md::tr!(
                             "macOS 只允许有“完全磁盘访问权限”的应用读取 {} 的数据，course2md 需要这项权限才能读取其中的 YouTube 登录。",
                             guide.browser.name()
                         ),
-                    ))
-                    .child(self.access_guide(guide, cx)),
+                    )),
                 _ => supporting_info(
                     "youtube-explain",
                     course2md::tr!(
@@ -667,7 +734,7 @@ impl AccountsView {
                         ),
                     ));
                 }
-                Some(guide) => body = body.child(self.access_guide(guide, cx)),
+                Some(guide) => body = body.child(self.access_guide(guide, compact, cx)),
                 None => {}
             }
             // The check's result sits under the choice it is about, next to the action.
@@ -741,54 +808,33 @@ impl AccountsView {
                             if let Some(dialog) = &mut this.youtube.dialog {
                                 dialog.guide = None;
                             }
-                            this.check_youtube(choice, true, cx);
+                            this.check_youtube(choice, true, false, cx);
                         }
                     }
                 }))
         };
+        // The footer holds 取消 and one main action, so both always fit; the
+        // step's other actions sit with its instruction.
+        let settings = || {
+            material_button("youtube-open-privacy", ButtonVariant::Filled)
+                .icon(symbols::settings())
+                .child(course2md::tr!("打开系统设置"))
+                .on_click(cx.listener(|this, _, _, cx| this.open_access_settings(cx)))
+        };
         let primary = match guide.as_ref().map(|guide| guide.step) {
             _ if connected => None,
-            // A translocated copy cannot keep the access: moving it comes first.
-            Some(step)
-                if step != AccessStep::Granted && *app_location() == AppLocation::Translocated =>
-            {
-                Some(check())
-            }
-            Some(AccessStep::Blocked) => Some(
-                material_button("youtube-open-privacy", ButtonVariant::Filled)
-                    .icon(symbols::settings())
-                    .child(course2md::tr!("打开系统设置"))
-                    .on_click(cx.listener(|this, _, _, cx| this.open_access_settings(cx))),
-            ),
+            // A copy that must be moved first has no step to take here; the
+            // guide says so above anything else.
+            Some(step) if step != AccessStep::Granted && must_move() => None,
+            Some(AccessStep::Blocked | AccessStep::Waiting) => Some(settings()),
             Some(AccessStep::Restart) if app_bundle().is_some() => Some(
                 material_button("youtube-relaunch", ButtonVariant::Filled)
                     .icon(symbols::restart_alt())
                     .child(course2md::tr!("重新打开 course2md"))
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(AccountsEvent::Relaunch))),
             ),
-            // Waiting on System Settings: the step's one helper the app can take
-            // is the app in Finder, for a list that lacks it.
-            Some(AccessStep::Waiting) if app_bundle().is_some() => {
-                Some(reveal_button(ButtonVariant::Tonal, cx))
-            }
+            Some(AccessStep::Restart) => Some(settings()),
             _ => Some(check()),
-        };
-        // The step's second action sits with the main one, so both stay in view
-        // however far the guide's text runs (at 200% text, past the dialog's
-        // height); the rest of the step's helpers follow its text.
-        let translocated = *app_location() == AppLocation::Translocated;
-        let secondary = match guide.as_ref() {
-            _ if connected || translocated => None,
-            Some(guide) if guide.step == AccessStep::Blocked && guide.reopened => {
-                app_bundle().map(|_| reveal_button(ButtonVariant::Text, cx))
-            }
-            Some(guide) if matches!(guide.step, AccessStep::Waiting | AccessStep::Restart) => Some(
-                material_button("youtube-open-privacy-again", ButtonVariant::Text)
-                    .icon(symbols::settings())
-                    .child(course2md::tr!("打开系统设置"))
-                    .on_click(cx.listener(|this, _, _, cx| this.open_access_settings(cx))),
-            ),
-            _ => None,
         };
         MaterialDialog::new("youtube-dialog")
             .container(ColorRole::SURFACE)
@@ -796,7 +842,6 @@ impl AccountsView {
             .width(YOUTUBE_DIALOG_WIDTH)
             .content(body)
             .action(close)
-            .when_some(secondary, |dialog, secondary| dialog.action(secondary))
             .when_some(primary, |dialog, primary| dialog.action(primary))
             .dismiss_on_scrim(false)
             .modal(open)
@@ -812,21 +857,42 @@ impl AccountsView {
     /// The Full Disk Access guide: where the person stands in three steps, what to
     /// do now, and the actions that help with it. The dialog's main action takes
     /// the step forward; these are the step's own helpers.
-    fn access_guide(&self, guide: &AccessGuide, cx: &mut Context<Self>) -> Div {
+    fn access_guide(&self, guide: &AccessGuide, compact: bool, cx: &mut Context<Self>) -> Div {
         let name = guide.browser.name();
         let bundle = app_bundle().is_some();
-        let translocated = *app_location() == AppLocation::Translocated;
+        let translocated = must_move();
         let choice = self.youtube.dialog.as_ref().and_then(YoutubeDialog::choice);
-        let stepper = Stepper::new(
-            "youtube-access-steps",
-            course2md::tr!("允许 course2md 读取浏览器数据的步骤"),
-        )
-        .steps([
+        let steps = [
             course2md::tr!("系统设置"),
             course2md::tr!("允许 course2md"),
             course2md::tr!("重新打开"),
-        ])
-        .current(guide.position());
+        ];
+        let stepper = if compact {
+            // One line: the step's number and name, in the label role.
+            steps
+                .get(guide.position())
+                .map(|step| {
+                    TileScale::Regular
+                        .label(
+                            "youtube-access-steps",
+                            format!(
+                                "{} · {}",
+                                course2md::tr!("第 {} 步，共 {} 步", guide.position() + 1, 3),
+                                step
+                            ),
+                        )
+                        .into_any_element()
+                })
+                .unwrap_or_else(|| div().into_any_element())
+        } else {
+            Stepper::new(
+                "youtube-access-steps",
+                course2md::tr!("允许 course2md 读取浏览器数据的步骤"),
+            )
+            .steps(steps)
+            .current(guide.position())
+            .into_any_element()
+        };
         let text = |id: &'static str, text: String| {
             TileScale::Regular
                 .support(id, text)
@@ -865,10 +931,8 @@ impl AccountsView {
                             .icon(symbols::login())
                             .child(course2md::tr!("仍然尝试连接"))
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                if let Some(dialog) = &mut this.youtube.dialog {
-                                    dialog.guide = None;
-                                }
-                                this.check_youtube(choice.clone(), true, cx);
+                                // The guide keeps its step: a refusal comes back to it.
+                                this.check_youtube(choice.clone(), true, true, cx);
                             })),
                     )
                 })
@@ -882,9 +946,15 @@ impl AccountsView {
                 .child(notice_banner(
                     "youtube-access-translocated",
                     NoticeKind::Warning,
-                    course2md::tr!(
-                        "course2md 正从一份临时副本运行（macOS 对刚下载、尚未移动的应用会这样做），给它的权限在下次打开时不会保留。请先退出 course2md，在访达中把它从“下载”等位置拖到“应用程序”文件夹，再从“应用程序”打开，然后回到这里。"
-                    ),
+                    if *app_location() == AppLocation::DiskImage {
+                        course2md::tr!(
+                            "course2md 正从磁盘映像运行，还没有安装。请先退出 course2md，在访达中把它拖到“应用程序”文件夹，再从“应用程序”打开，然后回到这里。"
+                        )
+                    } else {
+                        course2md::tr!(
+                            "course2md 正从一份临时副本运行（macOS 对刚下载、尚未移动的应用会这样做），给它的权限在下次打开时不会保留。请先退出 course2md，在访达中把它从“下载”等位置拖到“应用程序”文件夹，再从“应用程序”打开，然后回到这里。"
+                        )
+                    },
                 ))
                 .child(helpers(false, false)),
             // Reopened for the access and still closed: the switch is off, or on
@@ -897,7 +967,7 @@ impl AccountsView {
                         name
                     ),
                 ))
-                .child(helpers(false, false)),
+                .child(helpers(false, true)),
             AccessStep::Blocked => content
                 .child(text(
                     "youtube-access-step",
@@ -923,7 +993,7 @@ impl AccountsView {
                     None,
                     cx,
                 ))
-                .child(helpers(false, false)),
+                .child(helpers(false, true)),
             AccessStep::Restart => content
                 .child(text(
                     "youtube-access-step",
@@ -938,7 +1008,7 @@ impl AccountsView {
                     }
                     .into(),
                 ))
-                .child(helpers(false, true)),
+                .child(helpers(bundle, true)),
             AccessStep::Granted => content.children(crate::ui::async_status(
                 "youtube-access-granted",
                 &crate::ui::AsyncStatus::Success(
@@ -969,6 +1039,11 @@ impl crate::Desktop {
     ) {
         match origin {
             GuideOrigin::Settings => {
+                // The person was in Settings when they left; first use, shown at
+                // launch while unfinished, steps aside for this launch only (it is
+                // not marked done, so it comes back next time) rather than cover
+                // the page they return to.
+                self.onboarding.active = false;
                 self.open_settings(window, cx);
                 self.select_settings_tab(crate::settings_ui::SettingsTab::Services, window, cx);
             }
@@ -1041,14 +1116,6 @@ fn relaunch_when_exited(bundle: &std::path::Path) -> std::io::Result<()> {
         .map(drop)
 }
 
-/// Shows the app's bundle in Finder, to drag into the Full Disk Access list.
-fn reveal_button(variant: ButtonVariant, cx: &mut Context<AccountsView>) -> MaterialButton {
-    material_button("youtube-reveal-app", variant)
-        .icon(symbols::folder_open())
-        .child(course2md::tr!("在访达中显示 course2md"))
-        .on_click(cx.listener(|this, _, _, cx| this.reveal_app(cx)))
-}
-
 /// What the person may see from their system when this browser is read. Safari
 /// needs Full Disk Access, which the guide covers when its folder is closed.
 fn browser_note(browser: Browser) -> Option<&'static str> {
@@ -1071,7 +1138,7 @@ impl AccountsView {
         // A real check of the first installed browser, for a fixture home.
         if state == "check" {
             if let Some(choice) = self.youtube.dialog.as_ref().and_then(|d| d.choice()) {
-                self.check_youtube(choice, true, cx);
+                self.check_youtube(choice, true, false, cx);
             }
             return;
         }
