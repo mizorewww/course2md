@@ -555,7 +555,12 @@ fn online_metadata(
 /// The cache file for `key`: the same cover or track reuses one file instead
 /// of leaving a new one behind on every read.
 fn cache_file(kind: &str, key: &str, extension: &str) -> Result<PathBuf> {
-    let dir = c2m_config::config::cache_dir().join(kind);
+    cache_file_in(&c2m_config::config::cache_dir(), kind, key, extension)
+}
+
+/// [`cache_file`] under `root` (the app's cache directory, or a test's own).
+fn cache_file_in(root: &Path, kind: &str, key: &str, extension: &str) -> Result<PathBuf> {
+    let dir = root.join(kind);
     std::fs::create_dir_all(&dir)?;
     Ok(dir.join(cache_name(key, extension)))
 }
@@ -871,6 +876,20 @@ pub fn read_subtitle(
     c2m_source::subtitle::CachedSubtitle,
     c2m_source::subtitle::SubtitleReadError,
 > {
+    read_subtitle_in(&c2m_config::config::cache_dir(), source, track, cancel)
+}
+
+/// [`read_subtitle`] caching under `cache_root` (the app's cache directory; a
+/// test's own temporary one, so no test writes to the person's home).
+fn read_subtitle_in(
+    cache_root: &Path,
+    source: &Source,
+    track: &c2m_source::subtitle::SubtitleTrack,
+    cancel: Arc<AtomicBool>,
+) -> std::result::Result<
+    c2m_source::subtitle::CachedSubtitle,
+    c2m_source::subtitle::SubtitleReadError,
+> {
     use c2m_source::subtitle::{CachedSubtitle, SubtitleOrigin, SubtitleReadError};
     let read = || -> Result<CachedSubtitle> {
         check_cancel(&cancel)?;
@@ -878,7 +897,7 @@ pub fn read_subtitle(
             !source.identity.is_empty(),
             c2m_i18n::tr!("请先重新读取视频，确认字幕对应的来源")
         );
-        let cache = c2m_config::config::cache_dir().join("subtitles");
+        let cache = cache_root.join("subtitles");
         std::fs::create_dir_all(&cache)?;
         let temp = tempfile::Builder::new()
             .prefix("read-")
@@ -1000,7 +1019,8 @@ pub fn read_subtitle(
             }
             .into());
         }
-        let target = cache_file(
+        let target = cache_file_in(
+            cache_root,
             "subtitles",
             &format!("{}\n{}", source.identity, track.id),
             "srt",
@@ -1048,6 +1068,18 @@ pub fn read_default_subtitle(
     c2m_source::subtitle::CachedSubtitle,
     c2m_source::subtitle::SubtitleReadError,
 > {
+    read_default_subtitle_in(&c2m_config::config::cache_dir(), source, track, cancel)
+}
+
+fn read_default_subtitle_in(
+    cache_root: &Path,
+    source: &Source,
+    track: &c2m_source::subtitle::SubtitleTrack,
+    cancel: Arc<AtomicBool>,
+) -> std::result::Result<
+    c2m_source::subtitle::CachedSubtitle,
+    c2m_source::subtitle::SubtitleReadError,
+> {
     use c2m_source::subtitle::SubtitleReadError;
     let mut first_error = None;
     for candidate in c2m_source::subtitle::fallback_tracks(
@@ -1059,7 +1091,7 @@ pub fn read_default_subtitle(
         if first_error.is_some() {
             eprintln!("trying the next subtitle track: {}", candidate.id);
         }
-        match read_subtitle(source, candidate, cancel.clone()) {
+        match read_subtitle_in(cache_root, source, candidate, cancel.clone()) {
             Ok(subtitle) => return Ok(subtitle),
             Err(SubtitleReadError::Cancelled) => return Err(SubtitleReadError::Cancelled),
             Err(error) => {
@@ -1202,6 +1234,8 @@ mod tests {
     #[test]
     fn a_default_subtitle_that_cannot_be_read_falls_back_to_the_next() {
         let dir = tempfile::tempdir().unwrap();
+        // The app's cache, as a temporary directory: no test writes to the home.
+        let cache = tempfile::tempdir().unwrap();
         let broken = dir.path().join("lecture.zh.srt");
         let readable = dir.path().join("lecture.en.srt");
         std::fs::write(&broken, "not subtitles").unwrap();
@@ -1221,16 +1255,16 @@ mod tests {
         };
         let cancel = || Arc::new(AtomicBool::new(false));
         assert!(matches!(
-            read_subtitle(&source, &tracks[0], cancel()),
+            read_subtitle_in(cache.path(), &source, &tracks[0], cancel()),
             Err(c2m_source::subtitle::SubtitleReadError::NoReadableText { .. })
         ));
-        let cached = read_default_subtitle(&source, &tracks[0], cancel()).unwrap();
+        let cached = read_default_subtitle_in(cache.path(), &source, &tracks[0], cancel()).unwrap();
         assert_eq!(cached.track_id, tracks[1].id);
         assert_eq!(cached.events[0].text, "Hello");
         std::fs::remove_file(cached.path).unwrap();
         // A chosen track that can be read is the one read.
         assert!(matches!(
-            read_default_subtitle(&source, &tracks[1], cancel()).map(|cached| {
+            read_default_subtitle_in(cache.path(), &source, &tracks[1], cancel()).map(|cached| {
                 let _ = std::fs::remove_file(&cached.path);
                 cached.track_id
             }),
@@ -1245,7 +1279,7 @@ mod tests {
             ..source
         };
         assert!(matches!(
-            read_default_subtitle(&lone, &tracks[0], cancel()),
+            read_default_subtitle_in(cache.path(), &lone, &tracks[0], cancel()),
             Err(c2m_source::subtitle::SubtitleReadError::NoReadableText { .. })
         ));
     }
@@ -1253,6 +1287,7 @@ mod tests {
     #[test]
     fn arbitrary_sidecar_is_cached_without_mutating_the_video_or_old_selection() {
         let dir = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
         let path = dir.path().join("different-name.FR.VTT");
         std::fs::write(
             &path,
@@ -1265,7 +1300,8 @@ mod tests {
             title: "Lecture".into(),
             ..Source::default()
         };
-        let cached = read_subtitle(
+        let cached = read_subtitle_in(
+            cache.path(),
             &source,
             &c2m_source::subtitle::file_track(path.clone(), None),
             Arc::new(AtomicBool::new(false)),
@@ -1287,7 +1323,8 @@ mod tests {
         assert_eq!(source.input, "original.mp4");
         std::fs::write(&path, "invalid subtitles").unwrap();
         assert!(matches!(
-            read_subtitle(
+            read_subtitle_in(
+                cache.path(),
                 &source,
                 &c2m_source::subtitle::file_track(path, None),
                 Arc::new(AtomicBool::new(false))

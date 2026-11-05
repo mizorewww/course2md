@@ -70,6 +70,11 @@ fn spawn_task(root: &Path, request: &Request, configure: impl FnOnce(&mut Comman
         .current_dir(root)
         .env("XDG_CONFIG_HOME", root.join("config"))
         .env("XDG_CACHE_HOME", root.join("cache"))
+        // Nothing the task or a tool it starts (the python3 wrapper below) keeps
+        // per user may land in the person's home: Apple's python3 caches bytecode
+        // under ~/Library/Caches.
+        .env("HOME", root)
+        .env("PYTHONDONTWRITEBYTECODE", "1")
         .env("COURSE2MD_ASR_API_KEY", "environment-key-must-not-be-used")
         .env_remove("RUST_LOG")
         .stdin(Stdio::piped())
@@ -836,6 +841,7 @@ fn summarize_command_adds_a_summary_as_a_new_version() {
             .env("COURSE2MD_LANG", "zh-Hans")
             .env("XDG_CONFIG_HOME", root.path().join("cli-config"))
             .env("XDG_CACHE_HOME", root.path().join("cache"))
+            .env("HOME", root.path())
             .env_remove("RUST_LOG")
             .args(["summarize", "--quiet", "--out"])
             .arg(&exported)

@@ -408,14 +408,19 @@ mod tests {
             eprintln!("skip: python3 not found");
             return;
         };
-        let dir = std::env::temp_dir().join(format!("c2m-npu-py-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let script = dir.join("npu_worker.py");
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("npu_worker.py");
         std::fs::write(&script, NPU_WORKER_SCRIPT).unwrap();
+        // Compiled in memory, with no bytecode written anywhere: Apple's
+        // python3 otherwise caches it (and its own modules) under
+        // ~/Library/Caches, and no test may write to the home.
         let out = std::process::Command::new(py)
-            .arg("-m")
-            .arg("py_compile")
+            .arg("-B")
+            .arg("-c")
+            .arg("import sys; compile(open(sys.argv[1]).read(), sys.argv[1], 'exec')")
             .arg(&script)
+            .env("PYTHONDONTWRITEBYTECODE", "1")
+            .env("PYTHONPYCACHEPREFIX", dir.path())
             .output()
             .expect("spawn python3");
         assert!(
@@ -423,7 +428,6 @@ mod tests {
             "NPU worker 脚本存在语法错误：{}",
             String::from_utf8_lossy(&out.stderr)
         );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
