@@ -239,16 +239,25 @@ fn note_name(note_dir: &Path) -> Result<String> {
 /// The real folder of a note reached through a link: it is replaced beside its
 /// target, on the target's volume, so the link keeps pointing at the note.
 fn resolve_note(note_dir: &Path) -> Result<PathBuf> {
-    if !std::fs::symlink_metadata(note_dir).is_ok_and(|m| m.file_type().is_symlink()) {
-        return Ok(note_dir.to_path_buf());
+    // Read, not followed: while the note is moved aside its target is missing,
+    // and recovery must still find where it lives.
+    let mut path = note_dir.to_path_buf();
+    for _ in 0..8 {
+        if !std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
+            return Ok(path);
+        }
+        let target = std::fs::read_link(&path)?;
+        path = if target.is_absolute() {
+            target
+        } else {
+            note_parent(&path)?.join(target)
+        };
     }
-    std::fs::canonicalize(note_dir).with_context(|| {
-        tr!(
-            "笔记文件夹是一个无法打开的链接：{} / The note folder is a link that cannot be followed: {}",
-            note_dir.display(),
-            note_dir.display()
-        )
-    })
+    anyhow::bail!(tr!(
+        "笔记文件夹是一个无法打开的链接：{} / The note folder is a link that cannot be followed: {}",
+        note_dir.display(),
+        note_dir.display()
+    ))
 }
 
 /// Held by a task from before its first paid request until it ends: a second
@@ -257,11 +266,24 @@ fn resolve_note(note_dir: &Path) -> Result<PathBuf> {
 pub fn claim_note(note_dir: &Path) -> Result<crate::runtime::FileLock> {
     let note_dir = resolve_note(note_dir)?;
     let locks = library_dir(&note_dir)?.join("locks");
-    std::fs::create_dir_all(&locks)?;
-    crate::runtime::lock_file(&locks.join(format!("{}.task.lock", note_name(&note_dir)?)))
-        .context(tr!(
-            "另一个任务正在处理这份笔记，请等它结束后再试 / Another task is working on this note; try again when it ends"
-        ))
+    let path = locks.join(format!("{}.task.lock", note_name(&note_dir)?));
+    let opened =
+        std::fs::create_dir_all(&locks).and_then(|()| crate::runtime::try_lock_file(&path));
+    match opened {
+        Ok(Some(lock)) => Ok(lock),
+        Ok(None) => Err(crate::outcome::NoteBusy(
+            tr!(
+                "另一个任务正在处理这份笔记，请等它结束后再试 / Another task is working on this note; try again when it ends"
+            )
+            .to_string(),
+        )
+        .into()),
+        Err(error) => Err(anyhow::Error::new(error).context(tr!(
+            "无法打开这份笔记的任务锁：{} / Could not open the note's task lock: {}",
+            path.display(),
+            path.display()
+        ))),
+    }
 }
 
 /// Completes the interrupted replacements of every note whose swap folder is in
@@ -616,7 +638,7 @@ pub fn publish(
             if !simulated_crash(&error) {
                 let _ = remove_tree(&staging);
             }
-            return Err(error);
+            return Err(disk_full(error));
         }
     };
     swap_in(note, &staging, &target.task_id)?;
@@ -667,19 +689,28 @@ pub fn refuse_worse(saved: &Outcomes, new: &Outcomes) -> Result<()> {
     let Some((_, first, _)) = worse.first() else {
         return Ok(());
     };
+    let separator = match crate::i18n::lang() {
+        crate::i18n::Lang::En => ", ",
+        _ => "、",
+    };
     let names = worse
         .iter()
         .map(|(_, _, name)| name.to_string())
         .collect::<Vec<_>>()
-        .join(", ");
-    Err(crate::outcome::Failure {
-        kind: first.kind.unwrap_or(FailureKind::Local),
-        ..crate::outcome::Failure::local(tr!(
+        .join(separator);
+    // Why the first of them came out worse, as its outcome recorded it.
+    let message = match first.message.as_deref().filter(|m| !m.trim().is_empty()) {
+        Some(cause) => tr!(
+            "这次的结果在这些部分不如现有笔记，现有笔记已保留：{}（{}）",
+            names,
+            cause
+        ),
+        None => tr!(
             "这次的结果在这些部分不如现有笔记，现有笔记已保留：{}",
             names
-        ))
-    }
-    .into())
+        ),
+    };
+    Err(crate::outcome::NoteKept(message.to_string()).into())
 }
 
 /// Replaces `note` with the finished `staging`, which is on the same volume.
@@ -696,9 +727,22 @@ fn swap_in(note: &Path, staging: &Path, label: &str) -> Result<()> {
         let _ = std::fs::remove_dir(&swap);
         return Ok(());
     }
-    let old = swap.join(format!("old-{label}"));
-    remove_tree(&old)?;
+    // A copy an earlier replacement could not delete may hold this name.
+    let name = (1..)
+        .map(|n| match n {
+            1 => format!("old-{label}"),
+            n => format!("old-{label}-{n}"),
+        })
+        .find(|name| swap.join(name).symlink_metadata().is_err())
+        .expect("an unused name");
+    let old = swap.join(&name);
+    // Names the copy that is the note while it is moved aside, before it is: only
+    // that copy is ever put back, never one an earlier replacement left behind.
+    let live = swap.join(LIVE_MARKER);
+    crate::fsio::atomic_write(&live, name.as_bytes()).map_err(disk_full)?;
+    sync_dir(&swap)?;
     if let Err(error) = std::fs::rename(note, &old) {
+        let _ = std::fs::remove_file(&live);
         let _ = remove_tree(staging);
         return Err(replace_error(error));
     }
@@ -711,6 +755,7 @@ fn swap_in(note: &Path, staging: &Path, label: &str) -> Result<()> {
         if !simulated_crash(&error) {
             // Put the old note back; recovery does it later if this fails too.
             if std::fs::rename(&old, note).is_ok() {
+                let _ = std::fs::remove_file(&live);
                 let _ = remove_tree(staging);
             }
         }
@@ -718,10 +763,34 @@ fn swap_in(note: &Path, staging: &Path, label: &str) -> Result<()> {
     }
     sync_dir(&swap)?;
     sync_dir(&parent)?;
+    fail_point(FailPoint::AfterRenames)?;
+    std::fs::remove_file(&live)?;
+    sync_dir(&swap)?;
     fail_point(FailPoint::BeforeDeletingOld)?;
     discard_old(note, &old);
     let _ = std::fs::remove_dir(&swap);
     Ok(())
+}
+
+/// The file in a note's swap folder that names the copy which is the note while
+/// it is moved aside.
+const LIVE_MARKER: &str = "live";
+
+/// A full disk while the new note is written, in the words of every other step:
+/// the note is unchanged.
+fn disk_full(error: anyhow::Error) -> anyhow::Error {
+    let full = error.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::StorageFull)
+    });
+    if full {
+        error.context(tr!(
+            "磁盘空间不足，无法保存新笔记；原笔记未改动 / Not enough disk space to save the new note; it is unchanged"
+        ))
+    } else {
+        error
+    }
 }
 
 /// Why the note could not be moved aside, in words that say what to do. The note
@@ -1056,25 +1125,42 @@ fn recover_locked(note: &Path) -> Result<()> {
     if !swap.is_dir() {
         return Ok(());
     }
+    let marker = swap.join(LIVE_MARKER);
+    // The copy that was the note when a replacement stopped, if one did between
+    // its two renames. Nothing is inferred from times: a copy an earlier
+    // replacement could not delete is never put back.
+    let live = std::fs::read_to_string(&marker)
+        .ok()
+        .map(|name| name.trim().to_owned())
+        .filter(|name| name.starts_with("old-") && !name.contains(['/', '\\']));
     let mut olds = Vec::new();
     for entry in std::fs::read_dir(&swap)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
+        if name == LIVE_MARKER {
+            continue;
+        }
         if name.starts_with("old-") {
-            let modified = entry.metadata().and_then(|m| m.modified()).ok();
-            olds.push((modified, entry.path()));
-        } else {
+            olds.push((name, entry.path()));
+        } else if entry.file_type()?.is_dir() {
             remove_tree(&entry.path())?;
+        } else {
+            // The temporary file of a marker a crash stopped writing.
+            std::fs::remove_file(entry.path())?;
         }
     }
-    // Normally one; the newest is the note that was in place last.
-    olds.sort();
     if !note.exists()
-        && let Some((_, newest)) = olds.pop()
+        && let Some(live) = &live
+        && let Some(index) = olds.iter().position(|(name, _)| name == live)
     {
-        std::fs::rename(&newest, note)?;
+        let (_, path) = olds.remove(index);
+        std::fs::rename(&path, note)?;
         sync_dir(&swap)?;
         sync_dir(&note_parent(note)?)?;
+    }
+    if marker.exists() {
+        std::fs::remove_file(&marker)?;
+        sync_dir(&swap)?;
     }
     for (_, old) in olds {
         discard_old(note, &old);
@@ -1266,7 +1352,7 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
         if !simulated_crash(&error) {
             let _ = remove_tree(&staging);
         }
-        return Err(error);
+        return Err(disk_full(error));
     }
     swap_in(note, &staging, "flatten")?;
     Ok(Some(manifest))
@@ -1404,7 +1490,7 @@ pub fn write_export(
             kept_edit = Some(kept);
         }
     }
-    atomic_write_shared(&path, bytes)?;
+    atomic_write_shared(&path, bytes).map_err(disk_full)?;
     sync_dir(&note_dir.join("exports"))?;
     manifest.assets.retain(|asset| asset.path != relative);
     manifest.assets.push(Asset {
@@ -1445,6 +1531,7 @@ pub fn sync_dir(path: &Path) -> Result<()> {
 enum FailPoint {
     Staged,
     BetweenRenames,
+    AfterRenames,
     BeforeDeletingOld,
 }
 

@@ -1677,9 +1677,10 @@ fn a_regenerate_that_loses_paid_work_leaves_the_note() {
     assert!(!output.status.success(), "{observed:#?}");
     assert!(observed.iter().any(|event| {
         event["type"] == "error"
-            && event["message"]
-                .as_str()
-                .is_some_and(|m| m.contains("不如现有笔记") && m.contains("摘要"))
+            && event["code"] == "note_kept"
+            && event["message"].as_str().is_some_and(|m| {
+                m.contains("不如现有笔记") && m.contains("摘要") && m.contains("（")
+            })
     }));
     let after: Vec<_> = ["manifest.json", "document.json", "exports/course.zip"]
         .iter()

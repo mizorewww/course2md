@@ -601,6 +601,7 @@ fn an_interrupted_flatten_is_finished_by_running_it_again() {
     for point in [
         FailPoint::Staged,
         FailPoint::BetweenRenames,
+        FailPoint::AfterRenames,
         FailPoint::BeforeDeletingOld,
     ] {
         let legacy = Legacy::populated();
@@ -613,7 +614,7 @@ fn an_interrupted_flatten_is_finished_by_running_it_again() {
             // The older versions are still there until the flat note is in place.
             FailPoint::Staged => assert_eq!(snapshot(course), before),
             FailPoint::BetweenRenames => assert!(!course.exists()),
-            FailPoint::BeforeDeletingOld => {
+            FailPoint::AfterRenames | FailPoint::BeforeDeletingOld => {
                 assert!(!is_legacy(course));
                 let old = swap_dir(course).unwrap().join("old-flatten");
                 assert!(old.join("versions/v1").is_dir() && old.join("versions/v3").is_dir());
@@ -780,10 +781,8 @@ fn a_result_worse_in_a_part_it_tried_never_replaces_the_note() {
             ..summary
         };
         let error = publish_with(&library, "worse", outcomes(partial, screenshots)).unwrap_err();
-        let failure = error.downcast_ref::<crate::outcome::Failure>().unwrap();
-        assert!(
-            failure.message.contains("现有笔记已保留") || failure.message.contains("saved note")
-        );
+        let failure = error.downcast_ref::<crate::outcome::NoteKept>().unwrap();
+        assert!(failure.0.contains("现有笔记已保留") || failure.0.contains("saved note"));
         assert_eq!(snapshot(&library.note), before);
     }
     // A part the new task did not ask for is a choice, not a loss.
@@ -947,5 +946,241 @@ fn a_folder_of_notes_recovers_each_interrupted_replacement() {
     );
     assert!(!library.note.exists());
     assert!(recover_folder(&library.library()).is_empty());
+    assert_eq!(snapshot(&library.note), before);
+}
+
+/// The reviewer's repro: a file of note A cannot be deleted, so replacing A with
+/// B leaves a half-deleted copy of A behind, newer than the copy of B. A crash
+/// between the renames of the next replacement must put B back, never A.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_crash_puts_back_the_note_that_was_in_place_not_a_stuck_older_copy() {
+    let flags = |flag: &str, path: &Path| {
+        assert!(
+            std::process::Command::new("chflags")
+                .arg(flag)
+                .arg(path)
+                .status()
+                .unwrap()
+                .success()
+        );
+    };
+    let library = Library::new();
+    library
+        .publish(&library.target("note-a"), "Body A", "frames/a.jpg")
+        .unwrap();
+    let immutable = library.note.join("frames/a.jpg");
+    flags("uchg", &immutable);
+    library
+        .publish(&library.target("note-b"), "Body B", "")
+        .unwrap();
+    let swap = swap_dir(&library.note).unwrap();
+    let stuck = swap.join("old-note-b");
+    assert!(stuck.join("frames/a.jpg").is_file(), "A's copy is stuck");
+    std::fs::write(library.note.join("mine.txt"), b"added to B").unwrap();
+    let before = snapshot(&library.note);
+    // Make the stuck copy the newest thing in the swap folder, as deleting the
+    // rest of it does.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::create_dir(stuck.join("touched")).unwrap();
+    std::fs::remove_dir(stuck.join("touched")).unwrap();
+    crash_at(FailPoint::BetweenRenames);
+    let error = library
+        .publish(&library.target("note-c"), "Body C", "")
+        .unwrap_err();
+    assert!(simulated_crash(&error));
+    assert!(!library.note.exists());
+    assert!(recover(&library.note).unwrap());
+    assert_eq!(
+        snapshot(&library.note),
+        before,
+        "B and the added file are back"
+    );
+    assert_eq!(
+        note_manifest(&library.note).unwrap().unwrap().task_id,
+        "note-b"
+    );
+    // The stuck copy is still a copy, never the note.
+    assert!(stuck.join("frames/a.jpg").is_file());
+    flags("nouchg", &stuck.join("frames/a.jpg"));
+    prepare_note(&library.note).unwrap();
+    assert!(!swap.exists());
+}
+
+/// Without the immutable flag: a leftover copy is never put back in place of the
+/// note, whatever its time, and a crash after the renames keeps the new note.
+#[test]
+fn only_the_copy_named_live_is_ever_put_back() {
+    let library = Library::new();
+    library
+        .publish(&library.target("note-b"), "Body B", "")
+        .unwrap();
+    let before = snapshot(&library.note);
+    let swap = swap_dir(&library.note).unwrap();
+    crash_at(FailPoint::BetweenRenames);
+    assert!(
+        library
+            .publish(&library.target("note-c"), "Body C", "")
+            .is_err()
+    );
+    // A copy an earlier replacement left, newer than the copy of B.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::create_dir_all(swap.join("old-earlier/frames")).unwrap();
+    std::fs::write(swap.join("old-earlier/manifest.json"), b"{}").unwrap();
+    assert!(recover(&library.note).unwrap());
+    assert_eq!(snapshot(&library.note), before);
+    assert!(!swap.exists());
+    // Missing note, no record of a replacement: nothing is put back.
+    std::fs::create_dir_all(swap.join("old-stray")).unwrap();
+    std::fs::write(swap.join("old-stray/manifest.json"), b"{}").unwrap();
+    let moved = library.library().join("moved-away");
+    std::fs::rename(&library.note, &moved).unwrap();
+    assert!(recover(&library.note).unwrap());
+    assert!(!library.note.exists());
+    std::fs::rename(&moved, &library.note).unwrap();
+    // A crash after both renames keeps the new note and clears the record.
+    crash_at(FailPoint::AfterRenames);
+    assert!(
+        library
+            .publish(&library.target("note-d"), "Body D", "")
+            .is_err()
+    );
+    assert!(recover(&library.note).unwrap());
+    assert_eq!(
+        note_manifest(&library.note).unwrap().unwrap().task_id,
+        "note-d"
+    );
+    assert!(!swap.exists());
+}
+
+/// A link whose target is moved aside mid-replacement still leads recovery,
+/// tasks and publishing to where the note lives; relative links too.
+#[cfg(unix)]
+#[test]
+fn a_linked_note_is_recovered_while_its_target_is_moved_aside() {
+    let library = Library::new();
+    let real = library.library().join("store/real-note");
+    std::fs::create_dir_all(real.parent().unwrap()).unwrap();
+    library
+        .publish(
+            &Target {
+                course_dir: real.clone(),
+                ..library.target("first")
+            },
+            "First",
+            "",
+        )
+        .unwrap();
+    std::os::unix::fs::symlink("store/real-note", &library.note).unwrap();
+    let before = snapshot(&real);
+    crash_at(FailPoint::BetweenRenames);
+    assert!(
+        library
+            .publish(&library.target("second"), "Second", "")
+            .is_err()
+    );
+    assert!(!real.exists(), "the link points nowhere now");
+    assert!(recover(&library.note).unwrap());
+    assert_eq!(snapshot(&real), before);
+    // Again, recovered by the next task's preparation instead.
+    crash_at(FailPoint::BetweenRenames);
+    assert!(
+        library
+            .publish(&library.target("second"), "Second", "")
+            .is_err()
+    );
+    prepare_note(&library.note).unwrap();
+    assert_eq!(snapshot(&real), before);
+    library
+        .publish(&library.target("second"), "Second", "")
+        .unwrap();
+    assert_eq!(note_manifest(&real).unwrap().unwrap().task_id, "second");
+    assert!(
+        std::fs::symlink_metadata(&library.note)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+}
+
+#[test]
+fn a_full_disk_while_writing_says_so() {
+    let error = disk_full(
+        anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::StorageFull))
+            .context("writing course.md"),
+    );
+    let text = format!("{error:#}");
+    assert!(
+        text.contains("磁盘空间不足") || text.contains("disk space"),
+        "{text}"
+    );
+    let other = disk_full(anyhow::anyhow!("other"));
+    assert_eq!(format!("{other:#}"), "other");
+}
+
+#[test]
+fn a_busy_note_and_a_broken_lock_are_told_apart() {
+    let library = Library::new();
+    let held = claim_note(&library.note).unwrap();
+    let Err(busy) = claim_note(&library.note) else {
+        panic!("a held note was claimed again")
+    };
+    assert!(busy.is::<crate::outcome::NoteBusy>(), "{busy:#}");
+    let text = format!("{busy:#}");
+    assert!(!text.contains("os error"), "{text}");
+    drop(held);
+    // The lock file's folder is a file: not another task, an error that says what.
+    let locks = library_dir(&library.note).unwrap().join("locks");
+    std::fs::remove_dir_all(&locks).unwrap();
+    std::fs::write(&locks, b"not a folder").unwrap();
+    let Err(broken) = claim_note(&library.note) else {
+        panic!("a broken lock was claimed")
+    };
+    assert!(!broken.is::<crate::outcome::NoteBusy>(), "{broken:#}");
+}
+
+#[test]
+fn a_refusal_names_the_parts_in_the_language_and_why() {
+    let saved = Outcomes {
+        transcript: Outcome::succeeded(),
+        screenshots: Outcome::succeeded(),
+        summary: Outcome::succeeded(),
+        ..Default::default()
+    };
+    let new = Outcomes {
+        transcript: Outcome::succeeded(),
+        screenshots: Outcome::failed("no frames"),
+        summary: Outcome::failed("AI service unreachable"),
+        ..Default::default()
+    };
+    let error = refuse_worse(&saved, &new).unwrap_err();
+    let kept = error.downcast_ref::<crate::outcome::NoteKept>().unwrap();
+    let separator = match crate::i18n::lang() {
+        crate::i18n::Lang::En => ", ",
+        _ => "、",
+    };
+    assert!(
+        kept.0
+            .contains(&format!("{}{separator}{}", tr!("截图"), tr!("摘要"))),
+        "{}",
+        kept.0
+    );
+    assert!(kept.0.contains("no frames"), "{}", kept.0);
+}
+
+/// A crash while the marker itself is written leaves its temporary file in the
+/// swap folder; recovery clears it with the unfinished new note.
+#[test]
+fn a_crash_while_naming_the_live_copy_is_recovered() {
+    let library = Library::new();
+    library
+        .publish(&library.target("task-1"), "Body", "")
+        .unwrap();
+    let before = snapshot(&library.note);
+    let swap = swap_dir(&library.note).unwrap();
+    std::fs::create_dir_all(swap.join("new-task-2")).unwrap();
+    std::fs::write(swap.join(".tmpAbC123"), b"old-task-2").unwrap();
+    assert!(recover(&library.note).unwrap());
+    assert!(!swap.exists());
     assert_eq!(snapshot(&library.note), before);
 }
