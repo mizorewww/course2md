@@ -821,11 +821,22 @@ impl State {
         if self.reconciling {
             return None;
         }
+        // A worker from an earlier session that still runs holds its note: a task
+        // for the same note waits for it instead of stopping at its claim.
+        let note_held = |task: &TaskRecord| {
+            self.tasks.iter().any(|other| {
+                other.held
+                    && other.id != task.id
+                    && other.plan.library_id == task.plan.library_id
+                    && other.plan.source_id == task.plan.source_id
+            })
+        };
         self.tasks.iter().find(|t| {
             t.state == TaskState::Queued
                 && t.intent == Intent::Run
                 && t.handled_by.is_none()
                 && !t.held
+                && !note_held(t)
         })
     }
 
@@ -4385,6 +4396,35 @@ mod tests {
         assert_eq!(ws.register_prepared_library(&prepared).unwrap(), id);
     }
 
+    /// A worker from an earlier session still holds its note: another task for the
+    /// same note waits rather than start and stop at the note's claim.
+    #[test]
+    fn a_task_for_a_note_an_earlier_worker_holds_waits_for_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        ws.state.reconciling = false;
+        let library = ws.state.default_library.clone();
+        let (first, _) = ws.state.enqueue(plan(&library), None).unwrap();
+        let mut second = ws.state.task(&first).unwrap().clone();
+        second.id = "second".into();
+        ws.state.tasks.push(second);
+        let mut other = ws.state.task(&first).unwrap().clone();
+        other.id = "other-video".into();
+        other.plan.source_id = "video-b".into();
+        ws.state.tasks.push(other);
+        let held = ws.state.task_mut(&first).unwrap();
+        held.held = true;
+        held.state = TaskState::Running;
+        // Only the task for another note may start.
+        assert_eq!(ws.state.next_task().unwrap().id, "other-video");
+        ws.state.task_mut("other-video").unwrap().state = TaskState::Complete;
+        assert!(ws.state.next_task().is_none());
+        let released = ws.state.task_mut(&first).unwrap();
+        released.held = false;
+        released.state = TaskState::Complete;
+        assert_eq!(ws.state.next_task().unwrap().id, "second");
+    }
+
     fn test_workspace(dir: &Path) -> Workspace {
         Workspace::open_at_inline(
             dir.join("workspace.json"),
@@ -5790,6 +5830,8 @@ mod tests {
                     .join("library/.course2md/swap")
                     .join(fixture.note.file_name().unwrap());
                 std::fs::create_dir_all(&swap).unwrap();
+                // A replacement names the copy that is the note before it moves it.
+                std::fs::write(swap.join("live"), "old-flatten").unwrap();
                 std::fs::rename(&fixture.note, swap.join("old-flatten")).unwrap();
             } else {
                 c2m_artifact::artifact::flatten_legacy(&fixture.note)

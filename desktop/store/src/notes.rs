@@ -124,16 +124,28 @@ fn note_course(dir: &Path) -> Result<Course> {
 /// back, or the one it replaced deleted; a note another writer holds is left to it.
 pub fn recover_library(root: &Path) -> Vec<String> {
     let mut issues = Vec::new();
-    let folders = walkdir::WalkDir::new(root)
+    let entries = walkdir::WalkDir::new(root)
         .max_depth(8)
         .into_iter()
         .filter_entry(|entry| {
             entry.depth() == 0 || !entry.file_name().to_string_lossy().starts_with('.')
         })
-        .flatten()
-        .filter(|entry| entry.file_type().is_dir());
-    for folder in folders {
-        for (note, error) in artifact::recover_folder(folder.path()) {
+        .flatten();
+    for entry in entries {
+        let failed = if entry.file_type().is_dir() {
+            artifact::recover_folder(entry.path())
+        } else if entry.path_is_symlink() {
+            // A linked note is replaced where its link points, which the walk
+            // does not follow; while it is moved aside the link points nowhere.
+            artifact::recover(entry.path())
+                .err()
+                .map(|error| (entry.path().to_path_buf(), error))
+                .into_iter()
+                .collect()
+        } else {
+            Vec::new()
+        };
+        for (note, error) in failed {
             issues.push(c2m_i18n::tr!(
                 "{}：{}",
                 note.display(),
@@ -687,6 +699,8 @@ mod tests {
         // As a crash between the two renames leaves it: the note moved aside.
         let swap = platform.join(".course2md/swap/course");
         std::fs::create_dir_all(&swap).unwrap();
+        // A replacement names the copy that is the note before it moves it.
+        std::fs::write(swap.join("live"), "old-task").unwrap();
         std::fs::rename(&note.dir, swap.join("old-task")).unwrap();
         assert!(scan_library(root.path()).unwrap().courses.len() == 1);
         assert_eq!(
@@ -778,6 +792,8 @@ mod tests {
         // A crash between the two renames: the note is in the swap folder.
         let swap = root.path().join(".course2md/swap/course");
         std::fs::create_dir_all(&swap).unwrap();
+        // A replacement names the copy that is the note before it moves it.
+        std::fs::write(swap.join("live"), "old-task-2").unwrap();
         std::fs::rename(&note.dir, swap.join("old-task-2")).unwrap();
         let scan = scan_library(root.path()).unwrap();
         assert_eq!(scan.courses.len(), 1, "{:?}", scan.issues);
