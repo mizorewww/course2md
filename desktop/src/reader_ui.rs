@@ -1267,7 +1267,8 @@ impl ReaderPage {
             let input = path.to_string_lossy().into_owned();
             let identity = key.clone();
             let checked = crate::spawn_blocking_io(move || {
-                let source::SourceProbe::Single(source) = source::probe(input, false, probing)?
+                let source::SourceProbe::Single(source) =
+                    source::probe(input, false, false, probing)?
                 else {
                     anyhow::bail!(course2md::tr!("请选择可读取的视频文件"));
                 };

@@ -258,6 +258,40 @@ mod tests {
         let url = seek_url(&web, 90.).unwrap();
         assert!(url.contains("p=2") && url.contains("t=90") && !url.contains("old"));
     }
+
+    /// A video played from a playlist, a part or a short is played there, only later.
+    #[test]
+    fn seeking_keeps_where_the_video_plays() {
+        for (source, expected) in [
+            (
+                "https://www.youtube.com/watch?v=abc&list=PLx&index=3",
+                "https://www.youtube.com/watch?v=abc&list=PLx&index=3&t=90",
+            ),
+            (
+                "https://youtu.be/abc?list=PLx",
+                "https://youtu.be/abc?list=PLx&t=90",
+            ),
+            (
+                "https://www.youtube.com/shorts/abc",
+                "https://www.youtube.com/shorts/abc?t=90",
+            ),
+            (
+                "https://www.bilibili.com/video/BV1xx?p=2",
+                "https://www.bilibili.com/video/BV1xx?p=2&t=90",
+            ),
+            (
+                "https://www.youtube.com/watch?v=abc&t=4&list=PLx#old",
+                "https://www.youtube.com/watch?v=abc&list=PLx&t=90",
+            ),
+        ] {
+            let target = source_target(source, false).unwrap();
+            assert_eq!(
+                seek_url(&target, 90.9).as_deref(),
+                Some(expected),
+                "{source}"
+            );
+        }
+    }
     #[test]
     fn move_uses_new_root_even_when_old_copy_is_kept() {
         let locations = vec![(PathBuf::from("/new"), vec![PathBuf::from("/old")])];
