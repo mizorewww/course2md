@@ -556,27 +556,38 @@ fn configured_model_dir(dir: Option<&std::path::Path>) -> anyhow::Result<std::pa
     Ok(config::model_dir_from(file.defaults.model_dir.as_deref()))
 }
 
-/// 笔记版本目录：课程目录取 current.json 指向的版本，版本目录直接使用。
-fn note_version_dir(dir: &std::path::Path) -> anyhow::Result<Option<std::path::PathBuf>> {
-    if dir.join("current.json").is_file() {
-        let current: course2md::artifact::CurrentVersion =
-            serde_json::from_slice(&std::fs::read(dir.join("current.json"))?)?;
-        let manifest = course2md::artifact::safe_asset_path(dir, &current.manifest)?;
-        let version = manifest
-            .parent()
-            .context(tr!("笔记清单位置无效 / Invalid note manifest location"))?;
-        return Ok(Some(version.to_path_buf()));
+/// The note a folder holds. A course an older app wrote as versions (the course
+/// folder, or one of its `versions/<id>` folders) is flattened into one note first.
+fn note_dir(dir: &std::path::Path) -> anyhow::Result<Option<std::path::PathBuf>> {
+    use course2md::artifact;
+    let course = dir
+        .parent()
+        .filter(|versions| versions.file_name().is_some_and(|name| name == "versions"))
+        .and_then(|versions| versions.parent())
+        .filter(|course| artifact::is_legacy(course));
+    let note = course.unwrap_or(dir);
+    if artifact::is_legacy(note) {
+        artifact::flatten_legacy(note)?;
+        tracing::info!(
+            "已将笔记的旧版本整理为一份笔记 / Turned the note's versions into one note: {}",
+            note.display()
+        );
     }
-    Ok(dir
+    Ok(note
         .join("manifest.json")
         .is_file()
-        .then(|| dir.to_path_buf()))
+        .then(|| note.to_path_buf()))
 }
 
 /// 递归收集笔记（可传单份笔记或存放多份笔记的上级目录）；单条目读取失败只告警并跳过。
 fn collect_targets(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>, depth: usize) {
-    match note_version_dir(dir) {
-        Ok(Some(version)) => return out.push(version),
+    match note_dir(dir) {
+        Ok(Some(note)) => {
+            if !out.contains(&note) {
+                out.push(note);
+            }
+            return;
+        }
         Ok(None) => {}
         Err(error) => {
             tracing::warn!(
@@ -600,7 +611,7 @@ fn collect_targets(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>, dep
     }
 }
 
-/// `summarize` 子命令：为一份笔记补写 AI 摘要，保存为新版笔记（幂等，--force 重新生成）。
+/// `summarize` 子命令：为一份笔记补写 AI 摘要，更新原笔记（幂等，--force 重新生成）。
 /// It runs the same summary-only reprocess task the desktop runs.
 fn summarize_note(
     file: &settings::ConfigFile,
@@ -624,11 +635,13 @@ fn summarize_note(
     }
     let mut settings = file.llm.clone();
     settings.api_key.clear();
+    // A note's task id was its version id, so a summary started before notes were
+    // flat continues from its saved progress.
     let mut task_id = format!(
         "summary-{}",
         &course2md::digest::json_digest(&serde_json::json!({
             "operation": "reprocess-summary",
-            "base_version": base.version_id,
+            "base_version": base.task_id,
             "settings": settings,
         }))?[..32]
     );
@@ -640,11 +653,6 @@ fn summarize_note(
                 .as_nanos()
         ));
     }
-    let course_dir = dir
-        .parent()
-        .and_then(|p| p.parent())
-        .context(tr!("笔记版本位置无效 / Invalid note version location"))?
-        .to_path_buf();
     let source = if document.meta.webpage_url.trim().is_empty() {
         base.source_id.clone()
     } else {
@@ -653,13 +661,14 @@ fn summarize_note(
     let request = execution::Request {
         schema: execution::REQUEST_SCHEMA,
         operation: execution::Operation::Reprocess {
-            base_version_dir: dir.clone(),
+            note_dir: dir.clone(),
+            base_task_id: base.task_id.clone(),
             components: vec![execution::Component::Summary],
             prior_work_dir: None,
         },
         task_id: task_id.clone(),
         course_id: base.course_id.clone(),
-        version_id: task_id.clone(),
+        version_id: None,
         source,
         source_id: base.source_id.clone(),
         title: base.title.clone(),
@@ -669,8 +678,8 @@ fn summarize_note(
         subtitle_events: None,
         config: file.clone(),
         allow_unauthenticated_asr: false,
-        work_dir: course_dir.join(".work").join(&task_id),
-        course_dir: course_dir.clone(),
+        work_dir: artifact::work_dir(&dir, &task_id)?,
+        course_dir: dir.clone(),
         control_path: None,
         service_versions: Default::default(),
     };
@@ -679,14 +688,13 @@ fn summarize_note(
         request,
         course2md::dispatch::ParentProcess::current(),
     ))??;
-    let version = course_dir.join("versions").join(&task_id);
     if let Some(out) = out {
-        let manifest = artifact::read_manifest(&version.join("manifest.json"))?;
+        let manifest = artifact::read_manifest(&dir.join("manifest.json"))?;
         let saved: artifact::Document =
-            serde_json::from_slice(&std::fs::read(version.join(&manifest.document))?)?;
-        let summary = saved.summary.context(tr!(
-            "新版笔记缺少摘要 / The new note version has no summary"
-        ))?;
+            serde_json::from_slice(&std::fs::read(dir.join(&manifest.document))?)?;
+        let summary = saved
+            .summary
+            .context(tr!("笔记缺少摘要 / The note has no summary"))?;
         let file = out.join(format!(
             "{}.summary.md",
             course2md::summary_doc::sanitize_filename(&saved.meta.title)
@@ -698,10 +706,7 @@ fn summarize_note(
         }
     }
     if !progress::is_quiet() {
-        println_tr!(
-            "摘要已作为新版笔记保存 / Summary saved as a new note version: {}",
-            version.display()
-        );
+        println_tr!("摘要已加入笔记：{}", dir.display());
     }
     Ok(())
 }

@@ -548,13 +548,8 @@ exit 1
     assert_eq!(run("en", &[]).0, "en");
     assert_eq!(run("zh-Hans", &[]).0, "en");
     // A work folder from before the choice was recorded preferred Chinese.
-    let work = std::fs::read_dir(cli.dir.path().join("out/youtube"))
-        .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .path()
-        .join(".work");
+    // Task progress lives beside the notes, outside them.
+    let work = cli.dir.path().join("out/youtube/.course2md/work");
     let mut records = 0;
     for task in std::fs::read_dir(&work).unwrap() {
         let record = task.unwrap().path().join(".subs/language");

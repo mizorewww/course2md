@@ -517,7 +517,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 原生运行于 Apple 芯片	原生运行于 Apple 芯片	Runs natively on Apple silicon	原生執行於 Apple 晶片	Appleシリコン上でネイティブに動作
 原笔记库在复制期间发生变化，尚未切换保存位置	原笔记库在复制期间发生变化，尚未切换保存位置	The original note library changed during copying, and the save location has not been switched yet.	原筆記庫在複製期間發生變化，尚未切換儲存位置	コピー中に元のノートライブラリが変更され、保存場所はまだ切り替えられていません。
 原笔记库无法访问，请重新连接这个保存位置	原笔记库无法访问，请重新连接这个保存位置	The original note library cannot be accessed, please reconnect to this save location.	原筆記庫無法存取，請重新連接這個儲存位置	元のノート ライブラリにアクセスできません。この保存場所に再接続してください。
-原笔记版本需要绝对路径 / Base version requires an absolute path	原笔记版本需要绝对路径	Base version requires an absolute path	原筆記版本需要絕對路徑	元のノートのバージョンには絶対パスが必要です
 原视频	原视频	Original video	原影片	元の動画
 原视频不可用	原视频不可用	Original video is not available	原影片不可用	元の動画は利用できません
 原视频不在 {}，请用「找到原视频…」指定新位置	原视频不在 {}，请用「找到原视频…」指定新位置	The original video is not in {}, please use "Find original video..." to specify a new location	原影片不在 {}，請用「找到原影片…」指定新位置	元の動画は {} にありません。「元の動画を検索...」を使用して新しい場所を指定してください。
@@ -620,12 +619,10 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 导出 JSON 数据…	导出 JSON 数据…	Export JSON data…	匯出 JSON 資料…	JSONデータをエクスポート…
 导出 Markdown（含截图，.zip）…	导出 Markdown（含截图，.zip）…	Export Markdown (with screenshots, .zip)…	匯出 Markdown（含截圖，.zip）…	Markdown をエクスポート（スクリーンショット付き、.zip）…
 导出位置与任务记录不匹配	导出位置与任务记录不匹配	The export location does not match the task record	匯出位置與任務記錄不匹配	エクスポート場所がタスク レコードと一致しません
-导出位置已有不同文件，未覆盖 / Existing export differs; not overwritten	导出位置已有不同文件，未覆盖	Existing export differs; not overwritten	匯出位置已有不同檔案，未覆蓋	別のファイルがエクスポート場所にすでに存在しており、上書きされませんでした。
 导出位置无效	导出位置无效	Invalid export location	匯出位置無效	エクスポート場所が無効です
 导出文件	导出文件	Export file	匯出檔案	エクスポートファイル
 导出文件已移动或无法读取，可以重新导出	导出文件已移动或无法读取，可以重新导出	The export file has been moved or cannot be read. It can be re-exported.	匯出檔案已移動或無法讀取，可以重新匯出	エクスポートしたファイルが移動されたか、読み取れません。再度エクスポートできます。
 导出文件已移动或无法读取，可打开笔记后从「导出」菜单重新保存。	导出文件已移动或无法读取，可打开笔记后从「导出」菜单重新保存。	The export was moved or cannot be read. Open the note and save it again from the Export menu.	匯出檔案已移動或無法讀取，可開啟筆記後從「匯出」選單重新儲存。	書き出したファイルが移動されたか読み取れません。ノートを開いて「書き出し」メニューから再保存してください。
-导出文件已被修改，原文件已保留 / Export file changed; original retained	导出文件已被修改，原文件已保留	Export file changed; original retained	匯出檔案已被修改，原檔案已保留	エクスポートされたファイルは変更されており、元のファイルは保持されています。
 导出时意外中断，请重试	导出时意外中断，请重试	Export interrupted unexpectedly, please try again	匯出時意外中斷，請重試	エクスポートが予期せず中断されました。もう一度お試しください。
 导出未完成	导出未完成	Export not completed	匯出未完成	エクスポートが完了していません
 导出结果记录为空	导出结果记录为空	The export result record is empty	匯出結果記錄為空	エクスポート結果レコードが空です
@@ -657,7 +654,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 就绪 / Ready	就绪	Ready	就緒	準備完了
 展开	展开	Expand	展開	展開
 展开处理选项	展开处理选项	Expand processing options	展開處理選項	処理オプションを展開する
-工作目录不能位于已发布版本内 / Work directory overlaps published versions	工作目录不能位于已发布版本内	Work directory overlaps published versions	工作目錄不能位於已發布版本內	作業ディレクトリを公開済みのバージョン内に置くことはできません
 已 {}没有收到新数据	已 {}没有收到新数据	No new data for {}	已 {}沒有收到新資料	{}間、新しいデータが届いていません
 已下载	已下载	Downloaded	已下載	ダウンロード済み
 已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。	已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。	Inputs and tasks have been restored from backup. Unable to confirm the last operation, the unfinished task has been suspended.	已從備份恢復輸入和任務。無法確認最後一次操作，未完成任務已暫停。	入力とタスクはバックアップから復元されました。最後の操作を確認できず、未完了のタスクは中断されました。
@@ -990,7 +986,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 无法创建临时工作目录 / Could not create a temporary working directory	无法创建临时工作目录	Could not create a temporary working directory	無法建立暫存工作目錄	一時作業ディレクトリを作成できません
 无法创建默认保存位置 {}：{}。可以在设置的存储中选择其他位置。	无法创建默认保存位置 {}：{}。可以在设置的存储中选择其他位置。	Unable to create the default save location {}: {}. You can choose another location under Storage in Settings.	無法建立預設儲存位置 {}：{}。可以在設定的儲存中選擇其他位置。	デフォルトの保存場所 {} を作成できません: {}。設定の「ストレージ」で別の場所を選択できます。
 无法删除文件夹：{}	无法删除文件夹：{}	Unable to delete folder: {}	無法刪除資料夾：{}	フォルダーを削除できません: {}
-无法发布笔记版本；旧笔记已保留 / Could not publish note version	无法发布笔记版本；旧笔记已保留	Could not publish note version	無法發布筆記版本；舊筆記已保留	ノートのバージョンを公開できません。古いノートは保存されています
 无法同步笔记文件：{}	无法同步笔记文件：{}	Unable to sync note file: {}	無法同步筆記檔案：{}	ノート ファイルを同期できません: {}
 无法启动 {} / Could not start {}	无法启动 {}	Could not start {}	無法啟動 {}	{} を開始できません
 无法启动本地授权回调服务（端口 1455/1457 均被占用）/ Cannot start the local authorization callback (ports 1455/1457 are both in use)	无法启动本地授权回调服务（端口 1455/1457 均被占用）/ Cannot start the local authorization callback (ports 1455/1457 are both in use)	Cannot start the local authorization callback (ports 1455/1457 are both in use)	無法啟動本機授權回呼服務（埠 1455/1457 均被佔用）/ Cannot start the local authorization callback (ports 1455/1457 are both in use)	ローカル認証コールバックを開始できません (ポート 1455/1457 が両方とも使用中です)
@@ -1389,9 +1384,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 此服务的凭据无法读取，请重新保存 API Key	此服务的凭据无法读取，请重新保存 API Key	The credentials for this service cannot be read. Save the API key again.	此服務的憑證無法讀取，請重新儲存 API Key	このサービスの認証情報を読み取ることができません。API キーを再度保存してください。
 此来源暂不支持读取字幕，可以识别视频声音 / This source does not support reading subtitles yet; you can transcribe the video audio instead	此来源暂不支持读取字幕，可以识别视频声音	This source does not support reading subtitles yet; you can transcribe the video audio instead	此來源暫不支援讀取字幕，可以辨識影片聲音	このソースは現在字幕の読み取りに対応していません。代わりに動画の音声を認識できます。
 此版本不支持 Apple 识别，请改用 GPU 或 CPU 识别 / This build lacks Apple transcription; use GPU or CPU transcription.	此版本不支持 Apple 识别，请改用 GPU 或 CPU 识别	This build lacks Apple transcription; use GPU or CPU transcription.	此版本不支援 Apple 辨識，請改用 GPU 或 CPU 辨識	このバージョンは Apple 認識をサポートしていません。代わりに GPU または CPU 認識を使用してください。
-此版本位置已有其他笔记，已保留原文件 / Version identity conflict	此版本位置已有其他笔记，已保留原文件	Version identity conflict	此版本位置已有其他筆記，已保留原檔案	このバージョンの場所には他のノートがあり、元のファイルは保持されています。
 此程序未包含 Apple 原生识别运行时 / This build does not include the Apple native transcription runtime	此程序未包含 Apple 原生识别运行时	This build does not include the Apple native transcription runtime	此程式未包含 Apple 原生辨識執行環境	このプログラムには Apple ネイティブ音声認識ランタイムが含まれていません
-此笔记版本需要其他版本的软件 / Unsupported manifest schema	此笔记版本需要其他版本的软件	Unsupported manifest schema	此筆記版本需要其他版本的軟體	このノートのバージョンには別のバージョンのソフトウェアが必要です
 此组设置使用尚不支持的版本	此组设置使用尚不支持的版本	This group of settings uses a version that is not supported yet	此組設定使用尚不支援的版本	このグループ設定はまだサポートされていないバージョンを使用しています
 此组设置暂时无法读取，原文件已保留。可以保留原文件并重置此组	此组设置暂时无法读取，原文件已保留。可以保留原文件并重置此组	This group of settings cannot be read temporarily and the original file has been retained. You can keep the original files and reset the group	此組設定暫時無法讀取，原檔案已保留。可以保留原檔案並重設此組	この設定グループは一時的に読み取ることができず、元のファイルが保持されています。元のファイルを保持してグループをリセットできます
 此组设置需要先保留原文件并重置	此组设置需要先保留原文件并重置	Keep the original file and reset this group of settings first	此組設定需要先保留原檔案並重設	この設定グループは、先に元のファイルを保持してリセットする必要があります
@@ -1548,13 +1541,10 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 笔记库迁移位置无效 / Invalid relocation roots	笔记库迁移位置无效	Invalid relocation roots	筆記庫遷移位置無效	ノートライブラリの移行先が無効です
 笔记操作	笔记操作	Note actions	筆記操作	ノートの操作
 笔记文件不存在，请重新连接保存位置后重试	笔记文件不存在，请重新连接保存位置后重试	The note file does not exist. Please reconnect to the save location and try again.	筆記檔案不存在，請重新連接儲存位置後重試	ノートファイルが存在しません。保存場所に再接続して、もう一度お試しください。
-笔记文件已被手动修改；这次补做以原始记录为准，你修改的文件不会被覆盖 / The note file was edited by hand; this run uses the original record and leaves your edited file untouched	笔记文件已被手动修改；这次补做以原始记录为准，你修改的文件不会被覆盖	The note file was edited by hand; this run uses the original record and leaves your edited file untouched	筆記檔案已被手動修改；這次補做以原始記錄為準，你修改的檔案不會被覆蓋	ノートファイルは手動で変更されています。今回の再処理は元の記録に基づいて行われ、変更したファイルは上書きされません。
 笔记来源与任务不匹配	笔记来源与任务不匹配	The note source does not match the task	筆記來源與任務不匹配	ノートのソースがタスクと一致しません
 笔记正文无法读取，原文件已保留	笔记正文无法读取，原文件已保留	The text of the note cannot be read and the original file has been retained.	筆記正文無法讀取，原檔案已保留	ノートのテキストは読み取ることができず、元のファイルは保持されています。
 笔记没有可读正文 / Note has no readable body	笔记没有可读正文	Note has no readable body	筆記沒有可讀正文	ノートには判読可能なテキストがありません
-笔记清单位置无效 / Invalid note manifest location	笔记清单位置无效	Invalid note manifest location	筆記清單位置無效	ノートマニフェストの場所が無効です
 笔记清单损坏 / Invalid note manifest	笔记清单损坏	Invalid note manifest	筆記清單損壞	ノートマニフェストが破損しています
-笔记版本位置无效 / Invalid note version location	笔记版本位置无效	Invalid note version location	筆記版本位置無效	ノートのバージョンの場所が無効です
 笔记版本信息已损坏	笔记版本信息已损坏	Note version information is corrupted	筆記版本資訊已損壞	ノートのバージョン情報が破損しています
 笔记目录，或存放多份笔记的上级目录 / A note directory or a folder of notes	笔记目录，或存放多份笔记的上级目录	A note directory or a folder of notes	筆記目錄，或存放多份筆記的上級目錄	ノート ディレクトリ、または複数のノートが保存される親ディレクトリ
 笔记详情	笔记详情	Note details	筆記詳情	ノートの詳細
@@ -1757,7 +1747,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 读取课程	读取课程	Read course	讀取課程	コースを読み込む
 读取超时，请重试	读取超时，请重试	Read timed out. Please try again.	讀取逾時，請重試	読み取りタイムアウトです。もう一度お試しください。
 课件截图	课件截图	Courseware screenshots	課件截圖	講義資料のスクリーンショット
-课程位置已被其他课程使用 / Course identity conflict	课程位置已被其他课程使用	Course identity conflict	課程位置已被其他課程使用	コースの場所はすでに別のコースで使用されています
 调整后重试	调整后重试	Adjust and try again	調整後重試	調整して再試行してください
 调整并生成新版	调整并生成新版	Adjust and generate new version	調整並生成新版	調整して新しいバージョンを生成
 调整选项	调整选项	Adjust options	調整選項	調整オプション
@@ -2181,7 +2170,8 @@ gpu/cpu 模型目录 / gpu/cpu model directory: {}	gpu/cpu 模型目录：{}	gpu
 已清除 API 配置 / Cleared API settings ({}): {}	已清除 API 配置（{}）：{}	Cleared API settings ({}): {}	已清除 API 設定（{}）：{}	API 設定を消去しました（{}）：{}
 已有摘要，笔记保持不变 / Summary already exists: {}	已有摘要，笔记保持不变：{}	Summary already exists: {}	已有摘要，筆記保持不變：{}	要約は既にあります。ノートは変更しません：{}
 已导出摘要 / Summary exported: {}	已导出摘要：{}	Summary exported: {}	已匯出摘要：{}	要約を書き出しました：{}
-摘要已作为新版笔记保存 / Summary saved as a new note version: {}	摘要已作为新版笔记保存：{}	Summary saved as a new note version: {}	摘要已作為新版筆記儲存：{}	要約をノートの新しい版として保存しました：{}
+摘要已加入笔记：{}	摘要已加入笔记：{}	Summary added to the note: {}	摘要已加入筆記：{}	要約をノートに追加しました：{}
+笔记缺少摘要 / The note has no summary	笔记缺少摘要	The note has no summary	筆記缺少摘要	ノートに要約がありません
 模型 / Model: {} · {} · {}	模型：{} · {} · {}	Model: {} · {} · {}	模型：{} · {} · {}	モデル：{} · {} · {}
 占用空间 / Disk usage: {}	占用空间：{}	Disk usage: {}	佔用空間：{}	使用容量：{}
 使用已下载模型 / Using downloaded models: {}	使用已下载模型：{}	Using downloaded models: {}	使用已下載模型：{}	ダウンロード済みのモデルを使います：{}
@@ -2245,3 +2235,17 @@ AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not conf
 {}未完成的 {} 段都会发送，包括以上内容	{}未完成的 {} 段都会发送，包括以上内容	{}: all {} unfinished paragraphs are sent, including the requests above	{}未完成的 {} 段都會傳送，包括以上內容	{}：未完了の {} 段落はすべて送信されます（上記を含む）
 还会翻译此前未能完成的 {} 段	还会翻译此前未能完成的 {} 段	The {} paragraphs not translated before are translated too	還會翻譯此前未能完成的 {} 段	以前に翻訳できなかった {} 段落も翻訳されます
 还会生成此前未能开始的翻译	还会生成此前未能开始的翻译	The translation that could not start before is made too	還會產生此前未能開始的翻譯	以前に開始できなかった翻訳も作成されます
+此笔记需要更新版本的软件 / This note needs a newer version of course2md	此笔记需要更新版本的软件	This note needs a newer version of course2md	此筆記需要更新版本的軟體	このノートには新しいバージョンの course2md が必要です
+计划补做后笔记已被更改，请重新补做 / The note changed since this repair was planned	计划补做后笔记已被更改，请重新补做	The note changed since this repair was planned	計畫補做後筆記已被更改，請重新補做	やり直しを計画した後にノートが変更されました。もう一度やり直してください
+工作目录不能位于笔记文件夹内 / The work directory must be outside the note folder	工作目录不能位于笔记文件夹内	The work directory must be outside the note folder	工作目錄不能位於筆記資料夾內	作業ディレクトリはノートのフォルダの外に置く必要があります
+补做的笔记与任务不一致 / The repaired note does not match the task	补做的笔记与任务不一致	The repaired note does not match the task	補做的筆記與任務不一致	やり直すノートがタスクと一致しません
+笔记位置无效 / Invalid note location	笔记位置无效	Invalid note location	筆記位置無效	ノートの場所が無効です
+无法保存笔记；可稍后重试 / Could not save the note; try again later	无法保存笔记；可稍后重试	Could not save the note; try again later	無法儲存筆記；可稍後重試	ノートを保存できませんでした。後でもう一度お試しください
+笔记正被其他程序使用，暂时无法替换；原笔记未改动，关闭后重试即可 / The note is in use by another program; it is unchanged; close it and try again	笔记正被其他程序使用，暂时无法替换；原笔记未改动，关闭后重试即可	The note is in use by another program; it is unchanged; close it and try again	筆記正被其他程式使用，暫時無法取代；原筆記未變動，關閉後重試即可	ノートは別のプログラムで使用中のため置き換えられません。ノートは変更されていません。閉じてからもう一度お試しください
+无法保存笔记；原笔记未改动，可稍后重试 / Could not save the note; it is unchanged; try again later	无法保存笔记；原笔记未改动，可稍后重试	Could not save the note; it is unchanged; try again later	無法儲存筆記；原筆記未變動，可稍後重試	ノートを保存できませんでした。ノートは変更されていません。後でもう一度お試しください
+笔记目录层级过深 / Note directory depth exceeds the safe limit	笔记目录层级过深	Note directory depth exceeds the safe limit	筆記目錄層級過深	ノートのフォルダ階層が深すぎます
+这份笔记的各个版本都已损坏，已原样保留 / Every version of this note is damaged; it was left as it is	这份笔记的各个版本都已损坏，已原样保留	Every version of this note is damaged; it was left as it is	這份筆記的各個版本都已損壞，已原樣保留	このノートのすべての版が壊れているため、そのまま残しました
+你修改过的文件已另存为 / Your edited file was kept as: {}	你修改过的文件已另存为：{}	Your edited file was kept as: {}	你修改過的檔案已另存為：{}	編集したファイルは次の名前で保存しました：{}
+笔记文件已被手动修改；这次补做以原始记录为准，你修改的文件会另存为 course.edited.md / The note file was edited by hand; this run uses the original record and keeps your edited file as course.edited.md	笔记文件已被手动修改；这次补做以原始记录为准，你修改的文件会另存为 course.edited.md	The note file was edited by hand; this run uses the original record and keeps your edited file as course.edited.md	筆記檔案已被手動修改；這次補做以原始紀錄為準，你修改的檔案會另存為 course.edited.md	ノートのファイルが手動で編集されています。今回のやり直しは元の記録に基づき、編集したファイルは course.edited.md として保存します
+补做没有完成更多内容，笔记未改动 / Nothing more was finished; the note is unchanged	补做没有完成更多内容，笔记未改动	Nothing more was finished; the note is unchanged	補做沒有完成更多內容，筆記未變動	やり直しで新たに完了したものはありません。ノートは変更されていません
+已将笔记的旧版本整理为一份笔记 / Turned the note's versions into one note: {}	已将笔记的旧版本整理为一份笔记：{}	Turned the note's versions into one note: {}	已將筆記的舊版本整理為一份筆記：{}	ノートの古い版を 1 つのノートにまとめました：{}
