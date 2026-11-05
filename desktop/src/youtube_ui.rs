@@ -305,6 +305,10 @@ impl AccountsView {
         let Some(bundle) = app_bundle() else {
             return;
         };
+        if let Some(dialog) = &mut self.youtube.dialog {
+            dialog.acted();
+        }
+        cx.notify();
         if !stubbed(&format!("reveal {}", bundle.display())) {
             cx.reveal_path(bundle);
         }
@@ -727,8 +731,7 @@ impl AccountsView {
                             .on_select(cx.listener(|this, index: &usize, _, cx| {
                                 if let Some(dialog) = &mut this.youtube.dialog {
                                     dialog.profile_open = false;
-                                    dialog.profile = Some(*index);
-                                    dialog.step = YoutubeStep::Choose;
+                                    dialog.select_profile(*index);
                                 }
                                 cx.notify();
                             })),

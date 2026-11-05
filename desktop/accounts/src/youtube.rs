@@ -118,6 +118,23 @@ impl YoutubeDialog {
         if let (Some(guide), Some(browser)) = (&mut self.guide, browser) {
             guide.browser = browser;
         }
+        // A refusal was about the browser tried, not this one.
+        self.acted();
+    }
+
+    /// Chooses one of the browser's profiles.
+    pub fn select_profile(&mut self, index: usize) {
+        self.profile = Some(index);
+        self.step = YoutubeStep::Choose;
+        self.acted();
+    }
+
+    /// The person took a step of their own (another browser or profile, Finder,
+    /// System Settings): a refusal shown for the last try is done with.
+    pub fn acted(&mut self) {
+        if let Some(guide) = &mut self.guide {
+            guide.refused = false;
+        }
     }
 
     pub fn selected_browser(&self) -> Option<Browser> {
@@ -615,6 +632,19 @@ mod tests {
         assert!(dialog.guide.as_ref().unwrap().refused);
         dialog.guide.as_mut().unwrap().opened_settings(now);
         assert!(!dialog.guide.as_ref().unwrap().refused);
+        // Choosing another browser or profile, or any other action, ends it too:
+        // it named the browser tried.
+        for act in [
+            |d: &mut YoutubeDialog| d.select_browser(Some(1), None),
+            |d: &mut YoutubeDialog| d.select_profile(0),
+            |d: &mut YoutubeDialog| d.acted(),
+        ] {
+            dialog.step = YoutubeStep::Checking;
+            dialog.check_blocked(Access::Blocked, now);
+            assert!(dialog.guide.as_ref().unwrap().refused);
+            act(&mut dialog);
+            assert!(!dialog.guide.as_ref().unwrap().refused);
+        }
     }
 
     #[test]
