@@ -636,6 +636,18 @@ impl AccountsView {
                             guide.browser.name()
                         ),
                     )),
+                // Access just given: say so first, above the explanation.
+                (Some(guide), false) => v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(rem(16.))
+                    .child(self.access_guide(guide, compact, cx))
+                    .child(supporting_info(
+                        "youtube-explain",
+                        course2md::tr!(
+                            "YouTube 不允许在其他应用中用密码登录。course2md 会让 yt-dlp 读取所选浏览器中的 YouTube 登录（Cookie），只在打开 YouTube 视频时使用，不保存这些 Cookie。连接时的检查会让 yt-dlp 把浏览器的 Cookie 短暂写入本机的私有临时文件，检查结束即删除。"
+                        ),
+                    )),
                 _ => supporting_info(
                     "youtube-explain",
                     course2md::tr!(
@@ -734,7 +746,8 @@ impl AccountsView {
                         ),
                     ));
                 }
-                Some(guide) => body = body.child(self.access_guide(guide, compact, cx)),
+                // Granted: shown first, above.
+                Some(_) => {}
                 None => {}
             }
             // The check's result sits under the choice it is about, next to the action.
@@ -1034,11 +1047,26 @@ impl AccountsView {
                 cx,
             )),
         };
+        // A check just refused, said where the person acts next, not only on
+        // the settings row behind the dialog.
+        let refusal = guide.refused.then(|| {
+            notice_banner(
+                "youtube-access-refused",
+                NoticeKind::Danger,
+                course2md::tr!(
+                    "刚才的尝试没有成功：macOS 仍然不允许 course2md 读取 {} 的数据。",
+                    name
+                ),
+            )
+        });
+        // A copy that must be moved first is not on any of the three steps.
+        let moving = translocated && guide.step != AccessStep::Granted;
         v_flex()
             .w_full()
             .min_w_0()
             .gap(rem(16.))
-            .child(stepper)
+            .when(!moving, |guide| guide.child(stepper))
+            .children(refusal)
             .child(content)
     }
 }
@@ -1161,6 +1189,7 @@ impl AccountsView {
         // The guide's states for a fixture browser, whatever its folder says.
         if let Some(step) = match state {
             "access-blocked" | "access-reopened" => Some(AccessStep::Blocked),
+            "access-refused" => Some(AccessStep::Waiting),
             "access-waiting" => Some(AccessStep::Waiting),
             "access-restart" => Some(AccessStep::Restart),
             "access-granted" => Some(AccessStep::Granted),
@@ -1174,10 +1203,9 @@ impl AccountsView {
                 dialog.guide = dialog
                     .selected_browser()
                     .map(|browser| AccessGuide::new(browser, step, Instant::now()));
-                if state == "access-reopened"
-                    && let Some(guide) = &mut dialog.guide
-                {
-                    guide.reopened = true;
+                if let Some(guide) = &mut dialog.guide {
+                    guide.reopened = state == "access-reopened";
+                    guide.refused = state == "access-refused";
                 }
             }
             cx.notify();

@@ -2245,3 +2245,4 @@ AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not conf
 {}未完成的 {} 段都会发送，包括以上内容	{}未完成的 {} 段都会发送，包括以上内容	{}: all {} unfinished paragraphs are sent, including the requests above	{}未完成的 {} 段都會傳送，包括以上內容	{}：未完了の {} 段落はすべて送信されます（上記を含む）
 还会翻译此前未能完成的 {} 段	还会翻译此前未能完成的 {} 段	The {} paragraphs not translated before are translated too	還會翻譯此前未能完成的 {} 段	以前に翻訳できなかった {} 段落も翻訳されます
 还会生成此前未能开始的翻译	还会生成此前未能开始的翻译	The translation that could not start before is made too	還會產生此前未能開始的翻譯	以前に開始できなかった翻訳も作成されます
+刚才的尝试没有成功：macOS 仍然不允许 course2md 读取 {} 的数据。	刚才的尝试没有成功：macOS 仍然不允许 course2md 读取 {} 的数据。	That attempt did not work: macOS still does not allow course2md to read {}’s data.	剛才的嘗試沒有成功：macOS 仍然不允許 course2md 讀取 {} 的資料。	今の試行はうまくいきませんでした。macOS はまだ course2md による {} のデータの読み取りを許可していません。

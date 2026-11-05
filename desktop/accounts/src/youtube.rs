@@ -156,6 +156,7 @@ impl YoutubeDialog {
             Some(guide) if guide.step != AccessStep::Granted => AccessGuide { browser, ..guide },
             _ => AccessGuide::new(browser, AccessStep::Blocked, now),
         };
+        guide.refused = true;
         if access != Access::Blocked {
             guide.step = AccessStep::Restart;
             // The app's own look will keep finding the folder open; only a reopen
@@ -225,6 +226,9 @@ pub struct AccessGuide {
     /// Set by a check that failed although the app's own look found the folder
     /// open: nothing but a reopen applies the access, so looking again is moot.
     pub reopen_only: bool,
+    /// A check (run anyway, or after access looked given) was just refused:
+    /// the guide says so until the person takes the next action.
+    pub refused: bool,
 }
 
 /// How often the guide looks at the folder again while it is shown.
@@ -243,6 +247,7 @@ impl AccessGuide {
             left: false,
             reopened: false,
             reopen_only: false,
+            refused: false,
         }
     }
 
@@ -303,6 +308,7 @@ impl AccessGuide {
             self.since = now;
             self.left = false;
             self.reopen_only = false;
+            self.refused = false;
         }
     }
 
@@ -597,6 +603,10 @@ mod tests {
         dialog.step = YoutubeStep::Checking;
         dialog.check_blocked(Access::Blocked, now);
         assert_eq!(step(&dialog), Some(AccessStep::Waiting));
+        // The refusal shows until the person's next action.
+        assert!(dialog.guide.as_ref().unwrap().refused);
+        dialog.guide.as_mut().unwrap().opened_settings(now);
+        assert!(!dialog.guide.as_ref().unwrap().refused);
     }
 
     #[test]
