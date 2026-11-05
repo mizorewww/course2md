@@ -1636,6 +1636,69 @@ fn a_failed_part_of_a_mixed_repair_keeps_what_the_note_had() {
     );
 }
 
+/// A regenerate whose AI service is unreachable ends failed and leaves the
+/// complete note, its summary and its exports as they were; a later repair that
+/// asks for no export still keeps every export the note had.
+#[test]
+fn a_regenerate_that_loses_paid_work_leaves_the_note() {
+    use course2md::config::OutputFormat;
+    if !common::ffmpeg_available() {
+        return;
+    }
+    let mock = MockAi::respond_with(|_, _| Some((200, summary_response())));
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("video.mp4");
+    std::fs::write(&source, b"broken video, readable selected subtitles").unwrap();
+    let mut original = request(root.path(), &source);
+    original.config.defaults.formats = Some(vec![OutputFormat::Md]);
+    original.config.llm.summarize = true;
+    original.config.llm.base_url = mock.url.clone();
+    original.config.llm.model = "summary-model".into();
+    original.config.llm.api_key = "private-task-key".into();
+    assert!(run(root.path(), &original).status.success());
+    let note = original.course_dir.clone();
+    let before: Vec<_> = ["manifest.json", "document.json", "exports/course.zip"]
+        .iter()
+        .map(|name| std::fs::read(note.join(name)).unwrap())
+        .collect();
+    // The service is gone: nothing listens there any more.
+    let mut regenerate = original.clone();
+    regenerate.task_id = "regenerate".into();
+    regenerate.work_dir = root.path().join("regenerate-work");
+    regenerate.config.llm.base_url = "http://127.0.0.1:9".into();
+    let output = run(root.path(), &regenerate);
+    let observed = events(&output);
+    assert!(!output.status.success(), "{observed:#?}");
+    assert!(observed.iter().any(|event| {
+        event["type"] == "error"
+            && event["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("不如现有笔记") && m.contains("摘要"))
+    }));
+    let after: Vec<_> = ["manifest.json", "document.json", "exports/course.zip"]
+        .iter()
+        .map(|name| std::fs::read(note.join(name)).unwrap())
+        .collect();
+    assert_eq!(after, before);
+    // A summary-only repair asks for no export; the note keeps its archive.
+    let mut repair = original.clone();
+    repair.task_id = "repair".into();
+    repair.work_dir = root.path().join("repair-work");
+    repair.config.defaults.formats = Some(vec![]);
+    repair.operation = course2md::execution::Operation::Reprocess {
+        note_dir: note.clone(),
+        base_task_id: original.task_id.clone(),
+        components: vec![Component::Summary],
+        prior_work_dir: None,
+    };
+    let output = run(root.path(), &repair);
+    assert!(output.status.success(), "{:#?}", events(&output));
+    let manifest = artifact::read_manifest(&note.join("manifest.json")).unwrap();
+    assert_eq!(manifest.task_id, "repair");
+    assert_eq!(manifest.outputs, vec!["exports/course.zip"]);
+    assert!(note.join("exports/course.zip").is_file());
+}
+
 /// A note a newer app wrote is refused before anything is sent.
 #[test]
 fn a_newer_apps_note_is_refused_before_any_request() {

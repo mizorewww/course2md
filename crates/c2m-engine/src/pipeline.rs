@@ -131,6 +131,8 @@ pub async fn run(cfg: &PipelineConfig, models: ModelDownload<'_>) -> Result<()> 
         let note = target.course_dir.clone();
         blocking(move || artifact::prepare_note(&note)).await?;
     }
+    // Held until the task ends: a second task for this note stops before it pays.
+    let _claim = artifact::claim_note(&target.course_dir)?;
     let work = execution::enter_work_dir(
         &artifact::work_dir(&target.course_dir, &task_id)?,
         &binding,
@@ -177,6 +179,8 @@ pub(crate) async fn run_task(
         let note = target.course_dir.clone();
         blocking(move || artifact::prepare_note(&note)).await?;
     }
+    // Held until the task ends: a second task for this note stops before it pays.
+    let _claim = artifact::claim_note(&target.course_dir)?;
     if let execution::Operation::Reprocess {
         note_dir,
         base_task_id,
@@ -653,7 +657,7 @@ impl Task<'_> {
             blocking(move || {
                 crate::pool::map_pool(images, 4, &control, |image| {
                     let source = artifact::safe_asset_path(&base_dir, &image)?;
-                    let dest = out_dir.join("base").join(&image);
+                    let dest = out_dir.join(base_image(&image));
                     std::fs::create_dir_all(dest.parent().context("asset path")?)?;
                     if !dest.exists() {
                         std::fs::copy(source, &dest)?;
@@ -669,7 +673,7 @@ impl Task<'_> {
         }
         for section in &mut document.sections {
             if !section.image.is_empty() {
-                section.image = format!("base/{}", section.image);
+                section.image = base_image(&section.image);
             }
         }
         let mut outcomes = base.outcomes.clone();
@@ -1402,6 +1406,16 @@ fn export_for_task(
     artifact::write_export(note_dir, format, &bytes)
 }
 
+/// Where a repair keeps a screenshot of the note it repairs: under `base/`, once,
+/// however many repairs the note has been through.
+fn base_image(image: &str) -> String {
+    let mut name = image;
+    while let Some(rest) = name.strip_prefix("base/") {
+        name = rest;
+    }
+    format!("base/{name}")
+}
+
 /// File hashing, publishing and AI batches block for long; off the async workers,
 /// the sibling screenshot/transcript branch and control polling keep running.
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
@@ -1630,6 +1644,16 @@ mod tests {
         cfg.no_download = true;
         assert!(super::prepare_cached_media(&job, cfg.no_download).is_err());
         assert_eq!(std::fs::read(media).unwrap(), b"changed externally");
+    }
+
+    #[test]
+    fn repaired_screenshots_keep_one_base_folder() {
+        assert_eq!(super::base_image("frames/a.jpg"), "base/frames/a.jpg");
+        assert_eq!(super::base_image("base/frames/a.jpg"), "base/frames/a.jpg");
+        assert_eq!(
+            super::base_image("base/base/frames/a.jpg"),
+            "base/frames/a.jpg"
+        );
     }
 
     #[test]
