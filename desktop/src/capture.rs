@@ -34,7 +34,7 @@
 //! `dialog:youtube~<checking|signedout|failed|connected|empty>` the YouTube
 //! connection's, with fixture text and no request; `dialog:youtube~check` runs
 //! the real check of the first installed browser, so use it only with a fixture
-//! `HOME`. `dialog:youtube~access-<blocked|reopened|waiting|restart|granted>`
+//! `HOME`. `dialog:youtube~access-<blocked|reopened|waiting|refused|restart|granted>`
 //! shows a Full Disk Access guide step whatever the folder says, and
 //! `dialog:youtube~access-open-settings` takes the guide's first action on the
 //! real look at the fixture folder. In capture runs, opening System Settings,

@@ -73,7 +73,7 @@ fn read_only_mount(_: &Path) -> bool {
 fn must_move() -> bool {
     matches!(
         app_location(),
-        AppLocation::Translocated | AppLocation::DiskImage
+        AppLocation::Translocated | AppLocation::DiskImage | AppLocation::OutsideApplications
     )
 }
 
@@ -183,6 +183,9 @@ impl AccountsView {
             }
         }
         self.youtube.dialog = Some(dialog);
+        // A dialog opens at its top, not where the last one was left scrolled.
+        self.youtube_scroll.set_offset(point(px(0.), px(0.)));
+        self.youtube_scroll_step.set(0);
         self.watch_youtube_access(cx);
         window.refresh();
         cx.notify();
@@ -302,6 +305,10 @@ impl AccountsView {
         let Some(bundle) = app_bundle() else {
             return;
         };
+        if let Some(dialog) = &mut self.youtube.dialog {
+            dialog.acted();
+        }
+        cx.notify();
         if !stubbed(&format!("reveal {}", bundle.display())) {
             cx.reveal_path(bundle);
         }
@@ -636,6 +643,18 @@ impl AccountsView {
                             guide.browser.name()
                         ),
                     )),
+                // Access just given: say so first, above the explanation.
+                (Some(guide), false) => v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(rem(16.))
+                    .child(self.access_guide(guide, compact, cx))
+                    .child(supporting_info(
+                        "youtube-explain",
+                        course2md::tr!(
+                            "YouTube 不允许在其他应用中用密码登录。course2md 会让 yt-dlp 读取所选浏览器中的 YouTube 登录（Cookie），只在打开 YouTube 视频时使用，不保存这些 Cookie。连接时的检查会让 yt-dlp 把浏览器的 Cookie 短暂写入本机的私有临时文件，检查结束即删除。"
+                        ),
+                    )),
                 _ => supporting_info(
                     "youtube-explain",
                     course2md::tr!(
@@ -712,8 +731,7 @@ impl AccountsView {
                             .on_select(cx.listener(|this, index: &usize, _, cx| {
                                 if let Some(dialog) = &mut this.youtube.dialog {
                                     dialog.profile_open = false;
-                                    dialog.profile = Some(*index);
-                                    dialog.step = YoutubeStep::Choose;
+                                    dialog.select_profile(*index);
                                 }
                                 cx.notify();
                             })),
@@ -734,7 +752,8 @@ impl AccountsView {
                         ),
                     ));
                 }
-                Some(guide) => body = body.child(self.access_guide(guide, compact, cx)),
+                // Granted: shown first, above.
+                Some(_) => {}
                 None => {}
             }
             // The check's result sits under the choice it is about, next to the action.
@@ -836,7 +855,23 @@ impl AccountsView {
             Some(AccessStep::Restart) => Some(settings()),
             _ => Some(check()),
         };
+        // A new step (of the check or of the guide) replaces what the person was
+        // reading: show it from the top, not where the last one was scrolled to.
+        let step_key = match &dialog.step {
+            YoutubeStep::Choose => 1,
+            YoutubeStep::Checking => 2,
+            YoutubeStep::SignedOut => 3,
+            YoutubeStep::Failed { .. } => 4,
+            YoutubeStep::Connected => 5,
+        } * 16
+            + guide.as_ref().map_or(0, |guide| {
+                1 + guide.position() as u8 + if guide.refused { 8 } else { 0 }
+            });
+        if self.youtube_scroll_step.replace(step_key) != step_key {
+            self.youtube_scroll.set_offset(point(px(0.), px(0.)));
+        }
         MaterialDialog::new("youtube-dialog")
+            .track_body_scroll(&self.youtube_scroll)
             .container(ColorRole::SURFACE)
             .headline(course2md::tr!("连接 YouTube"))
             .width(YOUTUBE_DIALOG_WIDTH)
@@ -950,6 +985,10 @@ impl AccountsView {
                         course2md::tr!(
                             "course2md 正从磁盘映像运行，还没有安装。请先退出 course2md，在访达中把它拖到“应用程序”文件夹，再从“应用程序”打开，然后回到这里。"
                         )
+                    } else if *app_location() == AppLocation::OutsideApplications {
+                        course2md::tr!(
+                            "course2md 不在“应用程序”文件夹中。请先退出 course2md，在访达中把它移到“应用程序”文件夹（这台 Mac 的，或这个磁盘上的），再从那里打开，然后回到这里。"
+                        )
                     } else {
                         course2md::tr!(
                             "course2md 正从一份临时副本运行（macOS 对刚下载、尚未移动的应用会这样做），给它的权限在下次打开时不会保留。请先退出 course2md，在访达中把它从“下载”等位置拖到“应用程序”文件夹，再从“应用程序”打开，然后回到这里。"
@@ -1018,11 +1057,26 @@ impl AccountsView {
                 cx,
             )),
         };
+        // A check just refused, said where the person acts next, not only on
+        // the settings row behind the dialog.
+        let refusal = guide.refused.then(|| {
+            notice_banner(
+                "youtube-access-refused",
+                NoticeKind::Danger,
+                course2md::tr!(
+                    "刚才的尝试没有成功：macOS 仍然不允许 course2md 读取 {} 的数据。",
+                    name
+                ),
+            )
+        });
+        // A copy that must be moved first is not on any of the three steps.
+        let moving = translocated && guide.step != AccessStep::Granted;
         v_flex()
             .w_full()
             .min_w_0()
             .gap(rem(16.))
-            .child(stepper)
+            .when(!moving, |guide| guide.child(stepper))
+            .children(refusal)
             .child(content)
     }
 }
@@ -1145,6 +1199,7 @@ impl AccountsView {
         // The guide's states for a fixture browser, whatever its folder says.
         if let Some(step) = match state {
             "access-blocked" | "access-reopened" => Some(AccessStep::Blocked),
+            "access-refused" => Some(AccessStep::Waiting),
             "access-waiting" => Some(AccessStep::Waiting),
             "access-restart" => Some(AccessStep::Restart),
             "access-granted" => Some(AccessStep::Granted),
@@ -1158,10 +1213,9 @@ impl AccountsView {
                 dialog.guide = dialog
                     .selected_browser()
                     .map(|browser| AccessGuide::new(browser, step, Instant::now()));
-                if state == "access-reopened"
-                    && let Some(guide) = &mut dialog.guide
-                {
-                    guide.reopened = true;
+                if let Some(guide) = &mut dialog.guide {
+                    guide.reopened = state == "access-reopened";
+                    guide.refused = state == "access-refused";
                 }
             }
             cx.notify();
