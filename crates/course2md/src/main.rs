@@ -167,6 +167,7 @@ fn main() -> std::process::ExitCode {
                     message: tr!("参数无效：{}", error),
                     code: progress::ErrorCode::InvalidArguments,
                     parts: Vec::new(),
+                    path: None,
                 });
             } else if course2md::i18n::lang() == course2md::i18n::Lang::En {
                 let _ = error.print();
@@ -244,6 +245,7 @@ fn main() -> std::process::ExitCode {
                     code: progress::ErrorCode::of(&error),
                     message,
                     parts: progress::kept_parts(&error),
+                    path: progress::blocked_path(&error),
                 });
             } else if helper.is_some() {
                 // The parent puts the helper's words into its own error.
@@ -590,11 +592,23 @@ fn note_dir(dir: &std::path::Path) -> anyhow::Result<Option<std::path::PathBuf>>
 /// 递归收集笔记（可传单份笔记或存放多份笔记的上级目录）；单条目读取失败只告警并跳过。
 fn collect_targets(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>, depth: usize) {
     // A replacement a crash interrupted is completed before the folder is read.
-    for (note, error) in course2md::artifact::recover_folder(dir) {
-        tracing::warn!(
-            "跳过无法读取的笔记 / Skipped unreadable note {}: {error:#}",
-            note.display()
-        );
+    for attention in course2md::artifact::recover_folder(dir) {
+        use course2md::artifact::NoteAttention;
+        match attention {
+            NoteAttention::Blocked { swap, .. } => eprintln!(
+                "{}",
+                course2md::outcome::recovery_blocked_message(&swap, course2md::i18n::lang())
+            ),
+            NoteAttention::Kept { swap, copies, .. } => eprintln_tr!(
+                "笔记旁保留了 {} 份副本，请查看：{}",
+                copies.len(),
+                swap.display()
+            ),
+            NoteAttention::Failed { note, message } => tracing::warn!(
+                "跳过无法读取的笔记 / Skipped unreadable note {}: {message}",
+                note.display()
+            ),
+        }
     }
     match note_dir(dir) {
         Ok(Some(note)) => {
