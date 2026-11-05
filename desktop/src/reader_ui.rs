@@ -161,6 +161,8 @@ pub(crate) struct ReaderPage {
     loaded: Option<PathBuf>,
     generation: u64,
     data_loading: bool,
+    /// A task replaced the open note, and reading the new one failed.
+    replaced_unreadable: bool,
     frames: Rc<Vec<Frame>>,
     frame_by_path: Rc<HashMap<PathBuf, usize>>,
     /// The note's contents and the chapter titles its headings open.
@@ -383,6 +385,7 @@ impl ReaderPage {
             loaded: None,
             generation: 0,
             data_loading: false,
+            replaced_unreadable: false,
             frames: Rc::default(),
             frame_by_path: Rc::default(),
             outline: Rc::default(),
@@ -1426,7 +1429,15 @@ impl ReaderPage {
     /// `Replaced` finds the same moment of the video in a note a task has just
     /// replaced, whose blocks may differ.
     pub(crate) fn reload_note(&mut self, course: Course, reload: Reload, cx: &mut Context<Self>) {
-        if self.opened.reading
+        // A read of another note goes on; one of this note, which may have read it
+        // before the task replaced it, gives way to this one.
+        let other_read = self.opened.reading
+            && self
+                .opened
+                .opening_course
+                .as_ref()
+                .is_some_and(|opening| *opening != course.dir);
+        if other_read
             || self
                 .opened
                 .preview
@@ -1440,13 +1451,15 @@ impl ReaderPage {
             .capture_reading_position()
             .map(|position| match reload {
                 Reload::Reread => position,
-                // A replaced note's anchors name other blocks: the time is what carries over.
-                Reload::Replaced if position.seconds.is_some() => workspace::ReadingPosition {
+                // A replaced note's anchors name other blocks: the time is what carries
+                // over, and without one the note opens at its top.
+                Reload::Replaced => workspace::ReadingPosition {
                     seconds: position.seconds,
                     ..Default::default()
                 },
-                Reload::Replaced => position,
             });
+        self.replaced_unreadable = false;
+        self.opened.opening_course = None;
         let tab = self.opened.result_tab;
         self.opened.read_generation += 1;
         let generation = self.opened.read_generation;
@@ -1468,11 +1481,19 @@ impl ReaderPage {
                         this.opened.preview = Some(Rc::new(preview));
                         this.opened.result_tab = tab;
                         this.loaded = None;
+                        if reload == Reload::Replaced && this.visible {
+                            cx.emit(ReaderEvent::Message(course2md::tr!("笔记已更新").into()));
+                        }
                         // The event path loads the data; rendering no longer does.
                         this.ensure_reader_data(cx);
                         this.restore_reading_position(cx);
-                        this.restore.pending = position;
+                        if position.is_some() {
+                            this.restore.pending = position;
+                        }
                     }
+                    // The note on screen is gone from disk: the reader says so until
+                    // it is read again.
+                    Err(_) if reload == Reload::Replaced => this.replaced_unreadable = true,
                     Err(error) => cx.emit(ReaderEvent::Message(course2md::tr!(
                         "笔记暂时无法读取：{}",
                         error.to_string()
@@ -1701,25 +1722,55 @@ impl ReaderPage {
         let feedback = self
             .exports
             .update(cx, |exports, cx| exports.feedback(&preview.course, cx));
-        let status = |id: &'static str, text: &'static str, cx: &mut Context<Self>| {
+        let line = |id: &'static str, lead: AnyElement, text: &'static str| {
             h_flex()
+                .flex_wrap()
                 .items_center()
                 .gap(rem(8.))
-                .child(spinner(
-                    SharedString::from(format!("{id}-spinner")),
-                    text,
-                    cx,
-                ))
+                .child(lead)
                 .child(
                     accessible_text(SharedString::from(format!("{id}-label")), text)
                         .role(Role::Status)
                         .text_color(color(ON_SURFACE_VARIANT)),
                 )
         };
+        let icon = |icon: SymbolIcon, role| {
+            Icon::from(icon)
+                .size(rem(20.))
+                .color(color(role))
+                .into_any_element()
+        };
         let reading = self.opened.reading.then(|| {
+            let text = course2md::tr!("正在读取笔记…");
             motion::enter(
                 "reader-reading",
-                status("reader-reading", course2md::tr!("正在读取笔记…"), cx),
+                line(
+                    "reader-reading",
+                    spinner("reader-reading-spinner", text, cx).into_any_element(),
+                    text,
+                ),
+            )
+        });
+        // The note was replaced and could not be read: the one on screen is gone.
+        let unreadable = (!self.opened.reading && self.replaced_unreadable).then(|| {
+            let course = preview.course.clone();
+            motion::enter(
+                "reader-replaced-unreadable",
+                line(
+                    "reader-replaced-unreadable",
+                    icon(symbols::warning(), WARNING),
+                    course2md::tr!("笔记已更新，但暂时无法读取"),
+                )
+                .child(
+                    material_button("reader-replaced-reread", ButtonVariant::Text)
+                        .icon(symbols::refresh())
+                        .child(course2md::tr!("重新读取"))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            let mut course = course.clone();
+                            course.manifest = None;
+                            this.reload_note(course, Reload::Replaced, cx)
+                        })),
+                ),
             )
         });
         // The task that will replace this note: the note stays readable meanwhile, and
@@ -1727,16 +1778,31 @@ impl ReaderPage {
         let updating = (!self.opened.reading)
             .then(|| self.replacing_task(preview, cx))
             .flatten()
-            .map(|id| {
+            .map(|(id, state)| {
+                use workspace::TaskState::*;
+                let (lead, text) = match state {
+                    // A still icon: a spinner would draw the reader every frame for as
+                    // long as the task runs.
+                    Running | Pausing => (
+                        icon(symbols::refresh(), ON_SURFACE_VARIANT),
+                        course2md::tr!("正在更新这份笔记，完成后这里会自动刷新"),
+                    ),
+                    Queued => (
+                        icon(symbols::schedule(), ON_SURFACE_VARIANT),
+                        course2md::tr!("这份笔记等待更新，完成后这里会自动刷新"),
+                    ),
+                    Paused => (
+                        icon(symbols::pause(), ON_SURFACE_VARIANT),
+                        course2md::tr!("这份笔记的更新已暂停"),
+                    ),
+                    _ => (
+                        icon(symbols::warning(), WARNING),
+                        course2md::tr!("这份笔记的更新未完成，这里仍是原来的笔记"),
+                    ),
+                };
                 motion::enter(
                     "reader-updating",
-                    status(
-                        "reader-updating",
-                        course2md::tr!("正在更新这份笔记，完成后会在这里显示"),
-                        cx,
-                    )
-                    .flex_wrap()
-                    .child(
+                    line("reader-updating", lead, text).child(
                         material_button("reader-updating-task", ButtonVariant::Text)
                             .tone(ButtonTone::Neutral)
                             .icon(symbols::task())
@@ -1748,33 +1814,32 @@ impl ReaderPage {
                     ),
                 )
             });
-        (feedback.is_some() || reading.is_some() || updating.is_some()).then(|| {
-            v_flex()
-                .w_full()
-                .min_w_0()
-                .flex_shrink_0()
-                .gap(rem(8.))
-                .children(feedback)
-                .children(updating)
-                .children(reading)
-        })
+        (feedback.is_some() || reading.is_some() || updating.is_some() || unreadable.is_some())
+            .then(|| {
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .flex_shrink_0()
+                    .gap(rem(8.))
+                    .children(feedback)
+                    .children(unreadable)
+                    .children(updating)
+                    .children(reading)
+            })
     }
 
-    /// The task at work on the open note, which will replace it when it finishes.
-    fn replacing_task(&self, preview: &notes::Preview, cx: &App) -> Option<String> {
+    /// The unfinished task for the open note, which will replace it when it finishes.
+    fn replacing_task(
+        &self,
+        preview: &notes::Preview,
+        cx: &App,
+    ) -> Option<(String, workspace::TaskState)> {
         let manifest = preview.course.manifest.as_ref()?;
         let library = self.course_location(&preview.course, cx)?;
         let tasks = &self.workspace(cx)?.state.tasks;
         desktop_store::library::note_unfinished_task(tasks, &library.id, Some(&manifest.source_id))
-            .filter(|task| {
-                matches!(
-                    task.state,
-                    workspace::TaskState::Running
-                        | workspace::TaskState::Pausing
-                        | workspace::TaskState::Queued
-                ) && !task.exports_only()
-            })
-            .map(|task| task.id.clone())
+            .filter(|task| !task.exports_only())
+            .map(|task| (task.id.clone(), task.state))
     }
 
     /// The peer views, and the contents button when they cannot sit beside the article.
@@ -2274,8 +2339,8 @@ impl ReaderPage {
         };
         if let Some(manifest) = &preview.course.manifest {
             details.push((
-                course2md::tr!("生成时间"),
-                symbols::history(),
+                course2md::tr!("生成日期"),
+                symbols::schedule(),
                 nav::date_local(manifest.created_at_ms),
             ));
         }

@@ -2241,10 +2241,15 @@ AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not conf
 这项任务已结束，可在任务卡中补做或重新生成	这项任务已结束，可在任务卡中补做或重新生成	This task has ended; fill in missing steps or regenerate from its card	這項任務已結束，可在任務卡中補做或重新產生	このタスクは終了しました。タスクカードから未完了分を処理するか再生成できます
 {} 个已有笔记将被覆盖	{} 个已有笔记将被覆盖	Existing notes to be replaced: {}	{} 個已有筆記將被覆寫	{} 件の既存のノートは上書きされます
 《{}》将被新生成的笔记替换。你手动改过的文件会以 .edited 为名保留在笔记旁。	《{}》将被新生成的笔记替换。你手动改过的文件会以 .edited 为名保留在笔记旁。	“{}” will be replaced by the new note. Files you edited by hand are kept beside it under an .edited name.	《{}》將被新產生的筆記取代。你手動改過的檔案會以 .edited 為名保留在筆記旁。	「{}」は新しく生成されたノートに置き換えられます。手で編集したファイルは .edited の名前でノートの横に残ります。
-正在更新这份笔记，完成后会在这里显示	正在更新这份笔记，完成后会在这里显示	Updating this note; it will show here when done	正在更新這份筆記，完成後會在這裡顯示	このノートを更新しています。完了するとここに表示されます
-生成时间	生成时间	Generated	產生時間	生成日
 笔记已被之后的任务更新	笔记已被之后的任务更新	Note updated by a later task	筆記已被之後的任務更新	後のタスクでノートが更新されました
 笔记暂时无法读取：{}	笔记暂时无法读取：{}	The note cannot be read right now: {}	筆記暫時無法讀取：{}	ノートを現在読み込めません: {}
 重新生成	重新生成	Regenerate	重新產生	再生成
 重新生成笔记	重新生成笔记	Regenerate the note	重新產生筆記	ノートを再生成
 重新生成（覆盖当前笔记）	重新生成（覆盖当前笔记）	Regenerate (replaces the current note)	重新產生（覆寫目前筆記）	再生成（現在のノートを上書き）
+正在更新这份笔记，完成后这里会自动刷新	正在更新这份笔记，完成后这里会自动刷新	Updating this note; this page refreshes when it's done	正在更新這份筆記，完成後這裡會自動重新整理	このノートを更新しています。完了するとここが自動で更新されます
+这份笔记等待更新，完成后这里会自动刷新	这份笔记等待更新，完成后这里会自动刷新	This note is waiting to be updated; this page refreshes when it's done	這份筆記正在等待更新，完成後這裡會自動重新整理	このノートは更新待ちです。完了するとここが自動で更新されます
+这份笔记的更新已暂停	这份笔记的更新已暂停	Updating this note is paused	這份筆記的更新已暫停	このノートの更新は一時停止中です
+这份笔记的更新未完成，这里仍是原来的笔记	这份笔记的更新未完成，这里仍是原来的笔记	This note's update did not finish; this is still the earlier note	這份筆記的更新未完成，這裡仍是原來的筆記	このノートの更新は完了していません。表示しているのは元のノートです
+笔记已更新，但暂时无法读取	笔记已更新，但暂时无法读取	The note was updated but cannot be read right now	筆記已更新，但暫時無法讀取	ノートは更新されましたが、現在読み込めません
+笔记已更新	笔记已更新	Note updated	筆記已更新	ノートを更新しました
+生成日期	生成日期	Generated	產生日期	生成日
