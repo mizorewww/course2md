@@ -257,6 +257,33 @@ pub fn recovery_blocked_message(swap: &std::path::Path, lang: c2m_i18n::i18n::La
     )
 }
 
+/// Copies kept beside a note have reached the limit: new tasks for the note stop
+/// before any work until the person moves the copies to keep out of `swap` and
+/// deletes the rest.
+#[derive(Debug)]
+pub struct CopiesKept {
+    pub swap: std::path::PathBuf,
+}
+
+impl std::fmt::Display for CopiesKept {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&copies_kept_message(&self.swap, c2m_i18n::i18n::lang()))
+    }
+}
+
+impl std::error::Error for CopiesKept {}
+
+/// What to do when copies kept beside a note stop its new tasks, in `lang`.
+pub fn copies_kept_message(swap: &std::path::Path, lang: c2m_i18n::i18n::Lang) -> String {
+    fill(
+        c2m_i18n::i18n::t_for(
+            "这份笔记旁保留的副本已达上限，在处理之前，这份笔记的新任务都会停下。请打开 {}，把要留下的副本移出这个文件夹（留在里面的仍会挡住新任务），删除其余的，然后重试。",
+            lang,
+        ),
+        &[&swap.display().to_string()],
+    )
+}
+
 /// A catalog template with its `{}` filled in order.
 fn fill(template: &str, values: &[&str]) -> String {
     let mut out = String::new();

@@ -195,15 +195,24 @@ pub enum ErrorCode {
     /// A replacement of the note stopped and cannot be finished on its own;
     /// `path` names the folder to look at. Nothing was changed.
     NoteRecoveryBlocked,
+    /// Copies kept beside the note reached the limit; `path` names their folder.
+    /// New tasks for the note stop until the person sorts them out.
+    NoteCopiesKept,
     #[default]
     Other,
 }
 
-/// The folder a `note_recovery_blocked` error names; `None` for any other error.
+/// The folder a `note_recovery_blocked` or `note_copies_kept` error names;
+/// `None` for any other error.
 pub fn blocked_path(error: &anyhow::Error) -> Option<PathBuf> {
     error
         .downcast_ref::<crate::outcome::RecoveryBlocked>()
         .map(|blocked| blocked.swap.clone())
+        .or_else(|| {
+            error
+                .downcast_ref::<crate::outcome::CopiesKept>()
+                .map(|kept| kept.swap.clone())
+        })
 }
 
 /// The parts a `note_kept` error names; empty for any other error.
@@ -250,6 +259,9 @@ impl ErrorCode {
             .is_some()
         {
             return Self::NoteRecoveryBlocked;
+        }
+        if error.downcast_ref::<crate::outcome::CopiesKept>().is_some() {
+            return Self::NoteCopiesKept;
         }
         match error
             .downcast_ref::<crate::outcome::Failure>()
@@ -353,7 +365,8 @@ pub enum Event {
         /// reader shows the message in its own language.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         parts: Vec<crate::outcome::KeptPart>,
-        /// With `note_recovery_blocked`: the note's swap folder, to look at.
+        /// With `note_recovery_blocked` or `note_copies_kept`: the note's swap
+        /// folder, to look at.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         path: Option<PathBuf>,
     },
