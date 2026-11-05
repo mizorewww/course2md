@@ -30,7 +30,6 @@ YouTube 账号	YouTube 账号	YouTube account	YouTube 帳號	YouTube アカウ�
     缺失：{}	    缺失：{}	    Missing: {}	    缺失：{}	    欠落：{}
   仅 gpu/cpu 需要；下载约 2.4GB：course2md models download --dir "{}"	  仅 gpu/cpu 需要；下载约 2.4GB：course2md models download --dir "{}"	  Only needed for gpu/cpu (~2.4GB): course2md models download --dir "{}"	  僅 gpu/cpu 需要；下載約 2.4GB：course2md models download --dir "{}"	  gpu/cpu のみ必要です（約 2.4GB）：course2md models download --dir "{}"
  · 当前使用修改前的配置	 · 当前使用修改前的配置	 · Currently using the configuration from before the change	 · 目前使用修改前的配置	 · 現在は変更前の設定を使用しています
- · 部分完成	 · 部分完成	 · Partially completed	 · 部分完成	 · 一部完了
 ! GPU  无法检查设备：{}	! GPU  无法检查设备：{}	! GPU  Cannot check device: {}	! GPU  無法檢查裝置：{}	! GPU  デバイスを確認できません：{}
 ! coreml  缺少 Metal 着色器资源，请重新安装 / Metal shader resources missing; reinstall course2md	! coreml  缺少 Metal 着色器资源，请重新安装	! coreml  Metal shader resources missing; reinstall course2md	! coreml  缺少 Metal 著色器資源，請重新安裝	! coreml  Metal シェーダー リソースがありません。再インストールしてください
 (已设置，隐藏 / set, hidden)	(已设置，隐藏)	(set, hidden)	(已設定，隱藏)	(設定済み、非表示)
@@ -458,7 +457,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 关闭过渡动画和进度条的流动效果	关闭过渡动画和进度条的流动效果	Turn off transition animations and the flowing effect on progress bars	關閉過渡動畫和進度條的流動效果	プログレスバーのトランジションアニメーションとフロー効果をオフにする
 关闭这份笔记的导出提示	关闭这份笔记的导出提示	Turn off the export prompt for this note	關閉這份筆記的匯出提示	このノートのエクスポート プロンプトをオフにする
 其中的笔记会移到未分类	其中的笔记会移到未分类	The notes there will be moved to Uncategorized	其中的筆記會移到未分類	そこにあるノートは未分類に移動されます
-其他版本暂时无法读取：{}	其他版本暂时无法读取：{}	Other versions are temporarily unreadable: {}	其他版本暫時無法讀取：{}	他のバージョンは一時的に読み取れません: {}
 内容仍在处理中，请停止后重新定位	内容仍在处理中，请停止后重新定位	The content is still being processed, please stop and then relocate.	內容仍在處理中，請停止後重新定位	内容はまだ処理中です。停止してから場所を指定し直してください。
 内嵌字幕无法读取	内嵌字幕无法读取	Embedded subtitles cannot be read	內嵌字幕無法讀取	埋め込み字幕を読み取れません
 内嵌字幕（轨道 {}）	内嵌字幕（轨道 {}）	Embedded subtitles (track {})	內嵌字幕（軌道 {}）	埋め込み字幕 (トラック {})
@@ -1104,7 +1102,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 最近的笔记	最近的笔记	Recent notes	最近的筆記	最近のノート
 有 {} 个未完成任务引用此服务；这些任务中用到此服务的步骤将不再继续。	有 {} 个未完成任务引用此服务；这些任务中用到此服务的步骤将不再继续。	{} unfinished tasks use this service; their steps that need it will not continue.	有 {} 個未完成任務引用此服務；這些任務中用到此服務的步驟將不再繼續。	{} 件の未完了タスクがこのサービスを使用しています。このサービスが必要な手順は続行されません。
 有 {} 次未完成的移动记录已损坏，相关文件均已保留	有 {} 次未完成的移动记录已损坏，相关文件均已保留	{} unfinished move records are corrupted and related files have been retained	有 {} 次未完成的移動記錄已損壞，相關檔案均已保留	{} 件の未完了の移動記録が破損しています。関連ファイルはすべて保持されています
-有一个旧版本无法读取	有一个旧版本无法读取	There is an older version that cannot be read	有一個舊版本無法讀取	読み込めない古いバージョンがあります
 有字幕时直接用字幕，没有字幕时使用语音识别	有字幕时直接用字幕，没有字幕时使用语音识别	Use subtitles when available; otherwise use speech recognition	有字幕時直接使用字幕，沒有字幕時使用語音辨識	字幕があれば字幕を使用し、なければ音声認識を使用します
 有效服务版本记录不完整	有效服务版本记录不完整	The effective service version record is incomplete	有效服務版本記錄不完整	有効なサービス バージョン レコードが不完全です
 有效的模型分片索引 / a valid model shard index	有效的模型分片索引	a valid model shard index	有效的模型分片索引	有効なモデルシャードインデックス
@@ -1314,7 +1311,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 正在准备模型	正在准备模型	Preparing model	正在準備模型	モデルの準備中
 正在准备的模型	正在准备的模型	Model being prepared	正在準備的模型	準備中のモデル
 正在准备识别模型	正在准备识别模型	Preparing speech model	正在準備辨識模型	音声認識モデルを準備しています
-正在切换版本…	正在切换版本…	Switching versions...	正在切換版本…	バージョンを切り替えています...
 正在取消	正在取消	Canceling	正在取消	キャンセル中
 正在取消…	正在取消…	Canceling…	正在取消…	キャンセル中…
 正在取消浏览器授权…	正在取消浏览器授权…	Cancelling browser authorization…	正在取消瀏覽器授權…	ブラウザ認可をキャンセルしています…
@@ -1425,7 +1421,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 清除保存的登录凭据 / Remove saved login credentials	清除保存的登录凭据	Remove saved login credentials	清除儲存的登入憑證	保存されたログイン認証情報をクリアする
 清除搜索	清除搜索	Clear search	清除搜尋	検索をクリア
 源码构建：把 native/apple-asr/.build 下的 mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib 复制为 {}	源码构建：把 native/apple-asr/.build 下的 mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib 复制为 {}	Source code build: Copy mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib under native/apple-asr/.build to {}	原始碼建置：把 native/apple-asr/.build 下的 mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib 複製為 {}	ソースコードのビルド:native/apple-asr/.build の下にある mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib を {} にコピーします。
-版本	版本	Version	版本	バージョン
 环境变量 {}	环境变量 {}	Environment variable {}	環境變數 {}	環境変数 {}
 现在下载 / Download now	现在下载	Download now	現在下載	今すぐダウンロード
 生成中断	生成中断	Generation interrupted	生成中斷	生成が中断されました
@@ -1543,8 +1538,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 笔记清单损坏 / Invalid note manifest	笔记清单损坏	Invalid note manifest	筆記清單損壞	ノートマニフェストが破損しています
 笔记目录，或存放多份笔记的上级目录 / A note directory or a folder of notes	笔记目录，或存放多份笔记的上级目录	A note directory or a folder of notes	筆記目錄，或存放多份筆記的上級目錄	ノート ディレクトリ、または複数のノートが保存される親ディレクトリ
 笔记详情	笔记详情	Note details	筆記詳情	ノートの詳細
-第 {} 版 · {} 生成	第 {} 版 · {} 生成	Version {} · generated {}	第 {} 版 · {} 生成	バージョン {} · {} に生成
-第 {} 版 · {}{}	第 {} 版 · {}{}	Version {} · {}{}	第 {} 版 · {}{}	バージョン {} · {}{}
 第一段应纠正 have / book 的语法；第二段应保留水在零摄氏度结冰的原意	第一段应纠正 have / book 的语法；第二段应保留水在零摄氏度结冰的原意	The first paragraph should correct the grammar of have / book; the second paragraph should retain the original meaning of water freezing at zero degrees Celsius	第一段應糾正 have / book 的語法；第二段應保留水在零攝氏度結冰的原意	最初の段落では、have / book の文法を修正する必要があります。2 番目の段落は、摂氏 0 度で水が凍るという本来の意味を保持する必要があります。
 等待 yt-dlp 结束失败 / Failed waiting for yt-dlp to exit	等待 yt-dlp 结束失败	Failed waiting for yt-dlp to exit	等待 yt-dlp 結束失敗	yt-dlp の終了待ちに失敗しました
 等待准备进度	等待准备进度	Waiting for preparation progress	等待準備進度	準備の進行を待っています
@@ -1781,8 +1774,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 这个文件夹已是笔记库位置	这个文件夹已是笔记库位置	This folder is already a note library location	這個資料夾已是筆記庫位置	このフォルダーはすでにノートライブラリの場所です
 这个文件夹暂时不能写入，请重新连接磁盘或检查访问权限	这个文件夹暂时不能写入，请重新连接磁盘或检查访问权限	This folder cannot be written to temporarily, please reconnect the disk or check access permissions	這個資料夾暫時無法寫入，請重新連接磁碟或檢查存取權限	このフォルダーには一時的に書き込むことができません。ディスクを再接続するか、アクセス許可を確認してください。
 这个文件夹还没有笔记	这个文件夹还没有笔记	There are no notes in this folder yet	這個資料夾還沒有筆記	このフォルダーにはまだノートがありません
-这个版本暂时无法打开：{}	这个版本暂时无法打开：{}	This version cannot be opened temporarily: {}	這個版本暫時無法開啟：{}	このバージョンは一時的に開けません: {}
-这个版本没有 {} 处的内容，已跳到最近的 {}。	这个版本没有 {} 处的内容，已跳到最近的 {}。	This version has no content at {}; jumped to the nearest {}.	這個版本沒有 {} 處的內容，已跳到最近的 {}。	このバージョンには {} の内容がないため、最も近い {} に移動しました。
 这个环境变量当前没有可用的凭据，请重新选择或填写 API Key	这个环境变量当前没有可用的凭据，请重新选择或填写 API Key	No credentials are currently available from this environment variable. Please select again or enter the API key.	這個環境變數目前沒有可用的憑證，請重新選擇或填寫 API 金鑰	現在、この環境変数に使用できる認証情報はありません。再選択するか、API キーを入力してください。
 这个笔记库已被移除	这个笔记库已被移除	This note library has been removed	此筆記庫已移除	このノートライブラリは削除されています
 这个笔记库的位置已变化，请重新选择	这个笔记库的位置已变化，请重新选择	The location of this note library has changed, please select again	這個筆記庫的位置已變化，請重新選擇	このノートライブラリの場所が変更されました。もう一度選択してください
@@ -2251,3 +2242,6 @@ AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not conf
 这份笔记已被之后的任务更新，请从最新的任务补做	这份笔记已被之后的任务更新，请从最新的任务补做	A later task has updated this note; fill in missing steps from the latest task	這份筆記已被之後的任務更新，請從最新的任務補做	このノートは後のタスクで更新されています。最新のタスクから未完了分を処理してください
 这项任务已结束，可在任务卡中补做或重新生成	这项任务已结束，可在任务卡中补做或重新生成	This task has ended; fill in missing steps or regenerate from its card	這項任務已結束，可在任務卡中補做或重新產生	このタスクは終了しました。タスクカードから未完了分を処理するか再生成できます
 笔记已被之后的任务更新	笔记已被之后的任务更新	Note updated by a later task	筆記已被之後的任務更新	後のタスクでノートが更新されました
+正在更新这份笔记，完成后会在这里显示	正在更新这份笔记，完成后会在这里显示	Updating this note; it will show here when done	正在更新這份筆記，完成後會在這裡顯示	このノートを更新しています。完了するとここに表示されます
+生成时间	生成时间	Generated	產生時間	生成日
+笔记暂时无法读取：{}	笔记暂时无法读取：{}	The note cannot be read right now: {}	筆記暫時無法讀取：{}	ノートを現在読み込めません: {}

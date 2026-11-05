@@ -1,4 +1,4 @@
-//! Reading one immutable note version, independently of its exports. The note is one
+//! Reading one note, independently of its exports. The note is one
 //! Markdown document in a scrollable `TextView` (see `note_text`), which owns selection,
 //! highlights and virtualization; the screenshots are a list of rows beside it.
 use crate::{
@@ -103,6 +103,15 @@ fn viewer_tool(
     )
 }
 
+/// How the reader reads its open note again.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Reload {
+    /// The same note, after its files could not all be read.
+    Reread,
+    /// A task has replaced the note.
+    Replaced,
+}
+
 /// What the reader asks of the window around it.
 pub(crate) enum ReaderEvent {
     /// Leave the reader for this page.
@@ -126,7 +135,7 @@ pub(crate) enum ReaderEvent {
 
 impl EventEmitter<ReaderEvent> for ReaderPage {}
 
-/// The reader: one note version, its screenshots, find, contents and viewer. It reads
+/// The reader: one note, its screenshots, find, contents and viewer. It reads
 /// the shared records and exports, and asks the window for anything beyond the note.
 pub(crate) struct ReaderPage {
     records: Entity<Records>,
@@ -156,7 +165,6 @@ pub(crate) struct ReaderPage {
     frame_by_path: Rc<HashMap<PathBuf, usize>>,
     /// The note's contents and the chapter titles its headings open.
     outline: Rc<Vec<(usize, String, Option<f64>)>>,
-    versions: Vec<Version>,
     issues: Vec<String>,
     viewer: Option<ImageViewer>,
     viewer_text: MarkdownExtensions,
@@ -378,7 +386,6 @@ impl ReaderPage {
             frames: Rc::default(),
             frame_by_path: Rc::default(),
             outline: Rc::default(),
-            versions: Vec::new(),
             issues: Vec::new(),
             viewer: None,
             viewer_text: note_text::extensions(viewer_line.clone()),
@@ -933,7 +940,6 @@ impl ReaderPage {
         self.gallery.matches = Rc::default();
         self.gallery.excerpts = Rc::default();
         self.set_gallery_items(self.gallery.columns);
-        self.versions.clear();
         self.issues.clear();
         self.source = None;
         // A different note: stop the relocation probe in flight.
@@ -1127,7 +1133,6 @@ impl ReaderPage {
                 this.frames = Rc::new(data.frames);
                 this.frame_by_path = Rc::new(data.frame_by_path);
                 this.update_gallery_matches(cx);
-                this.versions = data.versions;
                 this.issues = data.issues;
                 this.export_folder = data.export_folder;
                 this.source = source;
@@ -1165,7 +1170,7 @@ impl ReaderPage {
         let state = &self.workspace(cx)?.state;
         let task = state.task(&manifest.task_id)?;
         let library = state.library(&task.plan.library_id)?;
-        OfflineVideoRequest::for_version(course, task, library)
+        OfflineVideoRequest::for_note(course, task, library)
     }
     fn play_reader_offline_video(&mut self, cx: &mut Context<Self>) {
         if self.offline_opening {
@@ -1174,7 +1179,7 @@ impl ReaderPage {
         let Some(request) = self.reader_offline_video_request(cx) else {
             return;
         };
-        let version = request.version_dir.clone();
+        let note = request.note_dir.clone();
         let generation = self.generation;
         self.offline_opening = true;
         cx.spawn(async move |this, cx| {
@@ -1187,7 +1192,7 @@ impl ReaderPage {
                         .opened
                         .preview
                         .as_ref()
-                        .is_none_or(|preview| preview.course.dir != version)
+                        .is_none_or(|preview| preview.course.dir != note)
                 {
                     return;
                 }
@@ -1417,22 +1422,31 @@ impl ReaderPage {
         };
         self.return_reader_to(position, cx);
     }
-    fn open_reader_version(&mut self, course: impl Into<Rc<Course>>, cx: &mut Context<Self>) {
-        self.load_reader_version(Rc::unwrap_or_clone(course.into()), false, cx);
-    }
-    fn load_reader_version(&mut self, course: Course, refresh: bool, cx: &mut Context<Self>) {
+    /// Reads the open note `course` again in place. `Reread` keeps the exact position;
+    /// `Replaced` finds the same moment of the video in a note a task has just
+    /// replaced, whose blocks may differ.
+    pub(crate) fn reload_note(&mut self, course: Course, reload: Reload, cx: &mut Context<Self>) {
         if self.opened.reading
-            || (!refresh
-                && self
-                    .opened
-                    .preview
-                    .as_ref()
-                    .is_some_and(|preview| preview.course.dir == course.dir))
+            || self
+                .opened
+                .preview
+                .as_ref()
+                .is_none_or(|preview| preview.course.dir != course.dir)
         {
             return;
         }
         self.save_reading_position(cx);
-        let position = self.capture_reading_position();
+        let position = self
+            .capture_reading_position()
+            .map(|position| match reload {
+                Reload::Reread => position,
+                // A replaced note's anchors name other blocks: the time is what carries over.
+                Reload::Replaced if position.seconds.is_some() => workspace::ReadingPosition {
+                    seconds: position.seconds,
+                    ..Default::default()
+                },
+                Reload::Replaced => position,
+            });
         let tab = self.opened.result_tab;
         self.opened.read_generation += 1;
         let generation = self.opened.read_generation;
@@ -1453,47 +1467,14 @@ impl ReaderPage {
                             this.library(cx).course_display_title(&preview.course);
                         this.opened.preview = Some(Rc::new(preview));
                         this.opened.result_tab = tab;
-                        if refresh {
-                            this.loaded = None;
-                        }
+                        this.loaded = None;
                         // The event path loads the data; rendering no longer does.
                         this.ensure_reader_data(cx);
-                        let has_saved_position = this.reading_key(cx).is_some_and(|key| {
-                            this.workspace(cx).is_some_and(|workspace| {
-                                workspace.state.positions.contains_key(&key)
-                            })
-                        });
                         this.restore_reading_position(cx);
-                        if refresh {
-                            this.restore.pending = position.clone();
-                        }
-                        if !refresh
-                            && !has_saved_position
-                            && let Some(seconds) = position.and_then(|position| position.seconds)
-                        {
-                            let blocks = &this.opened.preview.as_ref().unwrap().blocks;
-                            let nearest = nav::nearest_time(heading_times(blocks), seconds);
-                            if let Some((index, exact)) = nearest {
-                                this.restore.pending = Some(workspace::ReadingPosition {
-                                    seconds: Some(seconds),
-                                    ..Default::default()
-                                });
-                                if !exact {
-                                    cx.emit(ReaderEvent::Message(course2md::tr!(
-                                        "这个版本没有 {} 处的内容，已跳到最近的 {}。",
-                                        course2md::render::fmt_ts(seconds),
-                                        course2md::render::fmt_ts(
-                                            block_time(blocks, index).unwrap()
-                                        )
-                                    )));
-                                }
-                            } else {
-                                this.restore.pending = Some(Default::default());
-                            }
-                        }
+                        this.restore.pending = position;
                     }
                     Err(error) => cx.emit(ReaderEvent::Message(course2md::tr!(
-                        "这个版本暂时无法打开：{}",
+                        "笔记暂时无法读取：{}",
                         error.to_string()
                     ))),
                 }
@@ -1544,7 +1525,7 @@ impl ReaderPage {
         }
     }
 
-    /// The note version at `dir`: the library's shared copy, or the open note
+    /// The note at `dir`: the library's shared copy, or the open note
     /// when the library has not listed it yet. Copies only when it must.
     pub(crate) fn note_at(&self, dir: &std::path::Path, cx: &App) -> Option<Rc<Course>> {
         self.records.read(cx).note_at(dir).or_else(|| {
@@ -1710,8 +1691,8 @@ impl ReaderPage {
         )
     }
 
-    /// What passes over the note while reading it, kept in view: a finished export and a
-    /// version on its way.
+    /// What passes over the note while reading it, kept in view: a finished export, a
+    /// task replacing the note, and the note being read again.
     fn reader_strip(
         &mut self,
         preview: &Rc<notes::Preview>,
@@ -1720,30 +1701,80 @@ impl ReaderPage {
         let feedback = self
             .exports
             .update(cx, |exports, cx| exports.feedback(&preview.course, cx));
-        let loading = course2md::tr!("正在切换版本…");
-        let switching = self.opened.reading.then(|| {
+        let status = |id: &'static str, text: &'static str, cx: &mut Context<Self>| {
+            h_flex()
+                .items_center()
+                .gap(rem(8.))
+                .child(spinner(
+                    SharedString::from(format!("{id}-spinner")),
+                    text,
+                    cx,
+                ))
+                .child(
+                    accessible_text(SharedString::from(format!("{id}-label")), text)
+                        .role(Role::Status)
+                        .text_color(color(ON_SURFACE_VARIANT)),
+                )
+        };
+        let reading = self.opened.reading.then(|| {
             motion::enter(
-                "reader-version-loading",
-                h_flex()
-                    .items_center()
-                    .gap(rem(8.))
-                    .child(spinner("reader-version-spinner", loading, cx))
-                    .child(
-                        accessible_text("reader-version-loading-label", loading)
-                            .role(Role::Status)
-                            .text_color(color(ON_SURFACE_VARIANT)),
-                    ),
+                "reader-reading",
+                status("reader-reading", course2md::tr!("正在读取笔记…"), cx),
             )
         });
-        (feedback.is_some() || switching.is_some()).then(|| {
+        // The task that will replace this note: the note stays readable meanwhile, and
+        // is read again in place once the task has replaced it.
+        let updating = (!self.opened.reading)
+            .then(|| self.replacing_task(preview, cx))
+            .flatten()
+            .map(|id| {
+                motion::enter(
+                    "reader-updating",
+                    status(
+                        "reader-updating",
+                        course2md::tr!("正在更新这份笔记，完成后会在这里显示"),
+                        cx,
+                    )
+                    .flex_wrap()
+                    .child(
+                        material_button("reader-updating-task", ButtonVariant::Text)
+                            .tone(ButtonTone::Neutral)
+                            .icon(symbols::task())
+                            .child(course2md::tr!("查看任务"))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.save_reading_position(cx);
+                                cx.emit(ReaderEvent::OpenTask(id.clone()));
+                            })),
+                    ),
+                )
+            });
+        (feedback.is_some() || reading.is_some() || updating.is_some()).then(|| {
             v_flex()
                 .w_full()
                 .min_w_0()
                 .flex_shrink_0()
                 .gap(rem(8.))
                 .children(feedback)
-                .children(switching)
+                .children(updating)
+                .children(reading)
         })
+    }
+
+    /// The task at work on the open note, which will replace it when it finishes.
+    fn replacing_task(&self, preview: &notes::Preview, cx: &App) -> Option<String> {
+        let manifest = preview.course.manifest.as_ref()?;
+        let library = self.course_location(&preview.course, cx)?;
+        let tasks = &self.workspace(cx)?.state.tasks;
+        desktop_store::library::note_unfinished_task(tasks, &library.id, Some(&manifest.source_id))
+            .filter(|task| {
+                matches!(
+                    task.state,
+                    workspace::TaskState::Running
+                        | workspace::TaskState::Pausing
+                        | workspace::TaskState::Queued
+                ) && !task.exports_only()
+            })
+            .map(|task| task.id.clone())
     }
 
     /// The peer views, and the contents button when they cannot sit beside the article.
@@ -2103,7 +2134,7 @@ impl ReaderPage {
         }
     }
 
-    /// What opens the note and heads the screenshots: its facts and version, obstacles to
+    /// What opens the note and heads the screenshots: its facts, obstacles to
     /// watching it, its details, and what needs attention.
     fn reader_head(
         &mut self,
@@ -2158,8 +2189,7 @@ impl ReaderPage {
                         facts
                             .into_iter()
                             .map(|fact| status_chip(StatusKind::Neutral).child(fact)),
-                    )
-                    .children(self.reader_version_menu(preview, window, cx)),
+                    ),
             )
             .children(self.reader_obstacles(cx))
             .children(self.reader_details(preview, cx))
@@ -2169,41 +2199,6 @@ impl ReaderPage {
                 ReaderMetrics::new(window, !self.outline.is_empty()).short,
                 |head| head.children(self.reader_attention(preview, cx)),
             )
-    }
-
-    /// The other versions of this note, when it has any; its revision and date otherwise
-    /// stay in the details.
-    fn reader_version_menu(
-        &self,
-        preview: &Rc<notes::Preview>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        let manifest = preview.course.manifest.as_ref()?;
-        if self.versions.len() < 2 {
-            return None;
-        }
-        let current = preview.course.dir.clone();
-        let items = self.versions.iter().map(|version| {
-            let course = version.course.clone();
-            MaterialMenuItem::new(version.label.clone())
-                .leading(Icon::from(symbols::history()))
-                .selected(course.dir == current)
-                .on_click(
-                    cx.listener(move |this, _, _, cx| this.open_reader_version(course.clone(), cx)),
-                )
-        });
-        let menu = MaterialMenu::new("note-versions").items(items.collect::<Vec<_>>());
-        let trigger = material_button("choose-note-version", ButtonVariant::Text)
-            .icon(symbols::keyboard_arrow_down())
-            .icon_position(ButtonIconPosition::Trailing)
-            .disabled(self.opened.reading)
-            .child(course2md::tr!(
-                "第 {} 版 · {} 生成",
-                manifest.revision,
-                nav::date_local(manifest.created_at_ms)
-            ));
-        Some(ui::menu("note-version-menu", trigger, menu, window, cx).into_any_element())
     }
 
     /// What stands between the reader and the video, with the way past it.
@@ -2263,7 +2258,7 @@ impl ReaderPage {
             .into_any_element()
     }
 
-    /// The note's details in place: revision, source video, subtitle and model facts.
+    /// The note's details in place: when it was made, source video, subtitle and model facts.
     fn reader_details(
         &mut self,
         preview: &Rc<notes::Preview>,
@@ -2278,11 +2273,10 @@ impl ReaderPage {
             _ => None,
         };
         if let Some(manifest) = &preview.course.manifest {
-            let date = nav::date_local(manifest.created_at_ms);
             details.push((
-                course2md::tr!("版本"),
+                course2md::tr!("生成时间"),
                 symbols::history(),
-                course2md::tr!("第 {} 版 · {} 生成", manifest.revision, date),
+                nav::date_local(manifest.created_at_ms),
             ));
         }
         if let Some(path) = &local_source {
@@ -2414,7 +2408,7 @@ impl ReaderPage {
                         .loading(reading, course2md::tr!("重新读取"))
                         .disabled(reading)
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.load_reader_version(course.clone(), true, cx)
+                            this.reload_note(course.clone(), Reload::Reread, cx)
                         })),
                 ),
             ));
@@ -2722,8 +2716,8 @@ impl ReaderPage {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let exporting = self.reader_exporting(cx);
-        let current = self.exports.read(cx).exporting_version(&preview.course.dir);
-        let version = preview.course.dir.clone();
+        let current = self.exports.read(cx).exporting_note(&preview.course.dir);
+        let note = preview.course.dir.clone();
         let mut items = Vec::new();
         if let Some(folder) = self.export_folder.clone() {
             items.push(
@@ -2785,13 +2779,13 @@ impl ReaderPage {
                 symbols::data_object(),
             ),
         ] {
-            let version = version.clone();
+            let note = note.clone();
             items.push(
                 MaterialMenuItem::new(label)
                     .leading(Icon::from(icon))
                     .disabled(exporting)
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        if let Some(course) = this.note_at(&version, cx) {
+                        if let Some(course) = this.note_at(&note, cx) {
                             this.exports.update(cx, |exports, cx| {
                                 exports.export(course, format, window, cx)
                             });

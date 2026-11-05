@@ -1038,6 +1038,7 @@ impl Desktop {
                     let root = self.task_library(&task, cx).map(|l| l.root.clone());
                     let open = !task.exports_only()
                         && (follow_input_completion || follow_reader_completion);
+                    let exports_only = task.exports_only();
                     let publication = run::Publication::new(&task, root, &done, manifest.as_ref());
                     // Cover copy, folder assignment and thumbnail lookup touch the
                     // library disk; the record above is already committed.
@@ -1066,6 +1067,8 @@ impl Desktop {
                             this.refresh_library(cx);
                             if open {
                                 this.open_completed_conversion(Course::from_completed(&done), cx);
+                            } else {
+                                this.reload_replaced_note(&done.out_dir, exports_only, cx);
                             }
                             cx.notify();
                         });
@@ -1083,6 +1086,39 @@ impl Desktop {
             ),
         }
         cx.notify();
+    }
+
+    /// A note open in the reader that a task has just replaced is read again in place,
+    /// at the same moment of the video, wherever the person is.
+    fn reload_replaced_note(
+        &mut self,
+        note: &std::path::Path,
+        exports_only: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let shown = self
+            .opened(cx)
+            .preview
+            .as_ref()
+            .is_some_and(|preview| preview.course.dir == note);
+        if !shown {
+            return;
+        }
+        let course = self.records.read(cx).note_at(note).map_or_else(
+            || {
+                let mut course = self.opened(cx).preview.as_ref().unwrap().course.clone();
+                course.manifest = None;
+                course
+            },
+            |course| (*course).clone(),
+        );
+        let reload = if exports_only {
+            crate::reader_ui::Reload::Reread
+        } else {
+            crate::reader_ui::Reload::Replaced
+        };
+        self.reader
+            .change(cx, |reader, cx| reader.reload_note(course, reload, cx));
     }
 
     pub(crate) fn open_task_export_location(&mut self, id: String, cx: &mut Context<Self>) {

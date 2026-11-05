@@ -146,14 +146,22 @@ pub fn note_has_unfinished_task(
     library_id: &str,
     source_id: Option<&str>,
 ) -> bool {
-    source_id.is_some_and(|source| {
-        tasks.iter().any(|task| {
-            // An attempt a follow-up replaced stays unfinished, but is no longer worked on.
-            !task.state.finished()
-                && task.handled_by.is_none()
-                && task.plan.source_id == source
-                && task.plan.library_id == library_id
-        })
+    note_unfinished_task(tasks, library_id, source_id).is_some()
+}
+
+/// The one unfinished task that will replace the note of `source_id` in `library_id`.
+pub fn note_unfinished_task<'a>(
+    tasks: &'a [crate::workspace::TaskRecord],
+    library_id: &str,
+    source_id: Option<&str>,
+) -> Option<&'a crate::workspace::TaskRecord> {
+    let source = source_id?;
+    tasks.iter().find(|task| {
+        // An attempt a follow-up replaced stays unfinished, but is no longer worked on.
+        !task.state.finished()
+            && task.handled_by.is_none()
+            && task.plan.source_id == source
+            && task.plan.library_id == library_id
     })
 }
 

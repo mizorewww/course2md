@@ -338,8 +338,8 @@ impl Desktop {
         self.begin_naming(NameTarget::Note { root, storage }, window, cx);
     }
 
-    /// Asks before moving a note to the system trash. A note that a running
-    /// task is still writing a version into cannot be deleted yet.
+    /// Asks before moving a note to the system trash. A note that an unfinished
+    /// task will replace cannot be deleted yet.
     pub fn confirm_course_delete(
         &mut self,
         course: Course,
@@ -1429,8 +1429,7 @@ impl Desktop {
 
     /// Where a note lives and came from, on one line; a card's shorter line leaves out
     /// where it came from. Its folder is named only where the place does not already
-    /// say it; source identity helps recognize a note; routine revision numbers remain
-    /// in the reader's version history.
+    /// say it; source identity helps recognize a note.
     fn note_line(&self, course: &Course, card: bool, cx: &App) -> String {
         use chrono::Datelike;
         let ms = course
@@ -1586,7 +1585,7 @@ impl Desktop {
     }
 
     /// A note's real state worth flagging on its cover or row: opening now, a task
-    /// still writing a version of it, or content that still needs completing.
+    /// still replacing it, or content that still needs completing.
     fn note_status(&self, course: &Course, cx: &App) -> Option<Div> {
         let busy = self
             .course_location(course, cx)

@@ -86,7 +86,7 @@ impl Field {
 /// Debug builds: open a note in a given reader state at startup, so native
 /// layout can be checked without synthetic input. Release builds ignore it.
 struct ValidationOpen {
-    /// Matched against note titles and version directories.
+    /// Matched against note titles and folders.
     note: Option<String>,
     /// Comma-separated reader panels: `find`, `info`.
     panels: String,

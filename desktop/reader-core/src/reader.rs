@@ -89,17 +89,10 @@ impl Frame {
     }
 }
 
-#[derive(Clone)]
-pub struct Version {
-    pub course: Course,
-    pub label: String,
-}
-
 #[derive(Default)]
 pub struct ReaderData {
     pub frames: Vec<Frame>,
     pub frame_by_path: HashMap<PathBuf, usize>,
-    pub versions: Vec<Version>,
     pub issues: Vec<String>,
     pub export_folder: Option<PathBuf>,
 }
@@ -117,11 +110,11 @@ pub struct OfflineVideoRequest {
     pub library_root: PathBuf,
     pub task_id: String,
     pub work_dir: PathBuf,
-    pub version_dir: PathBuf,
+    pub note_dir: PathBuf,
 }
 
 impl OfflineVideoRequest {
-    pub fn for_version(
+    pub fn for_note(
         course: &Course,
         task: &workspace::TaskRecord,
         library: &workspace::LibraryLocation,
@@ -140,7 +133,7 @@ impl OfflineVideoRequest {
             library_root: library.root.clone(),
             task_id: task.id.clone(),
             work_dir: task.work_dir.clone(),
-            version_dir: course.dir.clone(),
+            note_dir: course.dir.clone(),
         })
     }
 
@@ -161,7 +154,7 @@ impl OfflineVideoRequest {
         let root = self.library_root.canonicalize().ok()?;
         let work = self.work_dir.canonicalize().ok()?;
         if work != root.join(".course2md/work").join(&self.task_id)
-            || !self.version_dir.canonicalize().ok()?.starts_with(&root)
+            || !self.note_dir.canonicalize().ok()?.starts_with(&root)
         {
             return None;
         }
@@ -188,23 +181,23 @@ pub struct ExportState {
 }
 
 impl ExportState {
-    pub fn begin(&mut self, version: PathBuf) -> Option<u64> {
+    pub fn begin(&mut self, note: PathBuf) -> Option<u64> {
         if self.pending.is_some() {
             return None;
         }
         self.generation = self.generation.wrapping_add(1);
-        self.pending = Some((self.generation, version));
+        self.pending = Some((self.generation, note));
         Some(self.generation)
     }
 
-    pub fn is_pending(&self, generation: u64, version: &std::path::Path) -> bool {
+    pub fn is_pending(&self, generation: u64, note: &std::path::Path) -> bool {
         self.pending
             .as_ref()
-            .is_some_and(|(current, source)| *current == generation && source == version)
+            .is_some_and(|(current, source)| *current == generation && source == note)
     }
 
-    pub fn cancel(&mut self, generation: u64, version: &std::path::Path) -> bool {
-        if !self.is_pending(generation, version) {
+    pub fn cancel(&mut self, generation: u64, note: &std::path::Path) -> bool {
+        if !self.is_pending(generation, note) {
             return false;
         }
         self.pending = None;
@@ -214,13 +207,13 @@ impl ExportState {
     pub fn finish(
         &mut self,
         generation: u64,
-        version: &std::path::Path,
+        note: &std::path::Path,
         feedback: ExportFeedback,
     ) -> bool {
-        if !self.cancel(generation, version) {
+        if !self.cancel(generation, note) {
             return false;
         }
-        self.feedback.insert(version.to_path_buf(), feedback);
+        self.feedback.insert(note.to_path_buf(), feedback);
         true
     }
 }
@@ -247,15 +240,15 @@ pub fn export_file_name(title: &str, format: c2m_config::config::OutputFormat) -
     format!("{stem}.{extension}")
 }
 
-/// Exports the note at `version` to `target`. It refuses a place inside the note's
+/// Exports the note at `note` to `target`. It refuses a place inside the note's
 /// own folder or any other note, and writes beside `target` first, so an existing
 /// file stays whole until the export is complete. Blocking.
-pub fn export_version(
-    version: &std::path::Path,
+pub fn export_note(
+    note: &std::path::Path,
     format: c2m_config::config::OutputFormat,
     target: &std::path::Path,
 ) -> anyhow::Result<()> {
-    let protected = version.canonicalize()?;
+    let protected = note.canonicalize()?;
     let parent = target
         .parent()
         .ok_or_else(|| anyhow::anyhow!(c2m_i18n::tr!("导出位置无效")))?
@@ -274,7 +267,7 @@ pub fn export_version(
         .prefix(".course2md-export-")
         .tempdir_in(&parent)?;
     let file = temp.path().join(target.file_name().unwrap_or_default());
-    c2m_artifact::portable::export(version, format, &file)?;
+    c2m_artifact::portable::export(note, format, &file)?;
     Ok(std::fs::rename(&file, target)?)
 }
 
@@ -571,59 +564,6 @@ pub fn load_reader_data(preview: &notes::Preview) -> ReaderData {
         }
         data.frames.push(frame);
     }
-    let parent = dir
-        .parent()
-        .filter(|parent| parent.file_name().is_some_and(|name| name == "versions"));
-    let Some(parent) = parent else {
-        return data;
-    };
-    match std::fs::read_dir(parent) {
-        Ok(entries) => {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if !path.is_dir() || !path.join("manifest.json").is_file() {
-                    continue;
-                }
-                match c2m_artifact::artifact::read_manifest(&path.join("manifest.json")) {
-                    Ok(other) if other.course_id == manifest.course_id => {
-                        let mut course = preview.course.clone();
-                        course.dir = path;
-                        course.title = other.title.clone();
-                        course.slides = other.frames.len();
-                        let label = c2m_i18n::tr!(
-                            "第 {} 版 · {}{}",
-                            other.revision,
-                            nav::timestamp_local(other.created_at_ms),
-                            if notes::has_incomplete_content(&other) {
-                                c2m_i18n::tr!(" · 部分完成")
-                            } else {
-                                ""
-                            }
-                        );
-                        course.manifest = Some(other);
-                        data.versions.push(Version { course, label });
-                    }
-                    Err(_) => data
-                        .issues
-                        .push(c2m_i18n::tr!("有一个旧版本无法读取").into()),
-                    _ => {}
-                }
-            }
-            data.versions.sort_by_key(|version| {
-                std::cmp::Reverse(
-                    version
-                        .course
-                        .manifest
-                        .as_ref()
-                        .map(|manifest| (manifest.revision, manifest.created_at_ms))
-                        .unwrap_or_default(),
-                )
-            });
-        }
-        Err(error) => data
-            .issues
-            .push(c2m_i18n::tr!("其他版本暂时无法读取：{}", error)),
-    }
     data
 }
 
@@ -780,7 +720,7 @@ mod tests {
         assert_eq!(opened.read_generation, 4);
     }
 
-    fn fixture_version(
+    fn fixture_note(
         root: &std::path::Path,
         revision: u64,
         times: &[f64],
@@ -864,7 +804,7 @@ mod tests {
     }
 
     #[test]
-    fn saved_export_folder_requires_a_listed_file_inside_the_version() {
+    fn saved_export_folder_requires_a_listed_file_inside_the_note() {
         let temp = tempfile::tempdir().unwrap();
         let exports = temp.path().join("exports");
         let outputs = vec!["exports/course.html".into()];
@@ -878,9 +818,9 @@ mod tests {
     }
 
     #[test]
-    fn export_feedback_stays_with_its_version_and_ignores_cancelled_callbacks() {
-        let old = std::path::PathBuf::from("/library/old-note/versions/one");
-        let other = std::path::PathBuf::from("/library/other-note/versions/two");
+    fn export_feedback_stays_with_its_note_and_ignores_cancelled_callbacks() {
+        let old = std::path::PathBuf::from("/library/old-note");
+        let other = std::path::PathBuf::from("/library/other-note");
         let path = std::path::PathBuf::from("/exports/old-note.html");
         let success = || ExportFeedback {
             title: "旧笔记".into(),
@@ -931,7 +871,7 @@ mod tests {
             Default::default(),
         );
         // The note's own folder, and any other note's, are refused.
-        assert!(export_version(&note.dir, OutputFormat::Html, &note.dir.join("x.html")).is_err());
+        assert!(export_note(&note.dir, OutputFormat::Html, &note.dir.join("x.html")).is_err());
         let other = desktop_store::notes::fixtures::published_note(
             &temp.path().join("other"),
             2,
@@ -940,14 +880,12 @@ mod tests {
         );
         let inside_other = other.dir.join("exports");
         std::fs::create_dir_all(&inside_other).unwrap();
-        assert!(
-            export_version(&note.dir, OutputFormat::Html, &inside_other.join("x.html")).is_err()
-        );
+        assert!(export_note(&note.dir, OutputFormat::Html, &inside_other.join("x.html")).is_err());
         let outside = temp.path().join("exports");
         std::fs::create_dir_all(&outside).unwrap();
         let target = outside.join("note.html");
         std::fs::write(&target, "older").unwrap();
-        export_version(&note.dir, OutputFormat::Html, &target).unwrap();
+        export_note(&note.dir, OutputFormat::Html, &target).unwrap();
         assert_ne!(std::fs::read_to_string(&target).unwrap(), "older");
         // Nothing is left beside it.
         assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 1);
@@ -1044,29 +982,29 @@ mod tests {
     #[test]
     fn offline_video_is_its_note_task_s_and_rechecks_removed_media() {
         let root = tempfile::tempdir().unwrap();
-        let first = fixture_version(root.path(), 1, &[10.]);
+        let first = fixture_note(root.path(), 1, &[10.]);
         let (task, library) = offline_task_fixture(root.path(), &first);
         std::fs::create_dir_all(&task.work_dir).unwrap();
         let media = task.work_dir.join("media.mp4");
         std::fs::write(&media, "retained first video").unwrap();
-        let request = OfflineVideoRequest::for_version(&first, &task, &library).unwrap();
+        let request = OfflineVideoRequest::for_note(&first, &task, &library).unwrap();
         assert_eq!(
             request.inspect(),
             OfflineVideo::Available(c2m_config::config::canonicalize(&media).unwrap())
         );
         // Another task replaced the note: its video is not this note's.
-        let second = fixture_version(root.path(), 2, &[20.]);
+        let second = fixture_note(root.path(), 2, &[20.]);
         assert_eq!(second.dir, first.dir);
-        assert!(OfflineVideoRequest::for_version(&second, &task, &library).is_none());
+        assert!(OfflineVideoRequest::for_note(&second, &task, &library).is_none());
         let mut changed = task.clone();
         changed.artifact = Some(root.path().join("another-note"));
-        assert!(OfflineVideoRequest::for_version(&first, &changed, &library).is_none());
+        assert!(OfflineVideoRequest::for_note(&first, &changed, &library).is_none());
         changed = task.clone();
         changed.plan.source_id = "another-video".into();
-        assert!(OfflineVideoRequest::for_version(&first, &changed, &library).is_none());
+        assert!(OfflineVideoRequest::for_note(&first, &changed, &library).is_none());
         changed = task.clone();
         changed.plan.config.defaults.keep_video = Some(false);
-        assert!(OfflineVideoRequest::for_version(&first, &changed, &library).is_none());
+        assert!(OfflineVideoRequest::for_note(&first, &changed, &library).is_none());
         std::fs::remove_file(media).unwrap();
         assert_eq!(request.inspect(), OfflineVideo::Missing);
     }
@@ -1075,18 +1013,18 @@ mod tests {
     fn offline_video_refuses_other_task_paths_and_files_outside_its_library() {
         let root = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
-        let course = fixture_version(root.path(), 1, &[10.]);
+        let course = fixture_note(root.path(), 1, &[10.]);
         let (mut task, library) = offline_task_fixture(root.path(), &course);
         let expected_work = task.work_dir.clone();
         std::fs::write(outside.path().join("media.mp4"), "unrelated video").unwrap();
         task.work_dir = outside.path().to_owned();
-        let request = OfflineVideoRequest::for_version(&course, &task, &library).unwrap();
+        let request = OfflineVideoRequest::for_note(&course, &task, &library).unwrap();
         assert_eq!(request.inspect(), OfflineVideo::Missing);
         task.work_dir = expected_work;
         std::fs::create_dir_all(&task.work_dir).unwrap();
-        let mut request = OfflineVideoRequest::for_version(&course, &task, &library).unwrap();
+        let mut request = OfflineVideoRequest::for_note(&course, &task, &library).unwrap();
         std::fs::write(task.work_dir.join("media.mp4"), "retained video").unwrap();
-        request.version_dir = outside.path().to_owned();
+        request.note_dir = outside.path().to_owned();
         assert_eq!(request.inspect(), OfflineVideo::Missing);
 
         #[cfg(unix)]
@@ -1097,7 +1035,7 @@ mod tests {
                 task.work_dir.join("media.mp4"),
             )
             .unwrap();
-            let request = OfflineVideoRequest::for_version(&course, &task, &library).unwrap();
+            let request = OfflineVideoRequest::for_note(&course, &task, &library).unwrap();
             assert_eq!(request.inspect(), OfflineVideo::Missing);
         }
     }
@@ -1145,7 +1083,7 @@ mod tests {
     #[test]
     fn a_missing_earlier_frame_does_not_shift_later_times_and_a_regenerate_replaces_them() {
         let root = tempfile::tempdir().unwrap();
-        let old = fixture_version(root.path(), 1, &[10., 20., 30.]);
+        let old = fixture_note(root.path(), 1, &[10., 20., 30.]);
         std::fs::remove_file(old.dir.join("frames/frame-0.png")).unwrap();
         let old_preview = desktop_store::notes::read_preview(old.clone()).unwrap();
         assert!(
@@ -1165,9 +1103,7 @@ mod tests {
             PreviewBlock::Heading { anchor, .. } if anchor == "section-1"
         ));
         assert_eq!(old_data.frame_by_path.len(), 2);
-        // A note has no other versions to offer.
-        assert!(old_data.versions.is_empty());
-        let new = fixture_version(root.path(), 2, &[40.]);
+        let new = fixture_note(root.path(), 2, &[40.]);
         let new_data = load_reader_data(&desktop_store::notes::read_preview(new.clone()).unwrap());
         assert_eq!(new_data.frames.len(), 1);
         assert_eq!(new_data.frames[0].seconds, 40.);
@@ -1179,7 +1115,6 @@ mod tests {
                 .path
                 .starts_with(&new.dir)
         );
-        assert!(new_data.versions.is_empty());
     }
 
     #[test]
