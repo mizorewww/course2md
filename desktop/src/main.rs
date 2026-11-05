@@ -157,6 +157,8 @@ struct Desktop {
     // virtualized list may unmount and remount while scrolling.
     entered: HashSet<String>,
     message: Option<String>,
+    /// Older versions were removed at startup: said in the library until dismissed.
+    pub(crate) migration_notice: Option<String>,
     _subscriptions: Vec<Subscription>,
     _poll: Task<()>,
 }
@@ -491,6 +493,7 @@ impl Desktop {
             candidate_scroll: ScrollHandle::new(),
             entered: HashSet::new(),
             message,
+            migration_notice: None,
             _subscriptions: subscriptions,
             _poll: poll,
         };
@@ -573,7 +576,8 @@ impl Desktop {
                     this.with_workspace(cx, |workspace| workspace.take_migrated())
                 {
                     if let Some(notice) = migrated.notice {
-                        this.message = Some(notice);
+                        this.message = Some(notice.clone());
+                        this.migration_notice = Some(notice);
                     }
                     if migrated.notes_changed {
                         this.refresh_library(cx);

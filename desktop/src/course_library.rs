@@ -102,6 +102,8 @@ enum LibraryItem {
     /// Work in progress, with its message.
     Status(&'static str),
     Recovery(crate::storage::LibraryAccess),
+    /// What the startup migration removed, until the person closes it.
+    Migrated(String),
     Coverage(String),
     Issues(Vec<String>),
     Empty,
@@ -138,6 +140,7 @@ impl LibraryItem {
         match self {
             LibraryItem::Status(message) => format!("status-{message}"),
             LibraryItem::Recovery(_) => "recovery".to_owned(),
+            LibraryItem::Migrated(_) => "migrated".to_owned(),
             LibraryItem::Coverage(_) => "coverage".to_owned(),
             LibraryItem::Issues(_) => "issues".to_owned(),
             LibraryItem::Empty => "empty".to_owned(),
@@ -842,6 +845,9 @@ impl Desktop {
         if self.library_needs_recovery(&all_access, cx) {
             items.push(LibraryItem::Recovery(all_access.clone()));
         }
+        if let Some(notice) = &self.migration_notice {
+            items.push(LibraryItem::Migrated(notice.clone()));
+        }
         use crate::storage::LibraryCoverage;
         match coverage {
             LibraryCoverage::Unavailable if query.is_empty() => items.push(LibraryItem::Coverage(
@@ -1184,6 +1190,19 @@ impl Desktop {
                 .library_recovery_view(access, cx)
                 .unwrap_or_else(div)
                 .into_any_element(),
+            LibraryItem::Migrated(message) => {
+                notice_banner("library-migrated", NoticeKind::Info, message.clone())
+                    .child(
+                        material_button("dismiss-library-migrated", ButtonVariant::Text)
+                            .icon(symbols::close())
+                            .child(course2md::tr!("关闭"))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.migration_notice = None;
+                                cx.notify();
+                            })),
+                    )
+                    .into_any_element()
+            }
             LibraryItem::Coverage(message) => TileScale::Regular
                 .support("library-search-coverage", message.clone())
                 .into_any_element(),
