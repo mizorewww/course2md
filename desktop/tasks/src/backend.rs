@@ -32,6 +32,7 @@ impl Event {
             message,
             code: Default::default(),
             parts: Vec::new(),
+            path: None,
         })
     }
 }

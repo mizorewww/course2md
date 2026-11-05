@@ -59,7 +59,19 @@ pub(crate) fn migrate_library(location: &LibraryLocation, busy: &[PathBuf]) -> M
             return migration;
         }
     };
-    migration.issues.extend(crate::notes::recover_library(root));
+    // A note that needs the person is shown by the next scan; a failure is told now.
+    migration
+        .issues
+        .extend(
+            crate::notes::recover_library(root).into_iter().filter_map(
+                |attention| match attention {
+                    c2m_artifact::artifact::NoteAttention::Failed { note, message } => {
+                        Some(format!("{}: {message}", note.display()))
+                    }
+                    _ => None,
+                },
+            ),
+        );
     let same = |a: &Path, b: &Path| {
         a == b
             || a.canonicalize()

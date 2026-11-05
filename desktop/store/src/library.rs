@@ -196,6 +196,9 @@ pub struct LibraryState {
     /// Note folders a newer app wrote, which this one must not replace; see
     /// `notes::LibraryScan::newer`.
     pub newer_notes: std::collections::BTreeSet<PathBuf>,
+    /// Notes whose interrupted replacement needs the person, or with copies kept
+    /// beside them; see `notes::LibraryScan::attention`.
+    pub note_attention: Vec<c2m_artifact::artifact::NoteAttention>,
 }
 
 impl LibraryState {
@@ -212,6 +215,7 @@ impl LibraryState {
             courses: Vec::new(),
             cover_by_source: BTreeMap::new(),
             newer_notes: Default::default(),
+            note_attention: Vec::new(),
             loading: false,
         }
     }
@@ -230,6 +234,7 @@ impl LibraryState {
         self.cover_by_source.clear();
         self.issues.clear();
         self.newer_notes.clear();
+        self.note_attention.clear();
         self.indexes.clear();
         self.view_cache = Default::default();
         for (location, _, (scan, organization, cache)) in results {
@@ -248,6 +253,7 @@ impl LibraryState {
                     }
                     self.courses.extend(scan.courses.into_iter().map(Rc::new));
                     self.newer_notes.extend(scan.newer);
+                    self.note_attention.extend(scan.attention);
                     self.issues
                         .extend(scan.issues.into_iter().map(|message| LibraryIssue {
                             root: location.root.clone(),
@@ -439,6 +445,7 @@ mod tests {
                 Ok(notes::LibraryScan {
                     courses: Vec::new(),
                     issues: vec!["一份笔记无法读取".into()],
+                    attention: Vec::new(),
                     newer: Vec::new(),
                 }),
                 if folders {

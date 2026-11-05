@@ -92,6 +92,9 @@ pub fn has_incomplete_content(manifest: &artifact::Manifest) -> bool {
 pub struct LibraryScan {
     pub courses: Vec<Course>,
     pub issues: Vec<String>,
+    /// Notes whose interrupted replacement needs the person, or that have copies
+    /// kept beside them; a blocked note is not among `courses`.
+    pub attention: Vec<artifact::NoteAttention>,
     /// Folders of notes a newer app wrote, which this one must not publish into.
     pub newer: Vec<PathBuf>,
 }
@@ -122,8 +125,8 @@ fn note_course(dir: &Path) -> Result<Course> {
 /// `root`: notes can sit in subfolders (the command line's `<platform>/<id>`), and
 /// each folder of notes keeps its own `.course2md`. A note being replaced is put
 /// back, or the one it replaced deleted; a note another writer holds is left to it.
-pub fn recover_library(root: &Path) -> Vec<String> {
-    let mut issues = Vec::new();
+pub fn recover_library(root: &Path) -> Vec<artifact::NoteAttention> {
+    let mut attention = Vec::new();
     let entries = walkdir::WalkDir::new(root)
         .max_depth(8)
         .into_iter()
@@ -132,40 +135,36 @@ pub fn recover_library(root: &Path) -> Vec<String> {
         })
         .flatten();
     for entry in entries {
-        let failed = if entry.file_type().is_dir() {
-            artifact::recover_folder(entry.path())
+        if entry.file_type().is_dir() {
+            attention.extend(artifact::recover_folder(entry.path()));
         } else if entry.path_is_symlink() {
             // A linked note is replaced where its link points, which the walk
             // does not follow; while it is moved aside the link points nowhere.
-            artifact::recover(entry.path())
-                .err()
-                .map(|error| (entry.path().to_path_buf(), error))
-                .into_iter()
-                .collect()
-        } else {
-            Vec::new()
-        };
-        for (note, error) in failed {
-            issues.push(c2m_i18n::tr!(
-                "{}：{}",
-                note.display(),
-                format!("{error:#}")
-            ));
+            attention.extend(artifact::note_attention(entry.path()));
         }
     }
-    issues
+    attention
 }
 
 pub fn scan_library(root: &Path) -> Result<LibraryScan> {
     let mut scan = LibraryScan {
         courses: Vec::new(),
         issues: Vec::new(),
+        attention: Vec::new(),
         newer: Vec::new(),
     };
     if !root.exists() {
         return Ok(scan);
     }
-    scan.issues.extend(recover_library(root));
+    for attention in recover_library(root) {
+        match attention {
+            artifact::NoteAttention::Failed { note, message } => {
+                scan.issues
+                    .push(c2m_i18n::tr!("{}：{}", note.display(), message))
+            }
+            attention => scan.attention.push(attention),
+        }
+    }
     // Hidden folders are never notes; nor is anything deeper than eight folders.
     let mut walk = walkdir::WalkDir::new(root)
         .max_depth(8)
@@ -686,6 +685,28 @@ mod tests {
         course.manifest.as_mut().unwrap().outcomes.summary =
             artifact::Outcome::failed("service unavailable");
         assert!(course.incomplete());
+    }
+
+    /// A note whose replacement cannot be finished is not listed silently: the
+    /// scan names it, with the folder to look at.
+    #[test]
+    fn a_blocked_note_is_named_by_the_scan() {
+        let root = tempfile::tempdir().unwrap();
+        let note = published_note(root.path(), 1, &[10.], Default::default());
+        let swap = root.path().join(".course2md/swap/course");
+        std::fs::create_dir_all(&swap).unwrap();
+        std::fs::rename(&note.dir, swap.join("old-task")).unwrap();
+        std::fs::write(swap.join("live"), "garbage").unwrap();
+        let scan = scan_library(root.path()).unwrap();
+        assert!(scan.courses.is_empty());
+        assert_eq!(
+            scan.attention,
+            vec![artifact::NoteAttention::Blocked {
+                note: note.dir.clone(),
+                swap: swap.clone()
+            }]
+        );
+        assert!(swap.join("old-task/manifest.json").is_file());
     }
 
     /// The command line keeps notes in `<platform>/<id>`, each folder with its own

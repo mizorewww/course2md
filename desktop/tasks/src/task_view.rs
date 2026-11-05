@@ -305,6 +305,11 @@ fn task_error_summary(task: &TaskRecord) -> Option<String> {
 }
 
 fn task_error_summary_in(task: &TaskRecord, lang: c2m_i18n::i18n::Lang) -> Option<String> {
+    // What to do, with the full paths: never cut short.
+    if let Some(folder) = task.events.blocked_folder() {
+        return failure_summary_in(task.state, task.events.error.as_deref(), lang)
+            .map(|_| c2m_core::outcome::recovery_blocked_message(folder, lang));
+    }
     match task.events.kept_parts() {
         Some(parts) => failure_summary_in(task.state, task.events.error.as_deref(), lang)
             .map(|_| c2m_core::outcome::note_kept_message(parts, lang)),
@@ -455,6 +460,8 @@ pub enum TaskSurface {
 pub enum TaskAction {
     Read,
     OpenNoteFolder,
+    /// The folder a stopped replacement of the task's note left, to sort out by hand.
+    OpenRecoveryFolder,
     OpenExports,
     OpenSource,
     CopyLink,
@@ -769,6 +776,7 @@ impl TaskAction {
         match self {
             Self::Read
             | Self::OpenNoteFolder
+            | Self::OpenRecoveryFolder
             | Self::OpenExports
             | Self::OpenSource
             | Self::CopyLink => 0,
@@ -845,6 +853,10 @@ pub fn task_actions(
         let repair = task_requires_service_repair(task);
         if repair && has_note {
             recovery.push(Repair);
+        }
+        // Continuing stops again until the person sorts out the note's folder.
+        if task.events.blocked_folder().is_some() {
+            recovery.push(OpenRecoveryFolder);
         }
         // Continuing would only stop again until the model is there.
         if task.state == TaskState::NeedsAttention && task.events.model_required && !uncertain {
@@ -1206,6 +1218,7 @@ mod tests {
             message: "识别模型 qwen3 尚未下载，请先下载并准备模型，再继续".into(),
             code: ErrorCode::ModelRequired,
             parts: Vec::new(),
+            path: None,
         });
         let actions = task_actions(&task, TaskSurface::Card, &facts());
         assert!(actions.contains(&Action::Resume));
@@ -1218,9 +1231,51 @@ mod tests {
             message: "其他错误".into(),
             code: ErrorCode::Other,
             parts: Vec::new(),
+            path: None,
         });
         let actions = task_actions(&task, TaskSurface::Card, &facts());
         assert!(!actions.contains(&Action::PrepareModel));
+    }
+
+    /// A note whose replacement cannot be finished says what to do with the full
+    /// path in the interface language, and offers to open that folder.
+    #[test]
+    fn a_blocked_note_tells_the_task_what_to_do() {
+        use super::{
+            TaskAction as Action, TaskFacts, TaskSurface, task_actions, task_error_summary_in,
+        };
+        use c2m_i18n::i18n::Lang;
+        use c2m_protocol::progress::{ErrorCode, Event};
+        let swap = std::path::PathBuf::from(
+            "/Users/someone/Documents/course2md/a-rather-long-library-name/.course2md/swap/course-0123456789abcdef",
+        );
+        let mut task = task_record("task");
+        task.state = TaskState::NeedsAttention;
+        task.events.apply(&Event::Error {
+            message: c2m_core::outcome::recovery_blocked_message(&swap, Lang::ZhHans),
+            code: ErrorCode::NoteRecoveryBlocked,
+            parts: Vec::new(),
+            path: Some(swap.clone()),
+        });
+        for lang in [Lang::En, Lang::Ja, Lang::ZhHant] {
+            let text = task_error_summary_in(&task, lang).unwrap();
+            assert_eq!(
+                text,
+                c2m_core::outcome::recovery_blocked_message(&swap, lang)
+            );
+            assert!(text.contains(&swap.display().to_string()), "{text}");
+            assert!(!text.ends_with('…'), "{text}");
+        }
+        let facts = TaskFacts {
+            active: false,
+            expanded: false,
+            library: None,
+            needs_reassociation: false,
+            queue: Vec::new(),
+        };
+        assert!(
+            task_actions(&task, TaskSurface::Card, &facts).contains(&Action::OpenRecoveryFolder)
+        );
     }
 
     /// A refused result is shown in the interface language from the parts the
@@ -1251,6 +1306,7 @@ mod tests {
             message: NoteKept::new(parts.clone()).message,
             code: ErrorCode::NoteKept,
             parts,
+            path: None,
         });
         let han = |text: &str| text.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
         let en = task_error_summary_in(&task, Lang::En).unwrap();
@@ -1269,6 +1325,7 @@ mod tests {
             message: "其他错误".into(),
             code: ErrorCode::Other,
             parts: Vec::new(),
+            path: None,
         });
         assert_eq!(task_error_summary_in(&task, Lang::En).unwrap(), "其他错误");
     }
@@ -1289,6 +1346,7 @@ mod tests {
                 message: "识别模型尚未下载".into(),
                 code: ErrorCode::ModelRequired,
                 parts: Vec::new(),
+                path: None,
             });
             task
         };
@@ -1304,6 +1362,7 @@ mod tests {
             message: "其他错误".into(),
             code: ErrorCode::Other,
             parts: Vec::new(),
+            path: None,
         });
         let request = task_model_request(&waiting, AsrProvider::Coreml);
         let mut other_model = stopped("other-model", None);

@@ -1237,6 +1237,11 @@ impl Desktop {
                     cx.open_with_system(path);
                 }
             }
+            TaskAction::OpenRecoveryFolder => {
+                if let Some(folder) = task.events.blocked_folder() {
+                    cx.open_with_system(folder);
+                }
+            }
             TaskAction::OpenExports => self.open_task_export_location(id, cx),
             TaskAction::OpenSource => cx.open_url(&task.plan.source.input),
             TaskAction::CopyLink => {

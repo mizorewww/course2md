@@ -583,7 +583,7 @@ impl Desktop {
                         .title_recovery
                         .contains_key(&location.root)
             })
-        })
+        }) || !self.library(cx).note_attention.is_empty()
     }
 
     fn library_recovery_view(
@@ -703,6 +703,50 @@ impl Desktop {
                         .children(details("names", location, LibraryIssueKind::Titles)),
                 );
             }
+        }
+        // A note whose replacement stopped is not listed until it is sorted out;
+        // copies kept beside a note are named so they do not pile up unseen.
+        use course2md::artifact::NoteAttention;
+        for (index, attention) in self
+            .library(cx)
+            .note_attention
+            .clone()
+            .into_iter()
+            .enumerate()
+        {
+            let (kind, message, folder) = match attention {
+                NoteAttention::Blocked { swap, .. } => (
+                    NoticeKind::Danger,
+                    course2md::outcome::recovery_blocked_message(&swap, course2md::i18n::lang()),
+                    swap,
+                ),
+                NoteAttention::Kept { note, swap, copies } => (
+                    NoticeKind::Info,
+                    course2md::tr!(
+                        "{} 旁保留了 {} 份副本（替换中断时留下，无法确认是否还需要），请查看后删除不需要的",
+                        note.display(),
+                        copies.len()
+                    )
+                    .to_string(),
+                    swap,
+                ),
+                NoteAttention::Failed { .. } => continue,
+            };
+            notices.push(
+                notice_banner(("note-attention", index), kind, message)
+                    .child(
+                        material_button(("open-note-attention", index), ButtonVariant::Tonal)
+                            .icon(symbols::folder_open())
+                            .child(course2md::tr!("打开需要处理的文件夹"))
+                            .on_click(move |_, _, cx| cx.open_with_system(&folder)),
+                    )
+                    .child(
+                        material_button(("recheck-note-attention", index), ButtonVariant::Text)
+                            .icon(symbols::refresh())
+                            .child(course2md::tr!("重新检查保存位置"))
+                            .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx))),
+                    ),
+            );
         }
         (!notices.is_empty()).then(|| v_flex().gap(rem(12.)).children(notices))
     }

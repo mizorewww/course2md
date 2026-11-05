@@ -1798,6 +1798,9 @@ impl TasksPage {
         match action {
             TaskAction::Read => (tr!("阅读笔记"), symbols::menu_book(), false),
             TaskAction::OpenNoteFolder => (tr!("打开笔记保存位置"), symbols::folder_open(), false),
+            TaskAction::OpenRecoveryFolder => {
+                (tr!("打开需要处理的文件夹"), symbols::folder_open(), false)
+            }
             TaskAction::OpenExports => (tr!("打开导出位置"), symbols::folder_open(), false),
             TaskAction::OpenSource => (tr!("打开原视频"), symbols::open_in_new(), false),
             TaskAction::CopyLink => (tr!("复制视频链接"), symbols::content_copy(), false),
