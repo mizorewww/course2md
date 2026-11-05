@@ -1138,7 +1138,14 @@ impl TasksPage {
                             .child(scale.support(
                                 SharedString::from(format!("task-row-place-{id}")),
                                 self.task_destination(task, cx),
-                            )),
+                            ))
+                            // A consequence worth seeing without opening the row.
+                            .children(task_kept_edits(task).map(|text| {
+                                scale.support(
+                                    SharedString::from(format!("task-row-kept-edits-{id}")),
+                                    text,
+                                )
+                            })),
                     )
                     .child(
                         h_flex()
@@ -1701,7 +1708,11 @@ impl TasksPage {
                 consequence
                     .map(|text| ("consequence", text))
                     .into_iter()
-                    .chain(task_kept_edits(task).map(|text| ("kept-edits", text)))
+                    .chain(
+                        task_kept_edits(task)
+                            .filter(|_| !row)
+                            .map(|text| ("kept-edits", text)),
+                    )
                     .map(|(kind, text)| {
                         accessible_text(SharedString::from(format!("task-{kind}-{id}")), text)
                             .text_size(TEXT_AUX)
