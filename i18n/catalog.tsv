@@ -158,7 +158,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {} / {} 段	{} / {} 段	{} / {} segments	{} / {} 段	{} / {} セグメント
 {} · 构建 {}	{} · 构建 {}	{} · Build {}	{} · 建置 {}	{} · ビルド {}
 {} 不支持「{}」，已改用 {}。	{} 不支持「{}」，已改用 {}。	{} does not support “{}”; switched to {}.	{} 不支援「{}」，已改用 {}。	{} は「{}」に対応していないため、{} に切り替えました。
-{} 个已有笔记，将生成新版	{} 个已有笔记，将生成新版	{} already have notes; new versions will be generated	{} 個已有筆記，將生成新版	{} 件は既存のノートがあるため、新しいバージョンを生成します
 {} 个无法识别，已跳过	{} 个无法识别，已跳过	{} unrecognized, skipped	{} 個無法辨識，已跳過	{} 件は認識できなかったため、スキップしました
 {} 分 {} 秒	{} 分 {} 秒	{}m {}s	{} 分 {} 秒	{} 分 {} 秒
 {} 字节	{} 字节	{} bytes	{} 位元組	{}バイト
@@ -1435,7 +1434,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 生成摘要未完成 / Summary generation incomplete	生成摘要未完成	Summary generation incomplete	生成摘要未完成	要約の生成が完了していません
 生成摘要请求失败 / Summary request failed	生成摘要请求失败	Summary request failed	生成摘要請求失敗	要約生成リクエストが失敗しました
 生成整篇摘要（{}–{}） / Generate the full summary ({}–{})	生成整篇摘要（{}–{}）	Generate the full summary ({}–{})	生成整篇摘要（{}–{}）	要約全体を生成する ({}–{})
-生成新版笔记	生成新版笔记	Generate a new version of the note	生成新版筆記	新しいバージョンのノートを生成する
 生成笔记	生成笔记	Note generation	產生筆記	ノートを作成
 生成笔记 / Writing notes	生成笔记	Writing notes	生成筆記	ノートを生成中
 生成笔记偏好	生成笔记偏好	Note generation preferences	生成筆記偏好	ノート生成の設定
@@ -2245,3 +2243,8 @@ AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not conf
 正在更新这份笔记，完成后会在这里显示	正在更新这份笔记，完成后会在这里显示	Updating this note; it will show here when done	正在更新這份筆記，完成後會在這裡顯示	このノートを更新しています。完了するとここに表示されます
 生成时间	生成时间	Generated	產生時間	生成日
 笔记暂时无法读取：{}	笔记暂时无法读取：{}	The note cannot be read right now: {}	筆記暫時無法讀取：{}	ノートを現在読み込めません: {}
+{} 个已有笔记将被覆盖	{} 个已有笔记将被覆盖	Existing notes to be replaced: {}	{} 個已有筆記將被覆寫	{} 件の既存のノートは上書きされます
+《{}》将被新生成的笔记替换。你手动改过的文件会以 .edited 为名保留在笔记旁。	《{}》将被新生成的笔记替换。你手动改过的文件会以 .edited 为名保留在笔记旁。	“{}” will be replaced by the new note. Files you edited by hand are kept beside it under an .edited name.	《{}》將被新產生的筆記取代。你手動改過的檔案會以 .edited 為名保留在筆記旁。	「{}」は新しく生成されたノートに置き換えられます。手で編集したファイルは .edited の名前でノートの横に残ります。
+重新生成	重新生成	Regenerate	重新產生	再生成
+重新生成笔记	重新生成笔记	Regenerate the note	重新產生筆記	ノートを再生成
+重新生成（覆盖当前笔记）	重新生成（覆盖当前笔记）	Regenerate (replaces the current note)	重新產生（覆寫目前筆記）	再生成（現在のノートを上書き）
