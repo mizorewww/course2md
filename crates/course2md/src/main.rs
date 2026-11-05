@@ -566,6 +566,12 @@ fn note_dir(dir: &std::path::Path) -> anyhow::Result<Option<std::path::PathBuf>>
         .and_then(|versions| versions.parent())
         .filter(|course| artifact::is_legacy(course));
     let note = course.unwrap_or(dir);
+    if let Err(error) = artifact::recover(note) {
+        tracing::warn!(
+            "跳过无法读取的笔记 / Skipped unreadable note {}: {error:#}",
+            note.display()
+        );
+    }
     if artifact::is_legacy(note) {
         artifact::flatten_legacy(note)?;
         tracing::info!(
@@ -581,6 +587,13 @@ fn note_dir(dir: &std::path::Path) -> anyhow::Result<Option<std::path::PathBuf>>
 
 /// 递归收集笔记（可传单份笔记或存放多份笔记的上级目录）；单条目读取失败只告警并跳过。
 fn collect_targets(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>, depth: usize) {
+    // A replacement a crash interrupted is completed before the folder is read.
+    for (note, error) in course2md::artifact::recover_folder(dir) {
+        tracing::warn!(
+            "跳过无法读取的笔记 / Skipped unreadable note {}: {error:#}",
+            note.display()
+        );
+    }
     match note_dir(dir) {
         Ok(Some(note)) => {
             if !out.contains(&note) {
