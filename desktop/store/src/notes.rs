@@ -118,17 +118,22 @@ fn note_course(dir: &Path) -> Result<Course> {
     })
 }
 
-/// Completes the replacements a crash interrupted in the library at `root`: a note
-/// being replaced is put back, or the one it replaced deleted. A note another
-/// writer holds is left to it.
+/// Completes the replacements a crash interrupted anywhere in the library at
+/// `root`: notes can sit in subfolders (the command line's `<platform>/<id>`), and
+/// each folder of notes keeps its own `.course2md`. A note being replaced is put
+/// back, or the one it replaced deleted; a note another writer holds is left to it.
 pub fn recover_library(root: &Path) -> Vec<String> {
     let mut issues = Vec::new();
-    let Ok(entries) = std::fs::read_dir(root.join(".course2md").join("swap")) else {
-        return issues;
-    };
-    for entry in entries.flatten() {
-        let note = root.join(entry.file_name());
-        if let Err(error) = artifact::recover(&note) {
+    let folders = walkdir::WalkDir::new(root)
+        .max_depth(8)
+        .into_iter()
+        .filter_entry(|entry| {
+            entry.depth() == 0 || !entry.file_name().to_string_lossy().starts_with('.')
+        })
+        .flatten()
+        .filter(|entry| entry.file_type().is_dir());
+    for folder in folders {
+        for (note, error) in artifact::recover_folder(folder.path()) {
             issues.push(c2m_i18n::tr!(
                 "{}：{}",
                 note.display(),
@@ -669,6 +674,26 @@ mod tests {
         course.manifest.as_mut().unwrap().outcomes.summary =
             artifact::Outcome::failed("service unavailable");
         assert!(course.incomplete());
+    }
+
+    /// The command line keeps notes in `<platform>/<id>`, each folder with its own
+    /// `.course2md`: a replacement a crash interrupted there is completed too.
+    #[test]
+    fn an_interrupted_replacement_in_a_subfolder_is_recovered() {
+        let root = tempfile::tempdir().unwrap();
+        let platform = root.path().join("youtube");
+        let note = published_note(&platform, 1, &[10.], Default::default());
+        let before = std::fs::read(note.dir.join("manifest.json")).unwrap();
+        // As a crash between the two renames leaves it: the note moved aside.
+        let swap = platform.join(".course2md/swap/course");
+        std::fs::create_dir_all(&swap).unwrap();
+        std::fs::rename(&note.dir, swap.join("old-task")).unwrap();
+        assert!(scan_library(root.path()).unwrap().courses.len() == 1);
+        assert_eq!(
+            std::fs::read(note.dir.join("manifest.json")).unwrap(),
+            before
+        );
+        assert!(!swap.exists());
     }
 
     #[test]
