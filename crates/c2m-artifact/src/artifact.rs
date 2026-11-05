@@ -1647,13 +1647,12 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
     let flat_lock = crate::runtime::lock_file(&staging.join(LEGACY_PUBLISH_LOCK))?;
     // Windows refuses to rename a folder with a file open inside it.
     #[cfg(windows)]
-    let (older_app, flat_lock) = {
-        drop((older_app, flat_lock));
-        ((), ())
-    };
+    drop((older_app, flat_lock));
     swap_in(note, &staging, "flatten", &publication)?;
     // Not part of the flat note: removed while still held, then let go.
     let _ = std::fs::remove_file(note.join(LEGACY_PUBLISH_LOCK));
+    // Already let go on Windows, above.
+    #[cfg(not(windows))]
     drop((older_app, flat_lock));
     Ok(Some(manifest))
 }
