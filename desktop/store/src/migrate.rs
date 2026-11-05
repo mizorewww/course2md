@@ -177,7 +177,7 @@ pub fn rekey_positions(
 
 /// The notice shown once, when this app first removed older versions.
 pub fn removed_versions_notice() -> &'static str {
-    c2m_i18n::tr!("现在每门课只保留一份笔记：旧版本已删除，重新生成或补做会直接更新这份笔记。")
+    c2m_i18n::tr!("笔记的旧版本已删除：每门课现在只保留一份笔记，重新生成或补做会直接更新它。")
 }
 
 #[cfg(test)]
