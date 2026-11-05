@@ -1748,7 +1748,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 输入与任务记录尚未恢复	输入与任务记录尚未恢复	Input and task records have not yet been restored	輸入與任務記錄尚未恢復	入力とタスクの記録はまだ復元されていません
 输入与输出 / Input and output	输入与输出	Input and output	輸入與輸出	入力と出力
 输入和任务记录无法读取，原文件已保留	输入和任务记录无法读取，原文件已保留	Input and task records cannot be read, the original files have been retained	輸入和任務記錄無法讀取，原檔案已保留	入力およびタスクのレコードを読み取ることができません。元のファイルは保持されています。
-输出根目录（按平台/标题/ID 建目录）/ Output root (platform/title/ID)	输出根目录（按平台/标题/ID 建目录）/ Output root (platform/title/ID)	Output root (platform/title/ID)	輸出根資料夾（依平台/標題/ID 建立資料夾）/ Output root (platform/title/ID)	出力ルートフォルダー（プラットフォーム/タイトル/ID ごとにフォルダーを作成）/ Output root (platform/title/ID)
+输出根目录（每个视频一份笔记，在 平台/ID/ 下）/ Output root (one note per video, under platform/ID/)	输出根目录（每个视频一份笔记，在 平台/ID/ 下）	Output root (one note per video, under platform/ID/)	輸出根資料夾（每個影片一份筆記，在 平台/ID/ 下）	出力ルートフォルダー（動画ごとに 1 つのノートを プラットフォーム/ID/ に保存）
 输出格式，逗号分隔 / Output formats, comma-separated: md,html,json	输出格式，逗号分隔	Output formats, comma-separated: md,html,json	輸出格式，逗號分隔	出力形式（カンマ区切り）: md,html,json
 迁移副本中的任务身份已经变化，未覆盖 / Copied task identity changed; not overwritten	迁移副本中的任务身份已经变化，未覆盖	Copied task identity changed; not overwritten	遷移副本中的任務身分已經變化，未覆蓋	移行コピー内のタスク ID が変更されたため、上書きしませんでした
 运行检查	运行检查	Run checks	執行檢查	チェックを実行
@@ -2239,12 +2239,12 @@ AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not conf
 这份笔记已有进行中的任务，已为你打开	这份笔记已有进行中的任务，已为你打开	This note already has a task in progress; it is open now	這份筆記已有進行中的任務，已為你開啟	このノートには進行中のタスクがあるため、そのタスクを開きました
 这份笔记已被之后的任务更新，请从最新的任务补做	这份笔记已被之后的任务更新，请从最新的任务补做	A later task has updated this note; fill in missing steps from the latest task	這份筆記已被之後的任務更新，請從最新的任務補做	このノートは後のタスクで更新されています。最新のタスクから未完了分を処理してください
 这项任务已结束，可在任务卡中补做或重新生成	这项任务已结束，可在任务卡中补做或重新生成	This task has ended; fill in missing steps or regenerate from its card	這項任務已結束，可在任務卡中補做或重新產生	このタスクは終了しました。タスクカードから未完了分を処理するか再生成できます
-笔记已被之后的任务更新	笔记已被之后的任务更新	Note updated by a later task	筆記已被之後的任務更新	後のタスクでノートが更新されました
-正在更新这份笔记，完成后会在这里显示	正在更新这份笔记，完成后会在这里显示	Updating this note; it will show here when done	正在更新這份筆記，完成後會在這裡顯示	このノートを更新しています。完了するとここに表示されます
-生成时间	生成时间	Generated	產生時間	生成日
-笔记暂时无法读取：{}	笔记暂时无法读取：{}	The note cannot be read right now: {}	筆記暫時無法讀取：{}	ノートを現在読み込めません: {}
 {} 个已有笔记将被覆盖	{} 个已有笔记将被覆盖	Existing notes to be replaced: {}	{} 個已有筆記將被覆寫	{} 件の既存のノートは上書きされます
 《{}》将被新生成的笔记替换。你手动改过的文件会以 .edited 为名保留在笔记旁。	《{}》将被新生成的笔记替换。你手动改过的文件会以 .edited 为名保留在笔记旁。	“{}” will be replaced by the new note. Files you edited by hand are kept beside it under an .edited name.	《{}》將被新產生的筆記取代。你手動改過的檔案會以 .edited 為名保留在筆記旁。	「{}」は新しく生成されたノートに置き換えられます。手で編集したファイルは .edited の名前でノートの横に残ります。
+正在更新这份笔记，完成后会在这里显示	正在更新这份笔记，完成后会在这里显示	Updating this note; it will show here when done	正在更新這份筆記，完成後會在這裡顯示	このノートを更新しています。完了するとここに表示されます
+生成时间	生成时间	Generated	產生時間	生成日
+笔记已被之后的任务更新	笔记已被之后的任务更新	Note updated by a later task	筆記已被之後的任務更新	後のタスクでノートが更新されました
+笔记暂时无法读取：{}	笔记暂时无法读取：{}	The note cannot be read right now: {}	筆記暫時無法讀取：{}	ノートを現在読み込めません: {}
 重新生成	重新生成	Regenerate	重新產生	再生成
 重新生成笔记	重新生成笔记	Regenerate the note	重新產生筆記	ノートを再生成
 重新生成（覆盖当前笔记）	重新生成（覆盖当前笔记）	Regenerate (replaces the current note)	重新產生（覆寫目前筆記）	再生成（現在のノートを上書き）

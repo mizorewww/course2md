@@ -215,7 +215,7 @@ const TERMINAL: &str = "终端输出 / Terminal output";
 #[derive(Clone, Default)]
 #[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct RunOpts {
-    /// 输出根目录（按平台/标题/ID 建目录）/ Output root (platform/title/ID)
+    /// 输出根目录（每个视频一份笔记，在 平台/ID/ 下）/ Output root (one note per video, under platform/ID/)
     #[cfg_attr(feature = "clap", arg(short, long, help_heading = IO))]
     pub out: Option<PathBuf>,
 

@@ -158,7 +158,7 @@ course2md https://www.youtube.com/watch?v=…    # 或 YouTube / Bilibili 链接
 course2md ./lecture.mp4 -o ./notes             # 指定笔记保存位置
 ```
 
-第一次运行会询问几项设置；笔记保存在输出目录的 `平台/标题/ID/` 下。
+第一次运行会询问几项设置。每个视频一份笔记，即输出目录下的 `平台/ID/` 文件夹；再次转换同一视频会直接替换这份笔记（你手动改过的 `course.md` 会以 `course.edited.md` 保留在旁边），新的转换失败时原笔记保持不变。处理中的数据放在笔记旁的 `.course2md/` 里。
 
 识别模型不会在未经询问时下载。转换需要的模型尚未下载时，CLI 会说明模型名称、大小和保存位置，并询问 `[y/N]`；没有终端时（管道、脚本、`--json`、`--quiet`）直接停止，退出码为 1（`--json` 的错误代码为 `model_required`）。可先运行 `course2md models prepare --provider … --model …` 准备模型，或加 `--download-models`（或设置 `COURSE2MD_DOWNLOAD_MODELS=1`）允许本次下载。这样停止的转换在模型就绪后从中断处继续。
 

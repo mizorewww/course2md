@@ -158,7 +158,7 @@ course2md https://www.youtube.com/watch?v=…    # or a YouTube / Bilibili link
 course2md ./lecture.mp4 -o ./notes             # choose where notes go
 ```
 
-The first run asks a few setup questions; notes are saved as `platform/title/ID/` under the output folder.
+The first run asks a few setup questions. Each video has one note, the folder `platform/ID/` under the output folder; converting the same video again replaces that note in place (a `course.md` you edited by hand is kept beside it as `course.edited.md`), and an existing note stays as it was if the new run fails. Work in progress lives in `.course2md/` beside the notes.
 
 A speech model is never downloaded without asking. When a conversion needs one that is missing, the CLI names it, its size and where it will be stored, and asks `[y/N]`; without a terminal (pipes, scripts, `--json`, `--quiet`) it stops with exit code 1 (`--json`: error code `model_required`). Prepare the model first with `course2md models prepare --provider … --model …`, or pass `--download-models` (or set `COURSE2MD_DOWNLOAD_MODELS=1`) to allow the download in that run. A conversion stopped this way continues where it left off once the model is ready.
 
