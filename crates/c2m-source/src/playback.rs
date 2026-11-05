@@ -7,6 +7,22 @@
 /// (`si`, `pp`, `feature`) and the time are not among them.
 const YOUTUBE_PLAYBACK: [&str; 2] = ["list", "index"];
 
+/// A playlist anyone with the link can open. Watch later (`WL`), liked videos
+/// (`LL`, `LM`) and My Mix (`RDMM…`) are the viewer's own: they belong to no note,
+/// and another viewer gets nothing from them. A mix of one video (`RD<id>`), a
+/// playlist (`PL…`) or an album (`OLAK…`) is shared.
+fn shared_list(list: &str) -> bool {
+    !list.is_empty() && !matches!(list, "WL" | "LL" | "LM") && !list.starts_with("RDMM")
+}
+
+/// The playlist `url` plays in, when it is a shared one.
+fn playlist(url: &url::Url) -> Option<String> {
+    url.query_pairs()
+        .find(|(key, _)| key == "list")
+        .map(|(_, list)| list.into_owned())
+        .filter(|list| shared_list(list))
+}
+
 fn is_youtube(url: &url::Url) -> bool {
     url.host_str().is_some_and(|host| {
         let host = host.to_ascii_lowercase();
@@ -41,7 +57,8 @@ fn youtube_video(url: &url::Url) -> Option<String> {
         "shorts" | "live" | "embed" | "v" => segments.next().map(str::to_owned),
         _ => None,
     }
-    .filter(|id| !id.is_empty())
+    // `embed/videoseries?list=…` embeds a playlist, not a video.
+    .filter(|id| !id.is_empty() && id != "videoseries")
 }
 
 /// A YouTube link to one video, perhaps opened from a playlist. Reading it as a
@@ -80,6 +97,10 @@ pub(crate) fn video_url(concrete: &str, input: &str, id: &str) -> String {
     if !same_video {
         return concrete.to_owned();
     }
+    // A position means nothing without its playlist.
+    if playlist(&input).is_none() {
+        return concrete.to_owned();
+    }
     let pairs = input
         .query_pairs()
         .filter(|(key, value)| YOUTUBE_PLAYBACK.contains(&key.as_ref()) && !value.is_empty())
@@ -97,11 +118,7 @@ pub(crate) fn entry_url(entry: &str, input: &str) -> String {
     if !is_youtube(&input) || youtube_video(&parsed).is_none() {
         return entry.to_owned();
     }
-    let list = input
-        .query_pairs()
-        .find(|(key, value)| key == "list" && !value.is_empty())
-        .map(|(_, value)| value.into_owned());
-    match list {
+    match playlist(&input) {
         Some(list) => with_pairs(entry, vec![("list".into(), list)]),
         None => entry.to_owned(),
     }
@@ -135,6 +152,29 @@ mod tests {
             // Another video's playlist is not this one's.
             ("https://www.youtube.com/watch?v=other&list=PLx", canonical),
             ("not a url", canonical),
+            // The viewer's own lists are left behind, and their position with them.
+            (
+                "https://www.youtube.com/watch?v=abc123&list=WL&index=4",
+                canonical,
+            ),
+            ("https://www.youtube.com/watch?v=abc123&list=LL", canonical),
+            (
+                "https://music.youtube.com/watch?v=abc123&list=LM",
+                canonical,
+            ),
+            (
+                "https://www.youtube.com/watch?v=abc123&list=RDMMabc123&start_radio=1",
+                canonical,
+            ),
+            // A mix of one video, or an album, is anyone's.
+            (
+                "https://www.youtube.com/watch?v=abc123&list=RDabc123&start_radio=1",
+                "https://www.youtube.com/watch?v=abc123&list=RDabc123",
+            ),
+            (
+                "https://www.youtube.com/watch?v=abc123&list=OLAK5uy_x&index=2",
+                "https://www.youtube.com/watch?v=abc123&list=OLAK5uy_x&index=2",
+            ),
         ] {
             assert_eq!(video_url(canonical, input, "abc123"), expected, "{input}");
         }
@@ -146,11 +186,13 @@ mod tests {
             "https://www.youtube.com/watch?v=abc123&list=PLx&index=2",
             "https://youtu.be/abc123?list=PLx",
             "https://www.youtube.com/shorts/abc123",
+            "https://www.youtube.com/embed/abc123?list=PLx",
         ] {
             assert!(names_youtube_video(link), "{link}");
         }
         for link in [
             "https://www.youtube.com/playlist?list=PLx",
+            "https://www.youtube.com/embed/videoseries?list=PLx",
             "https://www.youtube.com/@teacher/videos",
             "https://www.bilibili.com/video/BV1xx",
             "/videos/lecture.mp4",
@@ -189,6 +231,16 @@ mod tests {
                 entry_url("https://www.youtube.com/watch?v=abc123", input),
                 "https://www.youtube.com/watch?v=abc123&list=PLx",
                 "{input}"
+            );
+        }
+        for personal in ["WL", "LL", "LM", "RDMMfirst"] {
+            assert_eq!(
+                entry_url(
+                    "https://www.youtube.com/watch?v=abc123",
+                    &format!("https://www.youtube.com/playlist?list={personal}")
+                ),
+                "https://www.youtube.com/watch?v=abc123",
+                "{personal}"
             );
         }
         // A channel's videos are no playlist; an entry that is no video stays as it is.
