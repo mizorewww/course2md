@@ -227,6 +227,11 @@ pub fn record_finish(
         .and_then(|done| done.outcomes.clone())
         .or_else(|| manifest.map(|manifest| manifest.outcomes.clone()));
     workspace::reconcile_receipts(task)?;
+    // The note is this task's now, unless it left the note as it was.
+    let replaced = done
+        .zip(manifest)
+        .filter(|(_, manifest)| manifest.task_id == id && !task.exports_only())
+        .map(|(done, _)| done.out_dir.clone());
     if let (Some(done), Some(manifest)) = (done, manifest) {
         task.artifact = Some(done.out_dir.clone());
         let partial = done.partial.unwrap_or(manifest.partial);
@@ -259,6 +264,9 @@ pub fn record_finish(
         }
     }
     let record = task.clone();
+    if let Some(note) = replaced {
+        state.note_replaced(&note, id);
+    }
     if record.state == TaskState::Complete && state.selected_task.as_deref() == Some(id) {
         state.selected_task = None;
     }
@@ -531,5 +539,80 @@ mod tests {
         events.replay(stream.as_bytes());
         assert_eq!(events.kept_edits, kept);
         assert!(kept_edits_notice(&[]).is_none());
+    }
+    /// A task that replaces a note leaves the task whose note it was replaced, at
+    /// once, as the next opening would; one that left the note as it was does not.
+    #[test]
+    fn a_published_note_replaces_the_earlier_task_s_result() {
+        let (_root, mut workspace, first) = queued_task();
+        let state = &mut workspace.state;
+        let note = state
+            .library(&state.default_library)
+            .unwrap()
+            .root
+            .join("course");
+        let manifest = |task: &str| -> Manifest {
+            serde_json::from_value(serde_json::json!({
+                "schema": 2, "task_id": task, "course_id": "course", "source_id": "source",
+                "title": "课程", "created_at_ms": 1, "document": "document.json",
+                "markdown": "course.md", "frames": [], "assets": [], "outputs": [],
+                "outcomes": {}, "partial": false,
+            }))
+            .unwrap()
+        };
+        let done = |task: &str| Done {
+            task_id: task.into(),
+            out_dir: note.clone(),
+            ..Default::default()
+        };
+        record_finish(
+            state,
+            &first,
+            Some(&done(&first)),
+            Some(&manifest(&first)),
+            true,
+            true,
+            false,
+        )
+        .unwrap();
+        let mut plan = state.task(&first).unwrap().plan.clone();
+        plan.title = "重新生成".into();
+        let (second, _) = state.enqueue(plan.clone(), None).unwrap();
+        // A run that left the note as the first task wrote it replaces nothing.
+        record_finish(
+            state,
+            &second,
+            Some(&done(&second)),
+            Some(&manifest(&first)),
+            true,
+            true,
+            false,
+        )
+        .unwrap();
+        assert_eq!(state.task(&first).unwrap().replaced_by, None);
+        let (third, _) = state.enqueue(plan, None).unwrap();
+        record_finish(
+            state,
+            &third,
+            Some(&done(&third)),
+            Some(&manifest(&third)),
+            true,
+            true,
+            false,
+        )
+        .unwrap();
+        let replaced = state.task(&first).unwrap();
+        assert_eq!(replaced.replaced_by.as_deref(), Some(third.as_str()));
+        assert_eq!(replaced.artifact, None);
+        assert_eq!(replaced.state, TaskState::Complete);
+        assert_eq!(
+            state.task(&second).unwrap().replaced_by.as_deref(),
+            Some(third.as_str())
+        );
+        assert_eq!(state.task(&third).unwrap().artifact.as_ref(), Some(&note));
+        assert_eq!(
+            task_view::task_status_label(state.task(&first).unwrap()),
+            c2m_i18n::tr!("笔记已被之后的任务更新")
+        );
     }
 }

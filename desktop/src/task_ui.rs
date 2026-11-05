@@ -1000,13 +1000,17 @@ impl TasksPage {
             // A running title already says what is being generated; the chip only
             // carries the state.
             let generating = task.state == TaskState::Running && task.intent == Intent::Run;
-            status_chip(task_status_kind(task.state)).child(
-                if generating && matches!(place, CardPlace::Open { .. }) {
-                    course2md::tr!("处理中").to_owned()
-                } else {
-                    task_status_label(task)
-                },
-            )
+            // A task whose note another replaced is history, not a success.
+            status_chip(if task.replaced_by.is_some() {
+                StatusKind::Neutral
+            } else {
+                task_status_kind(task.state)
+            })
+            .child(if generating && matches!(place, CardPlace::Open { .. }) {
+                course2md::tr!("处理中").to_owned()
+            } else {
+                task_status_label(task)
+            })
         });
         let context_menu = self.task_menu(task, cx);
         // The running card's progress and actions stay in its text column.
@@ -1693,15 +1697,18 @@ impl TasksPage {
                         .whitespace_normal()
                     }),
             )
-            .children(consequence.map(|consequence| {
-                accessible_text(
-                    SharedString::from(format!("task-consequence-{id}")),
-                    consequence,
-                )
-                .text_size(TEXT_AUX)
-                .text_color(color(ColorRole::ON_SURFACE_VARIANT))
-                .whitespace_normal()
-            }))
+            .children(
+                consequence
+                    .map(|text| ("consequence", text))
+                    .into_iter()
+                    .chain(task_kept_edits(task).map(|text| ("kept-edits", text)))
+                    .map(|(kind, text)| {
+                        accessible_text(SharedString::from(format!("task-{kind}-{id}")), text)
+                            .text_size(TEXT_AUX)
+                            .text_color(color(ColorRole::ON_SURFACE_VARIANT))
+                            .whitespace_normal()
+                    }),
+            )
             .children(self.facts.models.get(&id).map(|preparation| {
                 let key = SharedString::from(format!("task-model-{id}"));
                 match preparation {

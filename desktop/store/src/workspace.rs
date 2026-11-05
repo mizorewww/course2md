@@ -961,6 +961,16 @@ impl State {
         Ok(())
     }
 
+    /// Task `by` has replaced the note in `note`: the other tasks whose result it was
+    /// are replaced, as the next opening would find them.
+    pub fn note_replaced(&mut self, note: &Path, by: &str) {
+        for task in &mut self.tasks {
+            if task.id != by && task.artifact.as_deref() == Some(note) {
+                apply_artifact(task, ArtifactFact::Replaced { by: by.to_owned() });
+            }
+        }
+    }
+
     /// The unfinished task already writing `plan`'s note, which `enqueue` returns
     /// instead of a new one: a note has one unfinished task at a time, since each
     /// replaces the note the last one left. The attempt `parent` names, the one
@@ -4817,7 +4827,7 @@ mod tests {
         let child = ws.state.task(&next).unwrap();
         let c2m_engine::execution::Operation::Reprocess {
             components,
-            note_dir: base_version_dir,
+            note_dir,
             prior_work_dir,
             ..
         } = &child.plan.operation
@@ -4825,7 +4835,7 @@ mod tests {
             panic!("expected component recovery");
         };
         assert_eq!(components, &[Component::Proofreading, Component::Summary]);
-        assert_eq!(Some(base_version_dir), original.artifact.as_ref());
+        assert_eq!(Some(note_dir), original.artifact.as_ref());
         assert_eq!(prior_work_dir.as_ref(), Some(&original.work_dir));
         assert!(child.plan.config.llm.enabled && child.plan.config.llm.summarize);
         assert!(child.plan.options().llm && child.plan.options().summarize);

@@ -13,10 +13,14 @@ pub(crate) const TRANSCRIPTION_PURPOSE: &str = "transcription";
 
 /// A settled task that waits for the person.
 pub fn needs_person(task: &TaskRecord) -> bool {
-    matches!(
-        task.state,
-        TaskState::NeedsAttention | TaskState::Uncertain | TaskState::Paused | TaskState::Partial
-    )
+    task.replaced_by.is_none()
+        && matches!(
+            task.state,
+            TaskState::NeedsAttention
+                | TaskState::Uncertain
+                | TaskState::Paused
+                | TaskState::Partial
+        )
 }
 
 /// Page order: the work in progress, what waits on the person, what follows,
@@ -56,7 +60,7 @@ impl TaskGroup {
 }
 
 pub fn task_group(task: &TaskRecord) -> TaskGroup {
-    if task.handled_by.is_some() {
+    if task.handled_by.is_some() || task.replaced_by.is_some() {
         TaskGroup::History
     } else if task.held {
         TaskGroup::Running
@@ -636,6 +640,9 @@ pub fn task_status_label(task: &TaskRecord) -> String {
     if task.handled_by.is_some() {
         return c2m_i18n::tr!("已有后续处理任务").into();
     }
+    if task.replaced_by.is_some() {
+        return c2m_i18n::tr!("笔记已被之后的任务更新").into();
+    }
     // What the folder holds is not known until the earlier worker lets go.
     if task.held {
         return TaskState::Pausing.label().into();
@@ -821,6 +828,8 @@ pub fn task_actions(
     let mut recovery = Vec::new();
     if let Some(next) = &task.handled_by {
         recovery.push(Followup(next.clone()));
+    } else if task.replaced_by.is_some() {
+        // Its note is another task's now: nothing here can be redone.
     } else {
         let repair = task_requires_service_repair(task);
         if repair && has_note {
@@ -880,7 +889,11 @@ pub fn task_actions(
             actions.extend(recovery);
             // A published note's requests are resent by redoing the part they were
             // made for; when no unfinished part explains them, the card says why.
-            if uncertain && !active && (!has_note || task.uncertain_components().is_ok()) {
+            if uncertain
+                && !active
+                && task.replaced_by.is_none()
+                && (!has_note || task.uncertain_components().is_ok())
+            {
                 actions.push(Resend);
             }
             if !task.state.finished() {
