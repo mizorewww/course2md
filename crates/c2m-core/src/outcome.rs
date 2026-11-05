@@ -191,17 +191,6 @@ pub fn note_kept_message(parts: &[KeptPart], lang: c2m_i18n::i18n::Lang) -> Stri
             causes.push(cause);
         }
     }
-    let fill = |template: &str, values: &[&str]| {
-        let mut out = String::new();
-        let mut values = values.iter();
-        let mut pieces = template.split("{}");
-        out.push_str(pieces.next().unwrap_or_default());
-        for piece in pieces {
-            out.push_str(values.next().copied().unwrap_or_default());
-            out.push_str(piece);
-        }
-        out
-    };
     if causes.is_empty() {
         fill(
             t_for("这次的结果在这些部分不如现有笔记，现有笔记已保留：{}", lang),
@@ -219,6 +208,67 @@ pub fn note_kept_message(parts: &[KeptPart], lang: c2m_i18n::i18n::Lang) -> Stri
 }
 
 impl std::error::Error for NoteKept {}
+
+/// A replacement of a note stopped and cannot be finished on its own: no note is
+/// in place, and what the swap folder holds does not say which copy is the note.
+/// Nothing was changed. `swap` is `<library>/.course2md/swap/<note>`.
+#[derive(Debug)]
+pub struct RecoveryBlocked {
+    pub swap: std::path::PathBuf,
+}
+
+impl RecoveryBlocked {
+    /// The note this swap folder belongs to: `<library>/<note>`.
+    pub fn note(swap: &std::path::Path) -> Option<std::path::PathBuf> {
+        let name = swap.file_name()?;
+        Some(swap.parent()?.parent()?.parent()?.join(name))
+    }
+}
+
+impl std::fmt::Display for RecoveryBlocked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&recovery_blocked_message(
+            &self.swap,
+            c2m_i18n::i18n::lang(),
+        ))
+    }
+}
+
+impl std::error::Error for RecoveryBlocked {}
+
+/// What to do about a note whose replacement cannot be finished, in `lang`, with
+/// the full paths.
+pub fn recovery_blocked_message(swap: &std::path::Path, lang: c2m_i18n::i18n::Lang) -> String {
+    let note = RecoveryBlocked::note(swap).unwrap_or_else(|| swap.to_path_buf());
+    let folder = note
+        .parent()
+        .map(|parent| parent.display().to_string())
+        .unwrap_or_default();
+    let name = note
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    fill(
+        c2m_i18n::i18n::t_for(
+            "这份笔记上次被替换时中断，无法自动恢复，所有文件都已原样保留。请打开 {}，把其中存有你笔记的 old- 开头的文件夹移到 {} 并改名为 {}，再删除那里的 live 文件，然后重试。",
+            lang,
+        ),
+        &[&swap.display().to_string(), &folder, &name],
+    )
+}
+
+/// A catalog template with its `{}` filled in order.
+fn fill(template: &str, values: &[&str]) -> String {
+    let mut out = String::new();
+    let mut values = values.iter();
+    let mut pieces = template.split("{}");
+    out.push_str(pieces.next().unwrap_or_default());
+    for piece in pieces {
+        out.push_str(values.next().copied().unwrap_or_default());
+        out.push_str(piece);
+    }
+    out
+}
 
 /// Another task is working on the note; this one stopped before any work.
 #[derive(Debug)]
