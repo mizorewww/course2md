@@ -465,7 +465,7 @@ pub fn probe(input: String, online: bool, cancel: Arc<AtomicBool>) -> Result<Sou
         return inspect_local(input, &cancel).map(|source| SourceProbe::Single(Box::new(source)));
     }
     validate_url(&input)?;
-    let output = online_metadata(&input, true, &cancel);
+    let output = online_metadata(&input, false, true, &cancel);
     let (metadata, subtitle_failure) = match output {
         Ok(output) => (
             c2m_source::fetch::parse_online_probe(&output.stdout, &input, &output.stderr)?,
@@ -475,7 +475,7 @@ pub fn probe(input: String, online: bool, cancel: Arc<AtomicBool>) -> Result<Sou
             check_cancel(&cancel)?;
             // A subtitle channel can fail while basic metadata remains available.
             // Preserve that video and the failure evidence instead of claiming no captions.
-            let basic = online_metadata(&input, false, &cancel)?;
+            let basic = online_metadata(&input, false, false, &cancel)?;
             (
                 c2m_source::fetch::parse_online_probe(&basic.stdout, &input, &basic.stderr)?,
                 Some(subtitle_failure_message(&error)),
@@ -540,14 +540,20 @@ pub fn probe(input: String, online: bool, cancel: Arc<AtomicBool>) -> Result<Sou
     Ok(result)
 }
 
+/// `single` reads the one video a source names, even one opened from a playlist;
+/// a preview lists a pasted playlist so a video can be chosen from it.
 fn online_metadata(
     input: &str,
+    single: bool,
     with_subtitles: bool,
     cancel: &AtomicBool,
 ) -> Result<CommandOutput> {
     let socket_timeout = c2m_source::fetch::YTDLP_SOCKET_TIMEOUT;
     let mut args = vec!["--ignore-config", "--socket-timeout", socket_timeout];
     args.extend(c2m_source::fetch::probe_args(with_subtitles));
+    if single && c2m_source::playback::names_youtube_video(input) {
+        args.push("--no-playlist");
+    }
     args.extend(["--", input]);
     command_output("yt-dlp", &args, cancel)
 }
@@ -836,7 +842,7 @@ pub fn refresh_subtitles(
             &source.identity,
         ));
     }
-    let output = online_metadata(&source.input, true, &cancel)
+    let output = online_metadata(&source.input, true, true, &cancel)
         .map_err(|error| anyhow::anyhow!(subtitle_failure_message(&error)))?;
     match c2m_source::fetch::parse_online_probe(&output.stdout, &source.input, &output.stderr)? {
         c2m_source::fetch::OnlineProbe::Video { mut video } => {

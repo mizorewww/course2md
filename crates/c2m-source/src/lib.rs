@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod fetch;
+pub mod playback;
 pub mod subtitle;
 
 use c2m_config::config;
