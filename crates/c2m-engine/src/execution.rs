@@ -627,10 +627,13 @@ mod tests {
     /// were flat, so its saved receipts still belong to it.
     #[test]
     fn a_repair_identity_records_its_task_and_base_as_versions() {
+        // An absolute path on every platform (`/library` is not one on Windows).
+        let root = std::env::temp_dir().join("library");
+        let at = |rel: &str| root.join(rel);
         let mut request = Request {
             schema: REQUEST_SCHEMA,
             operation: Operation::Reprocess {
-                note_dir: "/library/course".into(),
+                note_dir: at("course"),
                 base_task_id: "task-0".into(),
                 components: vec![Component::Summary],
                 prior_work_dir: None,
@@ -647,8 +650,8 @@ mod tests {
             subtitle_events: None,
             config: ConfigFile::default(),
             allow_unauthenticated_asr: false,
-            work_dir: "/library/.course2md/work/repair-1".into(),
-            course_dir: "/library/course".into(),
+            work_dir: at(".course2md/work/repair-1"),
+            course_dir: at("course"),
             control_path: None,
             service_versions: Default::default(),
         };
@@ -663,10 +666,10 @@ mod tests {
         request.version_id = Some("repair-1".into());
         assert_eq!(request.binding(&cfg).unwrap(), binding);
         // The work directory and the note never overlap: the note is replaced whole.
-        request.work_dir = "/library/course/.work/repair-1".into();
+        request.work_dir = at("course/.work/repair-1");
         assert!(request.validate().is_err());
-        request.work_dir = "/library/.course2md/work/repair-1".into();
-        request.course_dir = "/library/other".into();
+        request.work_dir = at(".course2md/work/repair-1");
+        request.course_dir = at("other");
         assert!(
             request.validate().is_err(),
             "the repaired note is the task's"
