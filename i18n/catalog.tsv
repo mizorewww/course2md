@@ -2254,3 +2254,9 @@ AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not conf
 笔记已更新	笔记已更新	Note updated	筆記已更新	ノートを更新しました
 生成日期	生成日期	Generated	產生日期	生成日
 保留当前笔记	保留当前笔记	Keep the current note	保留目前筆記	現在のノートを残す
+这次的结果在这些部分不如现有笔记，现有笔记已保留：{}	这次的结果在这些部分不如现有笔记，现有笔记已保留：{}	This run did less than the saved note in: {}; the saved note was kept	這次的結果在這些部分不如現有筆記，現有筆記已保留：{}	今回の結果は次の部分で既存のノートに及ばないため、既存のノートを残しました：{}
+磁盘空间不足，无法替换笔记；原笔记未改动 / Not enough disk space to replace the note; it is unchanged	磁盘空间不足，无法替换笔记；原笔记未改动	Not enough disk space to replace the note; it is unchanged	磁碟空間不足，無法取代筆記；原筆記未變動	ディスクの空き容量が足りないため、ノートを置き換えられません。ノートは変更されていません
+没有权限替换笔记；原笔记未改动 / No permission to replace the note; it is unchanged	没有权限替换笔记；原笔记未改动	No permission to replace the note; it is unchanged	沒有權限取代筆記；原筆記未變動	ノートを置き換える権限がありません。ノートは変更されていません
+这份笔记有 {} 份旧副本无法删除，请检查 {} 的权限后再试 / {} replaced copies of this note could not be deleted; check the permissions of {} and try again	这份笔记有 {} 份旧副本无法删除，请检查 {} 的权限后再试	{} replaced copies of this note could not be deleted; check the permissions of {} and try again	這份筆記有 {} 份舊副本無法刪除，請檢查 {} 的權限後再試	このノートの古いコピー {} 件を削除できません。{} の権限を確認してからもう一度お試しください
+笔记文件夹是一个无法打开的链接：{} / The note folder is a link that cannot be followed: {}	笔记文件夹是一个无法打开的链接：{}	The note folder is a link that cannot be followed: {}	筆記資料夾是一個無法開啟的連結：{}	ノートのフォルダは開けないリンクです：{}
+另一个任务正在处理这份笔记，请等它结束后再试 / Another task is working on this note; try again when it ends	另一个任务正在处理这份笔记，请等它结束后再试	Another task is working on this note; try again when it ends	另一個任務正在處理這份筆記，請等它結束後再試	別のタスクがこのノートを処理しています。終わってからもう一度お試しください

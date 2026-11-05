@@ -236,6 +236,50 @@ fn note_name(note_dir: &Path) -> Result<String> {
         .context(tr!("笔记位置无效 / Invalid note location"))
 }
 
+/// The real folder of a note reached through a link: it is replaced beside its
+/// target, on the target's volume, so the link keeps pointing at the note.
+fn resolve_note(note_dir: &Path) -> Result<PathBuf> {
+    if !std::fs::symlink_metadata(note_dir).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Ok(note_dir.to_path_buf());
+    }
+    std::fs::canonicalize(note_dir).with_context(|| {
+        tr!(
+            "笔记文件夹是一个无法打开的链接：{} / The note folder is a link that cannot be followed: {}",
+            note_dir.display(),
+            note_dir.display()
+        )
+    })
+}
+
+/// Held by a task from before its first paid request until it ends: a second
+/// task for the same note, from this app or the command line, stops at once
+/// instead of finding the note taken only after it paid for its requests.
+pub fn claim_note(note_dir: &Path) -> Result<crate::runtime::FileLock> {
+    let note_dir = resolve_note(note_dir)?;
+    let locks = library_dir(&note_dir)?.join("locks");
+    std::fs::create_dir_all(&locks)?;
+    crate::runtime::lock_file(&locks.join(format!("{}.task.lock", note_name(&note_dir)?)))
+        .context(tr!(
+            "另一个任务正在处理这份笔记，请等它结束后再试 / Another task is working on this note; try again when it ends"
+        ))
+}
+
+/// Completes the interrupted replacements of every note whose swap folder is in
+/// `folder/.course2md/swap`: the notes directly in `folder`. Returns the notes
+/// that could not be recovered, with why.
+pub fn recover_folder(folder: &Path) -> Vec<(PathBuf, anyhow::Error)> {
+    let Ok(entries) = std::fs::read_dir(folder.join(".course2md").join("swap")) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let note = folder.join(entry.file_name());
+            recover(&note).err().map(|error| (note, error))
+        })
+        .collect()
+}
+
 /// The folder that holds a note's replacement and the note it replaces.
 fn swap_dir(note_dir: &Path) -> Result<PathBuf> {
     Ok(library_dir(note_dir)?
@@ -395,10 +439,10 @@ pub fn publish(
             "文字未生成，已保留可用素材 / No readable text; available materials are retained in the task"
         )
     );
-    let note = &target.course_dir;
+    let note = &resolve_note(&target.course_dir)?;
     let _lock = lock_note(note)?;
     recover_locked(note)?;
-    flatten_locked(note)?;
+    flatten_tolerant(note)?;
     salvage_work(note, &note.join(".work"))?;
     let old = match note_manifest(note) {
         Ok(manifest) => manifest,
@@ -421,6 +465,17 @@ pub fn publish(
             NoteChanged
         );
     }
+    if let Some(old) = &old {
+        refuse_worse(&old.outcomes, &outcomes)?;
+    }
+    // The note keeps every export it had, made again from the new content.
+    let mut formats = formats.to_vec();
+    for format in old.iter().flat_map(|old| export_formats(&old.outputs)) {
+        if !formats.contains(&format) {
+            formats.push(format);
+        }
+    }
+    let formats = &formats[..];
     let swap = swap_dir(note)?;
     std::fs::create_dir_all(&swap)?;
     let staging = swap.join(format!("new-{}", target.task_id));
@@ -511,11 +566,19 @@ pub fn publish(
                 path: path.clone(),
             })
         })?;
-        let kept_edits = if note.is_dir() {
+        let (kept_edits, kept_exports) = if note.is_dir() {
             carry_over(note, old.as_ref(), &staging)?
         } else {
-            Vec::new()
+            Default::default()
         };
+        // An export the new note could not make again stays the note's own file.
+        let mut assets = assets;
+        for asset in kept_exports {
+            outputs.push(asset.path.clone());
+            assets.push(asset);
+        }
+        assets.sort_by(|a, b| a.path.cmp(&b.path));
+        outputs.sort();
         let manifest = Manifest {
             schema: MANIFEST_SCHEMA,
             task_id: target.task_id.clone(),
@@ -560,6 +623,65 @@ pub fn publish(
     Ok(publication)
 }
 
+/// The export formats whose files a note lists.
+fn export_formats(outputs: &[String]) -> Vec<crate::config::OutputFormat> {
+    use crate::config::OutputFormat;
+    [OutputFormat::Md, OutputFormat::Html, OutputFormat::Json]
+        .into_iter()
+        .filter(|format| {
+            let path = format!("exports/{}", crate::portable::file_name(*format));
+            outputs.contains(&path)
+        })
+        .collect()
+}
+
+/// How much of a part a note holds: all of it, the finished batches of it, or none.
+fn finished(outcome: &Outcome) -> usize {
+    match outcome.status {
+        Status::Succeeded => usize::MAX,
+        Status::Partial => outcome.completed.unwrap_or(0),
+        Status::NotRequested | Status::Failed => 0,
+    }
+}
+
+/// Refuses to replace a note with a result that holds less of any part the new
+/// task tried to make: its transcript, screenshots, proofreading, translation or
+/// summary. A part the new task did not ask for (AI turned off, a transcript
+/// already in the target language) is a choice, not a loss. The saved note stays,
+/// and the task ends failed, naming the parts; what it paid for stays in its work.
+pub fn refuse_worse(saved: &Outcomes, new: &Outcomes) -> Result<()> {
+    let parts = [
+        (&saved.transcript, &new.transcript, tr!("文字")),
+        (&saved.screenshots, &new.screenshots, tr!("截图")),
+        (&saved.proofreading, &new.proofreading, tr!("校对")),
+        (&saved.translation, &new.translation, tr!("翻译")),
+        (&saved.summary, &new.summary, tr!("摘要")),
+    ];
+    let worse: Vec<_> = parts
+        .iter()
+        .filter(|(saved, new, _)| {
+            matches!(new.status, Status::Failed | Status::Partial)
+                && finished(new) < finished(saved)
+        })
+        .collect();
+    let Some((_, first, _)) = worse.first() else {
+        return Ok(());
+    };
+    let names = worse
+        .iter()
+        .map(|(_, _, name)| name.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(crate::outcome::Failure {
+        kind: first.kind.unwrap_or(FailureKind::Local),
+        ..crate::outcome::Failure::local(tr!(
+            "这次的结果在这些部分不如现有笔记，现有笔记已保留：{}",
+            names
+        ))
+    }
+    .into())
+}
+
 /// Replaces `note` with the finished `staging`, which is on the same volume.
 /// Each step leaves a state [`recover`] completes or undoes.
 fn swap_in(note: &Path, staging: &Path, label: &str) -> Result<()> {
@@ -578,10 +700,7 @@ fn swap_in(note: &Path, staging: &Path, label: &str) -> Result<()> {
     remove_tree(&old)?;
     if let Err(error) = std::fs::rename(note, &old) {
         let _ = remove_tree(staging);
-        // On Windows a file of the note that another program holds open refuses this.
-        return Err(error).context(tr!(
-            "笔记正被其他程序使用，暂时无法替换；原笔记未改动，关闭后重试即可 / The note is in use by another program; it is unchanged; close it and try again"
-        ));
+        return Err(replace_error(error));
     }
     let placed = fail_point(FailPoint::BetweenRenames).and_then(|()| {
         std::fs::rename(staging, note).context(tr!(
@@ -605,11 +724,44 @@ fn swap_in(note: &Path, staging: &Path, label: &str) -> Result<()> {
     Ok(())
 }
 
+/// Why the note could not be moved aside, in words that say what to do. The note
+/// is unchanged in every case.
+fn replace_error(error: std::io::Error) -> anyhow::Error {
+    use std::io::ErrorKind;
+    // Windows: ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION, ERROR_ACCESS_DENIED on
+    // a file another program holds open.
+    let held_open = cfg!(windows)
+        && (matches!(error.raw_os_error(), Some(5 | 32 | 33))
+            || error.kind() == ErrorKind::PermissionDenied);
+    let message = if error.kind() == ErrorKind::StorageFull {
+        tr!(
+            "磁盘空间不足，无法替换笔记；原笔记未改动 / Not enough disk space to replace the note; it is unchanged"
+        )
+    } else if held_open || error.kind() == ErrorKind::ResourceBusy {
+        tr!(
+            "笔记正被其他程序使用，暂时无法替换；原笔记未改动，关闭后重试即可 / The note is in use by another program; it is unchanged; close it and try again"
+        )
+    } else if error.kind() == ErrorKind::PermissionDenied {
+        tr!("没有权限替换笔记；原笔记未改动 / No permission to replace the note; it is unchanged")
+    } else {
+        tr!(
+            "无法保存笔记；原笔记未改动，可稍后重试 / Could not save the note; it is unchanged; try again later"
+        )
+    };
+    anyhow::Error::new(error).context(message)
+}
+
 /// Copies into `staging` the files of the old note that are not its own: anything
 /// its manifest does not list, and listed files that were changed since. A file
 /// the new note also has is kept under an `.edited` name and reported. The old
-/// note's own unchanged files are left behind: the new note replaces them.
-fn carry_over(note: &Path, old: Option<&Manifest>, staging: &Path) -> Result<Vec<String>> {
+/// note's own unchanged files are left behind: the new note replaces them, except
+/// an export the new note could not make again, which stays. Folders that only
+/// held the old note's own files are not recreated empty.
+fn carry_over(
+    note: &Path,
+    old: Option<&Manifest>,
+    staging: &Path,
+) -> Result<(Vec<String>, Vec<Asset>)> {
     let listed: HashMap<&str, &Asset> = old
         .map(|manifest| {
             manifest
@@ -619,10 +771,20 @@ fn carry_over(note: &Path, old: Option<&Manifest>, staging: &Path) -> Result<Vec
                 .collect()
         })
         .unwrap_or_default();
+    let owned_dirs: std::collections::HashSet<&str> = listed
+        .keys()
+        .flat_map(|path| {
+            path.match_indices('/')
+                .map(move |(index, _)| &path[..index])
+        })
+        .collect();
     let mut kept_edits = Vec::new();
+    let mut kept_exports = Vec::new();
     for (relative, kind) in walk(note)? {
         if kind == EntryKind::Dir {
-            std::fs::create_dir_all(staging.join(&relative))?;
+            if !owned_dirs.contains(relative.as_str()) {
+                std::fs::create_dir_all(staging.join(&relative))?;
+            }
             continue;
         }
         if relative == "manifest.json" {
@@ -633,10 +795,14 @@ fn carry_over(note: &Path, old: Option<&Manifest>, staging: &Path) -> Result<Vec
             std::fs::metadata(&source).is_ok_and(|m| m.len() == asset.bytes)
                 && file_digest(&source).is_ok_and(|digest| digest == asset.sha256)
         });
+        let existing = staging.join(&relative);
         if own {
+            if relative.starts_with("exports/") && existing.symlink_metadata().is_err() {
+                copy_entry(&source, &existing, kind)?;
+                kept_exports.extend(listed.get(relative.as_str()).map(|asset| (*asset).clone()));
+            }
             continue;
         }
-        let existing = staging.join(&relative);
         let destination = if existing.symlink_metadata().is_err() {
             relative.clone()
         } else if kind == EntryKind::File
@@ -654,7 +820,7 @@ fn carry_over(note: &Path, old: Option<&Manifest>, staging: &Path) -> Result<Vec
         };
         copy_entry(&source, &staging.join(&destination), kind)?;
     }
-    Ok(kept_edits)
+    Ok((kept_edits, kept_exports))
 }
 
 /// `course.md` → `course.edited.md`, then `course.edited-2.md`, … — the first name
@@ -781,12 +947,65 @@ fn remove_tree(path: &Path) -> Result<()> {
 /// older app kept inside the note (`.work`) moves to the library's work folder
 /// first. A failure only warns: the next recovery deletes it.
 fn discard_old(note: &Path, old: &Path) {
-    let result = salvage_work(note, &old.join(".work")).and_then(|()| remove_tree(old));
+    let result = salvage_work(note, &old.join(".work"))
+        .and_then(|()| remove_tree(old))
+        // Read-only files (a Windows attribute, a copied CD) refuse deletion until writable.
+        .or_else(|_| {
+            make_writable(old);
+            remove_tree(old)
+        });
     if let Err(error) = result {
-        tracing::warn!(
-            "旧笔记暂时无法删除，稍后会再次清理 / The replaced note could not be deleted yet: {}: {error:#}",
-            old.display()
-        );
+        use std::sync::{Mutex, OnceLock};
+        static WARNED: OnceLock<Mutex<std::collections::HashSet<PathBuf>>> = OnceLock::new();
+        let first = crate::runtime::lock_recover(WARNED.get_or_init(Default::default))
+            .insert(old.to_path_buf());
+        if first {
+            tracing::warn!(
+                "旧笔记暂时无法删除，稍后会再次清理 / The replaced note could not be deleted yet: {}: {error:#}",
+                old.display()
+            );
+        }
+    }
+}
+
+/// Replaced notes that could not be deleted. This many refuses a new task until
+/// they are cleared, so copies of a whole note do not pile up.
+const MAX_STUCK_OLD: usize = 3;
+
+fn stuck_olds(note: &Path) -> Result<Vec<PathBuf>> {
+    let swap = swap_dir(note)?;
+    let Ok(entries) = std::fs::read_dir(&swap) else {
+        return Ok(Vec::new());
+    };
+    Ok(entries
+        .flatten()
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("old-"))
+        .map(|entry| entry.path())
+        .collect())
+}
+
+/// Lets the owner delete everything below `root`.
+fn make_writable(root: &Path) {
+    let entries = walk(root).unwrap_or_default();
+    for path in std::iter::once(root.to_path_buf())
+        .chain(entries.into_iter().map(|(relative, _)| root.join(relative)))
+    {
+        let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        let mut permissions = metadata.permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            permissions.set_mode(permissions.mode() | 0o700);
+        }
+        #[cfg(not(unix))]
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        let _ = std::fs::set_permissions(&path, permissions);
     }
 }
 
@@ -817,6 +1036,7 @@ fn salvage_work(note: &Path, legacy: &Path) -> Result<()> {
 /// deleted. An unfinished new note is deleted. Returns `false` without waiting
 /// when another writer holds the note (the leftovers are its own).
 pub fn recover(note_dir: &Path) -> Result<bool> {
+    let note_dir = &resolve_note(note_dir)?;
     let locks = library_dir(note_dir)?.join("locks");
     if !swap_dir(note_dir)?.exists() {
         return Ok(true);
@@ -867,13 +1087,24 @@ fn recover_locked(note: &Path) -> Result<()> {
 /// interrupted replacement, flattens a schema 1 course, moves task progress an
 /// older app kept inside the note out of it, and refuses a newer app's note.
 pub fn prepare_note(note_dir: &Path) -> Result<()> {
+    let note_dir = &resolve_note(note_dir)?;
     refuse_newer(note_dir)?;
     if !note_dir.exists() && !swap_dir(note_dir)?.exists() {
         return Ok(());
     }
     let _lock = lock_note(note_dir)?;
     recover_locked(note_dir)?;
-    flatten_locked(note_dir)?;
+    let stuck = stuck_olds(note_dir)?;
+    if stuck.len() >= MAX_STUCK_OLD {
+        anyhow::bail!(tr!(
+            "这份笔记有 {} 份旧副本无法删除，请检查 {} 的权限后再试 / {} replaced copies of this note could not be deleted; check the permissions of {} and try again",
+            stuck.len(),
+            swap_dir(note_dir)?.display(),
+            stuck.len(),
+            swap_dir(note_dir)?.display()
+        ));
+    }
+    flatten_tolerant(note_dir)?;
     salvage_work(note_dir, &note_dir.join(".work"))?;
     // A folder an older app made for a task that never published.
     if note_dir.is_dir() && std::fs::read_dir(note_dir)?.next().is_none() {
@@ -890,6 +1121,7 @@ pub fn prepare_note(note_dir: &Path) -> Result<()> {
 /// leaves the course as it was or flat; running it again finishes the job.
 /// Returns the flat note's manifest, or `None` when the folder was not schema 1.
 pub fn flatten_legacy(note_dir: &Path) -> Result<Option<Manifest>> {
+    let note_dir = &resolve_note(note_dir)?;
     if !note_dir.exists() && !swap_dir(note_dir)?.exists() {
         return Ok(None);
     }
@@ -898,11 +1130,20 @@ pub fn flatten_legacy(note_dir: &Path) -> Result<Option<Manifest>> {
     flatten_locked(note_dir)
 }
 
+/// [`flatten_locked`] for a task: a course with no readable version stays as it
+/// is, and a new note is published beside its versions, which it keeps.
+fn flatten_tolerant(note: &Path) -> Result<()> {
+    match flatten_locked(note) {
+        Err(error) if error.is::<NothingReadable>() => Ok(()),
+        result => result.map(drop),
+    }
+}
+
 fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
     if !is_legacy(note) {
         return Ok(None);
     }
-    let (version, mut manifest) = current_version(note)?;
+    let (version, mut manifest, passed_over) = current_version(note)?;
     let swap = swap_dir(note)?;
     std::fs::create_dir_all(&swap)?;
     let staging = swap.join("new-flatten");
@@ -995,6 +1236,24 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
                 copy_entry(&entry.path(), &staging.join(&destination), kind)?;
             }
         }
+        // The version the course pointed at, though unreadable, stays as it was.
+        if let Some(pointed) = &passed_over {
+            let source = note.join("versions").join(pointed);
+            let name = format!("damaged-version-{pointed}");
+            let destination = if taken(&name) {
+                edited_name(&name, taken)
+            } else {
+                name
+            };
+            for (relative, kind) in walk(&source)? {
+                copy_entry(
+                    &source.join(&relative),
+                    &staging.join(&destination).join(relative),
+                    kind,
+                )?;
+            }
+            std::fs::create_dir_all(staging.join(&destination))?;
+        }
         manifest.schema = MANIFEST_SCHEMA;
         atomic_write_shared(
             &staging.join("manifest.json"),
@@ -1013,10 +1272,27 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
     Ok(Some(manifest))
 }
 
-/// The version a schema 1 course reads: the one `current.json` names when it is
-/// intact, otherwise the newest intact one.
-fn current_version(note: &Path) -> Result<(String, Manifest)> {
-    let intact = |version: &str| -> Result<Manifest> {
+/// A schema 1 course in which no version has a readable body. Flattening
+/// leaves it as it is; a new note can still be published beside its versions.
+#[derive(Debug)]
+pub struct NothingReadable;
+
+impl std::fmt::Display for NothingReadable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(tr!(
+            "这份笔记的各个版本都已损坏，已原样保留 / Every version of this note is damaged; it was left as it is"
+        ))
+    }
+}
+
+impl std::error::Error for NothingReadable {}
+
+/// The version a schema 1 course reads, as the reader of that app read it: the one
+/// `current.json` names whenever its body is readable, whatever else in it was
+/// changed by hand; otherwise the newest version with a readable body. Also
+/// returns the pointed version when it was passed over, so it is kept.
+fn current_version(note: &Path) -> Result<(String, Manifest, Option<String>)> {
+    let readable = |version: &str| -> Result<Manifest> {
         let mut parts = Path::new(version).components();
         anyhow::ensure!(
             matches!(parts.next(), Some(Component::Normal(_))) && parts.next().is_none(),
@@ -1024,7 +1300,12 @@ fn current_version(note: &Path) -> Result<(String, Manifest)> {
         );
         let dir = note.join("versions").join(version);
         let manifest = read_manifest(&dir.join("manifest.json"))?;
-        validate_note(&dir, &manifest)?;
+        let body: Document =
+            serde_json::from_slice(&std::fs::read(safe_asset_path(&dir, &manifest.document)?)?)?;
+        anyhow::ensure!(
+            has_readable_body(&body.sections),
+            tr!("笔记没有可读正文 / Note has no readable body")
+        );
         Ok(manifest)
     };
     let pointed = match read_current(&note.join("current.json")) {
@@ -1032,10 +1313,12 @@ fn current_version(note: &Path) -> Result<(String, Manifest)> {
         Err(error) if error.is::<NewerSchema>() => return Err(error),
         Err(_) => None,
     };
-    if let Some(version) = pointed
-        && let Ok(manifest) = intact(&version)
-    {
-        return Ok((version, manifest));
+    if let Some(version) = &pointed {
+        match readable(version) {
+            Ok(manifest) => return Ok((version.clone(), manifest, None)),
+            Err(error) if error.is::<NewerSchema>() => return Err(error),
+            Err(_) => {}
+        }
     }
     let mut newest: Option<(String, Manifest)> = None;
     if note.join("versions").is_dir() {
@@ -1045,7 +1328,7 @@ fn current_version(note: &Path) -> Result<(String, Manifest)> {
             if name.starts_with('.') || !entry.file_type()?.is_dir() {
                 continue;
             }
-            match intact(&name) {
+            match readable(&name) {
                 Ok(manifest) => {
                     let key = |m: &Manifest| (m.revision, m.created_at_ms);
                     if newest.as_ref().is_none_or(|(_, n)| key(&manifest) > key(n)) {
@@ -1057,9 +1340,11 @@ fn current_version(note: &Path) -> Result<(String, Manifest)> {
             }
         }
     }
-    newest.context(tr!(
-        "这份笔记的各个版本都已损坏，已原样保留 / Every version of this note is damaged; it was left as it is"
-    ))
+    let (version, manifest) = newest.ok_or(NothingReadable)?;
+    // A pointed version that is passed over is never deleted.
+    let passed_over = pointed
+        .filter(|pointed| pointed != &version && note.join("versions").join(pointed).is_dir());
+    Ok((version, manifest, passed_over))
 }
 
 /// `exports/course.html` labelled `task` → `exports/course.task.html`, or with a
@@ -1097,6 +1382,7 @@ pub fn write_export(
     format: crate::config::OutputFormat,
     bytes: &[u8],
 ) -> Result<ExportWrite> {
+    let note_dir = &resolve_note(note_dir)?;
     let _lock = lock_note(note_dir)?;
     recover_locked(note_dir)?;
     let mut manifest =

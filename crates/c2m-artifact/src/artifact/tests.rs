@@ -356,12 +356,20 @@ fn an_export_is_written_into_the_note_and_listed_as_its_own() {
                 && asset.sha256 == crate::digest::digest(b"<p>newer</p>"))
     );
     validate_note(note, &manifest).unwrap();
-    // Listed as the note's own, a regenerate replaces it rather than keep it.
+    // Listed as the note's own, a regenerate makes it again from the new note.
     let next = library
         .publish(&library.target("task-2"), "Body", "")
         .unwrap();
     assert!(next.kept_edits.is_empty(), "{:?}", next.kept_edits);
-    assert!(!note.join("exports/structured.json").exists());
+    assert_ne!(
+        std::fs::read(note.join("exports/structured.json")).unwrap(),
+        b"{}"
+    );
+    assert!(
+        next.manifest
+            .outputs
+            .contains(&"exports/structured.json".to_string())
+    );
     assert_eq!(
         std::fs::read(note.join("exports/course.edited.html")).unwrap(),
         b"<p>mine</p>"
@@ -548,6 +556,13 @@ fn flattening_without_a_usable_pointer_takes_the_newest_intact_version() {
         flatten_legacy(legacy.course()).unwrap().unwrap().task_id,
         "v1"
     );
+    // The version it pointed at is kept, not deleted.
+    assert!(
+        legacy
+            .course()
+            .join("damaged-version-v2/manifest.json")
+            .is_file()
+    );
     // With nothing intact, the course is left as it was.
     let legacy = Legacy::new();
     let only = legacy.version("v1", 1, "First");
@@ -641,4 +656,296 @@ fn preparing_a_note_flattens_it_and_moves_task_progress_out() {
         std::fs::read(work_dir(&library.note, "task").unwrap().join("media.mp4")).unwrap(),
         b"video"
     );
+}
+
+/// The reader of the app that wrote versions read the current version whenever
+/// its body was readable; files changed by hand did not make it fall back.
+#[test]
+fn flattening_keeps_a_current_version_with_hand_edited_files() {
+    let legacy = Legacy::new();
+    legacy.version("v1", 1, "First");
+    let current = legacy.version("v2", 2, "Second");
+    legacy.point_at("v2");
+    std::fs::write(current.join("frames/a.jpg"), b"my retouched screenshot").unwrap();
+    std::fs::write(current.join("course.md"), b"# my notes").unwrap();
+    std::fs::write(current.join("added.txt"), b"added").unwrap();
+    let flat = flatten_legacy(legacy.course()).unwrap().unwrap();
+    let course = legacy.course();
+    assert_eq!(flat.task_id, "v2");
+    assert_eq!(
+        std::fs::read(course.join("frames/a.jpg")).unwrap(),
+        b"my retouched screenshot"
+    );
+    assert_eq!(
+        std::fs::read(course.join("course.md")).unwrap(),
+        b"# my notes"
+    );
+    assert_eq!(std::fs::read(course.join("added.txt")).unwrap(), b"added");
+    assert!(!course.join("versions").exists());
+    // A regenerate keeps both hand edits beside the new note.
+    let next = legacy
+        .library
+        .publish(&legacy.library.target("next"), "Next", "frames/a.jpg")
+        .unwrap();
+    assert_eq!(
+        next.kept_edits,
+        vec!["course.edited.md", "frames/a.edited.jpg"]
+    );
+    // The only version, edited the same way, is read too.
+    let single = Legacy::new();
+    let only = single.version("v1", 1, "Only");
+    single.point_at("v1");
+    std::fs::write(only.join("frames/a.jpg"), b"retouched").unwrap();
+    assert_eq!(
+        flatten_legacy(single.course()).unwrap().unwrap().task_id,
+        "v1"
+    );
+}
+
+/// A course with no readable version is not flattened, and a new note is still
+/// published beside its versions, which it keeps.
+#[test]
+fn a_course_with_nothing_readable_can_still_be_regenerated() {
+    let legacy = Legacy::new();
+    let only = legacy.version("v1", 1, "Only");
+    std::fs::remove_file(only.join("document.json")).unwrap();
+    legacy.point_at("v1");
+    assert!(
+        flatten_legacy(legacy.course())
+            .unwrap_err()
+            .is::<NothingReadable>()
+    );
+    prepare_note(legacy.course()).unwrap();
+    legacy
+        .library
+        .publish(&legacy.library.target("fresh"), "Fresh", "")
+        .unwrap();
+    let course = legacy.course();
+    assert_eq!(note_manifest(course).unwrap().unwrap().task_id, "fresh");
+    assert!(course.join("versions/v1/manifest.json").is_file());
+    assert!(course.join("current.json").is_file());
+    assert!(!is_legacy(course));
+}
+
+fn outcomes(summary: Outcome, screenshots: Outcome) -> Outcomes {
+    Outcomes {
+        transcript: Outcome::succeeded(),
+        summary,
+        screenshots,
+        ..Default::default()
+    }
+}
+
+fn publish_with(library: &Library, task: &str, outcomes: Outcomes) -> Result<Publication> {
+    publish(
+        &library.target(task),
+        &library.work,
+        &meta("Title"),
+        &sections("Body", ""),
+        None,
+        &[],
+        outcomes,
+        &TaskControl::default(),
+    )
+}
+
+#[test]
+fn a_result_worse_in_a_part_it_tried_never_replaces_the_note() {
+    let library = Library::new();
+    publish_with(
+        &library,
+        "complete",
+        outcomes(Outcome::succeeded(), Outcome::succeeded()),
+    )
+    .unwrap();
+    let before = snapshot(&library.note);
+    for (summary, screenshots) in [
+        (Outcome::failed("service unreachable"), Outcome::succeeded()),
+        (Outcome::succeeded(), Outcome::failed("no frames")),
+        (
+            Outcome {
+                completed: Some(1),
+                total: Some(3),
+                ..Outcome::failed("partly")
+            },
+            Outcome::succeeded(),
+        ),
+    ] {
+        let partial = Outcome {
+            status: if summary.completed.is_some() {
+                Status::Partial
+            } else {
+                summary.status
+            },
+            ..summary
+        };
+        let error = publish_with(&library, "worse", outcomes(partial, screenshots)).unwrap_err();
+        let failure = error.downcast_ref::<crate::outcome::Failure>().unwrap();
+        assert!(
+            failure.message.contains("现有笔记已保留") || failure.message.contains("saved note")
+        );
+        assert_eq!(snapshot(&library.note), before);
+    }
+    // A part the new task did not ask for is a choice, not a loss.
+    publish_with(
+        &library,
+        "without-ai",
+        outcomes(Outcome::not_requested(), Outcome::succeeded()),
+    )
+    .unwrap();
+    assert_eq!(
+        note_manifest(&library.note).unwrap().unwrap().task_id,
+        "without-ai"
+    );
+}
+
+#[test]
+fn every_export_the_note_had_is_made_again_from_the_new_note() {
+    use crate::config::OutputFormat;
+    let library = Library::new();
+    publish(
+        &library.target("first"),
+        &library.work,
+        &meta("Title"),
+        &sections("First body", "frames/a.jpg"),
+        None,
+        &[OutputFormat::Md, OutputFormat::Json],
+        Outcomes::default(),
+        &TaskControl::default(),
+    )
+    .unwrap();
+    // A summary-only repair asks for no export.
+    let next = publish(
+        &library.target("second"),
+        &library.work,
+        &meta("Title"),
+        &sections("Second body", ""),
+        None,
+        &[],
+        Outcomes::default(),
+        &TaskControl::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        next.manifest.outputs,
+        vec!["exports/course.zip", "exports/structured.json"]
+    );
+    let json = std::fs::read_to_string(library.note.join("exports/structured.json")).unwrap();
+    assert!(json.contains("Second body") && !json.contains("First body"));
+    // Screenshots the new note does not have leave no empty folder behind.
+    assert!(!library.note.join("frames").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_note_reached_through_a_link_is_replaced_where_it_lives() {
+    let library = Library::new();
+    let elsewhere = library
+        .library()
+        .parent()
+        .unwrap()
+        .join("elsewhere/real-note");
+    std::fs::create_dir_all(elsewhere.parent().unwrap()).unwrap();
+    let real = Target {
+        course_dir: elsewhere.clone(),
+        ..library.target("first")
+    };
+    library.publish(&real, "First", "").unwrap();
+    std::fs::create_dir_all(library.library()).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, &library.note).unwrap();
+    library
+        .publish(&library.target("second"), "Second", "")
+        .unwrap();
+    assert!(
+        std::fs::symlink_metadata(&library.note)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(
+        note_manifest(&elsewhere).unwrap().unwrap().task_id,
+        "second"
+    );
+    assert!(!library.library().join(".course2md/swap").exists());
+}
+
+#[test]
+fn a_second_task_for_a_note_is_refused_while_the_first_holds_it() {
+    let library = Library::new();
+    let first = claim_note(&library.note).unwrap();
+    assert!(claim_note(&library.note).is_err());
+    drop(first);
+    claim_note(&library.note).unwrap();
+}
+
+#[test]
+fn a_full_disk_is_not_reported_as_a_note_in_use() {
+    let full = format!(
+        "{:#}",
+        replace_error(std::io::Error::from(std::io::ErrorKind::StorageFull))
+    );
+    assert!(
+        full.contains("磁盘空间不足") || full.contains("disk space"),
+        "{full}"
+    );
+    let other = format!(
+        "{:#}",
+        replace_error(std::io::Error::from(std::io::ErrorKind::InvalidInput))
+    );
+    assert!(
+        !other.contains("其他程序") && !other.contains("another program"),
+        "{other}"
+    );
+}
+
+/// Replaced notes that cannot be deleted are retried, made writable, and once
+/// several pile up a new task stops before any work instead of adding another.
+#[cfg(unix)]
+#[test]
+fn replaced_notes_that_cannot_be_deleted_do_not_pile_up() {
+    use std::os::unix::fs::PermissionsExt;
+    let library = Library::new();
+    library
+        .publish(&library.target("task-1"), "Body", "")
+        .unwrap();
+    let swap = swap_dir(&library.note).unwrap();
+    // A read-only folder inside a replaced note is made writable and deleted.
+    std::fs::create_dir_all(swap.join("old-x/locked")).unwrap();
+    std::fs::write(swap.join("old-x/locked/file"), b"x").unwrap();
+    std::fs::set_permissions(
+        swap.join("old-x/locked"),
+        std::fs::Permissions::from_mode(0o555),
+    )
+    .unwrap();
+    prepare_note(&library.note).unwrap();
+    assert!(!swap.join("old-x").exists());
+    // Copies the swap folder itself will not let go of stop the next task.
+    for n in 0..MAX_STUCK_OLD {
+        std::fs::create_dir_all(swap.join(format!("old-{n}"))).unwrap();
+    }
+    std::fs::set_permissions(&swap, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let error = prepare_note(&library.note);
+    std::fs::set_permissions(&swap, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(error.is_err());
+    // Once they can go, the next task clears them.
+    prepare_note(&library.note).unwrap();
+    assert!(!swap.exists());
+}
+
+#[test]
+fn a_folder_of_notes_recovers_each_interrupted_replacement() {
+    let library = Library::new();
+    library
+        .publish(&library.target("task-1"), "Body", "")
+        .unwrap();
+    let before = snapshot(&library.note);
+    crash_at(FailPoint::BetweenRenames);
+    assert!(
+        library
+            .publish(&library.target("task-2"), "New", "")
+            .is_err()
+    );
+    assert!(!library.note.exists());
+    assert!(recover_folder(&library.library()).is_empty());
+    assert_eq!(snapshot(&library.note), before);
 }
