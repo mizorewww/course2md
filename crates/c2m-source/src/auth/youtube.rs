@@ -604,6 +604,14 @@ fn remove_stale_in(dir: &Path, age: Duration) {
 /// browser's keychain item.
 pub fn check_session(program: &Path, choice: &BrowserChoice, reader: Reader) -> Result<Session> {
     ensure_readable(choice, reader)?;
+    read_session(program, choice, reader)
+}
+
+/// [`check_session`] without the folder look first: yt-dlp reads the browser
+/// even where the look says the system keeps the folder closed, for a person
+/// who asks to try anyway (a look that got it wrong must not stand in the way).
+/// A real refusal still comes back as the same blocked error.
+pub fn read_session(program: &Path, choice: &BrowserChoice, reader: Reader) -> Result<Session> {
     let home = c2m_core::paths::home_dir();
     remove_stale_checks();
     let parent = checks_dir();
