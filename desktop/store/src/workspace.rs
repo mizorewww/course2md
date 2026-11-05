@@ -360,27 +360,6 @@ impl TaskPlan {
     pub fn options(&self) -> ConversionOptions {
         ConversionOptions::from_config(&self.config)
     }
-    pub fn same_work(&self, other: &Self) -> bool {
-        if self.operation != other.operation {
-            return false;
-        }
-        if self.library_id != other.library_id
-            || self.source_id != other.source_id
-            || self.subtitle != other.subtitle
-            || self.asr_service != other.asr_service
-            || self.ai_service != other.ai_service
-        {
-            return false;
-        }
-        let mut left = public_config(&self.config);
-        let mut right = public_config(&other.config);
-        // Display and organization are not processing parameters.
-        left.defaults.out = None;
-        right.defaults.out = None;
-        left.desktop = Default::default();
-        right.desktop = Default::default();
-        left == right
-    }
 }
 
 pub use c2m_dispatch::dispatch::Intent;
@@ -982,15 +961,17 @@ impl State {
         Ok(())
     }
 
-    /// An unfinished task already doing `plan`'s work, which `enqueue` would return
-    /// instead of a new one. The attempt `parent` names, the one `plan` replaces, is
-    /// not a duplicate of it.
+    /// The unfinished task already writing `plan`'s note, which `enqueue` returns
+    /// instead of a new one: a note has one unfinished task at a time, since each
+    /// replaces the note the last one left. The attempt `parent` names, the one
+    /// `plan` replaces, is not one.
     pub fn duplicate_of(&self, plan: &TaskPlan, parent: Option<&str>) -> Option<&TaskRecord> {
         self.tasks.iter().find(|t| {
             !t.state.finished()
                 && t.handled_by.is_none()
                 && parent != Some(t.id.as_str())
-                && t.plan.same_work(plan)
+                && t.plan.library_id == plan.library_id
+                && t.plan.source_id == plan.source_id
         })
     }
 
@@ -5920,6 +5901,37 @@ mod tests {
         let b = ws.state.task(&fixture.b).unwrap();
         assert_eq!(b.replaced_by.as_deref(), Some(fixture.a.as_str()));
         assert_eq!(b.artifact, None);
+    }
+
+    /// A note has one unfinished task at a time: starting another focuses it.
+    #[test]
+    fn a_note_takes_one_unfinished_task_at_a_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let library = ws.state.default_library.clone();
+        let (first, created) = ws.state.enqueue(plan(&library), None).unwrap();
+        assert!(created);
+        // Other options for the same video are still the same note.
+        let mut other = plan(&library);
+        other.title = "另一个名字".into();
+        other.config.llm.summarize = !other.config.llm.summarize;
+        assert_eq!(
+            ws.state.duplicate_of(&other, None).map(|t| t.id.clone()),
+            Some(first.clone())
+        );
+        assert_eq!(
+            ws.state.enqueue(other.clone(), None).unwrap(),
+            (first.clone(), false)
+        );
+        assert_eq!(ws.state.tasks.len(), 1);
+        // Another video is another note.
+        let mut video = plan(&library);
+        video.source_id = "video-b".into();
+        assert!(ws.state.enqueue(video, None).unwrap().1);
+        // Once the first has finished, the note takes the next one.
+        ws.state.task_mut(&first).unwrap().state = TaskState::Complete;
+        let (next, created) = ws.state.enqueue(other, None).unwrap();
+        assert!(created && next != first);
     }
 
     /// A repair whose note another task replaced since stops for good on opening and

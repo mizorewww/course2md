@@ -159,7 +159,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {} / {} 段	{} / {} 段	{} / {} segments	{} / {} 段	{} / {} セグメント
 {} · 构建 {}	{} · 构建 {}	{} · Build {}	{} · 建置 {}	{} · ビルド {}
 {} 不支持「{}」，已改用 {}。	{} 不支持「{}」，已改用 {}。	{} does not support “{}”; switched to {}.	{} 不支援「{}」，已改用 {}。	{} は「{}」に対応していないため、{} に切り替えました。
-{} 个与进行中的任务相同，未重复加入	{} 个与进行中的任务相同，未重复加入	{} are identical to tasks in progress and were not added again	{} 個與進行中的任務相同，未重複加入	{} 件は進行中のタスクと同じため、追加しませんでした
 {} 个已有笔记，将生成新版	{} 个已有笔记，将生成新版	{} already have notes; new versions will be generated	{} 個已有筆記，將生成新版	{} 件は既存のノートがあるため、新しいバージョンを生成します
 {} 个无法识别，已跳过	{} 个无法识别，已跳过	{} unrecognized, skipped	{} 個無法辨識，已跳過	{} 件は認識できなかったため、スキップしました
 {} 分 {} 秒	{} 分 {} 秒	{}m {}s	{} 分 {} 秒	{} 分 {} 秒
@@ -714,7 +713,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 已暂停	已暂停	Paused	已暫停	一時停止中
 已有后续处理任务	已有后续处理任务	There are follow-up processing tasks	已有後續處理任務	フォローアップ処理タスクがあります
 已有摘要的格式不完整，保留原文 / Existing summary markup is incomplete; original text kept	已有摘要的格式不完整，保留原文	Existing summary markup is incomplete; original text kept	已有摘要的格式不完整，保留原文	既存の要約の形式が不完全です。元のテキストを保持します
-已有相同任务，未重复加入	已有相同任务，未重复加入	This task is already in the queue.	已有相同任務，未重複加入	このタスクはすでにキューにあります。
 已有相同处理任务：《{}》（{}）	已有相同处理任务：《{}》（{}）	The same processing task already exists: "{}" ({})	已有相同處理任務：《{}》（{}）	同じ処理タスクがすでに存在します: "{}" ({})
 已有笔记	已有笔记	Notes already exist	已有筆記	ノートあり
 已有笔记，保存在「{}」	已有笔记，保存在「{}」	Notes already exist, saved in "{}"	已有筆記，儲存在「{}」	すでにノートがあり、「{}」に保存されています
@@ -2249,3 +2247,5 @@ AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not conf
 这份笔记仍按旧方式保存，正在等待整理	这份笔记仍按旧方式保存，正在等待整理	This note is still saved the old way and is waiting to be tidied up	這份筆記仍按舊方式儲存，正在等待整理	このノートはまだ古い形式で保存されており、整理を待っています
 这份笔记已被之后的任务更新，请从最新的任务补做	这份笔记已被之后的任务更新，请从最新的任务补做	A later task has updated this note; fill in missing steps from the latest task	這份筆記已被之後的任務更新，請從最新的任務補做	このノートは後のタスクで更新されています。最新のタスクから未完了分を処理してください
 这项任务已结束，可在任务卡中补做或重新生成	这项任务已结束，可在任务卡中补做或重新生成	This task has ended; fill in missing steps or regenerate from its card	這項任務已結束，可在任務卡中補做或重新產生	このタスクは終了しました。タスクカードから未完了分を処理するか再生成できます
+{} 个已有进行中的任务，未重复加入	{} 个已有进行中的任务，未重复加入	{} already have a task in progress and were not added again	{} 個已有進行中的任務，未重複加入	{} 件は進行中のタスクがあるため、追加しませんでした
+这份笔记已有进行中的任务，已为你打开	这份笔记已有进行中的任务，已为你打开	This note already has a task in progress; it is open now	這份筆記已有進行中的任務，已為你開啟	このノートには進行中のタスクがあるため、そのタスクを開きました

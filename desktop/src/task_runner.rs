@@ -382,7 +382,7 @@ impl Desktop {
             }
             if duplicates > 0 {
                 parts.push(course2md::tr!(
-                    "{} 个与进行中的任务相同，未重复加入",
+                    "{} 个已有进行中的任务，未重复加入",
                     duplicates
                 ));
             }
@@ -480,7 +480,8 @@ impl Desktop {
             self.import.pending_conversion = None;
             self.import.source_validation = None;
             self.import.title_required = false;
-            self.message = (!created).then(|| course2md::tr!("已有相同任务，未重复加入").into());
+            self.message =
+                (!created).then(|| course2md::tr!("这份笔记已有进行中的任务，已为你打开").into());
             if created {
                 self.import.following_conversion = self
                     .import
