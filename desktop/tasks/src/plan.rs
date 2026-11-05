@@ -264,8 +264,8 @@ pub fn fill_default_asr_model(
     }
 }
 
-/// Refuses a source whose note in `root` a newer app wrote: it cannot take a new
-/// version. A preview asks the last scan; a submission also reads the folder.
+/// Refuses a source whose note in `root` a newer app wrote: this app cannot replace
+/// it. A preview asks the last scan; a submission also reads the note's manifest.
 pub(crate) fn refuse_newer_note(
     library: &LibraryState,
     root: &std::path::Path,
@@ -294,7 +294,7 @@ pub(crate) fn validate_plan_config(
 
 /// Published task state and its visible card change together. A full library
 /// scan can include slow locations, so its old manifest cannot be the only
-/// source of the card while the newly published version is already readable.
+/// source of the card while the note just replaced is already readable.
 pub fn update_published_course(
     courses: &mut Vec<Rc<Course>>,
     done: &Done,
@@ -310,12 +310,8 @@ pub fn update_published_course(
         manifest: Some(manifest.clone()),
         warning: None,
     };
-    let storage = course.storage_dir();
-    if let Some(previous) = courses
-        .iter()
-        .find(|previous| previous.storage_dir() == storage)
-    {
-        // A user-facing library alias belongs to the course across versions.
+    if let Some(previous) = courses.iter().find(|previous| previous.dir == course.dir) {
+        // A user-facing library alias belongs to the note, whichever task wrote it.
         if previous
             .manifest
             .as_ref()
@@ -324,7 +320,7 @@ pub fn update_published_course(
             course.title = previous.title.clone();
         }
     }
-    courses.retain(|previous| previous.storage_dir() != storage);
+    courses.retain(|previous| previous.dir != course.dir);
     courses.push(Rc::new(course));
     courses.sort_by_key(|course| std::cmp::Reverse(course.modified));
 }
@@ -781,14 +777,14 @@ pub mod tests {
             ..Default::default()
         };
         let old_manifest = Manifest {
-            schema: 1,
+            schema: 2,
             task_id: "old".into(),
             course_id: "course".into(),
             source_id: "same-source".into(),
-            version_id: "old".into(),
+            version_id: String::new(),
             title: "原始课程名".into(),
             created_at_ms: 1_000,
-            revision: 1,
+            revision: 0,
             document: "document.json".into(),
             markdown: "course.md".into(),
             frames: Vec::new(),
@@ -798,7 +794,7 @@ pub mod tests {
             partial: true,
         };
         let old = Course {
-            dir: "/library/course/versions/old".into(),
+            dir: "/library/course".into(),
             title: "用户命名".into(),
             modified: UNIX_EPOCH + Duration::from_secs(1),
             slides: 0,
@@ -807,20 +803,18 @@ pub mod tests {
             warning: None,
         };
         let mut other_library = old.clone();
-        other_library.dir = "/other-library/course/versions/old".into();
+        other_library.dir = "/other-library/course".into();
         let mut courses = vec![
             std::rc::Rc::new(old.clone()),
             std::rc::Rc::new(other_library.clone()),
         ];
         let mut repaired = old_manifest;
         repaired.task_id = "repair".into();
-        repaired.version_id = "repair".into();
-        repaired.revision = 2;
         repaired.created_at_ms = 2_000;
         repaired.partial = false;
         repaired.outcomes.proofreading = Outcome::succeeded();
         let done = Completed {
-            out_dir: "/library/course/versions/repair".into(),
+            out_dir: "/library/course".into(),
             title: repaired.title.clone(),
             ..Default::default()
         };
@@ -839,7 +833,7 @@ pub mod tests {
             Some(std::path::Path::new("/new-cover.jpg"))
         );
         assert!(!current.incomplete());
-        assert_eq!(current.manifest.as_ref().unwrap().version_id, "repair");
+        assert_eq!(current.manifest.as_ref().unwrap().task_id, "repair");
         assert_eq!(courses[1].dir, other_library.dir);
         assert!(courses[1].incomplete());
         assert!(old.manifest.as_ref().unwrap().partial);

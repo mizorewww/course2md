@@ -1020,14 +1020,15 @@ impl Desktop {
                         .following_conversion
                         .as_ref()
                         .is_some_and(|follow| {
+                            let preview = self.opened(cx).preview.as_ref();
                             follow.completed_reader_task(
                                 &task,
                                 self.page,
                                 self.opened(cx).read_generation,
-                                self.opened(cx)
-                                    .preview
-                                    .as_ref()
-                                    .map(|preview| preview.course.dir.as_path()),
+                                preview.map(|preview| preview.course.dir.as_path()),
+                                preview
+                                    .and_then(|preview| preview.course.manifest.as_ref())
+                                    .map(|manifest| manifest.task_id.as_str()),
                             )
                         });
                 if let Some(done) = done {

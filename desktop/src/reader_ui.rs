@@ -735,11 +735,7 @@ impl ReaderPage {
     fn reading_key(&self, cx: &App) -> Option<String> {
         let preview = self.opened.preview.as_ref()?;
         Some(match &preview.course.manifest {
-            Some(manifest) => manifest_reading_key(
-                &manifest.course_id,
-                &manifest.version_id,
-                self.opened.result_tab,
-            ),
+            Some(manifest) => manifest_reading_key(&manifest.course_id, self.opened.result_tab),
             None => {
                 let identity = self
                     .course_location(&preview.course, cx)
@@ -1160,7 +1156,7 @@ impl ReaderPage {
                         m.source_id.clone()
                     }
                 })
-                .unwrap_or_else(|| preview.course.storage_dir().display().to_string()),
+                .unwrap_or_else(|| preview.course.dir.display().to_string()),
         )
     }
     fn reader_offline_video_request(&self, cx: &App) -> Option<OfflineVideoRequest> {
@@ -2387,37 +2383,13 @@ impl ReaderPage {
         Some(self.reader_processing_notice(preview, notice, cx))
     }
 
-    /// New-version and file-reload notices.
+    /// The file-reload notice.
     fn reader_notices(
         &mut self,
         preview: &Rc<notes::Preview>,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let mut notices = Vec::new();
-        if let Some(current) = &preview.course.manifest
-            && let Some(newer) = self
-                .library(cx)
-                .view_cache
-                .newer_version(&self.library(cx).courses, current)
-        {
-            notices.push(motion::enter(
-                "reader-new-version-notice",
-                notice_banner(
-                    "newer-note-version",
-                    NoticeKind::Info,
-                    course2md::tr!("这份笔记已有新版。"),
-                )
-                .child(
-                    material_button("open-newer-version", ButtonVariant::Outlined)
-                        .tone(ButtonTone::Accent)
-                        .icon(symbols::history())
-                        .child(course2md::tr!("查看新版"))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.open_reader_version(newer.clone(), cx)
-                        })),
-                ),
-            ));
-        }
         if files_need_reload(preview, &self.issues, &self.frames) {
             let course = preview.course.clone();
             let issues: Vec<&str> = preview

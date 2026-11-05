@@ -91,7 +91,7 @@ fn list_surface(outer: OuterCorners) -> Div {
 /// A note picked up to file into a folder of the tree.
 fn note_drag(course: &Course) -> NoteDrag {
     NoteDrag {
-        storage: course.storage_dir(),
+        storage: course.dir.clone(),
         title: course.title.clone().into(),
     }
 }
@@ -334,7 +334,7 @@ impl Desktop {
             cx.notify();
             return;
         };
-        let storage = course.storage_dir();
+        let storage = course.dir.clone();
         self.begin_naming(NameTarget::Note { root, storage }, window, cx);
     }
 
@@ -391,7 +391,7 @@ impl Desktop {
 
     fn delete_course(&mut self, root: PathBuf, course: Course, cx: &mut Context<Self>) {
         let title = self.library(cx).course_display_title(&course);
-        let dir = course.storage_dir();
+        let dir = course.dir.clone();
         let worker_dir = dir.clone();
         self.in_background(
             move || organize::delete_course(&root, &worker_dir),
@@ -401,7 +401,7 @@ impl Desktop {
                         .opened(cx)
                         .preview
                         .as_ref()
-                        .is_some_and(|preview| preview.course.storage_dir() == dir);
+                        .is_some_and(|preview| preview.course.dir == dir);
                     if reading && this.page == Page::Result {
                         this.navigate(Page::Library, cx);
                     } else {
@@ -429,7 +429,7 @@ impl Desktop {
     /// 打开 → 处理 → 管理: behind its ⋮ button and on right-click.
     fn note_commands(&self, course: &Rc<Course>, cx: &mut Context<Self>) -> Vec<Command> {
         let desktop = cx.weak_entity();
-        let path = course.storage_dir();
+        let path = course.dir.clone();
         let link = self
             .library(cx)
             .note_source(course)
@@ -488,7 +488,7 @@ impl Desktop {
                 symbols::drive_file_move(),
                 |this, course, _, cx| {
                     let root = this.folder_context(Some(course.dir.clone()), cx).root;
-                    this.begin_move(root, Moving::Note(course.storage_dir()), cx)
+                    this.begin_move(root, Moving::Note(course.dir.clone()), cx)
                 },
             ),
             on_course(
@@ -807,7 +807,7 @@ impl Desktop {
                                 .library(cx)
                                 .view_cache
                                 .locations
-                                .get(&course.storage_dir())
+                                .get(&course.dir)
                                 .is_some_and(|location| scope.available.contains(&location.root))
                     });
                 if !in_scope || !course.title.to_lowercase().contains(&query) {
@@ -1495,11 +1495,7 @@ impl Desktop {
 
     fn course_has_reading_position(&self, course: &Course, cx: &App) -> bool {
         course.manifest.as_ref().is_some_and(|manifest| {
-            let key = desktop_reader_core::reader::manifest_reading_key(
-                &manifest.course_id,
-                &manifest.version_id,
-                0,
-            );
+            let key = desktop_reader_core::reader::manifest_reading_key(&manifest.course_id, 0);
             self.workspace(cx)
                 .and_then(|workspace| workspace.state.positions.get(&key))
                 .is_some_and(desktop_reader_core::reader::has_reading_position)
@@ -1519,7 +1515,7 @@ impl Desktop {
             .as_ref()
             .filter(|(path, _)| path == &course.dir)?;
         let retry = course.clone();
-        let path = course.storage_dir();
+        let path = course.dir.clone();
         Some(
             v_flex()
                 .w_full()

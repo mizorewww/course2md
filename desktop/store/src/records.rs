@@ -26,7 +26,7 @@ pub struct FolderContext {
 
 /// What a folder context is asked for.
 pub enum FolderPlace<'a> {
-    /// The note version or note folder at this path.
+    /// The note folder at this path.
     Note(&'a Path),
     /// The draft's library and folder.
     Draft {
@@ -113,7 +113,7 @@ impl Records {
             .course_folder(&self.workspace.as_ref()?.state.libraries, course)
     }
 
-    /// The note version at `dir`, as the library lists it.
+    /// The note at `dir`, as the library lists it.
     pub fn note_at(&self, dir: &std::path::Path) -> Option<Rc<Course>> {
         self.library
             .courses
@@ -133,7 +133,7 @@ impl Records {
         library.index_note_sources(tasks);
         library.merge_alias_issues();
         for course in &mut library.courses {
-            if let Some(location) = library.view_cache.locations.get(&course.storage_dir())
+            if let Some(location) = library.view_cache.locations.get(&course.dir)
                 && let Some(name) = library
                     .view_cache
                     .aliases
@@ -154,8 +154,8 @@ impl Records {
                 library
                     .courses
                     .iter()
-                    .find(|course| course.dir == *path || course.storage_dir() == *path)
-                    .map(|course| course.storage_dir())
+                    .find(|course| course.dir == *path)
+                    .map(|course| course.dir.clone())
                     .unwrap_or_else(|| path.to_path_buf()),
             ),
             FolderPlace::Draft { .. } => None,

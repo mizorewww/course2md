@@ -420,7 +420,7 @@ impl Desktop {
                 .library(cx)
                 .courses
                 .iter()
-                .find(|course| &course.storage_dir() == storage)
+                .find(|course| &course.dir == storage)
                 .map(|course| course.title.clone())
                 .unwrap_or_default(),
         };

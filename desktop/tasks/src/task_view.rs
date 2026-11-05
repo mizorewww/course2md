@@ -590,7 +590,7 @@ pub fn resumable(task: &TaskRecord) -> bool {
 
 pub fn adjust_label(task: &TaskRecord) -> &'static str {
     if task.artifact.is_some() {
-        c2m_i18n::tr!("调整并生成新版")
+        c2m_i18n::tr!("调整并重新生成")
     } else if task.state == TaskState::Paused {
         c2m_i18n::tr!("调整选项")
     } else {
@@ -1094,6 +1094,7 @@ mod tests {
             artifact: None,
             unread: false,
             resend: Vec::new(),
+            replaced_by: None,
         }
     }
 
@@ -1574,6 +1575,7 @@ mod tests {
             artifact: Some(path.clone()),
             unread: false,
             resend: Vec::new(),
+            replaced_by: None,
         };
         // The first recovery action in Recent Notes and every action in the
         // task cards must target actual incomplete work, never the first success.

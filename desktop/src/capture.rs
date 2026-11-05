@@ -537,7 +537,7 @@ impl Desktop {
                             let root = this.folder_context(Some(course.dir.clone()), cx).root;
                             this.begin_move(
                                 root,
-                                crate::library_ui::Moving::Note(course.storage_dir()),
+                                crate::library_ui::Moving::Note(course.dir.clone()),
                                 cx,
                             );
                         }

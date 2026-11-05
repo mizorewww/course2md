@@ -247,9 +247,9 @@ pub fn export_file_name(title: &str, format: c2m_config::config::OutputFormat) -
     format!("{stem}.{extension}")
 }
 
-/// Exports the note version at `version` to `target`. It refuses a place inside the
-/// note's own folder or any other note version, and writes beside `target` first, so
-/// an existing file stays whole until the export is complete. Blocking.
+/// Exports the note at `version` to `target`. It refuses a place inside the note's
+/// own folder or any other note, and writes beside `target` first, so an existing
+/// file stays whole until the export is complete. Blocking.
 pub fn export_version(
     version: &std::path::Path,
     format: c2m_config::config::OutputFormat,
@@ -264,10 +264,7 @@ pub fn export_version(
         !parent.starts_with(&protected)
             && !parent
                 .ancestors()
-                .any(|ancestor| ancestor.join("manifest.json").is_file()
-                    && ancestor.parent().is_some_and(|parent| parent
-                        .file_name()
-                        .is_some_and(|name| name == "versions"))),
+                .any(|ancestor| ancestor.join("manifest.json").is_file()),
         c2m_i18n::tr!("不能保存在笔记自己的文件夹里，请换个位置")
     );
     // The native save panel owns the explicit overwrite decision; the old file
@@ -283,9 +280,10 @@ pub fn export_version(
 
 /// Position-store key for a manifest course at one tab (`:0` is the note
 /// tab). The library's "继续阅读" probe and the reader's save/restore build
-/// identical keys through this function.
-pub fn manifest_reading_key(course_id: &str, version_id: &str, tab: usize) -> String {
-    format!("{course_id}:{version_id}:{tab}")
+/// identical keys through this function. A note keeps its key when a task
+/// replaces it.
+pub fn manifest_reading_key(course_id: &str, tab: usize) -> String {
+    desktop_store::migrate::reading_key(course_id, tab)
 }
 
 /// A saved position away from the document top names the block it was read
@@ -691,23 +689,6 @@ pub fn copied_text(selected: &str) -> String {
     text.trim().to_owned()
 }
 
-pub fn carry_repaired_reading_positions(
-    positions: &mut BTreeMap<String, workspace::ReadingPosition>,
-    previous: (&str, &str),
-    next: (&str, &str),
-) {
-    if previous.0 != next.0 || previous.1 == next.1 {
-        return;
-    }
-    for tab in 0..=1 {
-        let previous_key = manifest_reading_key(previous.0, previous.1, tab);
-        let next_key = manifest_reading_key(next.0, next.1, tab);
-        if let Some(position) = positions.get(&previous_key).cloned() {
-            positions.entry(next_key).or_insert(position);
-        }
-    }
-}
-
 /// A completed read clears only its own earlier failure notice; newer,
 /// unrelated feedback stays visible.
 pub fn settle_reader_notice(current: &mut Option<String>, failure: &mut Option<String>) {
@@ -858,6 +839,7 @@ mod tests {
             artifact: Some(course.dir.clone()),
             unread: false,
             resend: Vec::new(),
+            replaced_by: None,
         };
         (task, library)
     }
@@ -931,7 +913,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "flat notes: tests the version layout; the desktop migration rewrites it"]
     fn an_export_stays_out_of_note_folders_and_replaces_a_file_whole() {
         use c2m_config::config::OutputFormat;
         assert_eq!(
@@ -949,7 +930,7 @@ mod tests {
             &[0.],
             Default::default(),
         );
-        // The note's own folder, and any version folder of a note, are refused.
+        // The note's own folder, and any other note's, are refused.
         assert!(export_version(&note.dir, OutputFormat::Html, &note.dir.join("x.html")).is_err());
         let other = desktop_store::notes::fixtures::published_note(
             &temp.path().join("other"),
@@ -1061,11 +1042,9 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "flat notes: tests the version layout; the desktop migration rewrites it"]
-    fn offline_video_uses_its_version_task_and_rechecks_removed_media() {
+    fn offline_video_is_its_note_task_s_and_rechecks_removed_media() {
         let root = tempfile::tempdir().unwrap();
         let first = fixture_version(root.path(), 1, &[10.]);
-        let second = fixture_version(root.path(), 2, &[20.]);
         let (task, library) = offline_task_fixture(root.path(), &first);
         std::fs::create_dir_all(&task.work_dir).unwrap();
         let media = task.work_dir.join("media.mp4");
@@ -1075,9 +1054,12 @@ mod tests {
             request.inspect(),
             OfflineVideo::Available(c2m_config::config::canonicalize(&media).unwrap())
         );
+        // Another task replaced the note: its video is not this note's.
+        let second = fixture_version(root.path(), 2, &[20.]);
+        assert_eq!(second.dir, first.dir);
         assert!(OfflineVideoRequest::for_version(&second, &task, &library).is_none());
         let mut changed = task.clone();
-        changed.artifact = Some(second.dir.clone());
+        changed.artifact = Some(root.path().join("another-note"));
         assert!(OfflineVideoRequest::for_version(&first, &changed, &library).is_none());
         changed = task.clone();
         changed.plan.source_id = "another-video".into();
@@ -1161,11 +1143,9 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "flat notes: tests the version layout; the desktop migration rewrites it"]
-    fn a_missing_earlier_frame_does_not_shift_later_times_or_mix_versions() {
+    fn a_missing_earlier_frame_does_not_shift_later_times_and_a_regenerate_replaces_them() {
         let root = tempfile::tempdir().unwrap();
         let old = fixture_version(root.path(), 1, &[10., 20., 30.]);
-        let new = fixture_version(root.path(), 2, &[40.]);
         std::fs::remove_file(old.dir.join("frames/frame-0.png")).unwrap();
         let old_preview = desktop_store::notes::read_preview(old.clone()).unwrap();
         assert!(
@@ -1185,7 +1165,9 @@ mod tests {
             PreviewBlock::Heading { anchor, .. } if anchor == "section-1"
         ));
         assert_eq!(old_data.frame_by_path.len(), 2);
-        assert_eq!(old_data.versions.len(), 2);
+        // A note has no other versions to offer.
+        assert!(old_data.versions.is_empty());
+        let new = fixture_version(root.path(), 2, &[40.]);
         let new_data = load_reader_data(&desktop_store::notes::read_preview(new.clone()).unwrap());
         assert_eq!(new_data.frames.len(), 1);
         assert_eq!(new_data.frames[0].seconds, 40.);
@@ -1197,6 +1179,7 @@ mod tests {
                 .path
                 .starts_with(&new.dir)
         );
+        assert!(new_data.versions.is_empty());
     }
 
     #[test]
@@ -1206,49 +1189,6 @@ mod tests {
         assert_eq!(outline_current(&outline, 2), Some(2));
         assert_eq!(outline_current(&outline, 5), Some(2));
         assert_eq!(outline_current(&outline, 9), Some(6));
-    }
-
-    #[test]
-    fn repair_position_handoff_uses_the_latest_old_position_and_keeps_existing_versions() {
-        use desktop_store::workspace::ReadingPosition;
-        use std::collections::BTreeMap;
-        let start = ReadingPosition {
-            seconds: Some(12.),
-            offset: -120.,
-            ..Default::default()
-        };
-        let latest = ReadingPosition {
-            paragraph: Some("section-80".into()),
-            seconds: Some(80.),
-            offset: -840.,
-            fraction: Some(0.4),
-            ..Default::default()
-        };
-        let gallery = ReadingPosition {
-            seconds: Some(36.),
-            offset: -300.,
-            ..Default::default()
-        };
-        let mut positions = BTreeMap::from([
-            ("course:old:0".into(), start.clone()),
-            ("course:old:1".into(), gallery.clone()),
-        ]);
-        // The user keeps scrolling while the new version is read. Completion
-        // saves this latest old-note position before performing the handoff.
-        positions.insert("course:old:0".into(), latest.clone());
-        carry_repaired_reading_positions(&mut positions, ("course", "old"), ("course", "new"));
-        assert_eq!(positions["course:new:0"], latest);
-        assert_eq!(positions["course:new:1"], gallery);
-        assert_eq!(positions["course:old:0"], latest);
-        assert_eq!(positions["course:old:1"], gallery);
-
-        positions.insert("course:new:0".into(), start.clone());
-        carry_repaired_reading_positions(&mut positions, ("course", "old"), ("course", "new"));
-        assert_eq!(positions["course:new:0"], start);
-        let snapshot = positions.clone();
-        carry_repaired_reading_positions(&mut positions, ("course", "old"), ("different", "new"));
-        carry_repaired_reading_positions(&mut positions, ("course", "old"), ("course", "old"));
-        assert_eq!(positions, snapshot);
     }
 
     #[test]

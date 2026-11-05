@@ -1999,6 +1999,7 @@ mod tests {
             artifact: None,
             unread: false,
             resend: Vec::new(),
+            replaced_by: None,
         }
     }
 }

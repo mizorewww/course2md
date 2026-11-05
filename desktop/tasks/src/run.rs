@@ -8,7 +8,6 @@ use c2m_config::{config::TranscriptSource, settings::ConfigFile};
 use c2m_engine::execution::{Component, Request};
 use desktop_prefs::preferences::{self, ServiceRefs};
 use desktop_store::{
-    notes::Course,
     organize,
     workspace::{self, Intent, LibraryLocation, LibraryWrites, TaskRecord, TaskState},
 };
@@ -271,8 +270,8 @@ pub struct Publication {
     root: Option<PathBuf>,
     source: source::Source,
     folder: Option<u64>,
-    out_dir: PathBuf,
-    storage_dir: PathBuf,
+    /// The note folder.
+    note: PathBuf,
     frames: Vec<c2m_core::timeline::FrameEvent>,
 }
 
@@ -287,25 +286,26 @@ impl Publication {
             root,
             source: task.plan.source.clone(),
             folder: task.plan.folder,
-            out_dir: done.out_dir.clone(),
-            storage_dir: Course::from_completed(done).storage_dir(),
+            note: done.out_dir.clone(),
             frames: manifest
                 .map(|manifest| manifest.frames.clone())
                 .unwrap_or_default(),
         }
     }
 
-    /// Saves the cover, files the note in its folder and finds the card's picture.
+    /// Saves the note's cover beside it (a file of its own, which the next task
+    /// replacing the note keeps), files the note in its folder and finds the card's
+    /// picture.
     /// Returns what could not be done, in the interface language, and the picture.
     /// Blocking: it touches the library's disk.
     pub fn file(self) -> (Vec<String>, Option<PathBuf>) {
         let mut issues = Vec::new();
         if let Some(root) = &self.root {
-            if let Err(error) = source::save_cover(&self.source, &self.out_dir) {
+            if let Err(error) = source::save_cover(&self.source, &self.note) {
                 issues.push(c2m_i18n::tr!("封面暂未保存：{}", format!("{error:#}")));
             }
             if let Err(error) = organize::Library::edit(root, |library| {
-                library.assign(root, &self.storage_dir, self.folder)
+                library.assign(root, &self.note, self.folder)
             }) {
                 issues.push(c2m_i18n::tr!(
                     "文件夹归属暂未更新：{}",
@@ -313,10 +313,10 @@ impl Publication {
                 ));
             }
         }
-        let cover = self.out_dir.join("cover.jpg");
+        let cover = self.note.join("cover.jpg");
         let thumbnail = cover.is_file().then_some(cover).or_else(|| {
             self.frames.iter().find_map(|frame| {
-                c2m_artifact::artifact::safe_asset_path(&self.out_dir, &frame.image).ok()
+                c2m_artifact::artifact::safe_asset_path(&self.note, &frame.image).ok()
             })
         });
         (issues, thumbnail)
