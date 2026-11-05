@@ -14,3 +14,4 @@ anyhow.workspace = true
 
 [dev-dependencies]
 desktop-prefs = { path = "../prefs" }
+tempfile.workspace = true

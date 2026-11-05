@@ -305,6 +305,15 @@ impl Desktop {
         service.details_open = false;
     }
 
+    /// First use at its account step, as the YouTube guide left it before the app
+    /// reopened for Full Disk Access.
+    pub(crate) fn show_setup_accounts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.onboarding.active {
+            self.start_onboarding(window, cx);
+        }
+        self.setup_step(Step::Account, cx);
+    }
+
     fn setup_step(&mut self, step: Step, cx: &mut Context<Self>) {
         if step == Step::Engine && self.setup_model_job_running(cx) {
             return;
@@ -753,7 +762,7 @@ impl Desktop {
                 Some(course2md::tr!("仅用于没有字幕的视频")),
             ),
             Step::Ai => (2, course2md::tr!("连接 AI 服务"), None),
-            Step::Account => (3, course2md::tr!("连接 Bilibili"), None),
+            Step::Account => (3, course2md::tr!("连接来源账号"), None),
             Step::Model if self.onboarding.provider == Some(AsrProvider::Api) => {
                 (4, course2md::tr!("准备就绪"), None)
             }
@@ -762,9 +771,31 @@ impl Desktop {
         let content = match step {
             Step::Engine => self.setup_engine_content(window, cx),
             Step::Ai => self.setup_service_content(ServicePurpose::Ai, window, cx),
-            Step::Account => setup_tile().child(self.accounts.update(cx, |accounts, cx| {
-                accounts.account_row(course2md::tr!("账号状态"), window, cx)
-            })),
+            // Each source's sign-in, as Settings › 来源账号 lists them: YouTube's row
+            // says there when macOS keeps the saved browser's data from the app.
+            Step::Account => {
+                let (account, youtube) = self.accounts.update(cx, |accounts, cx| {
+                    (
+                        accounts.account_row(course2md::tr!("Bilibili 账号"), window, cx),
+                        accounts.youtube_row(window, cx),
+                    )
+                });
+                // Peer accounts: connected tiles, as in Settings.
+                use gpui_kit_material::tokens::shape::{TILE_GAP, list_corners};
+                let tile = |index, row| {
+                    TileScale::Regular
+                        .surface(list_corners(index, 2))
+                        .gap(rem(12.))
+                        .p(ITEM_INSET)
+                        .child(row)
+                };
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(TILE_GAP)
+                    .child(tile(0, account))
+                    .child(tile(1, youtube))
+            }
             Step::Model => self.setup_model_content(window, cx),
         };
         let position = course2md::tr!("第 {} 步，共 {} 步", number, STEPS);
@@ -780,7 +811,7 @@ impl Desktop {
                     .steps([
                         course2md::tr!("识别方式"),
                         course2md::tr!("AI 服务"),
-                        "Bilibili",
+                        course2md::tr!("来源账号"),
                         course2md::tr!("模型准备"),
                     ])
                     .current(number - 1),
@@ -1362,7 +1393,10 @@ impl Desktop {
         });
         let label = match (service_action, step) {
             (Some(action), _) => action.label(),
-            (_, Step::Account) if self.accounts.read(cx).account_connected() => {
+            (_, Step::Account)
+                if self.accounts.read(cx).account_connected()
+                    || self.accounts.read(cx).youtube.choice.is_some() =>
+            {
                 course2md::tr!("继续")
             }
             (_, Step::Account) => course2md::tr!("跳过登录"),

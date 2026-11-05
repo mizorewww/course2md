@@ -24,6 +24,14 @@ pub(crate) enum AccountsEvent {
     /// Connected YouTube from a source preview that failed: retry it, if it is still
     /// the one shown.
     YoutubeConnected { source: (u64, String) },
+    /// Quit and open the app again, so macOS applies the Full Disk Access just
+    /// given; the guide opens again after the reopen.
+    Relaunch,
+    /// The app reopened for Full Disk Access: go back to where the person
+    /// started, then open the YouTube dialog again.
+    ResumeYoutube {
+        origin: desktop_accounts::youtube::GuideOrigin,
+    },
 }
 
 /// The sign-ins: the Bilibili account and its login dialog, and the YouTube

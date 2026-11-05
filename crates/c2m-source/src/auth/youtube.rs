@@ -147,14 +147,43 @@ impl Browser {
             .collect()
     }
 
-    /// Whether the system refuses to list this browser's data folder. macOS 27
-    /// keeps the folders of Chrome and other browsers to the browser itself unless
-    /// the reading app has Full Disk Access; the folder still exists (so the browser
-    /// is offered), but yt-dlp cannot search it and reports no cookie database.
-    pub fn blocked(self) -> bool {
+    /// The folder yt-dlp searches for this browser's cookies: the data folder, or
+    /// for Safari its cookie folder (in Safari's container on current macOS), which
+    /// is not the app that marks Safari installed.
+    fn cookie_dir(self, home: &Path) -> Option<PathBuf> {
+        if self != Self::Safari {
+            return self.data_dir(home);
+        }
+        if !cfg!(target_os = "macos") {
+            return None;
+        }
+        // Safari's container first: where current Safari keeps its cookies. A
+        // folder the system will not even look into counts as there (and closed),
+        // not as absent: `exists` would read that refusal as a missing folder
+        // and fall back to a listable legacy one, so a blocked Safari would pass.
+        [
+            home.join("Library/Containers/com.apple.Safari/Data/Library/Cookies"),
+            home.join("Library/Cookies"),
+        ]
+        .into_iter()
+        .find(|dir| !matches!(dir.try_exists(), Ok(false)))
+    }
+
+    /// Whether this app may read the browser's cookie folder now. macOS 27 keeps
+    /// the folders of Chrome and other browsers (and Safari's container) to the
+    /// browser itself unless the reading app has Full Disk Access; the folder still
+    /// exists (so the browser is offered), but yt-dlp cannot search it and reports
+    /// no cookie database. One folder listing, no cookie is read: cheap enough to
+    /// ask again every few seconds while the person grants access.
+    pub fn access(self) -> Access {
         c2m_core::paths::home_dir()
-            .and_then(|home| self.data_dir(&home))
-            .is_some_and(|dir| listing_denied(&dir))
+            .and_then(|home| self.cookie_dir(&home))
+            .map_or(Access::Absent, |dir| access_to(&dir))
+    }
+
+    /// Whether the system refuses to list this browser's cookie folder.
+    pub fn blocked(self) -> bool {
+        self.access() == Access::Blocked
     }
 
     /// A Chromium browser's profiles by the names the person gave them. Others
@@ -177,9 +206,31 @@ pub struct Profile {
     pub name: String,
 }
 
+/// What the system answers this app about a browser's cookie folder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Access {
+    /// The folder lists: yt-dlp can search it.
+    Open,
+    /// The folder exists but the system refuses to list it (on macOS, until the
+    /// app has Full Disk Access).
+    Blocked,
+    /// No such folder, or another failure that access would not change.
+    Absent,
+}
+
+/// Lists `dir` once. Both refusals (`EPERM`, as macOS privacy answers, and
+/// `EACCES`, as file modes do) read as blocked.
+pub fn access_to(dir: &Path) -> Access {
+    match std::fs::read_dir(dir) {
+        Ok(_) => Access::Open,
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => Access::Blocked,
+        Err(_) => Access::Absent,
+    }
+}
+
 /// Whether listing `dir` is refused, as opposed to the folder being absent.
 fn listing_denied(dir: &Path) -> bool {
-    matches!(std::fs::read_dir(dir), Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied)
+    access_to(dir) == Access::Blocked
 }
 
 fn chromium_profiles(data_dir: &Path) -> Vec<Profile> {
@@ -429,12 +480,68 @@ pub fn blocked_summary(browser: Browser, reader: Reader) -> String {
             "macOS 不允许 course2md 读取 {} 的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开 course2md，然后退出并重新打开 course2md，再试一次。",
             name
         ),
-        Reader::Terminal => tr!(
-            "macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开你使用的终端应用（如“终端”），然后退出并重新打开它，再试一次。可运行 open \"{}\" 打开该设置。",
-            name,
-            FULL_DISK_ACCESS_SETTINGS
-        ),
+        Reader::Terminal => match terminal_app() {
+            Some(terminal) => tr!(
+                "macOS 不允许 {} 读取 {} 的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开 {}，然后退出并重新打开它，再试一次。可运行 open \"{}\" 打开该设置。",
+                terminal,
+                name,
+                terminal,
+                FULL_DISK_ACCESS_SETTINGS
+            ),
+            None => tr!(
+                "macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开你使用的终端应用（如“终端”），然后退出并重新打开它，再试一次。可运行 open \"{}\" 打开该设置。",
+                name,
+                FULL_DISK_ACCESS_SETTINGS
+            ),
+        },
     }
+}
+
+/// The command line's hint after a run macOS kept from the browser's data:
+/// names the terminal app when it is known.
+pub fn terminal_hint() -> &'static str {
+    static NAMED: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    if let Some(named) = NAMED
+        .get_or_init(|| {
+            terminal_app().map(|terminal| {
+                tr!(
+                    "提示：macOS 不允许 {} 读取所连接浏览器的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开 {}（在 course2md 应用中则打开 course2md），退出并重新打开它后重试。可运行 open \"{}\" 打开该设置。",
+                    terminal,
+                    terminal,
+                    FULL_DISK_ACCESS_SETTINGS
+                )
+            })
+        })
+        .as_deref()
+    {
+        return named;
+    }
+    tr!(
+        "提示：macOS 不允许读取所连接浏览器的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中允许你使用的终端应用（在 course2md 应用中则允许 course2md），退出并重新打开它后重试。可运行 open \"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles\" 打开该设置。 / Hint: macOS does not allow reading the connected browser's data. Allow the terminal app you use (in the course2md app, course2md itself) in System Settings › Privacy & Security › Full Disk Access, quit and reopen it, then retry. Run open \"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles\" to open that setting."
+    )
+}
+
+/// The terminal app the command line runs in, by the name System Settings lists
+/// it under, from `TERM_PROGRAM`; `None` for one this does not know (then the
+/// guidance names terminals in general).
+pub fn terminal_app() -> Option<&'static str> {
+    terminal_named(&std::env::var("TERM_PROGRAM").ok()?)
+}
+
+fn terminal_named(program: &str) -> Option<&'static str> {
+    Some(match program {
+        "Apple_Terminal" => tr!("终端"),
+        "iTerm.app" => "iTerm",
+        "vscode" => "Visual Studio Code",
+        "WarpTerminal" => "Warp",
+        "ghostty" => "Ghostty",
+        "WezTerm" => "WezTerm",
+        "Hyper" => "Hyper",
+        "Tabby" => "Tabby",
+        "rio" => "Rio",
+        "zed" => "Zed",
+        _ => return None,
+    })
 }
 
 /// The folder yt-dlp searches for `choice`'s cookies, when the system refuses to
@@ -447,10 +554,7 @@ fn blocked_dir(choice: &BrowserChoice, home: &Path) -> Option<PathBuf> {
         .filter(|profile| profile.components().count() > 1);
     let dirs = [
         profile_path.map(Path::to_path_buf),
-        // Safari's cookies are not in the folder that marks it installed.
-        (choice.browser != Browser::Safari)
-            .then(|| choice.browser.data_dir(home))
-            .flatten(),
+        choice.browser.cookie_dir(home),
     ];
     dirs.into_iter().flatten().find(|dir| listing_denied(dir))
 }
@@ -500,6 +604,14 @@ fn remove_stale_in(dir: &Path, age: Duration) {
 /// browser's keychain item.
 pub fn check_session(program: &Path, choice: &BrowserChoice, reader: Reader) -> Result<Session> {
     ensure_readable(choice, reader)?;
+    read_session(program, choice, reader)
+}
+
+/// [`check_session`] without the folder look first: yt-dlp reads the browser
+/// even where the look says the system keeps the folder closed, for a person
+/// who asks to try anyway (a look that got it wrong must not stand in the way).
+/// A real refusal still comes back as the same blocked error.
+pub fn read_session(program: &Path, choice: &BrowserChoice, reader: Reader) -> Result<Session> {
     let home = c2m_core::paths::home_dir();
     remove_stale_checks();
     let parent = checks_dir();
@@ -854,6 +966,79 @@ mod tests {
         restore(&data);
     }
 
+    /// The probe the desktop repeats while the person grants access: a folder the
+    /// system will not list is blocked, a listed one open, and one that is not there
+    /// absent; giving access back (here, the folder's mode) opens it again.
+    #[cfg(unix)]
+    #[test]
+    fn access_follows_the_folder_as_it_is_refused_and_granted() {
+        let home = tempfile::tempdir().unwrap();
+        let data = home.path().join("Chrome");
+        assert_eq!(access_to(&data), Access::Absent);
+        std::fs::create_dir(&data).unwrap();
+        assert_eq!(access_to(&data), Access::Open);
+        if unlistable(&data, 0o000).is_some() {
+            assert_eq!(access_to(&data), Access::Blocked);
+            assert!(listing_denied(&data));
+            // Search without read is still a refusal to list.
+            unlistable(&data, 0o311);
+            assert_eq!(access_to(&data), Access::Blocked);
+        }
+        restore(&data);
+        assert_eq!(access_to(&data), Access::Open);
+        // A file where the folder should be is not something access would change.
+        let file = home.path().join("file");
+        std::fs::write(&file, "").unwrap();
+        assert_eq!(access_to(&file), Access::Absent);
+    }
+
+    /// Safari's cookies live in its container, not in the app that marks it
+    /// installed; without either folder there is nothing to grant.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn safari_is_probed_at_its_cookie_folder() {
+        let home = tempfile::tempdir().unwrap();
+        assert_eq!(Browser::Safari.cookie_dir(home.path()), None);
+        let legacy = home.path().join("Library/Cookies");
+        std::fs::create_dir_all(&legacy).unwrap();
+        assert_eq!(
+            Browser::Safari.cookie_dir(home.path()),
+            Some(legacy.clone())
+        );
+        let container = home
+            .path()
+            .join("Library/Containers/com.apple.Safari/Data/Library/Cookies");
+        std::fs::create_dir_all(&container).unwrap();
+        assert_eq!(
+            Browser::Safari.cookie_dir(home.path()),
+            Some(container.clone())
+        );
+        let choice = BrowserChoice {
+            browser: Browser::Safari,
+            profile: None,
+        };
+        assert_eq!(blocked_dir(&choice, home.path()), None);
+        if unlistable(&container, 0o000).is_some() {
+            assert_eq!(blocked_dir(&choice, home.path()), Some(container.clone()));
+        }
+        restore(&container);
+        // Safari's whole container closed, as macOS keeps it, while the legacy
+        // folder lists: Safari is blocked, not read from the legacy folder.
+        let safari = home.path().join("Library/Containers/com.apple.Safari");
+        if unlistable(&safari, 0o000).is_some() {
+            assert_eq!(
+                Browser::Safari.cookie_dir(home.path()),
+                Some(container.clone())
+            );
+            assert_eq!(access_to(&container), Access::Blocked);
+            assert_eq!(blocked_dir(&choice, home.path()), Some(container.clone()));
+        }
+        restore(&safari);
+        // No container at all: the legacy folder is the one.
+        std::fs::remove_dir_all(&safari).unwrap();
+        assert_eq!(Browser::Safari.cookie_dir(home.path()), Some(legacy));
+    }
+
     /// When the folder cannot be listed but "Local State" opens by name (execute
     /// without read), the profiles still come from it rather than vanishing.
     #[cfg(unix)]
@@ -887,6 +1072,16 @@ mod tests {
             assert_eq!(chromium_profiles(&data), []);
         }
         restore(&data);
+    }
+
+    #[test]
+    fn the_terminal_is_named_as_system_settings_lists_it() {
+        assert_eq!(terminal_named("iTerm.app"), Some("iTerm"));
+        assert_eq!(terminal_named("vscode"), Some("Visual Studio Code"));
+        assert!(terminal_named("Apple_Terminal").is_some());
+        // tmux and unknown programs: the general wording.
+        assert_eq!(terminal_named("tmux"), None);
+        assert_eq!(terminal_named(""), None);
     }
 
     #[test]

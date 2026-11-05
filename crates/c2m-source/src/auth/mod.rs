@@ -78,9 +78,7 @@ pub fn login_hint(url: &str, cause: &str) -> Option<&'static str> {
         return Some(if crate::progress::is_json() {
             "提示：macOS 不允许读取所连接浏览器的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中允许 course2md（命令行则允许所用的终端应用），重新打开后重试。 / Hint: macOS does not allow reading the connected browser's data. Allow course2md (on the command line, your terminal app) in System Settings › Privacy & Security › Full Disk Access, reopen it, then retry."
         } else {
-            tr!(
-                "提示：macOS 不允许读取所连接浏览器的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中允许 course2md（命令行则允许所用的终端应用），重新打开后重试。 / Hint: macOS does not allow reading the connected browser's data. Allow course2md (on the command line, your terminal app) in System Settings › Privacy & Security › Full Disk Access, reopen it, then retry."
-            )
+            youtube::terminal_hint()
         });
     }
     if is_youtube_url(url) && youtube::wants_sign_in(cause) {
