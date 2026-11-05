@@ -836,7 +836,23 @@ impl AccountsView {
             Some(AccessStep::Restart) => Some(settings()),
             _ => Some(check()),
         };
+        // A new step (of the check or of the guide) replaces what the person was
+        // reading: show it from the top, not where the last one was scrolled to.
+        let step_key = match &dialog.step {
+            YoutubeStep::Choose => 1,
+            YoutubeStep::Checking => 2,
+            YoutubeStep::SignedOut => 3,
+            YoutubeStep::Failed { .. } => 4,
+            YoutubeStep::Connected => 5,
+        } * 16
+            + guide.as_ref().map_or(0, |guide| {
+                1 + guide.position() as u8 + if guide.refused { 8 } else { 0 }
+            });
+        if self.youtube_scroll_step.replace(step_key) != step_key {
+            self.youtube_scroll.set_offset(point(px(0.), px(0.)));
+        }
         MaterialDialog::new("youtube-dialog")
+            .track_body_scroll(&self.youtube_scroll)
             .container(ColorRole::SURFACE)
             .headline(course2md::tr!("连接 YouTube"))
             .width(YOUTUBE_DIALOG_WIDTH)

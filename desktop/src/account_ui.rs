@@ -42,6 +42,10 @@ pub(crate) struct AccountsView {
     /// The password and SMS login fields, made when the login dialog first opens.
     pub(crate) login_inputs: Option<crate::login_ui::LoginInputs>,
     pub(crate) youtube: desktop_accounts::youtube::YoutubeUi,
+    /// The YouTube dialog's scrolling body, and the step it last showed: a new
+    /// step starts at the top.
+    pub(crate) youtube_scroll: ScrollHandle,
+    pub(crate) youtube_scroll_step: std::cell::Cell<u8>,
     /// The window the dialogs open in; deferred input changes return to it.
     pub(crate) window: AnyWindowHandle,
 }
@@ -54,6 +58,8 @@ impl AccountsView {
             account: AccountUi::default(),
             login_inputs: None,
             youtube: Default::default(),
+            youtube_scroll: ScrollHandle::new(),
+            youtube_scroll_step: Default::default(),
             window: window.window_handle(),
         };
         this.refresh_account(cx);
