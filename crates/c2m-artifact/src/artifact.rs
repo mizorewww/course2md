@@ -714,7 +714,9 @@ pub fn publish(
 fn flatten_and_hold(note: &Path) -> Result<Option<crate::runtime::FileLock>> {
     for _ in 0..3 {
         flatten_tolerant(note)?;
-        release_legacy_lock(note);
+        // A lock left in the note is taken where it is, never removed and made
+        // again: an older app that opened it but has not locked it yet would lock
+        // a file no one else opens. The new note does not carry it.
         if note.join(LEGACY_PUBLISH_LOCK).symlink_metadata().is_err() {
             return Ok(None);
         }
@@ -1539,7 +1541,6 @@ pub fn prepare_note(note_dir: &Path) -> Result<()> {
     // Taking an older app's later version keeps the flat note as a copy, which
     // may reach the limit: the task stops before its work, as it would have.
     at_limit()?;
-    release_legacy_lock(note_dir);
     // The publication takes an older app's lock left in the note: one it cannot
     // open stops the task now, before its work, not after. One that is held is
     // waited for then.
@@ -1576,9 +1577,7 @@ pub fn flatten_legacy(note_dir: &Path) -> Result<Option<Manifest>> {
     }
     let _lock = lock_note(note_dir)?;
     recover_locked(note_dir)?;
-    let flat = flatten_locked(note_dir)?;
-    release_legacy_lock(note_dir);
-    Ok(flat)
+    flatten_locked(note_dir)
 }
 
 /// [`flatten_locked`] for a task: a course with no readable version stays as it
@@ -1914,30 +1913,6 @@ fn resaved_by_older_app(note: &Path) -> bool {
 /// versions, or a flat note an older app saved a newer version into.
 pub fn needs_flatten(note_dir: &Path) -> bool {
     is_legacy(note_dir) || resaved_by_older_app(note_dir)
-}
-
-/// Removes the empty lock a flatten interrupted after its swap left in the flat
-/// note, or an older app left there, unless someone holds it. A course in the
-/// layout of versions keeps it: it is the older app's.
-pub fn release_legacy_lock(note_dir: &Path) {
-    let path = note_dir.join(LEGACY_PUBLISH_LOCK);
-    let Ok(metadata) = std::fs::symlink_metadata(&path) else {
-        return;
-    };
-    if !metadata.is_file()
-        || metadata.len() > 0
-        || is_legacy(note_dir)
-        || note_dir.join("current.json").exists()
-    {
-        return;
-    }
-    if let Ok(Some(lock)) = crate::runtime::try_lock_file(&path) {
-        #[cfg(windows)]
-        drop(lock);
-        let _ = std::fs::remove_file(&path);
-        #[cfg(not(windows))]
-        drop(lock);
-    }
 }
 
 /// A schema 1 course in which no version has a readable body. Flattening

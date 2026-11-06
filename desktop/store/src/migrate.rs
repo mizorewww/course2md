@@ -138,8 +138,6 @@ pub(crate) fn migrate_library(location: &LibraryLocation, busy: &[PathBuf]) -> M
             }
         } else if dir.join("manifest.json").is_file() {
             walk.skip_current_dir();
-            // The lock an interrupted flatten or an older app left in the note.
-            artifact::release_legacy_lock(&dir);
             if let Ok(Some(manifest)) = artifact::note_manifest(&dir)
                 && !migration
                     .notes

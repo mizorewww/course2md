@@ -647,7 +647,12 @@ fn an_interrupted_flatten_is_finished_by_running_it_again() {
         assert!(!is_legacy(course), "{point:?}");
         assert_eq!(note_manifest(course).unwrap().unwrap().task_id, "v2");
         assert!(!swap_dir(course).unwrap().exists(), "{point:?}");
-        // The lock the flat note carried across the swap does not stay in it.
+        // A lock the flat note kept from the swap is not carried past the next
+        // publication.
+        legacy
+            .library
+            .publish(&legacy.library.target("after"), "After", "")
+            .unwrap();
         assert!(!course.join(LEGACY_PUBLISH_LOCK).exists(), "{point:?}");
         assert_eq!(
             std::fs::read(
@@ -1706,8 +1711,9 @@ fn copies_at_the_limit_stop_a_task_and_say_what_frees_it() {
     prepare_note(&library.note).unwrap();
 }
 
-/// A lock an interrupted flatten or an older app left in a flat note is removed by
-/// the next task, and a regenerate never carries one into the new note.
+/// A lock an interrupted flatten or an older app left in a flat note is taken
+/// where it is, never removed and made again, and a regenerate never carries one
+/// into the new note.
 #[test]
 fn a_left_lock_is_not_part_of_the_note() {
     let library = Library::new();
@@ -1716,10 +1722,12 @@ fn a_left_lock_is_not_part_of_the_note() {
         .unwrap();
     let lock = library.note.join(LEGACY_PUBLISH_LOCK);
     std::fs::write(&lock, b"").unwrap();
+    let left_at = std::fs::metadata(&lock).unwrap().modified().unwrap();
     prepare_note(&library.note).unwrap();
-    assert!(!lock.exists());
-    // Not empty, so not removed as a lock: still not carried as a file of the person's.
-    std::fs::write(&lock, b"x").unwrap();
+    assert_eq!(
+        std::fs::metadata(&lock).unwrap().modified().unwrap(),
+        left_at
+    );
     library
         .publish(&library.target("task-2"), "Body two", "")
         .unwrap();
@@ -2022,7 +2030,7 @@ fn a_flatten_that_cannot_read_the_note_in_place_keeps_its_copy() {
 }
 
 /// A read-only lock left in a flat note does not stop a publication after its
-/// work: it is locked through a read-only handle, and removed.
+/// work: it is locked through a read-only handle, and not carried.
 #[cfg(unix)]
 #[test]
 fn a_read_only_lock_does_not_stop_a_publication() {
@@ -2038,13 +2046,11 @@ fn a_read_only_lock_does_not_stop_a_publication() {
     assert!(crate::runtime::try_lock_file(&lock).unwrap().is_none());
     drop(held);
     prepare_note(&course).unwrap();
-    assert!(!lock.exists());
-    std::fs::write(&lock, b"x").unwrap();
-    std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o444)).unwrap();
     legacy
         .library
         .publish(&legacy.library.target("next"), "Next", "")
         .unwrap();
+    assert!(!lock.exists());
     assert!(published_by(&course, "next").unwrap().is_some());
 }
 
