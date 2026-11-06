@@ -520,9 +520,11 @@ impl FileLock {
                 _ => false,
             }
         }
-        // Windows keeps a removed file that is open as pending deletion, and no one
-        // can open its name until it is closed: a lock held there cannot be passed
-        // by another opening its path.
+        // Windows offers no stable file identity to compare here. A removed file
+        // that is open either stays pending deletion, or (POSIX delete semantics,
+        // recent NTFS) frees its name at once. Whether the name still exists
+        // catches a removal; a new file made at the name since is not told apart.
+        // The app itself no longer removes a lock it may have to take.
         #[cfg(not(unix))]
         {
             path.exists()
