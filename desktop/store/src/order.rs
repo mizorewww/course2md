@@ -118,14 +118,48 @@ impl Place {
     }
 }
 
+/// How many complete scans in a row a note must be missing from before the record
+/// forgets it: a disk that answers slowly, or a note being replaced, does not cost
+/// it its place.
+pub const FORGET_AFTER: u32 = 3;
+
+/// Reading a note again within this long, in milliseconds, is not written down:
+/// last read only needs to be roughly right, and opening a note should not cost a
+/// disk flush each time.
+pub const READ_INTERVAL_MS: u64 = 5 * 60 * 1000;
+
+/// A place's sort as stored: kept as written, so a rule or field a newer app added
+/// survives this one saving the record.
+fn read_sort(value: Option<&serde_json::Value>) -> Sort {
+    value
+        .and_then(|value| serde_json::from_value(value.clone()).ok())
+        .unwrap_or_default()
+}
+
+/// `sort` written over what was stored, keeping fields this app does not know;
+/// `None` when nothing but the default would be left.
+fn write_sort(stored: Option<serde_json::Value>, sort: Sort) -> Option<serde_json::Value> {
+    let mut object = match stored {
+        Some(serde_json::Value::Object(object)) => object,
+        _ => Default::default(),
+    };
+    object.insert("rule".into(), serde_json::to_value(sort.rule).ok()?);
+    object.insert("descending".into(), sort.descending.into());
+    let only_default = sort == Sort::default()
+        && object
+            .keys()
+            .all(|key| key == "rule" || key == "descending");
+    (!only_default).then_some(serde_json::Value::Object(object))
+}
+
 /// One library's record of how its places list their notes.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Order {
     /// Place → its sort; a place without one uses the default.
     #[serde(default)]
-    sorts: BTreeMap<String, Sort>,
+    sorts: BTreeMap<String, serde_json::Value>,
     /// Place → note keys in the order the person arranged.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     manual: BTreeMap<String, Vec<String>>,
     /// Note → when it was first seen in the library, in milliseconds since the epoch.
     /// A regenerated note keeps the time it was first added.
@@ -134,6 +168,12 @@ pub struct Order {
     /// Note → when it was last opened, in milliseconds since the epoch.
     #[serde(default)]
     read: BTreeMap<String, u64>,
+    /// Note → complete scans in a row it was missing from.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    missing: BTreeMap<String, u32>,
+    /// What a newer app wrote, kept as it was.
+    #[serde(flatten)]
+    extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl Order {
@@ -171,13 +211,14 @@ impl Order {
         Ok(order)
     }
 
-    /// Records when each note of a scan was added. A note not seen before is
-    /// added when it was made; one gone from a complete scan is forgotten.
-    /// Writes only when something changed, and never fails the scan.
+    /// Records what a scan found: a note not seen before is added when it was made.
+    /// A complete scan (nothing unread, nothing waiting on the person) counts the
+    /// notes it did not find; one missing from [`FORGET_AFTER`] complete scans in a
+    /// row is forgotten, with its place in hand-made orders. Writes only when
+    /// something changed, and never fails the scan.
     pub fn observe(root: &Path, notes: &[(String, u64)], complete: bool) -> Self {
         let mut order = Self::load(root);
-        let changed = order.note_seen(notes, complete);
-        if changed {
+        if order.note_seen(notes, complete) {
             return Self::edit(root, |order| {
                 order.note_seen(notes, complete);
             })
@@ -187,26 +228,48 @@ impl Order {
     }
 
     fn note_seen(&mut self, notes: &[(String, u64)], complete: bool) -> bool {
-        let mut changed = false;
+        let before = self.clone();
+        let present: std::collections::HashSet<&str> =
+            notes.iter().map(|(key, _)| key.as_str()).collect();
         for (key, created) in notes {
-            if !self.added.contains_key(key) {
-                self.added.insert(key.clone(), *created);
-                changed = true;
-            }
+            self.added.entry(key.clone()).or_insert(*created);
+            self.missing.remove(key);
         }
         if complete {
-            let present: std::collections::HashSet<&str> =
-                notes.iter().map(|(key, _)| key.as_str()).collect();
-            let before = (self.added.len(), self.read.len());
-            self.added.retain(|key, _| present.contains(key.as_str()));
-            self.read.retain(|key, _| present.contains(key.as_str()));
-            changed |= before != (self.added.len(), self.read.len());
+            let known: std::collections::BTreeSet<String> = self
+                .added
+                .keys()
+                .chain(self.read.keys())
+                .filter(|key| !present.contains(key.as_str()))
+                .cloned()
+                .collect();
+            let mut forgotten = std::collections::HashSet::new();
+            for key in known {
+                let count = self.missing.entry(key.clone()).or_insert(0);
+                if *count < FORGET_AFTER {
+                    *count += 1;
+                }
+                if *count >= FORGET_AFTER {
+                    forgotten.insert(key);
+                }
+            }
+            for key in &forgotten {
+                self.added.remove(key);
+                self.read.remove(key);
+                self.missing.remove(key);
+            }
+            for keys in self.manual.values_mut() {
+                keys.retain(|key| !forgotten.contains(key));
+            }
+            self.manual.retain(|_, keys| !keys.is_empty());
+            self.missing
+                .retain(|key, _| self.added.contains_key(key) || self.read.contains_key(key));
         }
-        changed
+        *self != before
     }
 
     pub fn sort(&self, place: Place) -> Sort {
-        self.sorts.get(&place.key()).copied().unwrap_or_default()
+        read_sort(self.sorts.get(&place.key()))
     }
 
     /// The place's hand-made order, as note keys.
@@ -217,15 +280,21 @@ impl Order {
             .unwrap_or_default()
     }
 
-    /// Sets the place's sort and, when given, its hand-made order.
+    /// Sets the place's sort and, when given, its hand-made order; an empty order
+    /// is removed rather than stored.
     pub fn set_place(&mut self, place: Place, sort: Sort, manual: Option<Vec<String>>) {
-        if sort == Sort::default() {
-            self.sorts.remove(&place.key());
-        } else {
-            self.sorts.insert(place.key(), sort);
+        let key = place.key();
+        if let Some(value) = write_sort(self.sorts.remove(&key), sort) {
+            self.sorts.insert(key.clone(), value);
         }
-        if let Some(manual) = manual {
-            self.manual.insert(place.key(), manual);
+        match manual {
+            Some(manual) if manual.is_empty() => {
+                self.manual.remove(&key);
+            }
+            Some(manual) => {
+                self.manual.insert(key, manual);
+            }
+            None => {}
         }
     }
 
@@ -240,13 +309,93 @@ impl Order {
         self.added.get(key).copied()
     }
 
+    /// Whether the record knows the note: it was seen and not yet forgotten.
+    pub fn knows(&self, key: &str) -> bool {
+        self.added.contains_key(key)
+    }
+
     pub fn last_read(&self, key: &str) -> Option<u64> {
         self.read.get(key).copied()
     }
 
-    pub fn mark_read(&mut self, key: &str, at: u64) {
+    /// Notes that the note was opened at `at`, unless it was within
+    /// [`READ_INTERVAL_MS`] of the time already noted. Returns whether it changed.
+    pub fn mark_read(&mut self, key: &str, at: u64) -> bool {
+        if self
+            .read
+            .get(key)
+            .is_some_and(|before| at.saturating_sub(*before) < READ_INTERVAL_MS)
+        {
+            return false;
+        }
         self.read.insert(key.to_owned(), at);
+        true
     }
+}
+
+/// The sort and hand-made order of every note, across libraries, as the app keeps
+/// it in its own record: notes are `<library id>/<note key>`, so it does not depend
+/// on which library is the default or reachable.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PlaceOrder {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sort: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    manual: Vec<String>,
+    /// What a newer app wrote, kept as it was.
+    #[serde(flatten)]
+    extra: BTreeMap<String, serde_json::Value>,
+}
+
+impl PlaceOrder {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn sort(&self) -> Sort {
+        read_sort(self.sort.as_ref())
+    }
+
+    pub fn manual(&self) -> &[String] {
+        &self.manual
+    }
+
+    /// Sets the sort and, when given, the hand-made order.
+    pub fn set(&mut self, sort: Sort, manual: Option<Vec<String>>) {
+        self.sort = write_sort(self.sort.take(), sort);
+        if let Some(manual) = manual {
+            self.manual = manual;
+        }
+    }
+}
+
+/// Each note's key in its library's record, in the order given: its course id, or,
+/// for a copy of a note (another folder with the same course id), the id with the
+/// copy's folder, so moving one copy never moves the other. Of the notes sharing an
+/// id, the one whose folder sorts first keeps the plain id.
+pub fn note_keys(notes: &[(&Path, &str)]) -> Vec<String> {
+    let mut first: std::collections::HashMap<&str, &Path> = Default::default();
+    for (folder, id) in notes {
+        let entry = first.entry(id).or_insert(folder);
+        if folder < entry {
+            *entry = folder;
+        }
+    }
+    notes
+        .iter()
+        .map(|(folder, id)| {
+            if first.get(id) == Some(folder) {
+                (*id).to_owned()
+            } else {
+                let folder = folder
+                    .components()
+                    .map(|part| part.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                format!("{id}@{folder}")
+            }
+        })
+        .collect()
 }
 
 /// What a rule sorts one note by.
@@ -558,12 +707,122 @@ mod tests {
         assert_eq!(loaded, again);
         assert_eq!(loaded.manual(Place::Folder(1)), ["course-b", "course-a"]);
         assert_eq!(loaded.sort(Place::All), sort(SortRule::Title, false));
-        // A note gone from a complete scan is forgotten; an incomplete scan keeps it.
-        let partial = Order::observe(&moved, &[("course-b".into(), 200)], false);
-        assert_eq!(partial.added("course-a"), Some(100));
-        let complete = Order::observe(&moved, &[("course-b".into(), 200)], true);
-        assert_eq!(complete.added("course-a"), None);
-        assert_eq!(complete.last_read("course-a"), None);
+        // A scan that is not complete never counts a note as gone.
+        for _ in 0..FORGET_AFTER + 1 {
+            let partial = Order::observe(&moved, &[("course-b".into(), 200)], false);
+            assert_eq!(partial.added("course-a"), Some(100));
+        }
+        // Missing from one complete scan, or two, a note keeps its place; a scan
+        // that finds it again starts the count over.
+        for _ in 1..FORGET_AFTER {
+            let missed = Order::observe(&moved, &[("course-b".into(), 200)], true);
+            assert_eq!(missed.added("course-a"), Some(100));
+            assert_eq!(missed.manual(Place::Folder(1)), ["course-b", "course-a"]);
+        }
+        Order::observe(&moved, &seen, true);
+        for _ in 1..FORGET_AFTER {
+            Order::observe(&moved, &[("course-b".into(), 200)], true);
+        }
+        assert_eq!(Order::load(&moved).last_read("course-a"), Some(500));
+        // Missing from enough complete scans in a row, it is forgotten everywhere.
+        let gone = Order::observe(&moved, &[("course-b".into(), 200)], true);
+        assert_eq!(gone.added("course-a"), None);
+        assert_eq!(gone.last_read("course-a"), None);
+        assert_eq!(gone.manual(Place::Folder(1)), ["course-b"]);
+        assert_eq!(gone, Order::load(&moved));
+    }
+
+    #[test]
+    fn what_a_newer_app_wrote_survives_a_save() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join(FILE),
+            r#"{"sorts":{"all":{"rule":"popularity","descending":false,"group":"x"},
+                "unfiled":{"rule":"title","pin":true}},
+               "future":{"a":1},"added":{"n":5}}"#,
+        )
+        .unwrap();
+        let order = Order::edit(root, |order| {
+            order.set_place(Place::Folder(3), sort(SortRule::Duration, true), None);
+            order.set_place(Place::Unfiled, sort(SortRule::Title, false), None);
+        })
+        .unwrap();
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(root.join(FILE)).unwrap()).unwrap();
+        // The unknown rule and fields stay as written; the place this app changed
+        // keeps its unknown field too.
+        assert_eq!(written["sorts"]["all"]["rule"], "popularity");
+        assert_eq!(written["sorts"]["all"]["group"], "x");
+        assert_eq!(written["future"]["a"], 1);
+        assert_eq!(written["sorts"]["unfiled"]["pin"], true);
+        assert_eq!(written["sorts"]["unfiled"]["rule"], "title");
+        assert_eq!(written["sorts"]["unfiled"]["descending"], false);
+        assert_eq!(written["sorts"]["folder:3"]["rule"], "duration");
+        assert_eq!(order.sort(Place::All), sort(SortRule::Added, false));
+        assert_eq!(order.added("n"), Some(5));
+        // An unchanged sort writes no manual order, and an empty one is not stored.
+        assert!(written.get("manual").is_none());
+        let mut order = order;
+        order.set_place(
+            Place::Unfiled,
+            sort(SortRule::Manual, true),
+            Some(Vec::new()),
+        );
+        assert!(order.manual.is_empty());
+    }
+
+    #[test]
+    fn reading_again_soon_is_not_written_down() {
+        let mut order = Order::default();
+        assert!(order.mark_read("n", 1_000));
+        assert!(!order.mark_read("n", 1_000 + READ_INTERVAL_MS - 1));
+        assert_eq!(order.last_read("n"), Some(1_000));
+        assert!(order.mark_read("n", 1_000 + READ_INTERVAL_MS));
+        assert_eq!(order.last_read("n"), Some(1_000 + READ_INTERVAL_MS));
+    }
+
+    #[test]
+    fn copies_of_a_note_get_keys_of_their_own() {
+        let notes = [
+            (Path::new("b/course-x"), "course-x"),
+            (Path::new("course-y"), "course-y"),
+            (Path::new("a/course-x"), "course-x"),
+        ];
+        let keys = note_keys(&notes);
+        assert_eq!(keys, ["course-x@b/course-x", "course-y", "course-x"]);
+        // Moving one copy leaves the other where it was.
+        let notes = [
+            note("course-x", "X", 1),
+            note("course-x@b/course-x", "X", 1),
+            note("course-y", "Y", 2),
+        ];
+        let list: Vec<String> = notes.iter().map(|n| n.key.clone()).collect();
+        let moved = move_onto(&list, "course-x", "course-y").unwrap();
+        let arranged = arrange(&notes, sort(SortRule::Manual, true), &moved);
+        assert_eq!(
+            keys_of(&notes, &arranged),
+            ["course-x@b/course-x", "course-y", "course-x"]
+        );
+    }
+
+    fn keys_of(notes: &[NoteFacts], order: &[usize]) -> Vec<String> {
+        keys(notes, order)
+    }
+
+    #[test]
+    fn every_notes_order_keeps_unknown_fields_and_sets_its_sort() {
+        let mut order: PlaceOrder = serde_json::from_str(
+            r#"{"sort":{"rule":"title","descending":false},"manual":["l/a"],"later":2}"#,
+        )
+        .unwrap();
+        assert_eq!(order.sort(), sort(SortRule::Title, false));
+        order.set(sort(SortRule::Manual, false), None);
+        assert_eq!(order.manual(), ["l/a"]);
+        let written = serde_json::to_value(&order).unwrap();
+        assert_eq!(written["later"], 2);
+        assert_eq!(written["sort"]["rule"], "manual");
+        assert!(PlaceOrder::default().is_empty());
     }
 
     #[test]
@@ -590,7 +849,10 @@ mod tests {
         std::fs::write(root.join(FILE), "damaged").unwrap();
         let restored = Order::load(root);
         assert_eq!(restored.sort(Place::Unfiled), sort(SortRule::Title, true));
-        Order::edit(root, |order| order.mark_read("note", 1)).unwrap();
+        Order::edit(root, |order| {
+            order.mark_read("note", 1);
+        })
+        .unwrap();
         let kept = std::fs::read_dir(root)
             .unwrap()
             .flatten()

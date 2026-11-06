@@ -2987,7 +2987,11 @@ impl Desktop {
         });
         // Only a sort by what was read last depends on it, so a failure stays quiet.
         self.in_background(
-            move || order::Order::edit(&worker_root, |order| order.mark_read(&id, at)),
+            move || {
+                order::Order::edit(&worker_root, |order| {
+                    order.mark_read(&id, at);
+                })
+            },
             |_, _, _| {},
             cx,
         );
