@@ -1554,7 +1554,11 @@ impl Desktop {
         )
         .danger()
         .text(course2md::tr!("将删除此服务配置，已有笔记不受影响。"));
-        if affected > 0 {
+        if affected == 1 {
+            confirm = confirm.text(course2md::tr!(
+                "有 1 个未完成任务引用此服务；这个任务中用到此服务的步骤将不再继续。"
+            ));
+        } else if affected > 0 {
             confirm = confirm.text(course2md::tr!(
                 "有 {} 个未完成任务引用此服务；这些任务中用到此服务的步骤将不再继续。",
                 affected

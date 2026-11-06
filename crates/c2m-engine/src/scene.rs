@@ -140,11 +140,15 @@ fn report(event: Event, bar: &mut Option<Bar>, mode: SlideMode) {
             bar.as_ref().inspect(|bar| {
                 bar.set_found(
                     slides as u64,
-                    crate::tr!(
-                        "已找到 {} 张候选截图 / Found {} candidate slides",
-                        slides,
-                        slides
-                    ),
+                    if slides == 1 {
+                        crate::tr!("已找到 1 张候选截图 / Found 1 candidate slide").to_owned()
+                    } else {
+                        crate::tr!(
+                            "已找到 {} 张候选截图 / Found {} candidate slides",
+                            slides,
+                            slides
+                        )
+                    },
                 )
             });
         }

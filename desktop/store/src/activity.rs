@@ -31,6 +31,9 @@ pub struct Activity {
     /// Tokens the AI service reported for this stage, sent and received.
     prompt_tokens: u64,
     completion_tokens: u64,
+    /// The engine's last running totals for this stage, which the next report
+    /// is counted from.
+    reported_tokens: (u64, u64),
     sampled: bool,
     /// When the stage began and ended, for its elapsed time; `started`
     /// restarts with each retry for the rate.
@@ -124,8 +127,6 @@ pub struct JobEvents {
     /// The purposes the task's receipts hold any attempt for, read with them.
     #[serde(skip)]
     pub attempted: std::collections::BTreeSet<String>,
-    #[serde(skip)]
-    pub tokens: (u64, u64),
 }
 
 /// A record's identity is what it saves: the rest is derived.
@@ -185,9 +186,8 @@ impl JobEvents {
                 }
                 match status {
                     StageStatus::Start => {
+                        // The engine counts the stage's tokens again from zero.
                         self.stages.insert(stage.clone(), Activity::new());
-                        // The engine counts tokens again from zero for each stage.
-                        self.tokens = (0, 0);
                     }
                     StageStatus::Done => self.stage(stage).finish(),
                 }
@@ -216,17 +216,20 @@ impl JobEvents {
                 prompt,
                 completion,
             } => {
-                // The engine reports running totals that start again at zero with each
-                // stage start; each stage keeps the part that arrived while it ran. A
-                // total below the last one is a count that started again.
-                let (sent, received) = std::mem::replace(&mut self.tokens, (*prompt, *completion));
+                // The engine reports each stage's running totals, which start again at
+                // zero when that stage starts: a response is counted once, for its own
+                // stage, even when it lands after another stage started. A total below
+                // the last one is a count that started again (an engine that counted
+                // all stages together restarted it with any stage).
+                let activity = self.stage(stage);
+                let (sent, received) =
+                    std::mem::replace(&mut activity.reported_tokens, (*prompt, *completion));
                 let (sent, received) = if *prompt < sent || *completion < received {
                     (0, 0)
                 } else {
                     (sent, received)
                 };
-                self.stage(stage)
-                    .note_tokens(prompt - sent, completion - received);
+                activity.note_tokens(prompt - sent, completion - received);
                 false
             }
             Event::Workers { stage, workers } => {
@@ -308,7 +311,6 @@ impl JobEvents {
     pub fn begin_run(&mut self) {
         self.done = None;
         self.error = None;
-        self.tokens = (0, 0);
     }
 
     /// Applies a saved stream. A line this build cannot read is skipped: this is a view
@@ -347,6 +349,7 @@ impl Activity {
             found: None,
             prompt_tokens: 0,
             completion_tokens: 0,
+            reported_tokens: (0, 0),
             sampled: false,
             created: now,
             finished: None,
@@ -407,7 +410,11 @@ impl Activity {
         let quantity = quantity_of(stage, self.counts_bytes(stage), self.current, self.total);
         match self.found.filter(|_| *stage == Stage::ScenesScan) {
             Some(found) => {
-                let found = c2m_i18n::tr!("已找到 {} 张候选截图", found);
+                let found = if found == 1 {
+                    c2m_i18n::tr!("已找到 1 张候选截图").to_owned()
+                } else {
+                    c2m_i18n::tr!("已找到 {} 张候选截图", grouped(found))
+                };
                 if quantity.is_empty() {
                     found
                 } else {
@@ -751,10 +758,15 @@ pub fn quantity(stage: &Stage, current: u64, total: u64) -> String {
 }
 
 fn quantity_of(stage: &Stage, byte_download: bool, current: u64, total: u64) -> String {
+    // Counts read like the token counts: "1,234".
     if *stage == Stage::ScenesScan {
-        c2m_i18n::tr!("已检查 {} 张画面", current)
+        if current == 1 {
+            c2m_i18n::tr!("已检查 1 张画面").to_owned()
+        } else {
+            c2m_i18n::tr!("已检查 {} 张画面", grouped(current))
+        }
     } else if *stage == Stage::ScenesExtract && total > 0 {
-        c2m_i18n::tr!("已保存 {} / {} 张截图", current, total)
+        c2m_i18n::tr!("已保存 {} / {} 张截图", grouped(current), grouped(total))
     } else if byte_download {
         if total > 0 {
             format!("{} / {}", bytes(current), bytes(total))
@@ -763,7 +775,7 @@ fn quantity_of(stage: &Stage, byte_download: bool, current: u64, total: u64) -> 
         }
     } else if total > 0 {
         if *stage == Stage::Transcribe {
-            c2m_i18n::tr!("{} / {} 段", current, total)
+            c2m_i18n::tr!("{} / {} 段", grouped(current), grouped(total))
         } else {
             format!(
                 "{:.0}%",
@@ -1335,8 +1347,9 @@ mod tests {
                 .live_counter()
                 .ends_with("↑ 4,656 · ↓ 94 词元")
         );
-        // A stage that starts in between (scenes beside proofreading) restarts the
-        // engine's count too; a lower total is a fresh count, not lost tokens.
+        // An engine that counted every stage together restarted its count when a
+        // stage started in between (scenes beside proofreading); a lower total is
+        // a fresh count, not lost tokens.
         events.apply(&tokens(&Stage::Summary, 4_700, 120));
         events.apply(&start(&Stage::ScenesExtract));
         events.apply(&tokens(&Stage::Summary, 50, 10));
@@ -1345,6 +1358,61 @@ mod tests {
             Some("↑ 4,750 · ↓ 130 词元")
         );
         assert_eq!(Activity::new().tokens_label(), None);
+    }
+
+    /// Counts of frames and screenshots read like the token counts, and English
+    /// says one of them in the singular.
+    #[test]
+    fn counts_are_grouped_and_one_is_singular() {
+        use c2m_i18n::i18n::{Lang, t_for};
+        assert_eq!(
+            quantity(&Stage::ScenesScan, 12_345, 0),
+            c2m_i18n::tr!("已检查 {} 张画面", "12,345")
+        );
+        assert_eq!(
+            quantity(&Stage::ScenesScan, 1, 0),
+            c2m_i18n::tr!("已检查 1 张画面")
+        );
+        assert_eq!(
+            quantity(&Stage::ScenesExtract, 1_000, 2_000),
+            c2m_i18n::tr!("已保存 {} / {} 张截图", "1,000", "2,000")
+        );
+        assert_eq!(t_for("已检查 1 张画面", Lang::En), "1 frame checked");
+        assert_eq!(
+            t_for("已找到 1 张候选截图", Lang::En),
+            "1 candidate screenshot found"
+        );
+    }
+
+    /// A response of one stage that lands after the next stage started is counted
+    /// once, for its own stage.
+    #[test]
+    fn a_late_response_is_not_counted_twice() {
+        let start = |stage: &Stage| Event::Stage {
+            stage: stage.clone(),
+            status: StageStatus::Start,
+        };
+        let tokens = |stage: &Stage, prompt, completion| Event::Tokens {
+            stage: stage.clone(),
+            prompt,
+            completion,
+        };
+        let mut events = JobEvents::default();
+        events.apply(&start(&Stage::Llm));
+        events.apply(&tokens(&Stage::Llm, 4_000, 400));
+        events.apply(&start(&Stage::Summary));
+        // The proofreading total goes on from its own count.
+        events.apply(&tokens(&Stage::Llm, 4_100, 410));
+        events.apply(&tokens(&Stage::Summary, 600, 60));
+        events.apply(&tokens(&Stage::Summary, 900, 90));
+        assert_eq!(
+            events.stages[&Stage::Llm].tokens_label().as_deref(),
+            Some("↑ 4,100 · ↓ 410 词元")
+        );
+        assert_eq!(
+            events.stages[&Stage::Summary].tokens_label().as_deref(),
+            Some("↑ 900 · ↓ 90 词元")
+        );
     }
 
     #[test]

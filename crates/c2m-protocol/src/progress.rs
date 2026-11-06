@@ -190,7 +190,9 @@ pub enum ErrorCode {
     Uncertain,
     /// The result did less than the saved note in a part it tried; the note was kept.
     NoteKept,
-    /// Another task is working on the same note; nothing was done.
+    /// Another writer has the note. Another task: nothing was done. An older app
+    /// saving into it, met when publishing: the task's work is kept in its work
+    /// folder, and running the task again reuses it. The note is unchanged.
     NoteBusy,
     /// A replacement of the note stopped and cannot be finished on its own;
     /// `path` names the folder to look at. Nothing was changed.
@@ -336,8 +338,8 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         found: Option<u64>,
     },
-    /// Running LLM token totals for the stage: they start again at zero with
-    /// each stage start.
+    /// Running LLM token totals for the stage: they start again at zero when
+    /// that stage starts, and no other stage's start touches them.
     Tokens {
         stage: Stage,
         prompt: u64,
@@ -426,13 +428,18 @@ pub fn done(stage: Stage) {
     self::stage(stage, StageStatus::Done);
 }
 
-/// 阶段边界事件（json 模式才发）。新阶段开始时清零 token 累计，
-/// 保证 GUI 看到的是当前阶段的实时用量。
+/// 阶段边界事件（json 模式才发）。阶段开始时清零该阶段自己的 token 累计；
+/// 清零与发出开始事件在同一把锁下，其他阶段迟到的响应仍计入它们自己的阶段，
+/// GUI 不会把同一次响应算两次。
 pub fn stage(stage: Stage, status: StageStatus) {
     if status == StageStatus::Start {
-        reset_tokens();
-    }
-    if is_json() {
+        let mut tokens = crate::sync::lock_recover(&TOKENS);
+        tokens.remove(&stage);
+        if is_json() {
+            emit(&Event::Stage { stage, status });
+            return;
+        }
+    } else if is_json() {
         emit(&Event::Stage { stage, status });
         return;
     }
@@ -463,26 +470,25 @@ pub fn stage(stage: Stage, status: StageStatus) {
     eprintln!("{label}…");
 }
 
-/// LLM token 累计（当前阶段）：并发 worker 各自完成请求后累加，
-/// GUI 展示的是单调递增的实时用量。阶段开始时由 [`stage`] 清零。
-static TOKENS: Mutex<(u64, u64)> = Mutex::new((0, 0));
+/// LLM token 累计，按阶段分开：并发 worker 各自完成请求后累加到自己的阶段，
+/// GUI 展示的是单调递增的实时用量。阶段开始时由 [`stage`] 清零该阶段。
+static TOKENS: Mutex<std::collections::BTreeMap<Stage, (u64, u64)>> =
+    Mutex::new(std::collections::BTreeMap::new());
 
-fn reset_tokens() {
-    *crate::sync::lock_recover(&TOKENS) = (0, 0);
-}
-
-/// 记录一次 LLM 响应的 token 用量并发出累计值（json 模式才有事件）。
+/// 记录一次 LLM 响应的 token 用量并发出该阶段的累计值（json 模式才有事件）。
 pub fn note_tokens(stage: Stage, prompt: u64, completion: u64) {
     if prompt == 0 && completion == 0 {
         return;
     }
     let mut guard = crate::sync::lock_recover(&TOKENS);
-    guard.0 += prompt;
-    guard.1 += completion;
+    let total = guard.entry(stage.clone()).or_default();
+    total.0 += prompt;
+    total.1 += completion;
+    let (prompt, completion) = *total;
     emit(&Event::Tokens {
         stage,
-        prompt: guard.0,
-        completion: guard.1,
+        prompt,
+        completion,
     });
 }
 
@@ -837,6 +843,24 @@ impl tracing::field::Visit for LogVisitor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stage_start_restarts_only_its_own_token_total() {
+        let proofread = Stage::Other("tokens-test-proofread".into());
+        let summary = Stage::Other("tokens-test-summary".into());
+        let total = |stage: &Stage| crate::sync::lock_recover(&TOKENS).get(stage).copied();
+        start(proofread.clone());
+        note_tokens(proofread.clone(), 100, 10);
+        start(summary.clone());
+        // A response of the earlier stage that lands after the next one started.
+        note_tokens(proofread.clone(), 5, 1);
+        note_tokens(summary.clone(), 7, 2);
+        assert_eq!(total(&proofread), Some((105, 11)));
+        assert_eq!(total(&summary), Some((7, 2)));
+        start(proofread.clone());
+        assert_eq!(total(&proofread), None);
+        assert_eq!(total(&summary), Some((7, 2)));
+    }
 
     #[test]
     fn visitor_message_fallback_to_fields() {

@@ -573,7 +573,11 @@ impl TasksPage {
             (
                 attention,
                 StatusKind::Danger,
-                course2md::tr!("{} 个需要处理", attention),
+                if attention == 1 {
+                    course2md::tr!("1 个需要处理").to_owned()
+                } else {
+                    course2md::tr!("{} 个需要处理", attention)
+                },
             ),
             (
                 queued,
@@ -1211,7 +1215,12 @@ impl TasksPage {
         more: AnyElement,
         inner: Option<Div>,
         // Where it saves, its cover and the cover's width, and the step it is on.
-        (destination, cover, cover_width, step): (String, Option<PathBuf>, Rems, Option<String>),
+        (destination, cover, cover_width, step): (
+            String,
+            Option<PathBuf>,
+            Rems,
+            Option<(String, bool)>,
+        ),
     ) -> Div {
         let id = &task.id;
         let home = matches!(place, CardPlace::Home);
@@ -1307,14 +1316,19 @@ impl TasksPage {
                             column.child(task_support_line(id, support.clone()))
                         })
                     })
-                    .when_some(step, |column, step| {
-                        column.child(
+                    .when_some(step, |column, (step, side_by_side)| {
+                        let line =
                             accessible_text(SharedString::from(format!("task-step-{id}")), step)
                                 .role(Role::Status)
                                 .text_size(TEXT_BODY)
-                                .text_color(color(ColorRole::ON_SURFACE_VARIANT))
-                                .whitespace_normal(),
-                        )
+                                .text_color(color(ColorRole::ON_SURFACE_VARIANT));
+                        // Steps side by side stay on one line, so the card does not
+                        // grow when a second one starts; one step wraps as it did.
+                        column.child(if side_by_side {
+                            line.w_full().min_w_0().truncate()
+                        } else {
+                            line.whitespace_normal()
+                        })
                     })
                     .when(!home && !support.is_empty(), |column| {
                         column.child(task_support_line(id, support.clone()))
@@ -1326,30 +1340,32 @@ impl TasksPage {
 
     /// The step a running task is on. Later steps depend on what the video turns out
     /// to need, so the position counts the steps reached so far, without a total. The
-    /// workbench says the step and its measure instead, above the bar.
-    fn task_step_line(&self, task: &TaskRecord, home: bool, cx: &App) -> Option<String> {
+    /// workbench says the step and its measure instead, above the bar. Also says
+    /// whether several steps run side by side.
+    fn task_step_line(&self, task: &TaskRecord, home: bool, cx: &App) -> Option<(String, bool)> {
         let stages = self.task_stage_rows(task, cx);
-        let index = stages.iter().position(|stage| stage.status.running());
-        index
-            .map(|index| {
-                let stage = &stages[index];
+        // Steps that run side by side (scanning while speech is recognized) are all
+        // where the task is, each with its own number, on the one line.
+        let running: Vec<String> = stages
+            .iter()
+            .enumerate()
+            .filter(|(_, stage)| stage.status.running())
+            .map(|(index, stage)| {
                 if !home {
-                    // Steps that run side by side (scanning while speech is recognized)
-                    // are all where the task is.
-                    let titles = stages[index..]
-                        .iter()
-                        .filter(|stage| stage.status.running())
-                        .map(|stage| stage.title.as_str())
-                        .collect::<Vec<_>>()
-                        .join(course2md::tr!("、"));
-                    course2md::tr!("第 {} 步 · {}", index + 1, titles)
+                    course2md::tr!("第 {} 步 · {}", index + 1, stage.title)
                 } else if stage.detail.is_empty() {
                     stage.title.clone()
                 } else {
                     format!("{} · {}", stage.title, stage.detail)
                 }
             })
-            .or_else(|| self.task_wait(task, cx).map(|wait| wait.label().to_owned()))
+            .collect();
+        (!running.is_empty())
+            .then(|| (running.join(course2md::tr!("；")), running.len() > 1))
+            .or_else(|| {
+                self.task_wait(task, cx)
+                    .map(|wait| (wait.label().to_owned(), false))
+            })
     }
 
     fn task_wait(&self, task: &TaskRecord, cx: &App) -> Option<WorkerWait> {
@@ -1384,30 +1400,16 @@ impl TasksPage {
         if !active || (current.is_none() && self.task_wait(task, cx).is_none()) {
             return None;
         }
-        let lines: Vec<String> = if running.len() > 1 {
-            // Steps that run side by side each say where they are, by name. On the
-            // workbench the first one is already the line above the bar.
-            running
-                .iter()
-                .skip(usize::from(surface == TaskSurface::Home))
-                .filter(|stage| !stage.detail.is_empty())
-                .map(|stage| format!("{} · {}", stage.title, stage.detail))
-                .collect()
-        } else {
-            current
-                .map(|stage| stage.detail.clone())
-                .filter(|detail| !detail.is_empty())
-                .or_else(|| {
-                    self.work
-                        .read(cx)
-                        .job_started
-                        .filter(|_| self.work.read(cx).job.is_some())
-                        .map(|started| activity::elapsed_label(started.elapsed()))
-                })
-                .filter(|_| surface != TaskSurface::Home || current.is_none())
-                .into_iter()
-                .collect()
+        // How long the job has run, when no step measures itself yet.
+        let elapsed = || {
+            self.work
+                .read(cx)
+                .job_started
+                .filter(|_| self.work.read(cx).job.is_some())
+                .map(|started| activity::elapsed_label(started.elapsed()))
         };
+        let side_by_side = running.len() > 1;
+        let lines = measure_lines(&running, surface == TaskSurface::Home, elapsed);
         Some(
             v_flex()
                 .w_full()
@@ -1427,9 +1429,19 @@ impl TasksPage {
                     } else {
                         format!("task-measure-{id}-{index}")
                     };
-                    ui::status_line(SharedString::from(key), line)
-                        .text_size(TEXT_AUX)
-                        .text_color(color(ColorRole::ON_SURFACE_VARIANT))
+                    let key = SharedString::from(key);
+                    if side_by_side {
+                        div().w_full().min_w_0().child(
+                            accessible_text(key, line.clone())
+                                .w_full()
+                                .min_w_0()
+                                .truncate(),
+                        )
+                    } else {
+                        ui::status_line(key, line)
+                    }
+                    .text_size(TEXT_AUX)
+                    .text_color(color(ColorRole::ON_SURFACE_VARIANT))
                 })),
         )
     }
@@ -1890,9 +1902,71 @@ impl StageStatusView for StageStatus {
     }
 }
 
+/// The lines under a running task's bar. Steps that run side by side each say
+/// where they are, by name, on one line (drawn without wrapping), so the card
+/// keeps its height when a second step starts; with no measure yet, how long the
+/// job has run. On the workbench the line above the bar already says the steps.
+fn measure_lines(
+    running: &[&TaskStage],
+    home: bool,
+    elapsed: impl FnOnce() -> Option<String>,
+) -> Vec<String> {
+    let current = running.first();
+    let line = if running.len() > 1 {
+        let measures = running
+            .iter()
+            .filter(|stage| !stage.detail.is_empty())
+            .map(|stage| format!("{} · {}", stage.title, stage.detail))
+            .collect::<Vec<_>>()
+            .join(course2md::tr!("；"));
+        Some(measures)
+            .filter(|measures| !measures.is_empty())
+            .or_else(elapsed)
+            .filter(|_| !home)
+    } else {
+        current
+            .map(|stage| stage.detail.clone())
+            .filter(|detail| !detail.is_empty())
+            .or_else(elapsed)
+            .filter(|_| !home || current.is_none())
+    };
+    line.into_iter().collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{QueueItem, TaskGroup};
+
+    #[test]
+    fn steps_side_by_side_share_one_line_and_fall_back_to_the_clock() {
+        use desktop_tasks::task_view::TaskStage;
+        let stage = |title: &str, detail: &str| TaskStage {
+            id: title.into(),
+            title: title.into(),
+            status: desktop_tasks::task_view::StageStatus::Running,
+            detail: detail.into(),
+            compact_detail: String::new(),
+            fraction: None,
+        };
+        let clock = || Some("12s".to_owned());
+        let (scan, speech) = (stage("Scan", "1,234 frames"), stage("Speech", "3 / 9"));
+        assert_eq!(
+            super::measure_lines(&[&scan, &speech], false, clock),
+            [format!(
+                "Scan · 1,234 frames{}Speech · 3 / 9",
+                course2md::tr!("；")
+            )]
+        );
+        // Neither measures itself yet: the clock, not nothing.
+        let (scan, speech) = (stage("Scan", ""), stage("Speech", ""));
+        assert_eq!(
+            super::measure_lines(&[&scan, &speech], false, clock),
+            ["12s"]
+        );
+        // The workbench says the steps above the bar.
+        assert!(super::measure_lines(&[&scan, &speech], true, clock).is_empty());
+        assert_eq!(super::measure_lines(&[&scan], false, clock), ["12s"]);
+    }
 
     #[gpui::test]
     fn queue_item_keys_track_identity_not_content(cx: &mut gpui::TestAppContext) {

@@ -8,6 +8,10 @@
 //! unfinished task writes nothing until it runs, and the engine flattens its note
 //! first then, so it needs no wait.
 //!
+//! An older app run after the migration saves into a flat note as versions again. Its
+//! version, when newer than the flat note, becomes the note at the next opening; the
+//! flat note is kept beside it in the note's copies, which the library reports.
+//!
 //! The task records follow from what is on disk, so a crash at any point is finished
 //! by the next opening: a task whose note is now the flat note points at it, and one
 //! whose version was deleted is marked replaced (`workspace::probe_artifact`). Reading
@@ -30,6 +34,9 @@ pub struct Migration {
     pub flattened: usize,
     /// Versions deleted with them.
     pub removed_versions: usize,
+    /// Of those, flat notes an older app saved a later version into: that version
+    /// is the note now, and the flat note is kept beside it.
+    pub resaved: usize,
     /// Courses left as versions while a worker from an earlier session writes them.
     pub deferred: Vec<PathBuf>,
     pub issues: Vec<String>,
@@ -91,7 +98,8 @@ pub(crate) fn migrate_library(location: &LibraryLocation, busy: &[PathBuf]) -> M
         if !entry.file_type().is_dir() || entry.depth() == 0 {
             continue;
         }
-        if artifact::is_legacy(&dir) {
+        // A flat note an older app saved a newer version into is flattened again.
+        if artifact::needs_flatten(&dir) {
             walk.skip_current_dir();
             if busy.iter().any(|note| same(note, &dir)) {
                 migration.deferred.push(dir);
@@ -105,10 +113,15 @@ pub(crate) fn migrate_library(location: &LibraryLocation, busy: &[PathBuf]) -> M
                         .count()
                 })
                 .unwrap_or(0);
+            let resaved = !artifact::is_legacy(&dir);
             match artifact::flatten_legacy(&dir) {
                 Ok(Some(manifest)) => {
                     migration.flattened += 1;
-                    migration.removed_versions += versions.saturating_sub(1);
+                    if resaved {
+                        migration.resaved += 1;
+                    } else {
+                        migration.removed_versions += versions.saturating_sub(1);
+                    }
                     let kept = if manifest.version_id.is_empty() {
                         manifest.task_id.clone()
                     } else {
@@ -185,6 +198,21 @@ pub fn rekey_positions(
         }
     }
     changed
+}
+
+/// Told once when an older app had saved notes again after the migration.
+pub fn resaved_notice(count: usize) -> String {
+    if count == 1 {
+        c2m_i18n::tr!(
+            "旧版应用之后又保存过 1 份笔记：它保存的较新结果现在是这份笔记，之前的笔记作为副本保留在旁边。"
+        )
+        .to_owned()
+    } else {
+        c2m_i18n::tr!(
+            "旧版应用之后又保存过 {} 份笔记：它们保存的较新结果现在是这些笔记，之前的笔记作为副本保留在旁边。",
+            count
+        )
+    }
 }
 
 /// The notice shown once, when this app first removed older versions.

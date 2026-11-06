@@ -225,30 +225,32 @@ pub fn link_confirmation(link: &storage::LibraryLink, found: &storage::NotesFoun
     if found.names.is_empty() {
         detail.push_str(c2m_i18n::tr!("未读到笔记。\n"));
     } else {
-        detail.push_str(&c2m_i18n::tr!(
-            "目前可读取 {} 份笔记：\n{}",
-            found.names.len(),
-            found
-                .names
-                .iter()
-                .take(5)
-                .map(|name| format!("• {name}"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        ));
-        if found.names.len() > 5 {
-            detail.push_str(&c2m_i18n::tr!(
-                "\n以及另外 {} 份笔记。",
-                found.names.len() - 5
-            ));
+        let names = found
+            .names
+            .iter()
+            .take(5)
+            .map(|name| format!("• {name}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // English counts its noun; the catalog keeps the singular apart.
+        detail.push_str(&if found.names.len() == 1 {
+            c2m_i18n::tr!("目前可读取 1 份笔记：\n{}", names)
+        } else {
+            c2m_i18n::tr!("目前可读取 {} 份笔记：\n{}", found.names.len(), names)
+        });
+        match found.names.len() {
+            6 => detail.push_str(c2m_i18n::tr!("\n以及另外 1 份笔记。")),
+            more if more > 6 => {
+                detail.push_str(&c2m_i18n::tr!("\n以及另外 {} 份笔记。", more - 5));
+            }
+            _ => {}
         }
         detail.push('\n');
     }
-    if found.unreadable > 0 {
-        detail.push_str(&c2m_i18n::tr!(
-            "另有 {} 份笔记无法读取。\n",
-            found.unreadable
-        ));
+    match found.unreadable {
+        0 => {}
+        1 => detail.push_str(c2m_i18n::tr!("另有 1 份笔记无法读取。\n")),
+        unreadable => detail.push_str(&c2m_i18n::tr!("另有 {} 份笔记无法读取。\n", unreadable)),
     }
     detail.trim_end().to_owned()
 }

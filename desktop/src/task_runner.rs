@@ -377,14 +377,19 @@ impl Desktop {
             self.import.selected_candidates.clear();
             let created = total - duplicates;
             let mut parts = Vec::new();
-            if created > 0 {
-                parts.push(course2md::tr!("已把 {} 个视频加入队列", created));
+            // English counts its noun; the catalog keeps the singular apart.
+            match created {
+                0 => {}
+                1 => parts.push(course2md::tr!("已把 1 个视频加入队列").to_owned()),
+                created => parts.push(course2md::tr!("已把 {} 个视频加入队列", created)),
             }
-            if duplicates > 0 {
-                parts.push(course2md::tr!(
+            match duplicates {
+                0 => {}
+                1 => parts.push(course2md::tr!("1 个已有进行中的任务，未重复加入").to_owned()),
+                duplicates => parts.push(course2md::tr!(
                     "{} 个已有进行中的任务，未重复加入",
                     duplicates
-                ));
+                )),
             }
             if skipped > 0 {
                 parts.push(course2md::tr!("{} 个无法识别，已跳过", skipped));
