@@ -1826,7 +1826,7 @@ impl Desktop {
                     .update(cx, |exports, cx| exports.feedback(course, cx)),
             )
             .on_drag(note_drag(course), |drag, _, _, cx| cx.new(|_| drag.clone()))
-            .map(|card| self.reorderable(card, index, cx))
+            .map(|card| self.reorderable(card, index, [true; 4], cx))
             .into_any_element()
     }
 
@@ -1919,7 +1919,7 @@ impl Desktop {
             .child(row)
             .children(details)
             .on_drag(note_drag(course), |drag, _, _, cx| cx.new(|_| drag.clone()))
-            .when(!home, |row| self.reorderable(row, index, cx))
+            .when(!home, |row| self.reorderable(row, index, outer, cx))
             .into_any_element()
     }
 
@@ -2494,9 +2494,7 @@ impl RenderOnce for SortMenu {
         ui::menu(
             id,
             trigger,
-            MaterialMenu::new("library-sort-items")
-                .width(COMMAND_MENU_WIDTH * 0.75)
-                .items(items),
+            MaterialMenu::new("library-sort-items").items(items),
             window,
             cx,
         )
@@ -2934,18 +2932,37 @@ impl Desktop {
     }
 
     /// Lets notes dropped on a library note take its place, and Option with an arrow
-    /// move it; the target dims like the kit's reorderable chips while a note is over it.
+    /// move it. While a note is dragged over it, it shows the kit's drag state layer
+    /// in the primary role, as the kit's drop targets do, inside its own `corners`.
     fn reorderable(
         &self,
         note: Stateful<Div>,
         index: usize,
+        corners: OuterCorners,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         if self.page != Page::Library || !self.can_reorder(cx) {
             return note;
         }
+        let layer = gpui_kit_material::tokens::state::layer(
+            gpui::Rgba {
+                r: 0.,
+                g: 0.,
+                b: 0.,
+                a: 0.,
+            },
+            color(ColorRole::PRIMARY),
+            gpui_kit_material::tokens::state::DRAG,
+        );
         note.on_key_down(self.note_move_keys(index, cx))
-            .drag_over::<NoteDrag>(|style, _, _, _| style.opacity(0.6))
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .when(corners[0], |overlay| overlay.rounded_t(TILE_RADIUS))
+                    .when(corners[2], |overlay| overlay.rounded_b(TILE_RADIUS))
+                    .drag_over::<NoteDrag>(move |style, _, _, _| style.bg(layer)),
+            )
             .on_drop(cx.listener(move |this, drag: &NoteDrag, _, cx| {
                 this.drop_note_on(&drag.storage.clone(), index, cx)
             }))
