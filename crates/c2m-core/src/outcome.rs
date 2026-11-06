@@ -300,7 +300,11 @@ fn fill(template: &str, values: &[&str]) -> String {
     out
 }
 
-/// Another task is working on the note; this one stopped before any work.
+/// Another writer has the note: another task, and this one stopped before any
+/// work; or an older app saving into it past the wait, which a publication can
+/// meet after the task's work. That work stays in the task's work folder, and
+/// running the same task again takes its finished requests from their receipts
+/// instead of sending them again.
 #[derive(Debug)]
 pub struct NoteBusy(pub String);
 

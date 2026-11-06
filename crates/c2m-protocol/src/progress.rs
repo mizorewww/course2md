@@ -190,7 +190,9 @@ pub enum ErrorCode {
     Uncertain,
     /// The result did less than the saved note in a part it tried; the note was kept.
     NoteKept,
-    /// Another task is working on the same note; nothing was done.
+    /// Another writer has the note. Another task: nothing was done. An older app
+    /// saving into it, met when publishing: the task's work is kept in its work
+    /// folder, and running the task again reuses it. The note is unchanged.
     NoteBusy,
     /// A replacement of the note stopped and cannot be finished on its own;
     /// `path` names the folder to look at. Nothing was changed.
