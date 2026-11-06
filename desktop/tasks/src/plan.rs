@@ -296,7 +296,7 @@ pub(crate) fn validate_plan_config(
 /// scan can include slow locations, so its old manifest cannot be the only
 /// source of the card while the note just replaced is already readable.
 pub fn update_published_course(
-    courses: &mut Vec<Rc<Course>>,
+    library: &mut LibraryState,
     done: &Done,
     manifest: &c2m_artifact::artifact::Manifest,
     thumbnail: Option<PathBuf>,
@@ -310,7 +310,11 @@ pub fn update_published_course(
         manifest: Some(manifest.clone()),
         warning: None,
     };
-    if let Some(previous) = courses.iter().find(|previous| previous.dir == course.dir) {
+    if let Some(previous) = library
+        .courses
+        .iter()
+        .find(|previous| previous.dir == course.dir)
+    {
         // A user-facing library alias belongs to the note, whichever task wrote it.
         if previous
             .manifest
@@ -320,9 +324,12 @@ pub fn update_published_course(
             course.title = previous.title.clone();
         }
     }
+    let courses = &mut library.courses;
     courses.retain(|previous| previous.dir != course.dir);
     courses.push(Rc::new(course));
     courses.sort_by_key(|course| std::cmp::Reverse(course.modified));
+    // The notes' positions changed: what was sorted from them no longer holds.
+    library.touch();
 }
 
 /// The local engine to suggest for this machine.
@@ -805,10 +812,12 @@ pub mod tests {
         };
         let mut other_library = old.clone();
         other_library.dir = "/other-library/course".into();
-        let mut courses = vec![
+        let mut library = desktop_store::library::LibraryState::new("library".into());
+        library.courses = vec![
             std::rc::Rc::new(old.clone()),
             std::rc::Rc::new(other_library.clone()),
         ];
+        let revision = library.revision;
         let mut repaired = old_manifest;
         repaired.task_id = "repair".into();
         repaired.created_at_ms = 2_000;
@@ -820,11 +829,14 @@ pub mod tests {
             ..Default::default()
         };
         super::update_published_course(
-            &mut courses,
+            &mut library,
             &done,
             &repaired,
             Some(PathBuf::from("/new-cover.jpg")),
         );
+        // A view that sorted the notes sorts them again.
+        assert_ne!(library.revision, revision);
+        let courses = &library.courses;
         assert_eq!(courses.len(), 2);
         let current = &courses[0];
         assert_eq!(current.dir, done.out_dir);

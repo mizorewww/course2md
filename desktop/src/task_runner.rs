@@ -1057,7 +1057,7 @@ impl Desktop {
                             if let Some(manifest) = &manifest {
                                 this.records.change(cx, |records, _| {
                                     update_published_course(
-                                        &mut records.library.courses,
+                                        &mut records.library,
                                         &done,
                                         manifest,
                                         thumbnail,
