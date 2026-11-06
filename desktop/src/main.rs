@@ -1345,6 +1345,10 @@ fn main() {
             )),
             (None, None) => WindowBounds::centered(size(px(1140.), px(820.)), cx),
         };
+        // The old macOS redraw fallback (drawing synchronously when the display link
+        // stopped ticking) was not ported: the kit restarts the link on occlusion and
+        // screen changes, and nothing here needs frames while occluded. Port it only if
+        // a frozen window is ever seen.
         gpui_kit::open_window(
             WindowOptions {
                 window_bounds: Some(window_bounds),
