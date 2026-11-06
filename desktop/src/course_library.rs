@@ -2802,7 +2802,7 @@ impl Desktop {
 
     /// Reads how every note sorts, once, off the UI thread; until then its sort menu
     /// waits.
-    fn load_all_notes_order(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn load_all_notes_order(&mut self, cx: &mut Context<Self>) {
         if self.library_ui.all_notes.is_some() || self.library_ui.all_notes_loading {
             return;
         }
@@ -2850,7 +2850,6 @@ impl Desktop {
     /// written down, then sorts not yet saved. A change written before the scan
     /// began is in what it read, and is let go. Called after every scan.
     pub(crate) fn reapply_pending_orders(&mut self, cx: &mut Context<Self>) {
-        self.load_all_notes_order(cx);
         let generation = self.library(cx).generation;
         self.library_ui
             .order_edits

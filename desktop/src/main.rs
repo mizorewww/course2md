@@ -508,6 +508,7 @@ impl Desktop {
         std::thread::spawn(course2md::auth::youtube::remove_stale_checks);
         cx.set_reduce_motion(this.desktop_settings.reduce_motion);
         this.refresh_environment(cx);
+        this.load_all_notes_order(cx);
         this.refresh_library(cx);
         this.poll_workspace(cx);
         this.forget_credentials(abandoned_keys);
