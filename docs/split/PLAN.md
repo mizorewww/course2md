@@ -170,9 +170,10 @@ directions are in `docs/CRATES.md`.
 `REDUCTION.md` is the execution guide for what each lever removes. Each wave ends green and
 pushed; agents work on branches in sibling worktrees, and the coordinator merges.
 
-Done: P0 setup, P1 deps, P2 bugs, docs rewrite, waves 1 to 3, acceptance rounds 1 and 2 with their fixes, the
-thin wrapper up to decision 9's stopping point. Now: wave 4, acceptance round 3 against `e31032b1`
-(`ACCEPTANCE.md`); `STATUS.md` has the state.
+Done: P0 setup, P1 deps, P2 bugs, docs rewrite, waves 1 to 3, acceptance rounds 1 to 3 with their fixes, the
+thin wrapper up to decision 9's stopping point. **Paused** by the owner after 3.0.0-alpha.3: no further split or
+reduction work; `STATUS.md` records where it stopped. What remains is the final acceptance against the current
+structure, after which this directory is deleted.
 
 **Wave 1, in parallel:**
 - `split/engine`: lever 1, engine cleanup, plus the engine wheels.
