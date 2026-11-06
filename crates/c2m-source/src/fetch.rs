@@ -67,13 +67,16 @@ pub struct OnlineVideo {
     pub thumbnail: Option<String>,
     pub original_language: Option<String>,
     pub subtitles: crate::subtitle::SubtitleEvidence,
+    /// When the site says the video was published, as `YYYY-MM-DD`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum OnlineProbe {
     Video {
-        video: OnlineVideo,
+        video: Box<OnlineVideo>,
     },
     Collection {
         title: String,
@@ -103,9 +106,44 @@ struct ExtractorInfo {
     ie_key: Option<String>,
     thumbnail: Option<String>,
     language: Option<String>,
+    /// `YYYYMMDD`, and the instant as seconds since the epoch.
+    release_date: Option<String>,
+    upload_date: Option<String>,
+    release_timestamp: Option<f64>,
+    timestamp: Option<f64>,
     subtitles: Option<OrderedTracks>,
     automatic_captions: Option<OrderedTracks>,
     entries: Option<Vec<Option<ExtractorInfo>>>,
+}
+
+/// When the video was published, as `YYYY-MM-DD`: the site's release date, else
+/// its upload date, else the UTC day of either instant.
+fn published_date(info: &ExtractorInfo) -> Option<String> {
+    let day = |date: &Option<String>| {
+        let date = date.as_deref()?.trim();
+        (date.len() == 8 && date.bytes().all(|byte| byte.is_ascii_digit()))
+            .then(|| format!("{}-{}-{}", &date[..4], &date[4..6], &date[6..]))
+    };
+    let instant = |seconds: Option<f64>| {
+        let days = (seconds.filter(|seconds| seconds.is_finite())? / 86_400.).floor() as i64;
+        // Days since 1970-01-01 to a civil date (Howard Hinnant's algorithm).
+        let z = days + 719_468;
+        let era = z.div_euclid(146_097);
+        let doe = z.rem_euclid(146_097);
+        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let d = doy - (153 * mp + 2) / 5 + 1;
+        let m = if mp < 10 { mp + 3 } else { mp - 9 };
+        let y = yoe + era * 400 + i64::from(m <= 2);
+        (0..=9999)
+            .contains(&y)
+            .then(|| format!("{y:04}-{m:02}-{d:02}"))
+    };
+    day(&info.release_date)
+        .or_else(|| day(&info.upload_date))
+        .or_else(|| instant(info.release_timestamp))
+        .or_else(|| instant(info.timestamp))
 }
 
 fn extractor_name(info: &ExtractorInfo) -> &str {
@@ -239,8 +277,9 @@ pub fn parse_online_probe(bytes: &[u8], input: &str, diagnostics: &str) -> Resul
         input
     };
     let subtitles = subtitle_evidence(&info, &identity, diagnostics);
+    let published = published_date(&info);
     Ok(OnlineProbe::Video {
-        video: OnlineVideo {
+        video: Box::new(OnlineVideo {
             identity,
             meta: VideoMeta {
                 title: info
@@ -259,7 +298,8 @@ pub fn parse_online_probe(bytes: &[u8], input: &str, diagnostics: &str) -> Resul
             thumbnail: info.thumbnail,
             original_language: info.language,
             subtitles,
-        },
+            published,
+        }),
     })
 }
 
@@ -625,7 +665,7 @@ pub fn local_content_identity(
 /// Probe once and return the single video; collection/unresolved links are errors.
 pub async fn probe_video(url: &str, control: &crate::dispatch::TaskControl) -> Result<OnlineVideo> {
     match probe_online(url, control).await? {
-        OnlineProbe::Video { video } => Ok(video),
+        OnlineProbe::Video { video } => Ok(*video),
         OnlineProbe::Collection { .. } => {
             anyhow::bail!(tr!(
                 "这个链接包含多个视频，请选择具体单集后生成笔记 / This link contains multiple videos; choose a specific episode before generating notes"
@@ -1559,6 +1599,44 @@ mod tests {
         assert_eq!(candidates[0].identity, Some(plain.identity));
     }
 
+    /// A probe keeps when the video was published: the release date, the upload
+    /// date, or the day of the site's timestamp, in that order.
+    #[test]
+    fn a_probe_keeps_the_publish_date() {
+        let published = |extra: &str| {
+            let json = format!(
+                r#"{{"id":"abc123","title":"Lecture 3","extractor":"youtube","webpage_url":"https://www.youtube.com/watch?v=abc123"{extra}}}"#
+            );
+            let OnlineProbe::Video { video } = parse_online_probe(
+                json.as_bytes(),
+                "https://www.youtube.com/watch?v=abc123",
+                "",
+            )
+            .unwrap() else {
+                panic!("expected video")
+            };
+            video.published
+        };
+        assert_eq!(published(""), None);
+        assert_eq!(
+            published(r#","upload_date":"20240229","release_date":"20240301""#).as_deref(),
+            Some("2024-03-01")
+        );
+        assert_eq!(
+            published(r#","upload_date":"20231105""#).as_deref(),
+            Some("2023-11-05")
+        );
+        // 2021-01-01T00:00:00Z, and a malformed date that falls through to it.
+        assert_eq!(
+            published(r#","upload_date":"2021","timestamp":1609459200"#).as_deref(),
+            Some("2021-01-01")
+        );
+        assert_eq!(
+            published(r#","release_timestamp":951782400.5"#).as_deref(),
+            Some("2000-02-29")
+        );
+    }
+
     #[test]
     fn candidate_identity_prefers_probe_and_derives_bilibili_parts() {
         let probed = SourceCandidate {
@@ -1693,7 +1771,8 @@ mod tests {
         assert_eq!(tracks[2].kind, crate::subtitle::SubtitleKind::Automatic);
         assert_eq!(
             video,
-            serde_json::from_str::<OnlineVideo>(&serde_json::to_string(&video).unwrap()).unwrap()
+            serde_json::from_str::<Box<OnlineVideo>>(&serde_json::to_string(&video).unwrap())
+                .unwrap()
         );
     }
 

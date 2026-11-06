@@ -57,6 +57,9 @@ pub struct Source {
     pub subtitle_request: Option<c2m_source::subtitle::SubtitleTrack>,
     #[serde(default)]
     pub subtitle_read_error: Option<c2m_source::subtitle::SubtitleReadError>,
+    /// When an online video was published, as `YYYY-MM-DD`, when its site says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published: Option<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct LibraryLocation {
