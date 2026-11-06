@@ -202,7 +202,6 @@ pub fn rekey_positions(
     changed
 }
 
-/// The notice shown once, when this app first removed older versions.
 /// Told once when an older app had saved notes again after the migration.
 pub fn resaved_notice(count: usize) -> String {
     if count == 1 {
@@ -218,6 +217,7 @@ pub fn resaved_notice(count: usize) -> String {
     }
 }
 
+/// The notice shown once, when this app first removed older versions.
 pub fn removed_versions_notice() -> &'static str {
     c2m_i18n::tr!("笔记的旧版本已删除：每个视频现在只保留一份笔记，重新生成或补做会直接更新它。")
 }
