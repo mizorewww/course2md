@@ -48,7 +48,7 @@ Test-only environment variables:
 
 | Variable | Effect |
 | --- | --- |
-| `COURSE2MD_VALIDATION_WINDOW`, `_PANIC_LOG`, `_OPEN_NOTE`, `_READER` | Debug builds: initial window size, panic file, a note to open on launch and its reader panels. See `src/main.rs` and `src/a11y.rs`. |
+| `COURSE2MD_VALIDATION_WINDOW`, `_PANIC_LOG`, `_OPEN_NOTE`, `_READER` | Debug builds: initial window size, panic file, a note to open on launch and its reader panels. See `src/main.rs` and `src/validation.rs`. |
 | `COURSE2MD_CAPTURE` | `--features capture`: render pages to PNG files (`page=path.png;…`) and quit, with no screen-recording permission. See `src/capture.rs`. |
 | `COURSE2MD_TOOL_PATH` | Search path for ffmpeg, yt-dlp and other tools, replacing the bundled directory and PATH. |
 | `COURSE2MD_PERFORMANCE_LOG`, `COURSE2MD_FRAME_TRACE` | `--features performance`: frame and input-latency histograms, GPUI's frame trace. See `src/performance.rs`. |

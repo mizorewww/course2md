@@ -3,7 +3,6 @@
 // the engine behind that name, as gpui-kit-material does.
 extern crate gpui_kit as gpui;
 
-mod a11y;
 mod about;
 mod account_ui;
 mod appearance_ui;
@@ -27,6 +26,7 @@ mod settings_ui;
 mod storage_ui;
 mod task_runner;
 mod task_ui;
+mod validation;
 mod views;
 mod youtube_ui;
 
@@ -1305,7 +1305,7 @@ pub(crate) fn secondary_binding<A: gpui::Action>(
 }
 
 fn main() {
-    a11y::init_validation_diagnostics();
+    validation::init_validation_diagnostics();
     let app = gpui_kit::application().with_assets(symbols::Assets);
     app.on_reopen(|cx| {
         cx.activate(true);
