@@ -101,6 +101,51 @@ the split stops there for now.
 A change that needs an edge against these directions usually means a type sits in the wrong
 crate: move it rather than adding the edge. Cargo rejects cycles; the rest is kept by review.
 
+## Rules
+
+- Libraries meant to be published return typed errors and events and carry no `tr!`; only the
+  app translates.
+- No new patches to the GPUI engine, and no pull requests to Longbridge or Zed. The upstream ends
+  at `gpui-kit-material`.
+- Nothing is added to the kit's `vendor/` except by a reviewed pull request to
+  `gpui-kit-material`.
+
+## Decisions
+
+Each holds until the condition after it.
+
+- **The library sidebar is `folder_tree.rs`, not the kit's `Tree`.** `Tree` owns expansion and
+  toggles a folder on any click; the sidebar selects on click, toggles by its arrow, mixes row
+  heights and draws its own drag, drop, menu and counts, so `Tree` would save a dozen lines and
+  change what a click does. Reopen if the kit gains a Material tree with a separate disclosure
+  target.
+- **The catalog test keeps its own scanner, without `syn`.** The test still needs its own code
+  to join multi-line `///` help into clap's key and to read `about`/`help` attributes. Reopen if
+  the scanner misreads a literal.
+- **Credentials use the Keychain through `security-framework` on macOS and `keyring`
+  elsewhere.** Moving macOS to `keyring` would lose the Keychain status code every error shows,
+  and reading items a signed 2.0.1 build wrote cannot be tested here. Reopen when a signed build
+  can test it.
+- **No `toml_edit`.** `config.toml` is rewritten from its struct, with the previous file kept as
+  `config.toml.bak`; keeping comments is not a feature anyone asked for. Reopen if one is.
+- **No `apple-asr-sys` crate.** Publishing the Apple speech module would only move it to another
+  repository; it is already isolated in `c2m-asr`. Reopen if publishing it would delete code here
+  rather than move it.
+- **The screenshot cache and viewer (`reader_images.rs`) and the form primitives (`desktop-ui`)
+  stay in this repository.** Publishing either would be relocation, not deletion. Reopen if a
+  second app needs a sized, budgeted image cache.
+- **Speech recognition keeps its backends rather than moving to sherpa-onnx.** sherpa-onnx has no
+  Metal or MLX path and ran Qwen3 far too slowly on Apple. Reopen only for an NPU-only swap,
+  after a test on real NPU hardware.
+- **No SQLite.** Records stay JSON and JSONL, so tasks and folders travel with a library. Reopen
+  if a library no longer has to be portable.
+- **Libraries checked and rejected:** async-openai and rig (the ledger hashes the raw body; no
+  Codex), reqwest (an async rewrite for no saving), moka (no pending or failed states),
+  rust-ffmpeg, config-rs (a small macro does the layering), redb, sqlx and backon. Reopen one if
+  what it lacked is added.
+- **Never published:** the Bilibili login (`c2m-source`'s `auth`, an unofficial API), the Codex
+  login (`c2m-ai`'s `login/codex`, which reuses Codex CLI's client id) and `c2m-i18n`.
+
 ## Logs
 
 Each crate logs under its own target (`c2m_asr`, `c2m_source`, ...). `RUST_LOG=course2md=debug`
