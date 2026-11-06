@@ -3,7 +3,7 @@
 use crate::{
     locations::LocationCheck,
     notes::{self, Course},
-    organize, workspace,
+    order, organize, workspace,
 };
 use std::{collections::BTreeMap, path::PathBuf, rc::Rc};
 
@@ -23,6 +23,14 @@ impl FolderFilter {
         match self {
             Self::Folder(id) => Some(id),
             _ => None,
+        }
+    }
+    /// The place whose sort this view uses.
+    pub fn place(self) -> order::Place {
+        match self {
+            Self::All => order::Place::All,
+            Self::Unfiled => order::Place::Unfiled,
+            Self::Folder(id) => order::Place::Folder(id),
         }
     }
 }
@@ -54,6 +62,8 @@ pub struct LibraryIssue {
 pub struct NoteSource {
     pub author: String,
     pub duration: Option<f64>,
+    /// When the video was published, as `YYYY-MM-DD`.
+    pub published: Option<String>,
     pub local: bool,
     /// The video page an online note came from.
     pub link: Option<String>,
@@ -71,6 +81,8 @@ pub struct LibraryViewCache {
     pub title_recovery: BTreeMap<PathBuf, organize::Recovery>,
     pub aliases: BTreeMap<PathBuf, BTreeMap<PathBuf, String>>,
     pub alias_issues: Vec<LibraryIssue>,
+    /// Each library's sorts and hand-made orders, by its root.
+    pub orders: BTreeMap<PathBuf, order::Order>,
 }
 
 impl LibraryViewCache {
@@ -100,6 +112,18 @@ impl LibraryViewCache {
             }),
         }
         if let Some(scan) = scan {
+            let seen: Vec<(String, u64)> = scan
+                .courses
+                .iter()
+                .filter_map(|course| {
+                    let manifest = course.manifest.as_ref()?;
+                    Some((manifest.course_id.clone(), manifest.created_at_ms))
+                })
+                .collect();
+            cache.orders.insert(
+                location.root.clone(),
+                order::Order::observe(&location.root, &seen, scan.issues.is_empty()),
+            );
             for course in &scan.courses {
                 let storage = &course.dir;
                 let Ok(relative) = organize::relative_key(&location.root, storage) else {
@@ -135,6 +159,7 @@ impl LibraryViewCache {
         self.title_recovery.extend(other.title_recovery);
         self.aliases.extend(other.aliases);
         self.alias_issues.extend(other.alias_issues);
+        self.orders.extend(other.orders);
     }
 }
 
@@ -376,6 +401,7 @@ impl LibraryState {
                         author: source.author.clone(),
                         duration: (source.duration.is_finite() && source.duration > 0.)
                             .then_some(source.duration),
+                        published: source.published.clone(),
                         local: !source.online,
                         link: source.online.then(|| source.input.clone()),
                     },
