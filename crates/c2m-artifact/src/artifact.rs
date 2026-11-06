@@ -1782,7 +1782,9 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
             .and_then(|()| sync_dir(&swap));
         if let Err(error) = placed {
             // Nothing was replaced: the note still holds the flat note, and a retry
-            // makes the copy again.
+            // makes the copy again. The lock open in the staged note goes first:
+            // Windows cannot delete a file that is open.
+            drop(flat_lock);
             if !simulated_crash(&error) {
                 let _ = remove_tree(&kept);
                 let _ = remove_tree(&kept_staging);

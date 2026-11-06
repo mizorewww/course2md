@@ -2004,6 +2004,8 @@ fn a_copy_that_cannot_be_synced_is_not_left_behind() {
         assert!(flatten_legacy(&course).is_err());
         assert!(needs_flatten(&course));
         assert!(kept_copies(&course).is_empty());
+        // Nothing staged is left either.
+        assert!(!swap_dir(&course).unwrap().join("new-flatten").exists());
     }
 }
 
