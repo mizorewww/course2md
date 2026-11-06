@@ -1047,7 +1047,9 @@ impl Desktop {
                             material_button("start-batch-conversion", ButtonVariant::Filled)
                                 .ml_auto()
                                 .icon(symbols::arrow_forward())
-                                .child(if selected_count > 0 {
+                                .child(if selected_count == 1 {
+                                    course2md::tr!("整理选中的 1 个视频").to_owned()
+                                } else if selected_count > 0 {
                                     course2md::tr!("整理选中的 {} 个视频", selected_count)
                                 } else {
                                     course2md::tr!("整理选中的视频").to_owned()

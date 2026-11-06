@@ -18,6 +18,9 @@ impl OllamaUi {
             return Some(c2m_i18n::tr!("正在检查本机的 Ollama…").into());
         }
         match &self.status {
+            Some(Ok((host, models))) if models.len() == 1 => {
+                Some(c2m_i18n::tr!("已在 {} 检测到 1 个模型", host))
+            }
             Some(Ok((host, models))) => Some(c2m_i18n::tr!(
                 "已在 {} 检测到 {} 个模型",
                 host,

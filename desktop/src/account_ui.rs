@@ -570,11 +570,19 @@ impl AccountsView {
             QrDialogState::Generating => (course2md::tr!("正在获取二维码").into(), String::new()),
             QrDialogState::Waiting(seconds) => (
                 course2md::tr!("请使用 Bilibili App 扫码").into(),
-                course2md::tr!("二维码约 {} 秒后过期", seconds),
+                if *seconds == 1 {
+                    course2md::tr!("二维码约 1 秒后过期").into()
+                } else {
+                    course2md::tr!("二维码约 {} 秒后过期", seconds)
+                },
             ),
             QrDialogState::Confirming(seconds) => (
                 course2md::tr!("已扫码，请在手机上确认登录").into(),
-                course2md::tr!("请在约 {} 秒内确认", seconds),
+                if *seconds == 1 {
+                    course2md::tr!("请在约 1 秒内确认").into()
+                } else {
+                    course2md::tr!("请在约 {} 秒内确认", seconds)
+                },
             ),
             QrDialogState::Expired => (course2md::tr!("二维码已过期").into(), String::new()),
             QrDialogState::Error(error) => (course2md::tr!("登录未完成").into(), error.clone()),

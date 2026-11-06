@@ -508,6 +508,30 @@ pub struct FileLock {
     file: std::fs::File,
 }
 
+impl FileLock {
+    /// Whether `path` still names the locked file. A lock file removed or
+    /// replaced after it was opened locks nothing anyone else will open.
+    pub fn is_at(&self, path: &Path) -> bool {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            match (self.file.metadata(), std::fs::symlink_metadata(path)) {
+                (Ok(held), Ok(named)) => held.dev() == named.dev() && held.ino() == named.ino(),
+                _ => false,
+            }
+        }
+        // Windows offers no stable file identity to compare here. A removed file
+        // that is open either stays pending deletion, or (POSIX delete semantics,
+        // recent NTFS) frees its name at once. Whether the name still exists
+        // catches a removal; a new file made at the name since is not told apart.
+        // The app itself no longer removes a lock it may have to take.
+        #[cfg(not(unix))]
+        {
+            path.exists()
+        }
+    }
+}
+
 impl Drop for FileLock {
     fn drop(&mut self) {
         // Unix flock locks belong to the open file description. A concurrently
@@ -527,14 +551,22 @@ fn open_lock_file(path: &Path) -> Result<std::fs::File> {
 }
 
 /// [`lock_file`] that tells a lock someone holds (`Ok(None)`) from a lock file
-/// that could not be opened or locked (`Err`).
+/// that could not be opened or locked (`Err`). A lock file that exists but may
+/// not be written (left read-only by a copy or another user's app) is locked
+/// through a read-only handle: the lock does not need to write.
 pub fn try_lock_file(path: &Path) -> std::io::Result<Option<FileLock>> {
-    let file = std::fs::OpenOptions::new()
+    let opened = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .open(path)?;
+        .open(path);
+    let file = match opened {
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            std::fs::File::open(path).map_err(|_| error)?
+        }
+        opened => opened?,
+    };
     match file.try_lock() {
         Ok(()) => Ok(Some(FileLock { file })),
         Err(std::fs::TryLockError::WouldBlock) => Ok(None),
@@ -608,6 +640,22 @@ pub fn random_b64url(bytes: usize) -> anyhow::Result<String> {
 
 #[cfg(test)]
 mod tests {
+    /// A lock tells whether its path still names the file it locked.
+    #[cfg(unix)]
+    #[test]
+    fn a_lock_knows_when_its_file_was_removed_or_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".publish.lock");
+        let lock = super::try_lock_file(&path).unwrap().unwrap();
+        assert!(lock.is_at(&path));
+        std::fs::remove_file(&path).unwrap();
+        assert!(!lock.is_at(&path));
+        std::fs::write(&path, b"").unwrap();
+        assert!(!lock.is_at(&path));
+        let again = super::try_lock_file(&path).unwrap().unwrap();
+        assert!(again.is_at(&path));
+    }
+
     /// A proxy from the environment carries remote services, never loopback ones, and
     /// leaves out what NO_PROXY lists.
     #[test]

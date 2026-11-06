@@ -1807,7 +1807,11 @@ impl Desktop {
                 symbols::check_circle(),
                 Tint::Green,
                 course2md::tr!("一切正常"),
-                course2md::tr!("{} 项检查全部通过", checked),
+                if checked == 1 {
+                    course2md::tr!("1 项检查已通过").to_owned()
+                } else {
+                    course2md::tr!("{} 项检查全部通过", checked)
+                },
             )
         } else {
             (

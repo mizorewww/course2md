@@ -222,7 +222,11 @@ pub fn run() -> Result<()> {
     }
     anyhow::ensure!(
         failures == 0,
-        tr!("发现 {} 项必需依赖或配置问题；请按上方提示修复", failures)
+        if failures == 1 {
+            tr!("发现 1 项必需依赖或配置问题；请按上方提示修复").to_owned()
+        } else {
+            tr!("发现 {} 项必需依赖或配置问题；请按上方提示修复", failures)
+        }
     );
     println_tr!(
         "基础检查通过；可选服务未进行联网测试 / Basic checks passed; optional services were not tested online."

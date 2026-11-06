@@ -505,7 +505,7 @@ pub fn publish(
     let note = &resolve_note(&target.course_dir)?;
     let _lock = lock_note(note)?;
     recover_locked(note)?;
-    flatten_tolerant(note)?;
+    let older_app = flatten_and_hold(note)?;
     salvage_work(note, &note.join(".work"))?;
     let old = match note_manifest(note) {
         Ok(manifest) => manifest,
@@ -631,7 +631,15 @@ pub fn publish(
             })
         })?;
         let (kept_edits, kept_exports) = if note.is_dir() {
-            carry_over(note, old.as_ref(), &staging)?
+            // The lock a flatten or an older app left in the note is not the
+            // person's file.
+            carry_over(
+                note,
+                old.as_ref(),
+                &staging,
+                &|relative| relative == LEGACY_PUBLISH_LOCK,
+                true,
+            )?
         } else {
             Default::default()
         };
@@ -684,8 +692,46 @@ pub fn publish(
             return Err(disk_full(error));
         }
     };
+    // Windows refuses to rename a folder with a file open inside it. In the gap
+    // between letting go and the rename an older app may take the lock (it does
+    // not wait for it): it then holds the lock file open in the note, so the
+    // rename is refused and the note is unchanged, and the task says the note is
+    // in use. Its whole save, a version written and its pointer moved, cannot
+    // fit in that gap of one call, so it is never swapped away finished.
+    #[cfg(windows)]
+    drop(older_app);
     swap_in(note, &staging, &target.task_id, &stamp)?;
+    #[cfg(not(windows))]
+    drop(older_app);
     Ok(publication)
+}
+
+/// Flattens the note for a publication, and takes the lock an older app holds
+/// while it saves into the note, when it has one: a save under way finishes
+/// first, and none starts until the new note is in place. Returns that lock, to
+/// hold across the swap. A version the older app saved meanwhile is flattened
+/// before the lock is held.
+fn flatten_and_hold(note: &Path) -> Result<Option<crate::runtime::FileLock>> {
+    for _ in 0..3 {
+        flatten_tolerant(note)?;
+        // A lock left in the note is taken where it is, never removed and made
+        // again: an older app that opened it but has not locked it yet would lock
+        // a file no one else opens. The new note does not carry it.
+        if note.join(LEGACY_PUBLISH_LOCK).symlink_metadata().is_err() {
+            return Ok(None);
+        }
+        let lock = take_legacy_lock(note)?;
+        if !resaved_by_older_app(note) {
+            return Ok(Some(lock));
+        }
+    }
+    Err(crate::outcome::NoteBusy(older_app_saving().to_string()).into())
+}
+
+fn older_app_saving() -> &'static str {
+    tr!(
+        "旧版应用正在保存这份笔记，请等它完成后重试 / An older version of the app is saving this note; try again when it finishes"
+    )
 }
 
 /// The export formats whose files a note lists.
@@ -881,11 +927,15 @@ fn replace_error(error: std::io::Error) -> anyhow::Error {
 /// the new note also has is kept under an `.edited` name and reported. The old
 /// note's own unchanged files are left behind: the new note replaces them, except
 /// an export the new note could not make again, which stays. Folders that only
-/// held the old note's own files are not recreated empty.
+/// held the old note's own files are not recreated empty. Paths `skip` claims, and
+/// what is below them, stay behind; with `keep_exports` off, so do the old note's
+/// own exports.
 fn carry_over(
     note: &Path,
     old: Option<&Manifest>,
     staging: &Path,
+    skip: &dyn Fn(&str) -> bool,
+    keep_exports: bool,
 ) -> Result<(Vec<String>, Vec<Asset>)> {
     let listed: HashMap<&str, &Asset> = old
         .map(|manifest| {
@@ -905,7 +955,19 @@ fn carry_over(
         .collect();
     let mut kept_edits = Vec::new();
     let mut kept_exports = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
     for (relative, kind) in walk(note)? {
+        // Parents come before their children.
+        if skipped
+            .iter()
+            .any(|dir| relative.starts_with(dir.as_str()) && relative[dir.len()..].starts_with('/'))
+        {
+            continue;
+        }
+        if skip(&relative) {
+            skipped.push(relative);
+            continue;
+        }
         if kind == EntryKind::Dir {
             if !owned_dirs.contains(relative.as_str()) {
                 std::fs::create_dir_all(staging.join(&relative))?;
@@ -922,7 +984,10 @@ fn carry_over(
         });
         let existing = staging.join(&relative);
         if own {
-            if relative.starts_with("exports/") && existing.symlink_metadata().is_err() {
+            if keep_exports
+                && relative.starts_with("exports/")
+                && existing.symlink_metadata().is_err()
+            {
                 copy_entry(&source, &existing, kind)?;
                 kept_exports.extend(listed.get(relative.as_str()).map(|asset| (*asset).clone()));
             }
@@ -1095,7 +1160,7 @@ fn discard_old(note: &Path, old: &Path) {
 
 /// Replaced notes that could not be deleted. This many refuses a new task until
 /// they are cleared, so copies of a whole note do not pile up.
-pub const MAX_KEPT_COPIES: usize = 3;
+pub const MAX_KEPT_COPIES: usize = crate::outcome::MAX_KEPT_COPIES;
 
 fn stuck_olds(note: &Path) -> Result<Vec<PathBuf>> {
     Ok(kept_copies(note))
@@ -1462,13 +1527,30 @@ pub fn prepare_note(note_dir: &Path) -> Result<()> {
     }
     let _lock = lock_note(note_dir)?;
     recover_locked(note_dir)?;
-    if stuck_olds(note_dir)?.len() >= MAX_KEPT_COPIES {
-        return Err(crate::outcome::CopiesKept {
-            swap: swap_dir(note_dir)?,
+    let at_limit = || -> Result<()> {
+        if stuck_olds(note_dir)?.len() >= MAX_KEPT_COPIES {
+            return Err(crate::outcome::CopiesKept {
+                swap: swap_dir(note_dir)?,
+            }
+            .into());
         }
-        .into());
-    }
+        Ok(())
+    };
+    at_limit()?;
     flatten_tolerant(note_dir)?;
+    // Taking an older app's later version keeps the flat note as a copy, which
+    // may reach the limit: the task stops before its work, as it would have.
+    at_limit()?;
+    // The publication takes an older app's lock left in the note: one it cannot
+    // open stops the task now, before its work, not after. One that is held is
+    // waited for then.
+    let lock = note_dir.join(LEGACY_PUBLISH_LOCK);
+    if lock.symlink_metadata().is_ok() {
+        refuse_odd_lock(&lock)?;
+        if let Err(error) = crate::runtime::try_lock_file(&lock) {
+            return Err(legacy_lock_error(&lock, error));
+        }
+    }
     salvage_work(note_dir, &note_dir.join(".work"))?;
     // A folder an older app made for a task that never published.
     if note_dir.is_dir() && std::fs::read_dir(note_dir)?.next().is_none() {
@@ -1483,7 +1565,12 @@ pub fn prepare_note(note_dir: &Path) -> Result<()> {
 /// note's `exports/`, and files added to the course folder come along. Every other
 /// version is deleted, only once the flat note is in place. A crash at any point
 /// leaves the course as it was or flat; running it again finishes the job.
-/// Returns the flat note's manifest, or `None` when the folder was not schema 1.
+///
+/// A flat note into which an older app saved a newer version since is flattened the
+/// same way: that version becomes the note, the person's files come along, and the
+/// flat note as this app showed it is kept beside it, among the note's copies
+/// (`displaced-before-older-app`).
+/// Returns the flat note's manifest, or `None` when the folder needed neither.
 pub fn flatten_legacy(note_dir: &Path) -> Result<Option<Manifest>> {
     let note_dir = &resolve_note(note_dir)?;
     if !note_dir.exists() && !swap_dir(note_dir)?.exists() {
@@ -1504,23 +1591,39 @@ fn flatten_tolerant(note: &Path) -> Result<()> {
 }
 
 fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
-    if !is_legacy(note) {
+    // A flat note an older app saved a newer version into after this app flattened
+    // it: that version becomes the note, and the flat note is kept beside it.
+    let resaved = !is_legacy(note);
+    if resaved && !resaved_by_older_app(note) {
         return Ok(None);
     }
     // The older app holds this lock for its whole publication of a version: one
     // that started first finishes before the course is read, and one that starts
     // meanwhile fails to take it and stops, its paid work kept, instead of
     // landing in the course this replaces.
-    let older_app = crate::runtime::lock_file_within(&note.join(LEGACY_PUBLISH_LOCK), LOCK_WAIT)
-        .context(tr!(
-            "旧版应用正在保存这份笔记，请等它完成后重试 / An older version of the app is saving this note; try again when it finishes"
-        ))?;
+    let older_app = take_legacy_lock(note)?;
+    let flat = if resaved { note_manifest(note)? } else { None };
     let (version, mut manifest, passed_over) = current_version(note)?;
     let swap = swap_dir(note)?;
     std::fs::create_dir_all(&swap).map_err(|error| disk_full(error.into()))?;
     let staging = swap.join("new-flatten");
+    // The flat note as this app showed it, while it is copied.
+    let kept_staging = swap.join("new-flatten-kept");
     let publication = new_publication("flatten");
     remove_tree(&staging)?;
+    remove_tree(&kept_staging)?;
+    // What the older app wrote, which is not the flat note's: its versions, the
+    // pointer, its lock and task progress, and exports made from its versions.
+    let versions = note.join("versions");
+    let legacy_part = |relative: &str| {
+        let mut parts = relative.split('/');
+        let first = parts.next().unwrap_or_default();
+        ["current.json", "versions", LEGACY_PUBLISH_LOCK, ".work"].contains(&first)
+            || (first == "exports"
+                && parts
+                    .next()
+                    .is_some_and(|id| id == version || versions.join(id).is_dir()))
+    };
     let built = (|| {
         std::fs::create_dir(&staging)?;
         let source = note.join("versions").join(&version);
@@ -1552,8 +1655,19 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
                 )?;
             }
         }
+        if resaved {
+            // The person's files come along; the flat note's own stay with its copy.
+            carry_over(note, flat.as_ref(), &staging, &legacy_part, false)?;
+            for (relative, kind) in walk(note)? {
+                if !legacy_part(&relative) {
+                    copy_entry(&note.join(&relative), &kept_staging.join(&relative), kind)?;
+                }
+            }
+            std::fs::create_dir_all(&kept_staging)?;
+            sync_tree_dirs(&kept_staging)?;
+        }
         // Anything else a person put in the course folder.
-        for entry in std::fs::read_dir(note)? {
+        for entry in std::fs::read_dir(note)?.filter(|_| !resaved) {
             let entry = entry?;
             let name = entry.file_name().to_string_lossy().into_owned();
             if ["current.json", "versions", ".publish.lock", ".work"].contains(&name.as_str()) {
@@ -1639,16 +1753,74 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
     if let Err(error) = built {
         if !simulated_crash(&error) {
             let _ = remove_tree(&staging);
+            let _ = remove_tree(&kept_staging);
         }
         return Err(disk_full(error));
     }
     // The flat note carries the lock too, held across the swap: the older app's
-    // path to it then reaches this held lock, not a free one.
-    let flat_lock = crate::runtime::lock_file(&staging.join(LEGACY_PUBLISH_LOCK))?;
-    // Windows refuses to rename a folder with a file open inside it.
+    // path to it then reaches this held lock, not a free one. Taken before the
+    // copy is kept, so a failure here leaves no copy behind.
+    let locked = fail_point(FailPoint::Locking)
+        .and_then(|()| crate::runtime::lock_file(&staging.join(LEGACY_PUBLISH_LOCK)));
+    let flat_lock = match locked {
+        Ok(lock) => lock,
+        Err(error) => {
+            if !simulated_crash(&error) {
+                let _ = remove_tree(&staging);
+                let _ = remove_tree(&kept_staging);
+            }
+            return Err(error);
+        }
+    };
+    // Kept before the swap: a crash after it must not lose the flat note. A crash
+    // before it leaves a second copy at worst.
+    let kept = if resaved {
+        let kept = unused_name(&swap, OLDER_APP_COPY);
+        let placed = std::fs::rename(&kept_staging, &kept)
+            .map_err(anyhow::Error::from)
+            .and_then(|()| fail_point(FailPoint::KeptPlaced))
+            .and_then(|()| sync_dir(&swap));
+        if let Err(error) = placed {
+            // Nothing was replaced: the note still holds the flat note, and a retry
+            // makes the copy again. The lock open in the staged note goes first:
+            // Windows cannot delete a file that is open.
+            drop(flat_lock);
+            if !simulated_crash(&error) {
+                let _ = remove_tree(&kept);
+                let _ = remove_tree(&kept_staging);
+                let _ = remove_tree(&staging);
+            }
+            return Err(error);
+        }
+        Some(kept)
+    } else {
+        None
+    };
+    // Windows refuses to rename a folder with a file open inside it. An older app
+    // that takes the lock in the gap before the rename holds a file open in the
+    // note, so the rename is refused and nothing changes (see `publish`).
     #[cfg(windows)]
     drop((older_app, flat_lock));
-    swap_in(note, &staging, "flatten", &publication)?;
+    if let Err(error) = swap_in(note, &staging, "flatten", &publication) {
+        // Before the new note was in place, the note is as it was (or recovery puts
+        // it back) and still holds the flat note: its copy goes. Once the new note
+        // is in place, recovery deletes the replaced note, and the copy is the
+        // only flat note left: it stays. Only a note in place that is known not to
+        // be the new one lets the copy go; when that cannot be read, a second copy
+        // is the safe mistake.
+        let not_placed = fail_point(FailPoint::ReadingPlaced)
+            .and_then(|()| note_manifest(note))
+            .is_ok_and(|in_place| {
+                in_place.is_some_and(|in_place| in_place.publication != publication)
+            });
+        if !simulated_crash(&error)
+            && not_placed
+            && let Some(kept) = &kept
+        {
+            let _ = remove_tree(kept);
+        }
+        return Err(error);
+    }
     // Not part of the flat note: removed while still held, then let go.
     let _ = std::fs::remove_file(note.join(LEGACY_PUBLISH_LOCK));
     // Already let go on Windows, above.
@@ -1659,6 +1831,106 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
 
 /// The lock an older app holds in a course while it publishes a version.
 const LEGACY_PUBLISH_LOCK: &str = ".publish.lock";
+
+/// The name of the copy a flatten keeps of a flat note whose place an older
+/// app's later version took (then `-2`, … when taken).
+const OLDER_APP_COPY: &str = "displaced-before-older-app";
+
+/// Whether a kept copy is a flat note an older app's later version replaced,
+/// rather than one an interrupted replacement left.
+pub fn is_older_app_copy(copy: &Path) -> bool {
+    copy.file_name()
+        .is_some_and(|name| name.to_string_lossy().starts_with(OLDER_APP_COPY))
+}
+
+/// Says that an older app saved the note again and where the previous note is
+/// kept, in `lang`.
+pub fn older_app_copy_message(swap: &Path, lang: crate::i18n::Lang) -> String {
+    crate::i18n::t_for(
+        "旧版应用之后又保存过这份笔记：它保存的较新结果现在是这份笔记，之前的笔记作为副本保留在 {}",
+        lang,
+    )
+    .replacen("{}", &swap.display().to_string(), 1)
+}
+
+/// Takes the lock an older app holds while it publishes a version, waiting for a
+/// publication under way to finish. A lock that stays held is told apart from one
+/// that cannot be opened.
+fn take_legacy_lock(note: &Path) -> Result<crate::runtime::FileLock> {
+    let path = note.join(LEGACY_PUBLISH_LOCK);
+    let deadline = std::time::Instant::now() + LOCK_WAIT;
+    loop {
+        refuse_odd_lock(&path)?;
+        match crate::runtime::try_lock_file(&path) {
+            Ok(Some(lock)) if lock.is_at(&path) => return Ok(lock),
+            // Removed or replaced between opening and locking: the lock is on a file
+            // no one else opens. Open it again, within the same wait; or held.
+            Ok(_) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            // Another writer of the note, like a second task: the person waits.
+            Ok(_) => {
+                return Err(crate::outcome::NoteBusy(older_app_saving().to_string()).into());
+            }
+            Err(error) => return Err(legacy_lock_error(&path, error)),
+        }
+    }
+}
+
+/// Refuses a lock path that holds something other than a file (a link, a
+/// folder): it is never followed or locked.
+fn refuse_odd_lock(path: &Path) -> Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.is_file() => anyhow::bail!(tr!(
+            "这份笔记的保存锁不是普通文件：{}，请移走它后重试 / The note's save lock is not a regular file: {}; move it away and try again",
+            path.display(),
+            path.display()
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Why the older app's lock at `path` could not be opened, in words that say
+/// what to do.
+fn legacy_lock_error(path: &Path, error: std::io::Error) -> anyhow::Error {
+    if matches!(
+        error.kind(),
+        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
+    ) {
+        anyhow::Error::new(error).context(tr!(
+            "没有权限打开这份笔记的保存锁 {}，请检查这个文件夹的权限后重试 / No permission to open the note's save lock {}; check the folder's permissions and try again",
+            path.display(),
+            path.display()
+        ))
+    } else {
+        anyhow::Error::new(error).context(tr!(
+            "无法打开这份笔记的保存锁 {} / Could not open the note's save lock {}",
+            path.display(),
+            path.display()
+        ))
+    }
+}
+
+/// A flat note into which an older app, run after this one flattened it, saved a
+/// newer version (`current.json` and `versions/`, which this app does not read).
+fn resaved_by_older_app(note: &Path) -> bool {
+    if !(note.join("manifest.json").is_file()
+        && note.join("current.json").is_file()
+        && note.join("versions").is_dir())
+    {
+        return false;
+    }
+    let Ok(Some(flat)) = note_manifest(note) else {
+        return false;
+    };
+    current_version(note).is_ok_and(|(_, version, _)| version.created_at_ms > flat.created_at_ms)
+}
+
+/// A course folder [`flatten_legacy`] turns into a flat note: one in the layout of
+/// versions, or a flat note an older app saved a newer version into.
+pub fn needs_flatten(note_dir: &Path) -> bool {
+    is_legacy(note_dir) || resaved_by_older_app(note_dir)
+}
 
 /// A schema 1 course in which no version has a readable body. Flattening
 /// leaves it as it is; a new note can still be published beside its versions.
@@ -1832,6 +2104,12 @@ pub fn sync_dir(path: &Path) -> Result<()> {
 #[cfg_attr(not(test), allow(dead_code))]
 enum FailPoint {
     Staged,
+    /// Before a flatten takes the lock the flat note carries.
+    Locking,
+    /// Once a flatten has placed its copy of the flat note.
+    KeptPlaced,
+    /// When a failed flatten reads which note is in place.
+    ReadingPlaced,
     BetweenRenames,
     AfterRenames,
     BeforeDeletingOld,
@@ -1855,10 +2133,25 @@ impl std::fmt::Display for SimulatedCrash {
 impl std::error::Error for SimulatedCrash {}
 
 #[cfg(test)]
+thread_local! {
+    /// A point where tests make an ordinary I/O error happen, which the code
+    /// handles, unlike a crash.
+    static IO_ERROR_AT: std::cell::RefCell<Vec<FailPoint>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(test)]
 fn fail_point(point: FailPoint) -> Result<()> {
     if CRASH_AT.with(|crash| crash.get()) == Some(point) {
         CRASH_AT.with(|crash| crash.set(None));
         return Err(SimulatedCrash.into());
+    }
+    let injected = IO_ERROR_AT.with(|points| {
+        let mut points = points.borrow_mut();
+        let found = points.iter().position(|at| *at == point);
+        found.map(|index| points.remove(index)).is_some()
+    });
+    if injected {
+        return Err(std::io::Error::other("injected I/O error").into());
     }
     Ok(())
 }

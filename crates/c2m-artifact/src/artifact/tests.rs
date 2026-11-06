@@ -97,6 +97,11 @@ fn snapshot(dir: &Path) -> BTreeMap<String, Vec<u8>> {
         .collect()
 }
 
+/// Ordinary I/O errors at each of `points`, once.
+fn io_error_at(points: &[FailPoint]) {
+    IO_ERROR_AT.with(|at| at.borrow_mut().extend_from_slice(points));
+}
+
 fn crash_at(point: FailPoint) {
     CRASH_AT.with(|crash| crash.set(Some(point)));
 }
@@ -618,7 +623,10 @@ fn an_interrupted_flatten_is_finished_by_running_it_again() {
         assert!(simulated_crash(&error), "{point:?}: {error:#}");
         match point {
             // The older versions are still there until the flat note is in place.
-            FailPoint::Staged => assert_eq!(snapshot(course), before),
+            FailPoint::Staged
+            | FailPoint::Locking
+            | FailPoint::KeptPlaced
+            | FailPoint::ReadingPlaced => assert_eq!(snapshot(course), before),
             FailPoint::BetweenRenames => assert!(!course.exists()),
             FailPoint::AfterRenames | FailPoint::BeforeDeletingOld => {
                 assert!(!is_legacy(course));
@@ -639,6 +647,13 @@ fn an_interrupted_flatten_is_finished_by_running_it_again() {
         assert!(!is_legacy(course), "{point:?}");
         assert_eq!(note_manifest(course).unwrap().unwrap().task_id, "v2");
         assert!(!swap_dir(course).unwrap().exists(), "{point:?}");
+        // A lock the flat note kept from the swap is not carried past the next
+        // publication.
+        legacy
+            .library
+            .publish(&legacy.library.target("after"), "After", "")
+            .unwrap();
+        assert!(!course.join(LEGACY_PUBLISH_LOCK).exists(), "{point:?}");
         assert_eq!(
             std::fs::read(
                 legacy
@@ -1670,6 +1685,13 @@ fn copies_at_the_limit_stop_a_task_and_say_what_frees_it() {
         en.contains("move the copies you want to keep out") && en.contains("stop"),
         "{en}"
     );
+    // Only as many as the limit go on stopping new tasks.
+    assert!(
+        en.contains(&format!(
+            "While {MAX_KEPT_COPIES} or more copies stay in it"
+        )),
+        "{en}"
+    );
     assert!(en.contains(&swap.display().to_string()));
     for lang in [Lang::Ja, Lang::ZhHant, Lang::ZhHans] {
         let text = crate::outcome::copies_kept_message(&swap, lang);
@@ -1687,4 +1709,384 @@ fn copies_at_the_limit_stop_a_task_and_say_what_frees_it() {
         .unwrap();
     }
     prepare_note(&library.note).unwrap();
+}
+
+/// A lock an interrupted flatten or an older app left in a flat note is taken
+/// where it is, never removed and made again, and a regenerate never carries one
+/// into the new note.
+#[test]
+fn a_left_lock_is_not_part_of_the_note() {
+    let library = Library::new();
+    library
+        .publish(&library.target("task-1"), "Body", "")
+        .unwrap();
+    let lock = library.note.join(LEGACY_PUBLISH_LOCK);
+    std::fs::write(&lock, b"").unwrap();
+    let left_at = std::fs::metadata(&lock).unwrap().modified().unwrap();
+    prepare_note(&library.note).unwrap();
+    assert_eq!(
+        std::fs::metadata(&lock).unwrap().modified().unwrap(),
+        left_at
+    );
+    library
+        .publish(&library.target("task-2"), "Body two", "")
+        .unwrap();
+    assert!(!lock.exists());
+    assert!(
+        walk(&library.note)
+            .unwrap()
+            .iter()
+            .all(|(path, _)| !path.contains(".publish"))
+    );
+}
+
+/// A flat note an older app saved a newer version into: that version becomes the
+/// note, the person's files come along, and the flat note is kept beside it.
+#[test]
+fn a_version_an_older_app_saved_later_becomes_the_note_and_the_flat_one_is_kept() {
+    let legacy = Legacy::populated();
+    let course = legacy.course().to_path_buf();
+    flatten_legacy(&course).unwrap().unwrap();
+    std::fs::write(course.join("added-after.txt"), b"later").unwrap();
+    // An older version of the app saves into it as it did: a version, its pointer,
+    // its lock and an export made from it.
+    let resave = || {
+        legacy.version("v9", 9, "Ninth");
+        legacy.point_at("v9");
+        std::fs::write(course.join(LEGACY_PUBLISH_LOCK), b"").unwrap();
+        let exports = course.join("exports/v9/t9");
+        std::fs::create_dir_all(&exports).unwrap();
+        std::fs::write(exports.join("course.html"), b"<p>v9 export</p>").unwrap();
+    };
+    resave();
+    assert!(!is_legacy(&course));
+    assert!(needs_flatten(&course));
+    let manifest = flatten_legacy(&course).unwrap().unwrap();
+    assert_eq!(manifest.task_id, "v9");
+    let flat = note_manifest(&course).unwrap().unwrap();
+    validate_note(&course, &flat).unwrap();
+    assert!(
+        std::fs::read_to_string(course.join("course.md"))
+            .unwrap()
+            .contains("Ninth")
+    );
+    for gone in [
+        "versions",
+        "current.json",
+        LEGACY_PUBLISH_LOCK,
+        "exports/v9",
+    ] {
+        assert!(!course.join(gone).exists(), "{gone}");
+    }
+    assert_eq!(
+        std::fs::read(course.join("exports/course.t9.html")).unwrap(),
+        b"<p>v9 export</p>"
+    );
+    assert_eq!(std::fs::read(course.join("my-notes.txt")).unwrap(), b"mine");
+    assert_eq!(
+        std::fs::read(course.join("added-after.txt")).unwrap(),
+        b"later"
+    );
+    // The flat note as this app showed it, with the person's files, is kept.
+    let copies = kept_copies(&course);
+    assert_eq!(copies.len(), 1, "{copies:?}");
+    let kept = &copies[0];
+    assert!(
+        kept.file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("displaced-before-older-app")
+    );
+    assert_eq!(note_manifest(kept).unwrap().unwrap().task_id, "v2");
+    assert!(
+        std::fs::read_to_string(kept.join("course.md"))
+            .unwrap()
+            .contains("Second")
+    );
+    assert!(kept.join("added-after.txt").is_file());
+    assert!(is_older_app_copy(kept));
+    let swap = swap_dir(&course).unwrap();
+    let en = older_app_copy_message(&swap, crate::i18n::Lang::En);
+    assert!(
+        en.starts_with("An older version of the app saved this note again")
+            && en.contains(&swap.display().to_string()),
+        "{en}"
+    );
+    assert!(!kept.join("versions").exists() && !kept.join("current.json").exists());
+    assert!(!needs_flatten(&course));
+    // A version older than the flat note is not taken, and nothing changes.
+    let legacy = Legacy::populated();
+    let course = legacy.course().to_path_buf();
+    flatten_legacy(&course).unwrap().unwrap();
+    legacy.version("v0", 0, "Zeroth");
+    legacy.point_at("v0");
+    assert!(!needs_flatten(&course));
+    let before = snapshot(&course);
+    assert!(flatten_legacy(&course).unwrap().is_none());
+    assert_eq!(snapshot(&course), before);
+    assert!(kept_copies(&course).is_empty());
+}
+
+/// A lock file that cannot be opened is not reported as an older app saving.
+#[test]
+fn a_lock_that_cannot_be_opened_is_not_called_busy() {
+    let legacy = Legacy::new();
+    legacy.version("v1", 1, "First");
+    legacy.point_at("v1");
+    let lock = legacy.course().join(LEGACY_PUBLISH_LOCK);
+    std::fs::create_dir(&lock).unwrap();
+    let error = format!("{:#}", flatten_legacy(legacy.course()).unwrap_err());
+    assert!(
+        !error.contains(tr!(
+            "旧版应用正在保存这份笔记，请等它完成后重试 / An older version of the app is saving this note; try again when it finishes"
+        )),
+        "{error}"
+    );
+    assert!(error.contains(&lock.display().to_string()), "{error}");
+    assert!(is_legacy(legacy.course()));
+}
+
+/// Every `course.md` below `root` that says `text`.
+fn notes_saying(root: &Path, text: &str) -> usize {
+    walk(root)
+        .unwrap()
+        .into_iter()
+        .filter(|(path, kind)| *kind == EntryKind::File && path.ends_with("course.md"))
+        .filter(|(path, _)| {
+            std::fs::read_to_string(root.join(path)).is_ok_and(|body| body.contains(text))
+        })
+        .count()
+}
+
+/// A flat note an older app saved a newer version into (`Second` is the flat
+/// note's text, `Ninth` the older app's).
+fn resaved_note() -> (Legacy, PathBuf) {
+    let legacy = Legacy::populated();
+    let course = legacy.course().to_path_buf();
+    flatten_legacy(&course).unwrap().unwrap();
+    legacy.version("v9", 9, "Ninth");
+    legacy.point_at("v9");
+    assert!(needs_flatten(&course));
+    (legacy, course)
+}
+
+/// An ordinary error once the older app's version is in place (a directory that
+/// cannot be synced) keeps the copy of the flat note: recovery deletes the note
+/// it replaced, and the copy is the only flat note left.
+#[test]
+fn an_error_after_the_swap_keeps_the_flat_note() {
+    let (legacy, course) = resaved_note();
+    io_error_at(&[FailPoint::AfterRenames]);
+    assert!(flatten_legacy(&course).is_err());
+    prepare_note(&course).unwrap();
+    let root = legacy.library.library();
+    assert_eq!(notes_saying(&root, "Second"), 1);
+    assert!(
+        std::fs::read_to_string(course.join("course.md"))
+            .unwrap()
+            .contains("Ninth")
+    );
+    assert_eq!(kept_copies(&course).len(), 1);
+}
+
+/// A crash at any point of a flatten of a resaved note leaves the flat note
+/// somewhere, and running again makes the older app's version the note.
+#[test]
+fn a_crash_while_taking_an_older_apps_version_keeps_the_flat_note() {
+    for point in [
+        FailPoint::Staged,
+        FailPoint::BetweenRenames,
+        FailPoint::AfterRenames,
+        FailPoint::BeforeDeletingOld,
+    ] {
+        let (legacy, course) = resaved_note();
+        crash_at(point);
+        assert!(flatten_legacy(&course).is_err(), "{point:?}");
+        flatten_legacy(&course).unwrap();
+        prepare_note(&course).unwrap();
+        let root = legacy.library.library();
+        assert!(notes_saying(&root, "Second") >= 1, "{point:?}");
+        assert!(
+            std::fs::read_to_string(course.join("course.md"))
+                .unwrap()
+                .contains("Ninth"),
+            "{point:?}"
+        );
+        assert!(!needs_flatten(&course), "{point:?}");
+    }
+}
+
+/// A flatten that cannot take the flat note's lock leaves no copy behind, so
+/// retries do not pile copies up to the limit.
+#[test]
+fn a_flatten_that_cannot_lock_leaves_no_copy() {
+    let (_legacy, course) = resaved_note();
+    for _ in 0..MAX_KEPT_COPIES {
+        io_error_at(&[FailPoint::Locking]);
+        assert!(flatten_legacy(&course).is_err());
+        assert!(kept_copies(&course).is_empty());
+        assert!(needs_flatten(&course));
+    }
+    prepare_note(&course).unwrap();
+    assert_eq!(kept_copies(&course).len(), 1);
+}
+
+/// A re-flatten that brings the copies to the limit stops the task before its
+/// work, with the copy-limit error, as copies already at the limit do.
+#[test]
+fn a_reflatten_that_reaches_the_copy_limit_stops_the_task() {
+    let (_legacy, course) = resaved_note();
+    let swap = swap_dir(&course).unwrap();
+    for n in 1..MAX_KEPT_COPIES {
+        std::fs::create_dir_all(swap.join(format!("displaced-{n}"))).unwrap();
+    }
+    let error = prepare_note(&course).unwrap_err();
+    assert!(error.is::<crate::outcome::CopiesKept>(), "{error:#}");
+    assert!(!needs_flatten(&course));
+    assert_eq!(kept_copies(&course).len(), MAX_KEPT_COPIES);
+}
+
+/// A publication into a flat note waits for an older app saving into it, and
+/// the version that app saved is flattened before the note is replaced, not
+/// swapped away under it.
+#[test]
+fn a_publication_waits_for_an_older_app_saving_into_the_note() {
+    let legacy = Legacy::populated();
+    let course = legacy.course().to_path_buf();
+    flatten_legacy(&course).unwrap().unwrap();
+    let lock = crate::runtime::lock_file(&course.join(LEGACY_PUBLISH_LOCK)).unwrap();
+    let (started, ready) = std::sync::mpsc::channel();
+    let older_app = std::thread::spawn({
+        let legacy_version = legacy.version("v9", 9, "Ninth");
+        let course = course.clone();
+        // The version is staged beside the note until the older app's save lands.
+        let staged = course.parent().unwrap().join("staged-v9");
+        std::fs::rename(&legacy_version, &staged).unwrap();
+        std::fs::remove_dir(course.join("versions")).unwrap();
+        move || {
+            started.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            std::fs::create_dir_all(course.join("versions")).unwrap();
+            std::fs::rename(&staged, course.join("versions/v9")).unwrap();
+            std::fs::write(
+                course.join("current.json"),
+                r#"{"schema":1,"course_id":"course","version_id":"v9","manifest":"versions/v9/manifest.json"}"#,
+            )
+            .unwrap();
+            drop(lock);
+        }
+    });
+    ready.recv().unwrap();
+    legacy
+        .library
+        .publish(&legacy.library.target("next"), "Next", "")
+        .unwrap();
+    older_app.join().unwrap();
+    assert!(published_by(&course, "next").unwrap().is_some());
+    for gone in ["versions", "current.json", LEGACY_PUBLISH_LOCK] {
+        assert!(!course.join(gone).exists(), "{gone}");
+    }
+    // The flat note the older app's version replaced is kept.
+    assert!(
+        kept_copies(&course)
+            .iter()
+            .any(|copy| is_older_app_copy(copy))
+    );
+}
+
+/// A flatten whose copy of the flat note cannot be synced leaves no copy, so
+/// retries do not pile copies up.
+#[test]
+fn a_copy_that_cannot_be_synced_is_not_left_behind() {
+    let (_legacy, course) = resaved_note();
+    for _ in 0..MAX_KEPT_COPIES {
+        io_error_at(&[FailPoint::KeptPlaced]);
+        assert!(flatten_legacy(&course).is_err());
+        assert!(needs_flatten(&course));
+        assert!(kept_copies(&course).is_empty());
+        // Nothing staged is left either.
+        assert!(!swap_dir(&course).unwrap().join("new-flatten").exists());
+    }
+}
+
+/// When a failed flatten cannot tell which note is in place, it keeps its copy
+/// of the flat note: a second copy is the safe mistake.
+#[test]
+fn a_flatten_that_cannot_read_the_note_in_place_keeps_its_copy() {
+    let (legacy, course) = resaved_note();
+    io_error_at(&[FailPoint::AfterRenames, FailPoint::ReadingPlaced]);
+    assert!(flatten_legacy(&course).is_err());
+    assert!(
+        kept_copies(&course)
+            .iter()
+            .any(|copy| is_older_app_copy(copy))
+    );
+    prepare_note(&course).unwrap();
+    assert_eq!(kept_copies(&course).len(), 1);
+    assert_eq!(notes_saying(&legacy.library.library(), "Second"), 1);
+    // Known not to be in place (the error came before the swap): the copy goes.
+    let (_legacy, course) = resaved_note();
+    io_error_at(&[FailPoint::Staged]);
+    assert!(flatten_legacy(&course).is_err());
+    assert!(kept_copies(&course).is_empty());
+}
+
+/// A read-only lock left in a flat note does not stop a publication after its
+/// work: it is locked through a read-only handle, and not carried.
+#[cfg(unix)]
+#[test]
+fn a_read_only_lock_does_not_stop_a_publication() {
+    use std::os::unix::fs::PermissionsExt;
+    let legacy = Legacy::populated();
+    let course = legacy.course().to_path_buf();
+    flatten_legacy(&course).unwrap().unwrap();
+    let lock = course.join(LEGACY_PUBLISH_LOCK);
+    std::fs::write(&lock, b"").unwrap();
+    std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o444)).unwrap();
+    // Held by the older app, it is still waited for.
+    let held = crate::runtime::try_lock_file(&lock).unwrap().unwrap();
+    assert!(crate::runtime::try_lock_file(&lock).unwrap().is_none());
+    drop(held);
+    prepare_note(&course).unwrap();
+    legacy
+        .library
+        .publish(&legacy.library.target("next"), "Next", "")
+        .unwrap();
+    assert!(!lock.exists());
+    assert!(published_by(&course, "next").unwrap().is_some());
+}
+
+/// A lock that cannot be opened at all stops a task before its work.
+#[test]
+fn a_lock_that_cannot_be_opened_stops_the_task_before_its_work() {
+    let legacy = Legacy::populated();
+    let course = legacy.course().to_path_buf();
+    flatten_legacy(&course).unwrap().unwrap();
+    let lock = course.join(LEGACY_PUBLISH_LOCK);
+    std::fs::create_dir(&lock).unwrap();
+    let error = format!("{:#}", prepare_note(&course).unwrap_err());
+    assert!(error.contains(&lock.display().to_string()), "{error}");
+}
+
+/// A lock path that is a link is refused, never followed, before a task's work
+/// and by a flatten.
+#[cfg(unix)]
+#[test]
+fn a_lock_that_is_a_link_is_refused_not_followed() {
+    let legacy = Legacy::populated();
+    let course = legacy.course().to_path_buf();
+    flatten_legacy(&course).unwrap().unwrap();
+    let target = legacy.library.library().join("elsewhere");
+    std::fs::write(&target, b"").unwrap();
+    let lock = course.join(LEGACY_PUBLISH_LOCK);
+    std::os::unix::fs::symlink(&target, &lock).unwrap();
+    let error = format!("{:#}", prepare_note(&course).unwrap_err());
+    assert!(error.contains(&lock.display().to_string()), "{error}");
+    assert!(
+        legacy
+            .library
+            .publish(&legacy.library.target("next"), "Next", "")
+            .is_err()
+    );
+    assert!(lock.symlink_metadata().unwrap().file_type().is_symlink());
 }
