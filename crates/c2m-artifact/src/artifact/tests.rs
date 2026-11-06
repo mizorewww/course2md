@@ -1788,6 +1788,14 @@ fn a_version_an_older_app_saved_later_becomes_the_note_and_the_flat_one_is_kept(
             .contains("Second")
     );
     assert!(kept.join("added-after.txt").is_file());
+    assert!(is_older_app_copy(kept));
+    let swap = swap_dir(&course).unwrap();
+    let en = older_app_copy_message(&swap, crate::i18n::Lang::En);
+    assert!(
+        en.starts_with("An older version of the app saved this note again")
+            && en.contains(&swap.display().to_string()),
+        "{en}"
+    );
     assert!(!kept.join("versions").exists() && !kept.join("current.json").exists());
     assert!(!needs_flatten(&course));
     // A version older than the flat note is not taken, and nothing changes.

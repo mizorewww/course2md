@@ -577,7 +577,19 @@ fn note_dir(dir: &std::path::Path) -> anyhow::Result<Option<std::path::PathBuf>>
         );
     }
     if artifact::needs_flatten(note) {
+        let resaved = !artifact::is_legacy(note);
         artifact::flatten_legacy(note)?;
+        if resaved
+            && let Some(copy) = artifact::kept_copies(note)
+                .into_iter()
+                .find(|copy| artifact::is_older_app_copy(copy))
+            && let Some(swap) = copy.parent()
+        {
+            eprintln!(
+                "{}",
+                artifact::older_app_copy_message(swap, course2md::i18n::lang())
+            );
+        }
         tracing::info!(
             "已将笔记的旧版本整理为一份笔记 / Turned the note's versions into one note: {}",
             note.display()
@@ -594,6 +606,17 @@ fn collect_targets(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>, dep
     // A replacement a crash interrupted is completed before the folder is read.
     for attention in course2md::artifact::recover_folder(dir) {
         use course2md::artifact::NoteAttention;
+        // A copy an older app's later version replaced says so on its own.
+        if let NoteAttention::Kept { swap, copies, .. } = &attention
+            && copies
+                .iter()
+                .any(|copy| course2md::artifact::is_older_app_copy(copy))
+        {
+            eprintln!(
+                "{}",
+                course2md::artifact::older_app_copy_message(swap, course2md::i18n::lang())
+            );
+        }
         match attention {
             NoteAttention::Blocked { swap, .. } => eprintln!(
                 "{}",

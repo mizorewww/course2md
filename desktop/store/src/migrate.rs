@@ -34,6 +34,9 @@ pub struct Migration {
     pub flattened: usize,
     /// Versions deleted with them.
     pub removed_versions: usize,
+    /// Of those, flat notes an older app saved a later version into: that version
+    /// is the note now, and the flat note is kept beside it.
+    pub resaved: usize,
     /// Courses left as versions while a worker from an earlier session writes them.
     pub deferred: Vec<PathBuf>,
     pub issues: Vec<String>,
@@ -110,10 +113,15 @@ pub(crate) fn migrate_library(location: &LibraryLocation, busy: &[PathBuf]) -> M
                         .count()
                 })
                 .unwrap_or(0);
+            let resaved = !artifact::is_legacy(&dir);
             match artifact::flatten_legacy(&dir) {
                 Ok(Some(manifest)) => {
                     migration.flattened += 1;
-                    migration.removed_versions += versions.saturating_sub(1);
+                    if resaved {
+                        migration.resaved += 1;
+                    } else {
+                        migration.removed_versions += versions.saturating_sub(1);
+                    }
                     let kept = if manifest.version_id.is_empty() {
                         manifest.task_id.clone()
                     } else {
@@ -195,6 +203,21 @@ pub fn rekey_positions(
 }
 
 /// The notice shown once, when this app first removed older versions.
+/// Told once when an older app had saved notes again after the migration.
+pub fn resaved_notice(count: usize) -> String {
+    if count == 1 {
+        c2m_i18n::tr!(
+            "旧版应用之后又保存过 1 份笔记：它保存的较新结果现在是这份笔记，之前的笔记作为副本保留在旁边。"
+        )
+        .to_owned()
+    } else {
+        c2m_i18n::tr!(
+            "旧版应用之后又保存过 {} 份笔记：它们保存的较新结果现在是这些笔记，之前的笔记作为副本保留在旁边。",
+            count
+        )
+    }
+}
+
 pub fn removed_versions_notice() -> &'static str {
     c2m_i18n::tr!("笔记的旧版本已删除：每个视频现在只保留一份笔记，重新生成或补做会直接更新它。")
 }

@@ -1731,7 +1731,7 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
     // Kept before the swap: a crash after it must not lose the flat note. A crash
     // before it leaves a second copy at worst.
     let kept = if resaved {
-        let kept = unused_name(&swap, "displaced-before-older-app");
+        let kept = unused_name(&swap, OLDER_APP_COPY);
         std::fs::rename(&kept_staging, &kept)?;
         sync_dir(&swap)?;
         Some(kept)
@@ -1766,6 +1766,27 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
 
 /// The lock an older app holds in a course while it publishes a version.
 const LEGACY_PUBLISH_LOCK: &str = ".publish.lock";
+
+/// The name of the copy a flatten keeps of a flat note whose place an older
+/// app's later version took (then `-2`, … when taken).
+const OLDER_APP_COPY: &str = "displaced-before-older-app";
+
+/// Whether a kept copy is a flat note an older app's later version replaced,
+/// rather than one an interrupted replacement left.
+pub fn is_older_app_copy(copy: &Path) -> bool {
+    copy.file_name()
+        .is_some_and(|name| name.to_string_lossy().starts_with(OLDER_APP_COPY))
+}
+
+/// Says that an older app saved the note again and where the previous note is
+/// kept, in `lang`.
+pub fn older_app_copy_message(swap: &Path, lang: crate::i18n::Lang) -> String {
+    crate::i18n::t_for(
+        "旧版应用之后又保存过这份笔记：它保存的较新结果现在是这份笔记，之前的笔记作为副本保留在 {}",
+        lang,
+    )
+    .replacen("{}", &swap.display().to_string(), 1)
+}
 
 /// Takes the lock an older app holds while it publishes a version, waiting for a
 /// publication under way to finish. A lock that stays held is told apart from one

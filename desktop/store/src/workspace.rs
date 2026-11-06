@@ -2775,11 +2775,20 @@ impl Workspace {
         if migrations.iter().any(|migration| migration.flattened > 0) {
             let outcome = self.migrated.get_or_insert_with(Default::default);
             outcome.notes_changed = true;
+            let mut notices = Vec::new();
             if migrations
                 .iter()
                 .any(|migration| migration.removed_versions > 0)
             {
-                outcome.notice = Some(crate::migrate::removed_versions_notice().into());
+                notices.push(crate::migrate::removed_versions_notice().to_owned());
+            }
+            // Told even when the older app saved only one version.
+            let resaved: usize = migrations.iter().map(|migration| migration.resaved).sum();
+            if resaved > 0 {
+                notices.push(crate::migrate::resaved_notice(resaved));
+            }
+            if !notices.is_empty() {
+                outcome.notice = Some(notices.join(" "));
             }
         }
         // Nothing to record: a library migrated with no tasks and no positions to move.
@@ -5719,6 +5728,34 @@ mod tests {
         assert_eq!(other.state, TaskState::Complete);
         assert!(ws.state.next_task().is_none());
         assert!(!ws.state.reconciling);
+    }
+
+    /// An older app run after the migration saved one more version into the flat
+    /// note: the next opening makes it the note, keeps the flat note as a copy, and
+    /// says so once, though no other version was deleted.
+    #[test]
+    fn a_version_an_older_app_saved_after_the_migration_is_told_once() {
+        let fixture = versioned(true);
+        let mut ws = test_workspace(fixture.dir.path());
+        assert_flat(&ws, &fixture, &fixture.a, &fixture.b);
+        ws.take_migrated();
+        let c = finished_task(&mut ws, None);
+        let version_c = legacy_version_of(&ws.state, &c, 3);
+        ws.state.task_mut(&c).unwrap().artifact = Some(version_c);
+        crate::notes::fixtures::point_at(&fixture.note, &fixture.course, &c);
+        ws.save().unwrap();
+        drop(ws);
+        let mut again = test_workspace(fixture.dir.path());
+        let manifest = c2m_artifact::artifact::note_manifest(&fixture.note)
+            .unwrap()
+            .unwrap();
+        assert_eq!(manifest.task_id, c);
+        let copies = c2m_artifact::artifact::kept_copies(&fixture.note);
+        assert_eq!(copies.len(), 1);
+        assert!(c2m_artifact::artifact::is_older_app_copy(&copies[0]));
+        let migrated = again.take_migrated().unwrap();
+        assert_eq!(migrated.notice, Some(crate::migrate::resaved_notice(1)));
+        assert!(test_workspace(fixture.dir.path()).take_migrated().is_none());
     }
 
     #[test]
