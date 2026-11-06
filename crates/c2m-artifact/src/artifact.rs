@@ -1762,8 +1762,20 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
     // before it leaves a second copy at worst.
     let kept = if resaved {
         let kept = unused_name(&swap, OLDER_APP_COPY);
-        std::fs::rename(&kept_staging, &kept)?;
-        sync_dir(&swap)?;
+        let placed = std::fs::rename(&kept_staging, &kept)
+            .map_err(anyhow::Error::from)
+            .and_then(|()| fail_point(FailPoint::KeptPlaced))
+            .and_then(|()| sync_dir(&swap));
+        if let Err(error) = placed {
+            // Nothing was replaced: the note still holds the flat note, and a retry
+            // makes the copy again.
+            if !simulated_crash(&error) {
+                let _ = remove_tree(&kept);
+                let _ = remove_tree(&kept_staging);
+                let _ = remove_tree(&staging);
+            }
+            return Err(error);
+        }
         Some(kept)
     } else {
         None
@@ -2076,6 +2088,8 @@ enum FailPoint {
     Staged,
     /// Before a flatten takes the lock the flat note carries.
     Locking,
+    /// Once a flatten has placed its copy of the flat note.
+    KeptPlaced,
     BetweenRenames,
     AfterRenames,
     BeforeDeletingOld,
@@ -2102,7 +2116,7 @@ impl std::error::Error for SimulatedCrash {}
 thread_local! {
     /// A point where tests make an ordinary I/O error happen, which the code
     /// handles, unlike a crash.
-    static IO_ERROR_AT: std::cell::Cell<Option<FailPoint>> = const { std::cell::Cell::new(None) };
+    static IO_ERROR_AT: std::cell::RefCell<Vec<FailPoint>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 #[cfg(test)]
@@ -2111,8 +2125,12 @@ fn fail_point(point: FailPoint) -> Result<()> {
         CRASH_AT.with(|crash| crash.set(None));
         return Err(SimulatedCrash.into());
     }
-    if IO_ERROR_AT.with(|error| error.get()) == Some(point) {
-        IO_ERROR_AT.with(|error| error.set(None));
+    let injected = IO_ERROR_AT.with(|points| {
+        let mut points = points.borrow_mut();
+        let found = points.iter().position(|at| *at == point);
+        found.map(|index| points.remove(index)).is_some()
+    });
+    if injected {
         return Err(std::io::Error::other("injected I/O error").into());
     }
     Ok(())

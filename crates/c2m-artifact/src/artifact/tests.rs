@@ -97,6 +97,11 @@ fn snapshot(dir: &Path) -> BTreeMap<String, Vec<u8>> {
         .collect()
 }
 
+/// Ordinary I/O errors at each of `points`, once.
+fn io_error_at(points: &[FailPoint]) {
+    IO_ERROR_AT.with(|at| at.borrow_mut().extend_from_slice(points));
+}
+
 fn crash_at(point: FailPoint) {
     CRASH_AT.with(|crash| crash.set(Some(point)));
 }
@@ -618,7 +623,9 @@ fn an_interrupted_flatten_is_finished_by_running_it_again() {
         assert!(simulated_crash(&error), "{point:?}: {error:#}");
         match point {
             // The older versions are still there until the flat note is in place.
-            FailPoint::Staged | FailPoint::Locking => assert_eq!(snapshot(course), before),
+            FailPoint::Staged | FailPoint::Locking | FailPoint::KeptPlaced => {
+                assert_eq!(snapshot(course), before)
+            }
             FailPoint::BetweenRenames => assert!(!course.exists()),
             FailPoint::AfterRenames | FailPoint::BeforeDeletingOld => {
                 assert!(!is_legacy(course));
@@ -1860,7 +1867,7 @@ fn resaved_note() -> (Legacy, PathBuf) {
 #[test]
 fn an_error_after_the_swap_keeps_the_flat_note() {
     let (legacy, course) = resaved_note();
-    IO_ERROR_AT.with(|error| error.set(Some(FailPoint::AfterRenames)));
+    io_error_at(&[FailPoint::AfterRenames]);
     assert!(flatten_legacy(&course).is_err());
     prepare_note(&course).unwrap();
     let root = legacy.library.library();
@@ -1906,7 +1913,7 @@ fn a_crash_while_taking_an_older_apps_version_keeps_the_flat_note() {
 fn a_flatten_that_cannot_lock_leaves_no_copy() {
     let (_legacy, course) = resaved_note();
     for _ in 0..MAX_KEPT_COPIES {
-        IO_ERROR_AT.with(|error| error.set(Some(FailPoint::Locking)));
+        io_error_at(&[FailPoint::Locking]);
         assert!(flatten_legacy(&course).is_err());
         assert!(kept_copies(&course).is_empty());
         assert!(needs_flatten(&course));
@@ -1976,4 +1983,17 @@ fn a_publication_waits_for_an_older_app_saving_into_the_note() {
             .iter()
             .any(|copy| is_older_app_copy(copy))
     );
+}
+
+/// A flatten whose copy of the flat note cannot be synced leaves no copy, so
+/// retries do not pile copies up.
+#[test]
+fn a_copy_that_cannot_be_synced_is_not_left_behind() {
+    let (_legacy, course) = resaved_note();
+    for _ in 0..MAX_KEPT_COPIES {
+        io_error_at(&[FailPoint::KeptPlaced]);
+        assert!(flatten_legacy(&course).is_err());
+        assert!(needs_flatten(&course));
+        assert!(kept_copies(&course).is_empty());
+    }
 }
