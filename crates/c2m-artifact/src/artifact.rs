@@ -1511,10 +1511,7 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
     // that started first finishes before the course is read, and one that starts
     // meanwhile fails to take it and stops, its paid work kept, instead of
     // landing in the course this replaces.
-    let older_app = crate::runtime::lock_file_within(&note.join(LEGACY_PUBLISH_LOCK), LOCK_WAIT)
-        .context(tr!(
-            "旧版应用正在保存这份笔记，请等它完成后重试 / An older version of the app is saving this note; try again when it finishes"
-        ))?;
+    let older_app = take_legacy_lock(note)?;
     let (version, mut manifest, passed_over) = current_version(note)?;
     let swap = swap_dir(note)?;
     std::fs::create_dir_all(&swap).map_err(|error| disk_full(error.into()))?;
@@ -1659,6 +1656,44 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
 
 /// The lock an older app holds in a course while it publishes a version.
 const LEGACY_PUBLISH_LOCK: &str = ".publish.lock";
+
+/// Takes the lock an older app holds while it publishes a version, waiting for a
+/// publication under way to finish. A lock that stays held is told apart from one
+/// that cannot be opened.
+fn take_legacy_lock(note: &Path) -> Result<crate::runtime::FileLock> {
+    let path = note.join(LEGACY_PUBLISH_LOCK);
+    let deadline = std::time::Instant::now() + LOCK_WAIT;
+    loop {
+        match crate::runtime::try_lock_file(&path) {
+            Ok(Some(lock)) => return Ok(lock),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Ok(None) => anyhow::bail!(tr!(
+                "旧版应用正在保存这份笔记，请等它完成后重试 / An older version of the app is saving this note; try again when it finishes"
+            )),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
+                ) =>
+            {
+                return Err(anyhow::Error::new(error).context(tr!(
+                    "没有权限打开这份笔记的保存锁 {}，请检查这个文件夹的权限后重试 / No permission to open the note's save lock {}; check the folder's permissions and try again",
+                    path.display(),
+                    path.display()
+                )));
+            }
+            Err(error) => {
+                return Err(anyhow::Error::new(error).context(tr!(
+                    "无法打开这份笔记的保存锁 {} / Could not open the note's save lock {}",
+                    path.display(),
+                    path.display()
+                )));
+            }
+        }
+    }
+}
 
 /// A schema 1 course in which no version has a readable body. Flattening
 /// leaves it as it is; a new note can still be published beside its versions.

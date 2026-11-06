@@ -1688,3 +1688,22 @@ fn copies_at_the_limit_stop_a_task_and_say_what_frees_it() {
     }
     prepare_note(&library.note).unwrap();
 }
+
+/// A lock file that cannot be opened is not reported as an older app saving.
+#[test]
+fn a_lock_that_cannot_be_opened_is_not_called_busy() {
+    let legacy = Legacy::new();
+    legacy.version("v1", 1, "First");
+    legacy.point_at("v1");
+    let lock = legacy.course().join(LEGACY_PUBLISH_LOCK);
+    std::fs::create_dir(&lock).unwrap();
+    let error = format!("{:#}", flatten_legacy(legacy.course()).unwrap_err());
+    assert!(
+        !error.contains(tr!(
+            "旧版应用正在保存这份笔记，请等它完成后重试 / An older version of the app is saving this note; try again when it finishes"
+        )),
+        "{error}"
+    );
+    assert!(error.contains(&lock.display().to_string()), "{error}");
+    assert!(is_legacy(legacy.course()));
+}
