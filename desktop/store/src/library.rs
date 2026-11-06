@@ -3,7 +3,7 @@
 use crate::{
     locations::LocationCheck,
     notes::{self, Course},
-    organize, workspace,
+    order, organize, workspace,
 };
 use std::{collections::BTreeMap, path::PathBuf, rc::Rc};
 
@@ -23,6 +23,14 @@ impl FolderFilter {
         match self {
             Self::Folder(id) => Some(id),
             _ => None,
+        }
+    }
+    /// The place whose sort this view uses.
+    pub fn place(self) -> order::Place {
+        match self {
+            Self::All => order::Place::All,
+            Self::Unfiled => order::Place::Unfiled,
+            Self::Folder(id) => order::Place::Folder(id),
         }
     }
 }
@@ -54,6 +62,8 @@ pub struct LibraryIssue {
 pub struct NoteSource {
     pub author: String,
     pub duration: Option<f64>,
+    /// When the video was published, as `YYYY-MM-DD`.
+    pub published: Option<String>,
     pub local: bool,
     /// The video page an online note came from.
     pub link: Option<String>,
@@ -71,6 +81,10 @@ pub struct LibraryViewCache {
     pub title_recovery: BTreeMap<PathBuf, organize::Recovery>,
     pub aliases: BTreeMap<PathBuf, BTreeMap<PathBuf, String>>,
     pub alias_issues: Vec<LibraryIssue>,
+    /// Each library's sorts and hand-made orders, by its root.
+    pub orders: BTreeMap<PathBuf, order::Order>,
+    /// Each note's key in its library's order record, by its folder.
+    pub note_keys: std::collections::HashMap<PathBuf, String>,
 }
 
 impl LibraryViewCache {
@@ -100,6 +114,52 @@ impl LibraryViewCache {
             }),
         }
         if let Some(scan) = scan {
+            // Each note's key in the record: its course id, or a copy's own key.
+            let named: Vec<(&Course, order::Seen)> = scan
+                .courses
+                .iter()
+                .filter_map(|course| {
+                    let manifest = course.manifest.as_ref()?;
+                    let folder = organize::relative_key(&location.root, &course.dir).ok()?;
+                    Some((
+                        course,
+                        order::Seen {
+                            folder,
+                            id: manifest.course_id.clone(),
+                            created: manifest.created_at_ms,
+                        },
+                    ))
+                })
+                .collect();
+            let seen: Vec<order::Seen> = named.iter().map(|(_, seen)| seen.clone()).collect();
+            // Notes waiting on the person: being replaced (and so not listed), or with
+            // copies kept beside them. They are never forgotten, and a scan that could
+            // not list one does not count notes as gone.
+            let waiting: Vec<PathBuf> = scan
+                .attention
+                .iter()
+                .filter_map(|attention| match attention {
+                    c2m_artifact::artifact::NoteAttention::Blocked { note, .. }
+                    | c2m_artifact::artifact::NoteAttention::Kept { note, .. }
+                    | c2m_artifact::artifact::NoteAttention::Failed { note, .. } => {
+                        organize::relative_key(&location.root, note)
+                            .ok()
+                            .or_else(|| note.strip_prefix(&location.root).ok().map(Into::into))
+                    }
+                })
+                .collect();
+            let listed: std::collections::HashSet<&std::path::Path> =
+                seen.iter().map(|seen| seen.folder.as_path()).collect();
+            let complete = scan.issues.is_empty()
+                && scan.attention.len() == waiting.len()
+                && waiting
+                    .iter()
+                    .all(|folder| listed.contains(folder.as_path()));
+            let (record, keys) = order::Order::observe(&location.root, &seen, complete, &waiting);
+            for ((course, _), key) in named.iter().zip(keys) {
+                cache.note_keys.insert(course.dir.clone(), key);
+            }
+            cache.orders.insert(location.root.clone(), record);
             for course in &scan.courses {
                 let storage = &course.dir;
                 let Ok(relative) = organize::relative_key(&location.root, storage) else {
@@ -135,6 +195,8 @@ impl LibraryViewCache {
         self.title_recovery.extend(other.title_recovery);
         self.aliases.extend(other.aliases);
         self.alias_issues.extend(other.alias_issues);
+        self.orders.extend(other.orders);
+        self.note_keys.extend(other.note_keys);
     }
 }
 
@@ -199,6 +261,9 @@ pub struct LibraryState {
     /// Notes whose interrupted replacement needs the person, or with copies kept
     /// beside them; see `notes::LibraryScan::attention`.
     pub note_attention: Vec<c2m_artifact::artifact::NoteAttention>,
+    /// Changes whenever what the notes are sorted by may have changed: a scan, their
+    /// names and sources, or an order record; a view sorting them keys on it.
+    pub revision: u64,
 }
 
 impl LibraryState {
@@ -217,6 +282,7 @@ impl LibraryState {
             newer_notes: Default::default(),
             note_attention: Vec::new(),
             loading: false,
+            revision: 0,
         }
     }
 
@@ -230,6 +296,7 @@ impl LibraryState {
     /// Replaces what was known with what a scan found, newest notes first.
     pub fn apply_scan(&mut self, results: Vec<LibraryScanned>) {
         self.loading = false;
+        self.touch();
         self.courses.clear();
         self.cover_by_source.clear();
         self.issues.clear();
@@ -349,7 +416,21 @@ impl LibraryState {
             .collect()
     }
 
+    /// Records that what the notes are sorted by may have changed.
+    pub fn touch(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    /// The note's key in its library's order record.
+    pub fn note_key(&self, course: &Course) -> Option<&str> {
+        self.view_cache
+            .note_keys
+            .get(&course.dir)
+            .map(String::as_str)
+    }
+
     pub fn index_note_sources(&mut self, tasks: &[workspace::TaskRecord]) {
+        self.touch();
         let mut notes_by_source: std::collections::HashMap<String, Vec<usize>> = Default::default();
         for (index, course) in self.courses.iter().enumerate() {
             if let Some(manifest) = &course.manifest {
@@ -376,6 +457,7 @@ impl LibraryState {
                         author: source.author.clone(),
                         duration: (source.duration.is_finite() && source.duration > 0.)
                             .then_some(source.duration),
+                        published: source.published.clone(),
                         local: !source.online,
                         link: source.online.then(|| source.input.clone()),
                     },
@@ -456,6 +538,42 @@ mod tests {
                 Default::default(),
             ),
         )
+    }
+
+    /// A note being replaced is missing from the scan's notes and waits on the
+    /// person: however often the library is scanned, it keeps when it was added.
+    #[test]
+    fn a_note_waiting_on_the_person_keeps_its_place() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_path_buf();
+        let seen = crate::order::Seen {
+            folder: "course-a".into(),
+            id: "course-a".into(),
+            created: 7,
+        };
+        crate::order::Order::observe(&root, &[seen], true, &[]);
+        let mut location = location("library");
+        location.root = root.clone();
+        let scan = |attention: Vec<c2m_artifact::artifact::NoteAttention>| notes::LibraryScan {
+            courses: Vec::new(),
+            issues: Vec::new(),
+            attention,
+            newer: Vec::new(),
+        };
+        let blocked = c2m_artifact::artifact::NoteAttention::Blocked {
+            note: root.join("course-a"),
+            swap: root.join(".course2md/swap/course-a"),
+        };
+        for _ in 0..crate::order::FORGET_AFTER + 1 {
+            let cache =
+                super::LibraryViewCache::inspect(&location, Some(&scan(vec![blocked.clone()])));
+            assert_eq!(cache.orders[&root].added("course-a"), Some(7));
+        }
+        // Once nothing waits and it is still gone, it is forgotten in time.
+        for _ in 0..crate::order::FORGET_AFTER {
+            super::LibraryViewCache::inspect(&location, Some(&scan(Vec::new())));
+        }
+        assert_eq!(crate::order::Order::load(&root).added("course-a"), None);
     }
 
     #[test]

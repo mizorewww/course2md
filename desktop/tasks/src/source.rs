@@ -519,6 +519,7 @@ pub fn probe(
                 online: true,
                 original_language: video.original_language,
                 subtitles: video.subtitles,
+                published: video.published,
                 ..Source::default()
             };
             if let Some(message) = subtitle_failure {

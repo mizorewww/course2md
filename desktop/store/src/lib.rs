@@ -7,6 +7,7 @@ pub mod library;
 pub mod locations;
 pub mod migrate;
 pub mod notes;
+pub mod order;
 pub mod organize;
 pub mod page;
 pub mod records;

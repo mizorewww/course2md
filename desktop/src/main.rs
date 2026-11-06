@@ -273,6 +273,7 @@ impl Desktop {
         {
             job.cancel();
         }
+        self.write_unwritten_reads_now();
         if let Some(workspace) = &self.records.read(cx).workspace
             && let Err(error) = workspace.save()
         {
@@ -508,6 +509,7 @@ impl Desktop {
         std::thread::spawn(course2md::auth::youtube::remove_stale_checks);
         cx.set_reduce_motion(this.desktop_settings.reduce_motion);
         this.refresh_environment(cx);
+        this.load_all_notes_order(cx);
         this.refresh_library(cx);
         this.poll_workspace(cx);
         this.forget_credentials(abandoned_keys);
@@ -994,6 +996,7 @@ impl Desktop {
                 }
                 this.records
                     .change(cx, |records, _| records.library.apply_scan(results));
+                this.reapply_pending_orders(cx);
                 this.apply_course_title_aliases(cx);
                 this.open_validation_note(cx);
                 this.records.change(cx, |records, _| {
@@ -1090,6 +1093,7 @@ impl Desktop {
                 }
                 match result {
                     Ok(preview) => {
+                        this.note_opened(&preview.course, cx);
                         // The same duties as navigate() when leaving a page: save the draft when leaving the workbench;
                         // opening another note stops following an unrelated conversion, and a background completion never takes over.
                         if this.page == Page::New {

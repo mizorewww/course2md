@@ -39,6 +39,33 @@ pub(crate) enum NameTarget {
     },
 }
 
+/// A change to a library's record in view, and the scan generation as of which it
+/// was written (`None` while it is being written).
+#[derive(Clone)]
+pub(crate) struct OrderEditEntry {
+    pub id: u64,
+    pub root: PathBuf,
+    pub edit: desktop_store::order::OrderEdit,
+    pub settled: Option<u64>,
+}
+
+/// A library place: its library's root and the place.
+pub(crate) type PlaceKey = (PathBuf, desktop_store::order::Place);
+/// A place's sort, and its hand-made order when that changed.
+pub(crate) type PendingOrder = (desktop_store::order::Sort, Option<Vec<String>>);
+
+/// What a sort of the library's notes depends on: the notes and what is known of
+/// them, the place and its sort and hand-made order.
+#[derive(Clone, PartialEq)]
+pub(crate) struct ArrangeKey {
+    pub revision: u64,
+    pub home: Option<PathBuf>,
+    pub place: desktop_store::order::Place,
+    pub sort: desktop_store::order::Sort,
+    pub manual: u64,
+    pub courses: Vec<usize>,
+}
+
 /// The library page's own view state: its dialogs, folder tree and virtualized list.
 pub(crate) struct LibraryUi {
     pub name_dialog: Option<NameDialog>,
@@ -54,6 +81,35 @@ pub(crate) struct LibraryUi {
     pub keys: Vec<String>,
     pub focus: Vec<FocusHandle>,
     pub rem: f32,
+    /// The notes as last shown, run by run (a folder group, or the whole list), and
+    /// the card columns; moving a note by the keyboard steps within its run.
+    pub note_runs: Vec<Vec<usize>>,
+    pub note_columns: Option<usize>,
+    /// A note moved by the keyboard, to scroll into view once it is laid out again.
+    pub reveal: Option<usize>,
+    /// A library place's sort, and its hand-made order when that changed, not yet
+    /// saved; it is laid over the record a rescan reads until it is. Saves run one
+    /// at a time, so the last change lands last; `order_saving` is the one under way.
+    pub order_unsaved: std::collections::BTreeMap<PlaceKey, PendingOrder>,
+    pub order_saving: Option<(PathBuf, desktop_store::order::Place)>,
+    /// A save failed: the changes wait until the next change or scan tries again.
+    pub order_save_paused: bool,
+    /// Changes to library records being written, or written but not yet read back
+    /// by a scan that began after them; see `Desktop::reapply_pending_orders`.
+    pub order_edits: Vec<OrderEditEntry>,
+    pub next_order_edit: u64,
+    /// Notes read too soon after the time last written for them to write again, and
+    /// that time, by library root and note key.
+    pub reads_unwritten: std::collections::HashMap<(PathBuf, String), u64>,
+    pub read_written: std::collections::HashMap<(PathBuf, String), u64>,
+    /// How every note sorts, once read from the app's own file; whether it is being
+    /// read, saved, or changed since it was last saved.
+    pub all_notes: Option<desktop_store::order::PlaceOrder>,
+    pub all_notes_loading: bool,
+    pub all_notes_saving: bool,
+    pub all_notes_unsaved: bool,
+    /// The last notes sorted, what decided their order, and the result.
+    pub arranged: std::cell::RefCell<Option<(ArrangeKey, Vec<usize>)>>,
 }
 
 impl LibraryUi {
@@ -69,6 +125,21 @@ impl LibraryUi {
             keys: Vec::new(),
             focus: Vec::new(),
             rem: f32::NAN,
+            note_runs: Vec::new(),
+            note_columns: None,
+            reveal: None,
+            order_unsaved: Default::default(),
+            order_saving: None,
+            order_save_paused: false,
+            arranged: Default::default(),
+            order_edits: Vec::new(),
+            next_order_edit: 0,
+            reads_unwritten: Default::default(),
+            read_written: Default::default(),
+            all_notes: None,
+            all_notes_loading: false,
+            all_notes_saving: false,
+            all_notes_unsaved: false,
         }
     }
 }
@@ -930,24 +1001,28 @@ impl Desktop {
                 this.edit_folders(
                     root,
                     move |library| {
+                        let removed = library.subtree(id);
                         library.remove(id);
-                        Ok(())
+                        Ok(removed)
                     },
                     move |this, result, cx| match result {
                         // Drafts keep the deleted folder so their next submission
                         // asks for a deliberate destination.
-                        Ok(()) => this.records.change(cx, |records, _| {
-                            let library = &mut records.library;
-                            let removed = library.folder_filter.folder_id().is_some_and(|folder| {
-                                library
-                                    .indexes
-                                    .get(&removed_root)
-                                    .is_none_or(|index| !index.folders.contains_key(&folder))
-                            });
-                            if library.root == removed_root && removed {
-                                library.folder_filter = FolderFilter::Unfiled;
-                            }
-                        }),
+                        Ok(removed) => {
+                            this.forget_folder_orders(removed_root.clone(), removed, cx);
+                            this.records.change(cx, |records, _| {
+                                let library = &mut records.library;
+                                let removed =
+                                    library.folder_filter.folder_id().is_some_and(|folder| {
+                                        library.indexes.get(&removed_root).is_none_or(|index| {
+                                            !index.folders.contains_key(&folder)
+                                        })
+                                    });
+                                if library.root == removed_root && removed {
+                                    library.folder_filter = FolderFilter::Unfiled;
+                                }
+                            })
+                        }
                         Err(error) => {
                             this.message =
                                 Some(course2md::tr!("无法删除文件夹：{}", format!("{error:#}")))
