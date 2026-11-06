@@ -17,7 +17,7 @@ native libraries; `--workspace` adds the desktop. Every crate inherits its versi
 | `c2m-config` | `crates/c2m-config` | `config.toml` and the settings a task runs with |
 | `c2m-dispatch` | `crates/c2m-dispatch` | The paid-request ledger and the task control every long step checks |
 | `c2m-source` | `crates/c2m-source` | Video sources: metadata, downloads, subtitles, Bilibili and YouTube logins |
-| `c2m-asr` | `crates/c2m-asr` | Speech recognition backends and their models; its `build.rs` builds the Apple speech module from `native/apple-asr` |
+| `c2m-asr` | `crates/c2m-asr` | Speech recognition backends and their models, and the transcript checkpoint a resumed run continues from (`checkpoint.rs`); its `build.rs` builds the Apple speech module from `native/apple-asr` |
 | `c2m-ai` | `crates/c2m-ai` | AI services: proofreading, translation, summaries and their logins |
 | `c2m-artifact` | `crates/c2m-artifact` | Published notes: rendering, manifests and portable exports |
 | `c2m-engine` | `crates/c2m-engine` | The conversion pipeline and the task protocol (`run-task`) |
@@ -25,7 +25,7 @@ native libraries; `--workspace` adds the desktop. Every crate inherits its versi
 | `c2m-test-http` | `crates/c2m-test-http` | A loopback HTTP server, a dev-dependency only |
 | `desktop-prefs` | `desktop/prefs` | Preferences, services and their checks, credentials, this machine's components, and how the desktop keeps a JSON record |
 | `desktop-accounts` | `desktop/accounts` | The sign-ins' state: Bilibili, YouTube, Codex and Ollama |
-| `desktop-store` | `desktop/store` | The workspace record of drafts and tasks, libraries and their folders, published notes, task activity; `Records`, the record and the library scan every page reads, and where a note is filed |
+| `desktop-store` | `desktop/store` | The workspace record of drafts and tasks, libraries and their folders, each library's note order (`order.rs`), published notes, task activity; `Records`, the record and the library scan every page reads, and where a note is filed |
 | `desktop-reader-core` | `desktop/reader-core` | What the reader shows of a note, its links, reading positions and exports |
 | `desktop-tasks` | `desktop/tasks` | Sources, the import session, task plans, engine runs (the request, control file and record changes of a run) and the task view |
 | `desktop-ui` | `desktop/ui` | Shared compositions on `gpui-kit-material` (settings rows, confirm dialogs, note text, formulas, symbols), without page state |
@@ -110,7 +110,7 @@ also covers every `c2m_*` crate, so filters written for the single-crate engine 
 
 Some commits on merged side branches do not build on their own: `e771098`, `3080007`,
 `2cd910d` and `5e9f046` were made while a branch was mid-change, and only its merge builds.
-Bisect along the commits of `main` and `split/workspace` themselves, where every merge is checked as a whole:
+Bisect along the merges of `main`, where every merge is checked as a whole:
 
 ```sh
 git bisect start --first-parent <bad> <good>
