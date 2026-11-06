@@ -455,7 +455,8 @@ impl Desktop {
                     ),
                 )
                 .child(
-                    material_button("open-task-result", ButtonVariant::Tonal)
+                    // Tonal would be the notice's own container color.
+                    material_button("open-task-result", ButtonVariant::Filled)
                         .icon(symbols::arrow_forward())
                         .child(action)
                         .on_click(cx.listener(move |this, _, _, cx| {
