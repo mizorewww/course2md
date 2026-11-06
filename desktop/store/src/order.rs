@@ -414,6 +414,40 @@ pub fn read_worth_writing(written: Option<u64>, at: u64) -> bool {
     written.is_none_or(|written| at.saturating_sub(written) >= READ_INTERVAL_MS)
 }
 
+/// How long, in milliseconds, until a note read at `at` is worth writing down, when
+/// the time last written for it was `written`.
+pub fn read_due_in(written: u64, at: u64) -> u64 {
+    (written + READ_INTERVAL_MS).saturating_sub(at)
+}
+
+/// Writes reads not yet written down, by library root and note key: one change to
+/// each library's record, on a thread of its own, waiting at most `wait` for them.
+/// A library that does not answer is left; the times stay in its record unwritten.
+pub fn write_reads(
+    reads: impl IntoIterator<Item = ((PathBuf, String), u64)>,
+    wait: std::time::Duration,
+) {
+    let mut by_library: BTreeMap<PathBuf, Vec<(String, u64)>> = BTreeMap::new();
+    for ((root, key), at) in reads {
+        by_library.entry(root).or_default().push((key, at));
+    }
+    if by_library.is_empty() {
+        return;
+    }
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for (root, reads) in by_library {
+            let _ = Order::edit(&root, |order| {
+                for (key, at) in &reads {
+                    order.mark_read(key, *at);
+                }
+            });
+        }
+        let _ = done.send(());
+    });
+    let _ = finished.recv_timeout(wait);
+}
+
 /// A note a library scan found.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Seen {
@@ -934,6 +968,29 @@ mod tests {
             1_000 + READ_INTERVAL_MS - 1
         ));
         assert!(read_worth_writing(Some(1_000), 1_000 + READ_INTERVAL_MS));
+    }
+
+    #[test]
+    fn reads_waiting_are_written_to_each_library_at_once() {
+        let temp = tempfile::tempdir().unwrap();
+        let (a, b) = (temp.path().join("a"), temp.path().join("b"));
+        std::fs::create_dir(&a).unwrap();
+        std::fs::create_dir(&b).unwrap();
+        write_reads(
+            [
+                ((a.clone(), "n1".into()), 10),
+                ((a.clone(), "n2".into()), 20),
+                ((b.clone(), "n3".into()), 30),
+                ((temp.path().join("gone"), "n4".into()), 40),
+            ],
+            std::time::Duration::from_secs(10),
+        );
+        assert_eq!(Order::load(&a).last_read("n1"), Some(10));
+        assert_eq!(Order::load(&a).last_read("n2"), Some(20));
+        assert_eq!(Order::load(&b).last_read("n3"), Some(30));
+        // When a read is next worth writing.
+        assert_eq!(read_due_in(1_000, 1_000), READ_INTERVAL_MS);
+        assert_eq!(read_due_in(1_000, 1_000 + READ_INTERVAL_MS + 5), 0);
     }
 
     #[test]

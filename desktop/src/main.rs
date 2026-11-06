@@ -273,6 +273,7 @@ impl Desktop {
         {
             job.cancel();
         }
+        self.write_unwritten_reads_now();
         if let Some(workspace) = &self.records.read(cx).workspace
             && let Err(error) = workspace.save()
         {

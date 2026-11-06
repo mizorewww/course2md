@@ -3295,16 +3295,45 @@ impl Desktop {
             self.library_ui.read_written.insert(note, at);
             self.write_order_edit(root, order::OrderEdit::Read { key, at }, cx);
         } else {
-            // Kept in view over later scans, and written with the next read that is.
-            self.library_ui.reads_unwritten.insert(note, at);
-            if let Some(written) = written {
-                self.library_ui
-                    .read_written
-                    .entry((root, key))
-                    .or_insert(written);
+            // Kept in view over later scans, and written once the few minutes since
+            // the time last written have passed, or at quit.
+            let first = !self.library_ui.reads_unwritten.contains_key(&note);
+            self.library_ui.reads_unwritten.insert(note.clone(), at);
+            let written = written.unwrap_or(at);
+            self.library_ui
+                .read_written
+                .entry(note.clone())
+                .or_insert(written);
+            if first {
+                let due = order::read_due_in(written, at);
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(due))
+                        .await;
+                    let _ = this.update(cx, |this, cx| this.write_unwritten_read(note, cx));
+                })
+                .detach();
             }
         }
         cx.notify();
+    }
+
+    /// Writes down when a note was last read, if that is still waiting.
+    fn write_unwritten_read(&mut self, note: (PathBuf, String), cx: &mut Context<Self>) {
+        let Some(at) = self.library_ui.reads_unwritten.remove(&note) else {
+            return;
+        };
+        self.library_ui.read_written.insert(note.clone(), at);
+        let (root, key) = note;
+        self.write_order_edit(root, order::OrderEdit::Read { key, at }, cx);
+    }
+
+    /// Writes down every read still waiting, before the app quits: one change to each
+    /// library's record, waiting at most a moment for them.
+    pub(crate) fn write_unwritten_reads_now(&mut self) {
+        let reads = std::mem::take(&mut self.library_ui.reads_unwritten);
+        // A library that does not answer does not hold up quitting.
+        order::write_reads(reads, std::time::Duration::from_secs(2));
     }
 }
 
