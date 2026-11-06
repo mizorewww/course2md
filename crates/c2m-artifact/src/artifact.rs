@@ -1852,6 +1852,9 @@ fn take_legacy_lock(note: &Path) -> Result<crate::runtime::FileLock> {
     let deadline = std::time::Instant::now() + LOCK_WAIT;
     loop {
         match crate::runtime::try_lock_file(&path) {
+            // Removed or replaced between opening and locking (a cleanup of a left
+            // lock): the lock is on a file no one else opens. Open it again.
+            Ok(Some(lock)) if !lock.is_at(&path) => {}
             Ok(Some(lock)) => return Ok(lock),
             Ok(None) if std::time::Instant::now() < deadline => {
                 std::thread::sleep(std::time::Duration::from_millis(50));

@@ -508,6 +508,28 @@ pub struct FileLock {
     file: std::fs::File,
 }
 
+impl FileLock {
+    /// Whether `path` still names the locked file. A lock file removed or
+    /// replaced after it was opened locks nothing anyone else will open.
+    pub fn is_at(&self, path: &Path) -> bool {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            match (self.file.metadata(), std::fs::metadata(path)) {
+                (Ok(held), Ok(named)) => held.dev() == named.dev() && held.ino() == named.ino(),
+                _ => false,
+            }
+        }
+        // Windows keeps a removed file that is open as pending deletion, and no one
+        // can open its name until it is closed: a lock held there cannot be passed
+        // by another opening its path.
+        #[cfg(not(unix))]
+        {
+            path.exists()
+        }
+    }
+}
+
 impl Drop for FileLock {
     fn drop(&mut self) {
         // Unix flock locks belong to the open file description. A concurrently
@@ -616,6 +638,22 @@ pub fn random_b64url(bytes: usize) -> anyhow::Result<String> {
 
 #[cfg(test)]
 mod tests {
+    /// A lock tells whether its path still names the file it locked.
+    #[cfg(unix)]
+    #[test]
+    fn a_lock_knows_when_its_file_was_removed_or_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".publish.lock");
+        let lock = super::try_lock_file(&path).unwrap().unwrap();
+        assert!(lock.is_at(&path));
+        std::fs::remove_file(&path).unwrap();
+        assert!(!lock.is_at(&path));
+        std::fs::write(&path, b"").unwrap();
+        assert!(!lock.is_at(&path));
+        let again = super::try_lock_file(&path).unwrap().unwrap();
+        assert!(again.is_at(&path));
+    }
+
     /// A proxy from the environment carries remote services, never loopback ones, and
     /// leaves out what NO_PROXY lists.
     #[test]
