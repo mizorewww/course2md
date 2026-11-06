@@ -20,6 +20,7 @@ A page does not define colors, radii, control sizes, curves or icon files, and d
 ## Read the reference that controls the decision
 
 - For every UI change, read [the design language](references/design-language.md), [the shared system](references/system.md) and [layout, type and icons](references/layout-and-type.md). Establish the screen's alignment axes and information hierarchy before changing spacing.
+- When implementing on the kit (choosing a component, adding a symbol, a timer), read [kit usage](references/kit-usage.md).
 - For interactions, asynchronous work, scrolling or animation, read [states and motion](references/states-and-motion.md).
 - For first use, conversion, navigation or recovery, read [task decisions and continuity](references/interaction.md).
 - For preferences, services, models and diagnostics, also read [settings composition](references/settings.md).
