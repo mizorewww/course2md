@@ -1906,3 +1906,18 @@ fn a_flatten_that_cannot_lock_leaves_no_copy() {
     prepare_note(&course).unwrap();
     assert_eq!(kept_copies(&course).len(), 1);
 }
+
+/// A re-flatten that brings the copies to the limit stops the task before its
+/// work, with the copy-limit error, as copies already at the limit do.
+#[test]
+fn a_reflatten_that_reaches_the_copy_limit_stops_the_task() {
+    let (_legacy, course) = resaved_note();
+    let swap = swap_dir(&course).unwrap();
+    for n in 1..MAX_KEPT_COPIES {
+        std::fs::create_dir_all(swap.join(format!("displaced-{n}"))).unwrap();
+    }
+    let error = prepare_note(&course).unwrap_err();
+    assert!(error.is::<crate::outcome::CopiesKept>(), "{error:#}");
+    assert!(!needs_flatten(&course));
+    assert_eq!(kept_copies(&course).len(), MAX_KEPT_COPIES);
+}

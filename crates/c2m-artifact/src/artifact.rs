@@ -1490,13 +1490,20 @@ pub fn prepare_note(note_dir: &Path) -> Result<()> {
     }
     let _lock = lock_note(note_dir)?;
     recover_locked(note_dir)?;
-    if stuck_olds(note_dir)?.len() >= MAX_KEPT_COPIES {
-        return Err(crate::outcome::CopiesKept {
-            swap: swap_dir(note_dir)?,
+    let at_limit = || -> Result<()> {
+        if stuck_olds(note_dir)?.len() >= MAX_KEPT_COPIES {
+            return Err(crate::outcome::CopiesKept {
+                swap: swap_dir(note_dir)?,
+            }
+            .into());
         }
-        .into());
-    }
+        Ok(())
+    };
+    at_limit()?;
     flatten_tolerant(note_dir)?;
+    // Taking an older app's later version keeps the flat note as a copy, which
+    // may reach the limit: the task stops before its work, as it would have.
+    at_limit()?;
     release_legacy_lock(note_dir);
     salvage_work(note_dir, &note_dir.join(".work"))?;
     // A folder an older app made for a task that never published.
