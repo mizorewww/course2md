@@ -2933,15 +2933,17 @@ impl Desktop {
         self.move_note_onto(moving, target, false, cx);
     }
 
-    /// Moves a note one place along its run, or a card row up or down.
+    /// Moves a note one place along its run, or a card row up or down; down from a
+    /// card with no card below it, to the end of its run.
     fn step_note(&mut self, index: usize, step: isize, cx: &mut Context<Self>) {
         if !self.can_reorder(cx) {
             return;
         }
-        let neighbor = self.library_ui.note_runs.iter().find_map(|run| {
-            let position = run.iter().position(|i| *i == index)?;
-            run.get(position.checked_add_signed(step)?).copied()
-        });
+        let neighbor = self
+            .library_ui
+            .note_runs
+            .iter()
+            .find_map(|run| neighbor_in_run(run, index, step));
         if let Some(neighbor) = neighbor {
             self.library_ui.reveal = Some(index);
             self.move_note_onto(index, neighbor, true, cx);
@@ -3178,6 +3180,18 @@ impl Desktop {
     }
 }
 
+/// The note `step` places from `index` in `run`, if `index` is in it. A step down
+/// a row from a card with no card below it reaches the end of the run.
+fn neighbor_in_run(run: &[usize], index: usize, step: isize) -> Option<usize> {
+    let position = run.iter().position(|i| *i == index)?;
+    let target = position.checked_add_signed(step)?;
+    match run.get(target) {
+        Some(neighbor) => Some(*neighbor),
+        None if step > 1 && position + 1 < run.len() => run.last().copied(),
+        None => None,
+    }
+}
+
 /// A place with nothing in it: a tinted icon, what that means and the way forward,
 /// which the caller appends.
 pub(crate) fn empty_state(
@@ -3250,6 +3264,25 @@ mod tests {
 
     use crate::notes::Course;
     use std::time::SystemTime;
+
+    #[test]
+    fn option_down_from_a_card_with_none_below_goes_to_the_end() {
+        use super::neighbor_in_run;
+        // Three columns: 0 1 2 / 3 4 5 / 6 7.
+        let run: Vec<usize> = (10..18).collect();
+        assert_eq!(neighbor_in_run(&run, 11, 3), Some(14));
+        // Below 15 (last row has two cards) there is none: it goes to the end.
+        assert_eq!(neighbor_in_run(&run, 15, 3), Some(17));
+        // On the last row there is nowhere further down, and up still steps a row.
+        assert_eq!(neighbor_in_run(&run, 16, 3), Some(17));
+        assert_eq!(neighbor_in_run(&run, 17, 3), None);
+        assert_eq!(neighbor_in_run(&run, 16, -3), Some(13));
+        assert_eq!(neighbor_in_run(&run, 11, -3), None);
+        // One place along, and a note not in the run.
+        assert_eq!(neighbor_in_run(&run, 17, 1), None);
+        assert_eq!(neighbor_in_run(&run, 10, -1), None);
+        assert_eq!(neighbor_in_run(&run, 99, 1), None);
+    }
 
     #[test]
     fn a_note_whose_task_stopped_for_the_person_does_not_read_as_processing() {
