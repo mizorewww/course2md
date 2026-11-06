@@ -2790,11 +2790,15 @@ impl Desktop {
             move || all.save(&order::all_notes_path()),
             |this, result, cx| {
                 this.library_ui.all_notes_saving = false;
-                if let Err(error) = result {
-                    this.message =
-                        Some(course2md::tr!("排序方式尚未保存：{}", format!("{error:#}")));
+                match result {
+                    Ok(()) => this.save_all_notes_order(cx),
+                    // Still unsaved: the next change or scan tries again.
+                    Err(error) => {
+                        this.library_ui.all_notes_unsaved = true;
+                        this.message =
+                            Some(course2md::tr!("排序方式尚未保存：{}", format!("{error:#}")));
+                    }
                 }
-                this.save_all_notes_order(cx);
             },
             cx,
         );
@@ -2850,6 +2854,11 @@ impl Desktop {
     /// written down, then sorts not yet saved. A change written before the scan
     /// began is in what it read, and is let go. Called after every scan.
     pub(crate) fn reapply_pending_orders(&mut self, cx: &mut Context<Self>) {
+        // A save that failed tries again now.
+        self.save_all_notes_order(cx);
+        if std::mem::take(&mut self.library_ui.order_save_paused) {
+            self.save_place_orders(cx);
+        }
         let generation = self.library(cx).generation;
         self.library_ui
             .order_edits
@@ -2919,7 +2928,7 @@ impl Desktop {
     /// Saves the library places whose sort changed, one at a time, each as it is
     /// when its turn comes; the hand-made order is written only when it changed.
     fn save_place_orders(&mut self, cx: &mut Context<Self>) {
-        if self.library_ui.order_saving.is_some() {
+        if self.library_ui.order_saving.is_some() || self.library_ui.order_save_paused {
             return;
         }
         let Some((key, (sort, manual))) = self
@@ -2944,12 +2953,12 @@ impl Desktop {
             move || order::Order::edit(&root, |order| written.apply(order)),
             move |this, result, cx| {
                 this.library_ui.order_saving = None;
-                // A change made while this one was saving waits for its own turn.
-                if this.library_ui.order_unsaved.get(&key) == Some(&sent) {
-                    this.library_ui.order_unsaved.remove(&key);
-                }
                 match result {
                     Ok(_) => {
+                        // A change made while this one was saving waits for its own turn.
+                        if this.library_ui.order_unsaved.get(&key) == Some(&sent) {
+                            this.library_ui.order_unsaved.remove(&key);
+                        }
                         // Kept until a scan that began after it reads it back.
                         let id = this.library_ui.next_order_edit;
                         this.library_ui.next_order_edit += 1;
@@ -2974,13 +2983,16 @@ impl Desktop {
                         }
                     }
                     Err(error) => {
-                        // Memory keeps the change in view; it is not claimed saved.
-                        this.library_ui.order_unsaved.remove(&key);
+                        // Kept in view and not claimed saved: the change stays waiting,
+                        // and saving pauses until the next change or scan tries again.
+                        this.library_ui.order_save_paused = true;
                         this.message =
                             Some(course2md::tr!("排序方式尚未保存：{}", format!("{error:#}")));
                     }
                 }
+                let paused = this.library_ui.order_save_paused;
                 this.reapply_pending_orders(cx);
+                this.library_ui.order_save_paused = paused;
                 this.save_place_orders(cx);
             },
             cx,

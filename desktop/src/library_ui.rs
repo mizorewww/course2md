@@ -92,6 +92,8 @@ pub(crate) struct LibraryUi {
     /// at a time, so the last change lands last; `order_saving` is the one under way.
     pub order_unsaved: std::collections::BTreeMap<PlaceKey, PendingOrder>,
     pub order_saving: Option<(PathBuf, desktop_store::order::Place)>,
+    /// A save failed: the changes wait until the next change or scan tries again.
+    pub order_save_paused: bool,
     /// Changes to library records being written, or written but not yet read back
     /// by a scan that began after them; see `Desktop::reapply_pending_orders`.
     pub order_edits: Vec<OrderEditEntry>,
@@ -128,6 +130,7 @@ impl LibraryUi {
             reveal: None,
             order_unsaved: Default::default(),
             order_saving: None,
+            order_save_paused: false,
             arranged: Default::default(),
             order_edits: Vec::new(),
             next_order_edit: 0,
