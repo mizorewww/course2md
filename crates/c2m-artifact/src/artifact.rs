@@ -1706,6 +1706,21 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
         }
         return Err(disk_full(error));
     }
+    // The flat note carries the lock too, held across the swap: the older app's
+    // path to it then reaches this held lock, not a free one. Taken before the
+    // copy is kept, so a failure here leaves no copy behind.
+    let locked = fail_point(FailPoint::Locking)
+        .and_then(|()| crate::runtime::lock_file(&staging.join(LEGACY_PUBLISH_LOCK)));
+    let flat_lock = match locked {
+        Ok(lock) => lock,
+        Err(error) => {
+            if !simulated_crash(&error) {
+                let _ = remove_tree(&staging);
+                let _ = remove_tree(&kept_staging);
+            }
+            return Err(error);
+        }
+    };
     // Kept before the swap: a crash after it must not lose the flat note. A crash
     // before it leaves a second copy at worst.
     let kept = if resaved {
@@ -1716,9 +1731,6 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
     } else {
         None
     };
-    // The flat note carries the lock too, held across the swap: the older app's
-    // path to it then reaches this held lock, not a free one.
-    let flat_lock = crate::runtime::lock_file(&staging.join(LEGACY_PUBLISH_LOCK))?;
     // Windows refuses to rename a folder with a file open inside it.
     #[cfg(windows)]
     drop((older_app, flat_lock));
@@ -2003,6 +2015,8 @@ pub fn sync_dir(path: &Path) -> Result<()> {
 #[cfg_attr(not(test), allow(dead_code))]
 enum FailPoint {
     Staged,
+    /// Before a flatten takes the lock the flat note carries.
+    Locking,
     BetweenRenames,
     AfterRenames,
     BeforeDeletingOld,

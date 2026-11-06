@@ -618,7 +618,7 @@ fn an_interrupted_flatten_is_finished_by_running_it_again() {
         assert!(simulated_crash(&error), "{point:?}: {error:#}");
         match point {
             // The older versions are still there until the flat note is in place.
-            FailPoint::Staged => assert_eq!(snapshot(course), before),
+            FailPoint::Staged | FailPoint::Locking => assert_eq!(snapshot(course), before),
             FailPoint::BetweenRenames => assert!(!course.exists()),
             FailPoint::AfterRenames | FailPoint::BeforeDeletingOld => {
                 assert!(!is_legacy(course));
@@ -1890,4 +1890,19 @@ fn a_crash_while_taking_an_older_apps_version_keeps_the_flat_note() {
         );
         assert!(!needs_flatten(&course), "{point:?}");
     }
+}
+
+/// A flatten that cannot take the flat note's lock leaves no copy behind, so
+/// retries do not pile copies up to the limit.
+#[test]
+fn a_flatten_that_cannot_lock_leaves_no_copy() {
+    let (_legacy, course) = resaved_note();
+    for _ in 0..MAX_KEPT_COPIES {
+        IO_ERROR_AT.with(|error| error.set(Some(FailPoint::Locking)));
+        assert!(flatten_legacy(&course).is_err());
+        assert!(kept_copies(&course).is_empty());
+        assert!(needs_flatten(&course));
+    }
+    prepare_note(&course).unwrap();
+    assert_eq!(kept_copies(&course).len(), 1);
 }
