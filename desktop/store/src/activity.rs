@@ -31,6 +31,9 @@ pub struct Activity {
     /// Tokens the AI service reported for this stage, sent and received.
     prompt_tokens: u64,
     completion_tokens: u64,
+    /// The engine's last running totals for this stage, which the next report
+    /// is counted from.
+    reported_tokens: (u64, u64),
     sampled: bool,
     /// When the stage began and ended, for its elapsed time; `started`
     /// restarts with each retry for the rate.
@@ -124,8 +127,6 @@ pub struct JobEvents {
     /// The purposes the task's receipts hold any attempt for, read with them.
     #[serde(skip)]
     pub attempted: std::collections::BTreeSet<String>,
-    #[serde(skip)]
-    pub tokens: (u64, u64),
 }
 
 /// A record's identity is what it saves: the rest is derived.
@@ -185,9 +186,8 @@ impl JobEvents {
                 }
                 match status {
                     StageStatus::Start => {
+                        // The engine counts the stage's tokens again from zero.
                         self.stages.insert(stage.clone(), Activity::new());
-                        // The engine counts tokens again from zero for each stage.
-                        self.tokens = (0, 0);
                     }
                     StageStatus::Done => self.stage(stage).finish(),
                 }
@@ -216,17 +216,20 @@ impl JobEvents {
                 prompt,
                 completion,
             } => {
-                // The engine reports running totals that start again at zero with each
-                // stage start; each stage keeps the part that arrived while it ran. A
-                // total below the last one is a count that started again.
-                let (sent, received) = std::mem::replace(&mut self.tokens, (*prompt, *completion));
+                // The engine reports each stage's running totals, which start again at
+                // zero when that stage starts: a response is counted once, for its own
+                // stage, even when it lands after another stage started. A total below
+                // the last one is a count that started again (an engine that counted
+                // all stages together restarted it with any stage).
+                let activity = self.stage(stage);
+                let (sent, received) =
+                    std::mem::replace(&mut activity.reported_tokens, (*prompt, *completion));
                 let (sent, received) = if *prompt < sent || *completion < received {
                     (0, 0)
                 } else {
                     (sent, received)
                 };
-                self.stage(stage)
-                    .note_tokens(prompt - sent, completion - received);
+                activity.note_tokens(prompt - sent, completion - received);
                 false
             }
             Event::Workers { stage, workers } => {
@@ -308,7 +311,6 @@ impl JobEvents {
     pub fn begin_run(&mut self) {
         self.done = None;
         self.error = None;
-        self.tokens = (0, 0);
     }
 
     /// Applies a saved stream. A line this build cannot read is skipped: this is a view
@@ -347,6 +349,7 @@ impl Activity {
             found: None,
             prompt_tokens: 0,
             completion_tokens: 0,
+            reported_tokens: (0, 0),
             sampled: false,
             created: now,
             finished: None,
@@ -1343,8 +1346,9 @@ mod tests {
                 .live_counter()
                 .ends_with("↑ 4,656 · ↓ 94 词元")
         );
-        // A stage that starts in between (scenes beside proofreading) restarts the
-        // engine's count too; a lower total is a fresh count, not lost tokens.
+        // An engine that counted every stage together restarted its count when a
+        // stage started in between (scenes beside proofreading); a lower total is
+        // a fresh count, not lost tokens.
         events.apply(&tokens(&Stage::Summary, 4_700, 120));
         events.apply(&start(&Stage::ScenesExtract));
         events.apply(&tokens(&Stage::Summary, 50, 10));
@@ -1353,6 +1357,37 @@ mod tests {
             Some("↑ 4,750 · ↓ 130 词元")
         );
         assert_eq!(Activity::new().tokens_label(), None);
+    }
+
+    /// A response of one stage that lands after the next stage started is counted
+    /// once, for its own stage.
+    #[test]
+    fn a_late_response_is_not_counted_twice() {
+        let start = |stage: &Stage| Event::Stage {
+            stage: stage.clone(),
+            status: StageStatus::Start,
+        };
+        let tokens = |stage: &Stage, prompt, completion| Event::Tokens {
+            stage: stage.clone(),
+            prompt,
+            completion,
+        };
+        let mut events = JobEvents::default();
+        events.apply(&start(&Stage::Llm));
+        events.apply(&tokens(&Stage::Llm, 4_000, 400));
+        events.apply(&start(&Stage::Summary));
+        // The proofreading total goes on from its own count.
+        events.apply(&tokens(&Stage::Llm, 4_100, 410));
+        events.apply(&tokens(&Stage::Summary, 600, 60));
+        events.apply(&tokens(&Stage::Summary, 900, 90));
+        assert_eq!(
+            events.stages[&Stage::Llm].tokens_label().as_deref(),
+            Some("↑ 4,100 · ↓ 410 词元")
+        );
+        assert_eq!(
+            events.stages[&Stage::Summary].tokens_label().as_deref(),
+            Some("↑ 900 · ↓ 90 词元")
+        );
     }
 
     #[test]
