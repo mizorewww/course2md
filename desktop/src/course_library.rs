@@ -737,7 +737,7 @@ impl Desktop {
                 NoteAttention::Kept { note, swap, copies } => (
                     NoticeKind::Info,
                     course2md::tr!(
-                        "{} 旁保留了 {} 份副本（替换中断时留下，无法确认是否还需要），请查看后删除不需要的",
+                        "{} 的文件夹里保留了 {} 份副本，无法确认是否还需要，请查看后删除不需要的",
                         note.display(),
                         copies.len()
                     )
@@ -755,7 +755,7 @@ impl Desktop {
                         .flex_wrap()
                         .gap(rem(8.))
                         .child(
-                            material_button(("open-note-attention", index), ButtonVariant::Tonal)
+                            material_button(("open-note-attention", index), ButtonVariant::Filled)
                                 .icon(symbols::folder_open())
                                 .child(course2md::tr!("打开需要处理的文件夹"))
                                 .on_click(move |_, _, cx| cx.open_with_system(&folder)),
