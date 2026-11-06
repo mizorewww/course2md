@@ -249,8 +249,12 @@ impl Order {
     /// Each note's key: its course id, or, for a copy of a note (another folder with
     /// the same course id), the id with the copy's folder, so moving one copy never
     /// moves the other. The folder recorded as holding the plain id keeps it while it
-    /// holds the note; otherwise the folder that sorts first takes it.
-    fn assign_keys(&mut self, notes: &[Seen]) -> Vec<String> {
+    /// holds the note. Gone from the scan, it still keeps it when the scan is not
+    /// complete, when that folder waits on the person, or, while the plain key is
+    /// remembered, when copies remain and none can be told to be the note; a note
+    /// that alone has the id (one moved or renamed) takes the plain id in a complete
+    /// scan. A new id goes to the folder that sorts first.
+    fn assign_keys(&mut self, notes: &[Seen], complete: bool, waiting: &[String]) -> Vec<String> {
         let mut folders: BTreeMap<&str, Vec<String>> = BTreeMap::new();
         for note in notes {
             folders
@@ -259,10 +263,13 @@ impl Order {
                 .push(folder_name(&note.folder));
         }
         for (id, present) in &folders {
-            let keeps = self
-                .holders
-                .get(*id)
-                .is_some_and(|holder| present.contains(holder));
+            let remembered = self.added.contains_key(*id) || self.read.contains_key(*id);
+            let keeps = self.holders.get(*id).is_some_and(|holder| {
+                present.contains(holder)
+                    || !complete
+                    || waiting.contains(holder)
+                    || (remembered && present.len() > 1)
+            });
             if !keeps && let Some(first) = present.iter().min() {
                 self.holders.insert((*id).to_owned(), first.clone());
             }
@@ -295,15 +302,15 @@ impl Order {
         waiting: &[PathBuf],
     ) -> (bool, Vec<String>) {
         let before = self.clone();
-        let keys = self.assign_keys(notes);
+        let waiting: Vec<String> = waiting.iter().map(|folder| folder_name(folder)).collect();
+        let keys = self.assign_keys(notes, complete, &waiting);
         let present: std::collections::HashSet<&str> = keys.iter().map(String::as_str).collect();
         for (key, note) in keys.iter().zip(notes) {
             self.added.entry(key.clone()).or_insert(note.created);
             self.missing.remove(key);
         }
         if complete {
-            let waiting: std::collections::HashSet<String> =
-                waiting.iter().map(|folder| folder_name(folder)).collect();
+            let waiting: std::collections::HashSet<String> = waiting.into_iter().collect();
             let known: std::collections::BTreeSet<String> = self
                 .added
                 .keys()
@@ -953,11 +960,41 @@ mod tests {
         // The copy going away changes nothing for the original.
         let named = order.note_seen(&both[..2], true, &[]).1;
         assert_eq!(named, ["course-x", "course-y"]);
-        // Once the original's folder is gone, the remaining copy takes the plain id.
+        // A copy beside the original keeps its own key while the original is
+        // remembered, whatever scans in between could not list it.
+        let copy_only = [note_in("a/course-x", "course-x")];
+        let both_again = [
+            note_in("b/course-x", "course-x"),
+            note_in("a/course-x", "course-x"),
+        ];
+        order.note_seen(&both_again, true, &[]);
         let named = order
-            .note_seen(&[note_in("a/course-x", "course-x")], true, &[])
+            .note_seen(&copy_only, false, &[PathBuf::from("b/course-x")])
             .1;
-        assert_eq!(named, ["course-x"]);
+        assert_eq!(named, ["course-x@a/course-x"]);
+        let named = order.note_seen(&both_again, true, &[]).1;
+        assert_eq!(named, ["course-x", "course-x@a/course-x"]);
+        // A note that alone has its id, moved to another folder, keeps its key.
+        let moved = [
+            note_in("b/course-x", "course-x"),
+            note_in("a/course-x", "course-x"),
+            note_in("c/course-y", "course-y"),
+        ];
+        assert_eq!(
+            order.note_seen(&moved, true, &[]).1,
+            ["course-x", "course-x@a/course-x", "course-y"]
+        );
+        // Once the original is forgotten, the remaining copy takes the plain id.
+        let copies = [
+            note_in("a/course-x", "course-x"),
+            note_in("d/course-x", "course-x"),
+        ];
+        for _ in 0..FORGET_AFTER {
+            let named = order.note_seen(&copies, true, &[]).1;
+            assert_eq!(named, ["course-x@a/course-x", "course-x@d/course-x"]);
+        }
+        let named = order.note_seen(&copies, true, &[]).1;
+        assert_eq!(named, ["course-x", "course-x@d/course-x"]);
         // Moving one copy leaves the other where it was.
         let notes = [
             note("course-x", "X", 1),
@@ -971,6 +1008,30 @@ mod tests {
             keys(&notes, &arranged),
             ["course-x@b/course-x", "course-y", "course-x"]
         );
+    }
+
+    /// The original being replaced (not listed, waiting on the person) leaves its
+    /// copy with the copy's own key, and gets its key back when it is listed again.
+    #[test]
+    fn a_note_being_replaced_keeps_its_key_from_its_copy() {
+        let n = |folder: &str| Seen {
+            folder: PathBuf::from(folder),
+            id: "x".into(),
+            created: 1,
+        };
+        let mut order = Order::default();
+        order.note_seen(&[n("b/x")], true, &[]);
+        order.mark_read("x", 500);
+        let both = order.note_seen(&[n("b/x"), n("a/x")], true, &[]).1;
+        assert_eq!(both, ["x", "x@a/x"]);
+        let (_, keys) = order.note_seen(&[n("a/x")], false, &[PathBuf::from("b/x")]);
+        assert_eq!(keys, ["x@a/x"]);
+        // Even a complete scan that lists it as waiting leaves it its key.
+        let (_, keys) = order.note_seen(&[n("a/x")], true, &[PathBuf::from("b/x")]);
+        assert_eq!(keys, ["x@a/x"]);
+        let after = order.note_seen(&[n("b/x"), n("a/x")], true, &[]).1;
+        assert_eq!(after, ["x", "x@a/x"]);
+        assert_eq!(order.last_read("x"), Some(500));
     }
 
     #[test]
