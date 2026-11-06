@@ -1821,3 +1821,73 @@ fn a_lock_that_cannot_be_opened_is_not_called_busy() {
     assert!(error.contains(&lock.display().to_string()), "{error}");
     assert!(is_legacy(legacy.course()));
 }
+
+/// Every `course.md` below `root` that says `text`.
+fn notes_saying(root: &Path, text: &str) -> usize {
+    walk(root)
+        .unwrap()
+        .into_iter()
+        .filter(|(path, kind)| *kind == EntryKind::File && path.ends_with("course.md"))
+        .filter(|(path, _)| {
+            std::fs::read_to_string(root.join(path)).is_ok_and(|body| body.contains(text))
+        })
+        .count()
+}
+
+/// A flat note an older app saved a newer version into (`Second` is the flat
+/// note's text, `Ninth` the older app's).
+fn resaved_note() -> (Legacy, PathBuf) {
+    let legacy = Legacy::populated();
+    let course = legacy.course().to_path_buf();
+    flatten_legacy(&course).unwrap().unwrap();
+    legacy.version("v9", 9, "Ninth");
+    legacy.point_at("v9");
+    assert!(needs_flatten(&course));
+    (legacy, course)
+}
+
+/// An ordinary error once the older app's version is in place (a directory that
+/// cannot be synced) keeps the copy of the flat note: recovery deletes the note
+/// it replaced, and the copy is the only flat note left.
+#[test]
+fn an_error_after_the_swap_keeps_the_flat_note() {
+    let (legacy, course) = resaved_note();
+    IO_ERROR_AT.with(|error| error.set(Some(FailPoint::AfterRenames)));
+    assert!(flatten_legacy(&course).is_err());
+    prepare_note(&course).unwrap();
+    let root = legacy.library.library();
+    assert_eq!(notes_saying(&root, "Second"), 1);
+    assert!(
+        std::fs::read_to_string(course.join("course.md"))
+            .unwrap()
+            .contains("Ninth")
+    );
+    assert_eq!(kept_copies(&course).len(), 1);
+}
+
+/// A crash at any point of a flatten of a resaved note leaves the flat note
+/// somewhere, and running again makes the older app's version the note.
+#[test]
+fn a_crash_while_taking_an_older_apps_version_keeps_the_flat_note() {
+    for point in [
+        FailPoint::Staged,
+        FailPoint::BetweenRenames,
+        FailPoint::AfterRenames,
+        FailPoint::BeforeDeletingOld,
+    ] {
+        let (legacy, course) = resaved_note();
+        crash_at(point);
+        assert!(flatten_legacy(&course).is_err(), "{point:?}");
+        flatten_legacy(&course).unwrap();
+        prepare_note(&course).unwrap();
+        let root = legacy.library.library();
+        assert!(notes_saying(&root, "Second") >= 1, "{point:?}");
+        assert!(
+            std::fs::read_to_string(course.join("course.md"))
+                .unwrap()
+                .contains("Ninth"),
+            "{point:?}"
+        );
+        assert!(!needs_flatten(&course), "{point:?}");
+    }
+}

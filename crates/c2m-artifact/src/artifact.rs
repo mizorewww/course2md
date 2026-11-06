@@ -1723,8 +1723,14 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
     #[cfg(windows)]
     drop((older_app, flat_lock));
     if let Err(error) = swap_in(note, &staging, "flatten", &publication) {
-        // The note is as it was, or recovery puts it back: it still holds the flat note.
+        // Before the new note was in place, the note is as it was (or recovery puts
+        // it back) and still holds the flat note: its copy goes. Once the new note
+        // is in place, recovery deletes the replaced note, and the copy is the
+        // only flat note left: it stays.
+        let placed = note_manifest(note)
+            .is_ok_and(|placed| placed.is_some_and(|placed| placed.publication == publication));
         if !simulated_crash(&error)
+            && !placed
             && let Some(kept) = &kept
         {
             let _ = remove_tree(kept);
@@ -2020,10 +2026,21 @@ impl std::fmt::Display for SimulatedCrash {
 impl std::error::Error for SimulatedCrash {}
 
 #[cfg(test)]
+thread_local! {
+    /// A point where tests make an ordinary I/O error happen, which the code
+    /// handles, unlike a crash.
+    static IO_ERROR_AT: std::cell::Cell<Option<FailPoint>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
 fn fail_point(point: FailPoint) -> Result<()> {
     if CRASH_AT.with(|crash| crash.get()) == Some(point) {
         CRASH_AT.with(|crash| crash.set(None));
         return Err(SimulatedCrash.into());
+    }
+    if IO_ERROR_AT.with(|error| error.get()) == Some(point) {
+        IO_ERROR_AT.with(|error| error.set(None));
+        return Err(std::io::Error::other("injected I/O error").into());
     }
     Ok(())
 }
