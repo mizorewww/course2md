@@ -692,7 +692,12 @@ pub fn publish(
             return Err(disk_full(error));
         }
     };
-    // Windows refuses to rename a folder with a file open inside it.
+    // Windows refuses to rename a folder with a file open inside it. In the gap
+    // between letting go and the rename an older app may take the lock (it does
+    // not wait for it): it then holds the lock file open in the note, so the
+    // rename is refused and the note is unchanged, and the task says the note is
+    // in use. Its whole save, a version written and its pointer moved, cannot
+    // fit in that gap of one call, so it is never swapped away finished.
     #[cfg(windows)]
     drop(older_app);
     swap_in(note, &staging, &target.task_id, &stamp)?;
@@ -1789,7 +1794,9 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
     } else {
         None
     };
-    // Windows refuses to rename a folder with a file open inside it.
+    // Windows refuses to rename a folder with a file open inside it. An older app
+    // that takes the lock in the gap before the rename holds a file open in the
+    // note, so the rename is refused and nothing changes (see `publish`).
     #[cfg(windows)]
     drop((older_app, flat_lock));
     if let Err(error) = swap_in(note, &staging, "flatten", &publication) {
