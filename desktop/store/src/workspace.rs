@@ -731,10 +731,6 @@ pub struct State {
     pub reader_sources: BTreeMap<String, PathBuf>,
     pub collapsed: BTreeSet<String>,
     pub storage_backups: Vec<crate::storage::BackupRecord>,
-    /// How 全部笔记 sorts the notes of every library; each library keeps its own
-    /// places' sorts in its folder.
-    #[serde(default, skip_serializing_if = "crate::order::PlaceOrder::is_empty")]
-    pub all_notes: crate::order::PlaceOrder,
     /// Startup reconciliation has not been applied yet; nothing is dispatched.
     #[serde(skip)]
     pub reconciling: bool,
@@ -767,7 +763,6 @@ impl State {
             reader_sources: BTreeMap::new(),
             collapsed: BTreeSet::new(),
             storage_backups: Vec::new(),
-            all_notes: Default::default(),
             reconciling: false,
             progress: 0,
         }

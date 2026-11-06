@@ -82,6 +82,12 @@ pub(crate) struct LibraryUi {
     /// at a time, so the last change lands last; `order_saving` is the one under way.
     pub order_unsaved: std::collections::BTreeMap<PlaceKey, PendingOrder>,
     pub order_saving: Option<(PathBuf, desktop_store::order::Place)>,
+    /// How every note sorts, once read from the app's own file; whether it is being
+    /// read, saved, or changed since it was last saved.
+    pub all_notes: Option<desktop_store::order::PlaceOrder>,
+    pub all_notes_loading: bool,
+    pub all_notes_saving: bool,
+    pub all_notes_unsaved: bool,
     /// The last notes sorted, what decided their order, and the result.
     pub arranged: std::cell::RefCell<Option<(ArrangeKey, Vec<usize>)>>,
 }
@@ -105,6 +111,10 @@ impl LibraryUi {
             order_unsaved: Default::default(),
             order_saving: None,
             arranged: Default::default(),
+            all_notes: None,
+            all_notes_loading: false,
+            all_notes_saving: false,
+            all_notes_unsaved: false,
         }
     }
 }

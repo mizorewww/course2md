@@ -2555,8 +2555,8 @@ impl Desktop {
                     order.is_some(),
                 )
             }
-            None => match self.workspace(cx) {
-                Some(workspace) => (workspace.state.all_notes.sort(), true),
+            None => match &self.library_ui.all_notes {
+                Some(all) => (all.sort(), true),
                 None => (Sort::default(), false),
             },
         };
@@ -2564,7 +2564,7 @@ impl Desktop {
     }
 
     /// The hand-made order of the place in view.
-    fn place_manual<'a>(&self, cx: &'a App) -> &'a [String] {
+    fn place_manual<'a>(&'a self, cx: &'a App) -> &'a [String] {
         match self.order_home(cx) {
             Some(root) => self
                 .library(cx)
@@ -2574,8 +2574,10 @@ impl Desktop {
                 .map(|order| order.manual(self.library(cx).folder_filter.place()))
                 .unwrap_or_default(),
             None => self
-                .workspace(cx)
-                .map(|workspace| workspace.state.all_notes.manual())
+                .library_ui
+                .all_notes
+                .as_ref()
+                .map(|all| all.manual())
                 .unwrap_or_default(),
         }
     }
@@ -2751,13 +2753,10 @@ impl Desktop {
     ) {
         let Some(root) = home else {
             let manual = manual.map(|keys| self.keep_known_keys(keys, cx));
-            if let Some(Err(error)) = self.with_workspace(cx, |workspace| {
-                workspace.transaction(|state| {
-                    state.all_notes.set(sort, manual);
-                    Ok(())
-                })
-            }) {
-                self.message = Some(course2md::tr!("排序方式尚未保存：{}", format!("{error:#}")));
+            if let Some(all) = &mut self.library_ui.all_notes {
+                all.set(sort, manual);
+                self.library_ui.all_notes_unsaved = true;
+                self.save_all_notes_order(cx);
             }
             cx.notify();
             return;
@@ -2774,6 +2773,49 @@ impl Desktop {
         self.reapply_pending_orders(cx);
         self.save_place_orders(cx);
         cx.notify();
+    }
+
+    /// Writes how every note sorts to the app's own file, off the UI thread and one
+    /// write at a time, each with what is in view when its turn comes.
+    fn save_all_notes_order(&mut self, cx: &mut Context<Self>) {
+        if self.library_ui.all_notes_saving || !self.library_ui.all_notes_unsaved {
+            return;
+        }
+        let Some(all) = self.library_ui.all_notes.clone() else {
+            return;
+        };
+        self.library_ui.all_notes_unsaved = false;
+        self.library_ui.all_notes_saving = true;
+        self.in_background(
+            move || all.save(&order::all_notes_path()),
+            |this, result, cx| {
+                this.library_ui.all_notes_saving = false;
+                if let Err(error) = result {
+                    this.message =
+                        Some(course2md::tr!("排序方式尚未保存：{}", format!("{error:#}")));
+                }
+                this.save_all_notes_order(cx);
+            },
+            cx,
+        );
+    }
+
+    /// Reads how every note sorts, once, off the UI thread; until then its sort menu
+    /// waits.
+    fn load_all_notes_order(&mut self, cx: &mut Context<Self>) {
+        if self.library_ui.all_notes.is_some() || self.library_ui.all_notes_loading {
+            return;
+        }
+        self.library_ui.all_notes_loading = true;
+        self.in_background(
+            || Ok(order::PlaceOrder::load(&order::all_notes_path())),
+            |this, result: anyhow::Result<order::PlaceOrder>, cx| {
+                this.library_ui.all_notes_loading = false;
+                this.library_ui.all_notes = Some(result.unwrap_or_default());
+                cx.notify();
+            },
+            cx,
+        );
     }
 
     /// Of every note's hand-made order, the keys still worth keeping: notes of a
@@ -2805,7 +2847,8 @@ impl Desktop {
 
     /// Lays the library places' unsaved sorts over the records in view, as after a
     /// rescan has read them again from disk.
-    pub(crate) fn reapply_pending_orders(&mut self, cx: &mut App) {
+    pub(crate) fn reapply_pending_orders(&mut self, cx: &mut Context<Self>) {
+        self.load_all_notes_order(cx);
         let pending = self.library_ui.order_unsaved.clone();
         if pending.is_empty() {
             return;

@@ -428,6 +428,11 @@ fn folder_name(folder: &Path) -> String {
         .join("/")
 }
 
+/// The file beside the app's workspace record that keeps how 全部笔记 sorts.
+pub fn all_notes_path() -> PathBuf {
+    c2m_config::config::config_dir().join("all-notes-order.json")
+}
+
 /// The sort and hand-made order of every note, across libraries, as the app keeps
 /// it in its own record: notes are `<library id>/<note key>`, so it does not depend
 /// on which library is the default or reachable.
@@ -461,6 +466,23 @@ impl PlaceOrder {
         if let Some(manual) = manual {
             self.manual = manual;
         }
+    }
+
+    /// The record at `path`, its last good copy when it is damaged, or an empty one.
+    /// Blocking.
+    pub fn load(path: &Path) -> Self {
+        let parse = |bytes: Vec<u8>| serde_json::from_slice::<Self>(&bytes).ok();
+        match desktop_prefs::store::read(path) {
+            Ok(bytes) => parse(bytes)
+                .or_else(|| desktop_prefs::store::read_backup(path).ok().and_then(parse))
+                .unwrap_or_default(),
+            Err(_) => Self::default(),
+        }
+    }
+
+    /// Writes the record to `path`, keeping the last good copy. Blocking.
+    pub fn save(&self, path: &Path) -> Result<()> {
+        desktop_prefs::store::save(path, &serde_json::to_vec_pretty(self)?)
     }
 }
 
@@ -915,6 +937,22 @@ mod tests {
             order.note_seen(&[seen("b", 2)], true, &[]);
         }
         assert_eq!(order.added("a"), None);
+    }
+
+    #[test]
+    fn every_notes_order_lives_in_a_file_of_its_own() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("all-notes-order.json");
+        assert!(PlaceOrder::load(&path).is_empty());
+        let mut order = PlaceOrder::default();
+        order.set(sort(SortRule::Manual, true), Some(vec!["lib/a".into()]));
+        order.save(&path).unwrap();
+        assert_eq!(PlaceOrder::load(&path), order);
+        // A damaged file reads its last good copy.
+        order.set(sort(SortRule::Title, false), None);
+        order.save(&path).unwrap();
+        std::fs::write(&path, "damaged").unwrap();
+        assert_eq!(PlaceOrder::load(&path).manual(), ["lib/a"]);
     }
 
     #[test]
