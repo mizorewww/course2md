@@ -1129,8 +1129,28 @@ mod tests {
         let url = format!("http://{}/", listener.local_addr().unwrap());
         std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
+            // Read the whole request: answering before the body is in lets
+            // the client's write fail (EINVAL on macOS) instead of the status.
+            let mut request = Vec::new();
             let mut chunk = [0u8; 4096];
-            let _ = stream.read(&mut chunk);
+            while let Ok(n @ 1..) = stream.read(&mut chunk) {
+                request.extend_from_slice(&chunk[..n]);
+                let text = String::from_utf8_lossy(&request);
+                let Some(end) = text.find("\r\n\r\n") else {
+                    continue;
+                };
+                let length = text[..end]
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())?
+                    })
+                    .unwrap_or(0);
+                if request.len() >= end + 4 + length {
+                    break;
+                }
+            }
             script(&mut stream);
         });
         url
