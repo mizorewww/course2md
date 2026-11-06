@@ -2,15 +2,24 @@
 
 Update this file in the same commit as the work it records.
 
-**Current phase:** Wave 4, acceptance round 3, against `e31032b1` (3.0.0-alpha.1). The fixes of rounds 1 and 2 and
-the thin-wrapper work up to decision 9's stopping point (`PLAN.md`) are merged into `split/workspace`. 3.0.0-alpha.1 is
-being released from `main` once `split/workspace` merges into it (PR #24). Every `DESIGN-RESTORE.md` restore that
-waited on the kit is in, through kit PRs #16 to #30. Open: U2 (reader resize, unmeasured: load stayed high).
+**Current phase:** paused. The owner stopped the refactor after 3.0.0-alpha.3 (`ccbdc0cf`); feature work and fixes
+continue on `main`. Acceptance round 3 has every row resolved (`ACCEPTANCE.md`). Not done, and dropped rather than
+deferred: the rest of P2-b (the library page and the settings state as their own entities; the binary is still
+32,640 lines) and any further reduction. Left: the final acceptance against the current structure, then delete
+this directory. Open: U2 (reader resize, unmeasured: load stayed high).
 
 **Dependency form:** git, `gpui-kit-material` `main` at `4f40d75`, in `[workspace.dependencies]` and all six
 `[patch]` entries of the root `Cargo.toml`. No temporary pin. Kit #28 to #30 are in.
 
 ## Metrics
+
+`metrics.py` at `ee26059c`, where the refactor paused: **76,650** production Rust lines (-1,868, -2.4% against the
+baseline). Engine 23,513 across `crates/`; desktop 53,137 (`desktop` 32,640, `store` 7,983, `prefs` 4,488, `tasks`
+4,487, `ui` 1,766, `reader-core` 915, `accounts` 858). Since alpha.1 the count grew with features, not structure:
+flat notes and their safe replacement and migration, the Full Disk Access guide, the playlist fix, per-step
+progress, and library sorting.
+
+The readings below are the history up to alpha.1.
 
 `python3 docs/split/metrics.py` at `e31032b1` (3.0.0-alpha.1): **69,361** production Rust lines against the 78,518
 baseline (-9,157, -11.7%); the current script reads 77,921 at `3db4a88`, so -8,560, -11.0% like for like. Engine
@@ -43,6 +52,7 @@ since added lines back (entity plumbing, events, `ShellFacts`).
 | Fixes and logins | `5863f22` | 67,456 |
 | Reduction chunks, crate split | `edf140d` | 66,768 |
 | 3.0.0-alpha.1: round-2 fixes, thin wrapper | `e31032b1` | 69,361 |
+| Paused: alpha.3, small fixes, library sorting | `ee26059c` | 76,650 |
 
 ## P2: the thin wrapper (decision 9, finding Q2)
 
