@@ -1929,3 +1929,51 @@ fn a_reflatten_that_reaches_the_copy_limit_stops_the_task() {
     assert!(!needs_flatten(&course));
     assert_eq!(kept_copies(&course).len(), MAX_KEPT_COPIES);
 }
+
+/// A publication into a flat note waits for an older app saving into it, and
+/// the version that app saved is flattened before the note is replaced, not
+/// swapped away under it.
+#[test]
+fn a_publication_waits_for_an_older_app_saving_into_the_note() {
+    let legacy = Legacy::populated();
+    let course = legacy.course().to_path_buf();
+    flatten_legacy(&course).unwrap().unwrap();
+    let lock = crate::runtime::lock_file(&course.join(LEGACY_PUBLISH_LOCK)).unwrap();
+    let (started, ready) = std::sync::mpsc::channel();
+    let older_app = std::thread::spawn({
+        let legacy_version = legacy.version("v9", 9, "Ninth");
+        let course = course.clone();
+        // The version is staged beside the note until the older app's save lands.
+        let staged = course.parent().unwrap().join("staged-v9");
+        std::fs::rename(&legacy_version, &staged).unwrap();
+        std::fs::remove_dir(course.join("versions")).unwrap();
+        move || {
+            started.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            std::fs::create_dir_all(course.join("versions")).unwrap();
+            std::fs::rename(&staged, course.join("versions/v9")).unwrap();
+            std::fs::write(
+                course.join("current.json"),
+                r#"{"schema":1,"course_id":"course","version_id":"v9","manifest":"versions/v9/manifest.json"}"#,
+            )
+            .unwrap();
+            drop(lock);
+        }
+    });
+    ready.recv().unwrap();
+    legacy
+        .library
+        .publish(&legacy.library.target("next"), "Next", "")
+        .unwrap();
+    older_app.join().unwrap();
+    assert!(published_by(&course, "next").unwrap().is_some());
+    for gone in ["versions", "current.json", LEGACY_PUBLISH_LOCK] {
+        assert!(!course.join(gone).exists(), "{gone}");
+    }
+    // The flat note the older app's version replaced is kept.
+    assert!(
+        kept_copies(&course)
+            .iter()
+            .any(|copy| is_older_app_copy(copy))
+    );
+}

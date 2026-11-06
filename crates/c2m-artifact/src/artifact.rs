@@ -505,8 +505,7 @@ pub fn publish(
     let note = &resolve_note(&target.course_dir)?;
     let _lock = lock_note(note)?;
     recover_locked(note)?;
-    flatten_tolerant(note)?;
-    release_legacy_lock(note);
+    let older_app = flatten_and_hold(note)?;
     salvage_work(note, &note.join(".work"))?;
     let old = match note_manifest(note) {
         Ok(manifest) => manifest,
@@ -693,8 +692,39 @@ pub fn publish(
             return Err(disk_full(error));
         }
     };
+    // Windows refuses to rename a folder with a file open inside it.
+    #[cfg(windows)]
+    drop(older_app);
     swap_in(note, &staging, &target.task_id, &stamp)?;
+    #[cfg(not(windows))]
+    drop(older_app);
     Ok(publication)
+}
+
+/// Flattens the note for a publication, and takes the lock an older app holds
+/// while it saves into the note, when it has one: a save under way finishes
+/// first, and none starts until the new note is in place. Returns that lock, to
+/// hold across the swap. A version the older app saved meanwhile is flattened
+/// before the lock is held.
+fn flatten_and_hold(note: &Path) -> Result<Option<crate::runtime::FileLock>> {
+    for _ in 0..3 {
+        flatten_tolerant(note)?;
+        release_legacy_lock(note);
+        if note.join(LEGACY_PUBLISH_LOCK).symlink_metadata().is_err() {
+            return Ok(None);
+        }
+        let lock = take_legacy_lock(note)?;
+        if !resaved_by_older_app(note) {
+            return Ok(Some(lock));
+        }
+    }
+    Err(crate::outcome::NoteBusy(older_app_saving().to_string()).into())
+}
+
+fn older_app_saving() -> &'static str {
+    tr!(
+        "旧版应用正在保存这份笔记，请等它完成后重试 / An older version of the app is saving this note; try again when it finishes"
+    )
 }
 
 /// The export formats whose files a note lists.
@@ -1800,9 +1830,10 @@ fn take_legacy_lock(note: &Path) -> Result<crate::runtime::FileLock> {
             Ok(None) if std::time::Instant::now() < deadline => {
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
-            Ok(None) => anyhow::bail!(tr!(
-                "旧版应用正在保存这份笔记，请等它完成后重试 / An older version of the app is saving this note; try again when it finishes"
-            )),
+            // Another writer of the note, like a second task: the person waits.
+            Ok(None) => {
+                return Err(crate::outcome::NoteBusy(older_app_saving().to_string()).into());
+            }
             Err(error)
                 if matches!(
                     error.kind(),
