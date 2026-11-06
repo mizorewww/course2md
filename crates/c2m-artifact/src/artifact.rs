@@ -506,6 +506,7 @@ pub fn publish(
     let _lock = lock_note(note)?;
     recover_locked(note)?;
     flatten_tolerant(note)?;
+    release_legacy_lock(note);
     salvage_work(note, &note.join(".work"))?;
     let old = match note_manifest(note) {
         Ok(manifest) => manifest,
@@ -631,7 +632,11 @@ pub fn publish(
             })
         })?;
         let (kept_edits, kept_exports) = if note.is_dir() {
-            carry_over(note, old.as_ref(), &staging)?
+            // The lock a flatten or an older app left in the note is not the
+            // person's file.
+            carry_over(note, old.as_ref(), &staging, &|relative| {
+                relative == LEGACY_PUBLISH_LOCK
+            })?
         } else {
             Default::default()
         };
@@ -881,11 +886,13 @@ fn replace_error(error: std::io::Error) -> anyhow::Error {
 /// the new note also has is kept under an `.edited` name and reported. The old
 /// note's own unchanged files are left behind: the new note replaces them, except
 /// an export the new note could not make again, which stays. Folders that only
-/// held the old note's own files are not recreated empty.
+/// held the old note's own files are not recreated empty. Paths `skip` claims, and
+/// what is below them, stay behind.
 fn carry_over(
     note: &Path,
     old: Option<&Manifest>,
     staging: &Path,
+    skip: &dyn Fn(&str) -> bool,
 ) -> Result<(Vec<String>, Vec<Asset>)> {
     let listed: HashMap<&str, &Asset> = old
         .map(|manifest| {
@@ -905,7 +912,19 @@ fn carry_over(
         .collect();
     let mut kept_edits = Vec::new();
     let mut kept_exports = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
     for (relative, kind) in walk(note)? {
+        // Parents come before their children.
+        if skipped
+            .iter()
+            .any(|dir| relative.starts_with(dir.as_str()) && relative[dir.len()..].starts_with('/'))
+        {
+            continue;
+        }
+        if skip(&relative) {
+            skipped.push(relative);
+            continue;
+        }
         if kind == EntryKind::Dir {
             if !owned_dirs.contains(relative.as_str()) {
                 std::fs::create_dir_all(staging.join(&relative))?;
@@ -1469,6 +1488,7 @@ pub fn prepare_note(note_dir: &Path) -> Result<()> {
         .into());
     }
     flatten_tolerant(note_dir)?;
+    release_legacy_lock(note_dir);
     salvage_work(note_dir, &note_dir.join(".work"))?;
     // A folder an older app made for a task that never published.
     if note_dir.is_dir() && std::fs::read_dir(note_dir)?.next().is_none() {
@@ -1491,7 +1511,9 @@ pub fn flatten_legacy(note_dir: &Path) -> Result<Option<Manifest>> {
     }
     let _lock = lock_note(note_dir)?;
     recover_locked(note_dir)?;
-    flatten_locked(note_dir)
+    let flat = flatten_locked(note_dir)?;
+    release_legacy_lock(note_dir);
+    Ok(flat)
 }
 
 /// [`flatten_locked`] for a task: a course with no readable version stays as it
@@ -1692,6 +1714,30 @@ fn take_legacy_lock(note: &Path) -> Result<crate::runtime::FileLock> {
                 )));
             }
         }
+    }
+}
+
+/// Removes the empty lock a flatten interrupted after its swap left in the flat
+/// note, or an older app left there, unless someone holds it. A course in the
+/// layout of versions keeps it: it is the older app's.
+pub fn release_legacy_lock(note_dir: &Path) {
+    let path = note_dir.join(LEGACY_PUBLISH_LOCK);
+    let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+        return;
+    };
+    if !metadata.is_file()
+        || metadata.len() > 0
+        || is_legacy(note_dir)
+        || note_dir.join("current.json").exists()
+    {
+        return;
+    }
+    if let Ok(Some(lock)) = crate::runtime::try_lock_file(&path) {
+        #[cfg(windows)]
+        drop(lock);
+        let _ = std::fs::remove_file(&path);
+        #[cfg(not(windows))]
+        drop(lock);
     }
 }
 

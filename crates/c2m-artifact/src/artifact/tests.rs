@@ -639,6 +639,8 @@ fn an_interrupted_flatten_is_finished_by_running_it_again() {
         assert!(!is_legacy(course), "{point:?}");
         assert_eq!(note_manifest(course).unwrap().unwrap().task_id, "v2");
         assert!(!swap_dir(course).unwrap().exists(), "{point:?}");
+        // The lock the flat note carried across the swap does not stay in it.
+        assert!(!course.join(LEGACY_PUBLISH_LOCK).exists(), "{point:?}");
         assert_eq!(
             std::fs::read(
                 legacy
@@ -1687,6 +1689,32 @@ fn copies_at_the_limit_stop_a_task_and_say_what_frees_it() {
         .unwrap();
     }
     prepare_note(&library.note).unwrap();
+}
+
+/// A lock an interrupted flatten or an older app left in a flat note is removed by
+/// the next task, and a regenerate never carries one into the new note.
+#[test]
+fn a_left_lock_is_not_part_of_the_note() {
+    let library = Library::new();
+    library
+        .publish(&library.target("task-1"), "Body", "")
+        .unwrap();
+    let lock = library.note.join(LEGACY_PUBLISH_LOCK);
+    std::fs::write(&lock, b"").unwrap();
+    prepare_note(&library.note).unwrap();
+    assert!(!lock.exists());
+    // Not empty, so not removed as a lock: still not carried as a file of the person's.
+    std::fs::write(&lock, b"x").unwrap();
+    library
+        .publish(&library.target("task-2"), "Body two", "")
+        .unwrap();
+    assert!(!lock.exists());
+    assert!(
+        walk(&library.note)
+            .unwrap()
+            .iter()
+            .all(|(path, _)| !path.contains(".publish"))
+    );
 }
 
 /// A lock file that cannot be opened is not reported as an older app saving.
