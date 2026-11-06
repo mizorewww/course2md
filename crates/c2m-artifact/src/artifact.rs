@@ -1787,11 +1787,16 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
         // Before the new note was in place, the note is as it was (or recovery puts
         // it back) and still holds the flat note: its copy goes. Once the new note
         // is in place, recovery deletes the replaced note, and the copy is the
-        // only flat note left: it stays.
-        let placed = note_manifest(note)
-            .is_ok_and(|placed| placed.is_some_and(|placed| placed.publication == publication));
+        // only flat note left: it stays. Only a note in place that is known not to
+        // be the new one lets the copy go; when that cannot be read, a second copy
+        // is the safe mistake.
+        let not_placed = fail_point(FailPoint::ReadingPlaced)
+            .and_then(|()| note_manifest(note))
+            .is_ok_and(|in_place| {
+                in_place.is_some_and(|in_place| in_place.publication != publication)
+            });
         if !simulated_crash(&error)
-            && !placed
+            && not_placed
             && let Some(kept) = &kept
         {
             let _ = remove_tree(kept);
@@ -2090,6 +2095,8 @@ enum FailPoint {
     Locking,
     /// Once a flatten has placed its copy of the flat note.
     KeptPlaced,
+    /// When a failed flatten reads which note is in place.
+    ReadingPlaced,
     BetweenRenames,
     AfterRenames,
     BeforeDeletingOld,

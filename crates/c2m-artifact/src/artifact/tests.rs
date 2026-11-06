@@ -623,9 +623,10 @@ fn an_interrupted_flatten_is_finished_by_running_it_again() {
         assert!(simulated_crash(&error), "{point:?}: {error:#}");
         match point {
             // The older versions are still there until the flat note is in place.
-            FailPoint::Staged | FailPoint::Locking | FailPoint::KeptPlaced => {
-                assert_eq!(snapshot(course), before)
-            }
+            FailPoint::Staged
+            | FailPoint::Locking
+            | FailPoint::KeptPlaced
+            | FailPoint::ReadingPlaced => assert_eq!(snapshot(course), before),
             FailPoint::BetweenRenames => assert!(!course.exists()),
             FailPoint::AfterRenames | FailPoint::BeforeDeletingOld => {
                 assert!(!is_legacy(course));
@@ -1996,4 +1997,26 @@ fn a_copy_that_cannot_be_synced_is_not_left_behind() {
         assert!(needs_flatten(&course));
         assert!(kept_copies(&course).is_empty());
     }
+}
+
+/// When a failed flatten cannot tell which note is in place, it keeps its copy
+/// of the flat note: a second copy is the safe mistake.
+#[test]
+fn a_flatten_that_cannot_read_the_note_in_place_keeps_its_copy() {
+    let (legacy, course) = resaved_note();
+    io_error_at(&[FailPoint::AfterRenames, FailPoint::ReadingPlaced]);
+    assert!(flatten_legacy(&course).is_err());
+    assert!(
+        kept_copies(&course)
+            .iter()
+            .any(|copy| is_older_app_copy(copy))
+    );
+    prepare_note(&course).unwrap();
+    assert_eq!(kept_copies(&course).len(), 1);
+    assert_eq!(notes_saying(&legacy.library.library(), "Second"), 1);
+    // Known not to be in place (the error came before the swap): the copy goes.
+    let (_legacy, course) = resaved_note();
+    io_error_at(&[FailPoint::Staged]);
+    assert!(flatten_legacy(&course).is_err());
+    assert!(kept_copies(&course).is_empty());
 }
