@@ -8,7 +8,11 @@
 //! default sort instead of keeping the library from listing its notes.
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::{cmp::Ordering, collections::BTreeMap, path::Path};
+use std::{
+    cmp::Ordering,
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
 const FILE: &str = ".course2md-order.json";
 const LOCK: &str = ".course2md-order.lock";
@@ -171,6 +175,11 @@ pub struct Order {
     /// Note → complete scans in a row it was missing from.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     missing: BTreeMap<String, u32>,
+    /// Course id → the folder (within the library, `/`-separated) whose note has
+    /// the plain id as its key. It keeps it while that folder holds the note, so a
+    /// copy appearing or going away never swaps which note is which.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    holders: BTreeMap<String, String>,
     /// What a newer app wrote, kept as it was.
     #[serde(flatten)]
     extra: BTreeMap<String, serde_json::Value>,
@@ -211,36 +220,100 @@ impl Order {
         Ok(order)
     }
 
-    /// Records what a scan found: a note not seen before is added when it was made.
-    /// A complete scan (nothing unread, nothing waiting on the person) counts the
-    /// notes it did not find; one missing from [`FORGET_AFTER`] complete scans in a
-    /// row is forgotten, with its place in hand-made orders. Writes only when
+    /// Records what a scan found and returns each note's key, in the order given: a
+    /// note not seen before is added when it was made. A complete scan (everything
+    /// read, nothing listed that waits on the person) counts the notes it did not
+    /// find; one missing from [`FORGET_AFTER`] complete scans in a row is forgotten,
+    /// with its place in hand-made orders. A note in a folder of `waiting` (one being
+    /// replaced, or with copies kept beside it) is never forgotten. Writes only when
     /// something changed, and never fails the scan.
-    pub fn observe(root: &Path, notes: &[(String, u64)], complete: bool) -> Self {
+    pub fn observe(
+        root: &Path,
+        notes: &[Seen],
+        complete: bool,
+        waiting: &[PathBuf],
+    ) -> (Self, Vec<String>) {
         let mut order = Self::load(root);
-        if order.note_seen(notes, complete) {
-            return Self::edit(root, |order| {
-                order.note_seen(notes, complete);
-            })
-            .unwrap_or(order);
+        let (changed, keys) = order.note_seen(notes, complete, waiting);
+        if changed {
+            let mut written = None;
+            if let Ok(saved) = Self::edit(root, |order| {
+                written = Some(order.note_seen(notes, complete, waiting).1);
+            }) {
+                return (saved, written.unwrap_or(keys));
+            }
         }
-        order
+        (order, keys)
     }
 
-    fn note_seen(&mut self, notes: &[(String, u64)], complete: bool) -> bool {
+    /// Each note's key: its course id, or, for a copy of a note (another folder with
+    /// the same course id), the id with the copy's folder, so moving one copy never
+    /// moves the other. The folder recorded as holding the plain id keeps it while it
+    /// holds the note; otherwise the folder that sorts first takes it.
+    fn assign_keys(&mut self, notes: &[Seen]) -> Vec<String> {
+        let mut folders: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+        for note in notes {
+            folders
+                .entry(note.id.as_str())
+                .or_default()
+                .push(folder_name(&note.folder));
+        }
+        for (id, present) in &folders {
+            let keeps = self
+                .holders
+                .get(*id)
+                .is_some_and(|holder| present.contains(holder));
+            if !keeps && let Some(first) = present.iter().min() {
+                self.holders.insert((*id).to_owned(), first.clone());
+            }
+        }
+        notes
+            .iter()
+            .map(|note| {
+                let folder = folder_name(&note.folder);
+                if self.holders.get(&note.id) == Some(&folder) {
+                    note.id.clone()
+                } else {
+                    format!("{}@{folder}", note.id)
+                }
+            })
+            .collect()
+    }
+
+    /// The folder a note's key names, as [`Self::assign_keys`] gave it.
+    fn key_folder(&self, key: &str) -> Option<String> {
+        match key.split_once('@') {
+            Some((_, folder)) => Some(folder.to_owned()),
+            None => self.holders.get(key).cloned(),
+        }
+    }
+
+    fn note_seen(
+        &mut self,
+        notes: &[Seen],
+        complete: bool,
+        waiting: &[PathBuf],
+    ) -> (bool, Vec<String>) {
         let before = self.clone();
-        let present: std::collections::HashSet<&str> =
-            notes.iter().map(|(key, _)| key.as_str()).collect();
-        for (key, created) in notes {
-            self.added.entry(key.clone()).or_insert(*created);
+        let keys = self.assign_keys(notes);
+        let present: std::collections::HashSet<&str> = keys.iter().map(String::as_str).collect();
+        for (key, note) in keys.iter().zip(notes) {
+            self.added.entry(key.clone()).or_insert(note.created);
             self.missing.remove(key);
         }
         if complete {
+            let waiting: std::collections::HashSet<String> =
+                waiting.iter().map(|folder| folder_name(folder)).collect();
             let known: std::collections::BTreeSet<String> = self
                 .added
                 .keys()
                 .chain(self.read.keys())
                 .filter(|key| !present.contains(key.as_str()))
+                .filter(|key| {
+                    !self
+                        .key_folder(key)
+                        .is_some_and(|folder| waiting.contains(&folder))
+                })
                 .cloned()
                 .collect();
             let mut forgotten = std::collections::HashSet::new();
@@ -257,6 +330,9 @@ impl Order {
                 self.added.remove(key);
                 self.read.remove(key);
                 self.missing.remove(key);
+                if self.holders.contains_key(key) {
+                    self.holders.remove(key);
+                }
             }
             for keys in self.manual.values_mut() {
                 keys.retain(|key| !forgotten.contains(key));
@@ -265,7 +341,7 @@ impl Order {
             self.missing
                 .retain(|key, _| self.added.contains_key(key) || self.read.contains_key(key));
         }
-        *self != before
+        (*self != before, keys)
     }
 
     pub fn sort(&self, place: Place) -> Sort {
@@ -333,6 +409,25 @@ impl Order {
     }
 }
 
+/// A note a library scan found.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Seen {
+    /// Its folder within the library.
+    pub folder: PathBuf,
+    pub id: String,
+    /// When it was made, in milliseconds since the epoch.
+    pub created: u64,
+}
+
+/// A folder within a library as the record names it: `/`-separated on every system.
+fn folder_name(folder: &Path) -> String {
+    folder
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// The sort and hand-made order of every note, across libraries, as the app keeps
 /// it in its own record: notes are `<library id>/<note key>`, so it does not depend
 /// on which library is the default or reachable.
@@ -367,35 +462,6 @@ impl PlaceOrder {
             self.manual = manual;
         }
     }
-}
-
-/// Each note's key in its library's record, in the order given: its course id, or,
-/// for a copy of a note (another folder with the same course id), the id with the
-/// copy's folder, so moving one copy never moves the other. Of the notes sharing an
-/// id, the one whose folder sorts first keeps the plain id.
-pub fn note_keys(notes: &[(&Path, &str)]) -> Vec<String> {
-    let mut first: std::collections::HashMap<&str, &Path> = Default::default();
-    for (folder, id) in notes {
-        let entry = first.entry(id).or_insert(folder);
-        if folder < entry {
-            *entry = folder;
-        }
-    }
-    notes
-        .iter()
-        .map(|(folder, id)| {
-            if first.get(id) == Some(folder) {
-                (*id).to_owned()
-            } else {
-                let folder = folder
-                    .components()
-                    .map(|part| part.as_os_str().to_string_lossy())
-                    .collect::<Vec<_>>()
-                    .join("/");
-                format!("{id}@{folder}")
-            }
-        })
-        .collect()
 }
 
 /// What a rule sorts one note by.
@@ -542,6 +608,14 @@ pub fn move_by(keys: &[String], moving: &str, step: isize) -> Option<(Vec<String
 mod tests {
     use super::*;
 
+    fn seen(id: &str, created: u64) -> Seen {
+        Seen {
+            folder: PathBuf::from(id),
+            id: id.into(),
+            created,
+        }
+    }
+
     fn note(key: &str, title: &str, added: u64) -> NoteFacts {
         NoteFacts {
             key: key.into(),
@@ -675,8 +749,9 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("library");
         std::fs::create_dir(&root).unwrap();
-        let seen = [("course-a".to_owned(), 100), ("course-b".to_owned(), 200)];
-        let observed = Order::observe(&root, &seen, true);
+        let all = [seen("course-a", 100), seen("course-b", 200)];
+        let only_b = [seen("course-b", 200)];
+        let observed = Order::observe(&root, &all, true, &[]).0;
         assert_eq!(observed.added("course-a"), Some(100));
         Order::edit(&root, |order| {
             order.set_place(
@@ -691,9 +766,11 @@ mod tests {
         // A regenerated note keeps when it was added.
         let again = Order::observe(
             &root,
-            &[("course-a".into(), 900), ("course-b".into(), 200)],
+            &[seen("course-a", 900), seen("course-b", 200)],
             true,
-        );
+            &[],
+        )
+        .0;
         assert_eq!(again.added("course-a"), Some(100));
         assert_eq!(again.last_read("course-a"), Some(500));
         // The record lives in the library, so a moved library keeps it.
@@ -709,23 +786,23 @@ mod tests {
         assert_eq!(loaded.sort(Place::All), sort(SortRule::Title, false));
         // A scan that is not complete never counts a note as gone.
         for _ in 0..FORGET_AFTER + 1 {
-            let partial = Order::observe(&moved, &[("course-b".into(), 200)], false);
+            let partial = Order::observe(&moved, &only_b, false, &[]).0;
             assert_eq!(partial.added("course-a"), Some(100));
         }
         // Missing from one complete scan, or two, a note keeps its place; a scan
         // that finds it again starts the count over.
         for _ in 1..FORGET_AFTER {
-            let missed = Order::observe(&moved, &[("course-b".into(), 200)], true);
+            let missed = Order::observe(&moved, &only_b, true, &[]).0;
             assert_eq!(missed.added("course-a"), Some(100));
             assert_eq!(missed.manual(Place::Folder(1)), ["course-b", "course-a"]);
         }
-        Order::observe(&moved, &seen, true);
+        Order::observe(&moved, &all, true, &[]);
         for _ in 1..FORGET_AFTER {
-            Order::observe(&moved, &[("course-b".into(), 200)], true);
+            Order::observe(&moved, &only_b, true, &[]);
         }
         assert_eq!(Order::load(&moved).last_read("course-a"), Some(500));
         // Missing from enough complete scans in a row, it is forgotten everywhere.
-        let gone = Order::observe(&moved, &[("course-b".into(), 200)], true);
+        let gone = Order::observe(&moved, &only_b, true, &[]).0;
         assert_eq!(gone.added("course-a"), None);
         assert_eq!(gone.last_read("course-a"), None);
         assert_eq!(gone.manual(Place::Folder(1)), ["course-b"]);
@@ -783,14 +860,34 @@ mod tests {
     }
 
     #[test]
-    fn copies_of_a_note_get_keys_of_their_own() {
-        let notes = [
-            (Path::new("b/course-x"), "course-x"),
-            (Path::new("course-y"), "course-y"),
-            (Path::new("a/course-x"), "course-x"),
+    fn copies_of_a_note_get_keys_of_their_own_and_keep_them() {
+        let note_in = |folder: &str, id: &str| Seen {
+            folder: PathBuf::from(folder),
+            id: id.into(),
+            created: 1,
+        };
+        let mut order = Order::default();
+        // The first folder seen with an id keeps the plain id.
+        let named = order
+            .note_seen(&[note_in("b/course-x", "course-x")], true, &[])
+            .1;
+        assert_eq!(named, ["course-x"]);
+        // A copy appearing in a folder that sorts first does not take it over.
+        let both = [
+            note_in("b/course-x", "course-x"),
+            note_in("course-y", "course-y"),
+            note_in("a/course-x", "course-x"),
         ];
-        let keys = note_keys(&notes);
-        assert_eq!(keys, ["course-x@b/course-x", "course-y", "course-x"]);
+        let named = order.note_seen(&both, true, &[]).1;
+        assert_eq!(named, ["course-x", "course-y", "course-x@a/course-x"]);
+        // The copy going away changes nothing for the original.
+        let named = order.note_seen(&both[..2], true, &[]).1;
+        assert_eq!(named, ["course-x", "course-y"]);
+        // Once the original's folder is gone, the remaining copy takes the plain id.
+        let named = order
+            .note_seen(&[note_in("a/course-x", "course-x")], true, &[])
+            .1;
+        assert_eq!(named, ["course-x"]);
         // Moving one copy leaves the other where it was.
         let notes = [
             note("course-x", "X", 1),
@@ -801,13 +898,23 @@ mod tests {
         let moved = move_onto(&list, "course-x", "course-y").unwrap();
         let arranged = arrange(&notes, sort(SortRule::Manual, true), &moved);
         assert_eq!(
-            keys_of(&notes, &arranged),
+            keys(&notes, &arranged),
             ["course-x@b/course-x", "course-y", "course-x"]
         );
     }
 
-    fn keys_of(notes: &[NoteFacts], order: &[usize]) -> Vec<String> {
-        keys(notes, order)
+    #[test]
+    fn a_note_waiting_on_the_person_is_never_forgotten() {
+        let mut order = Order::default();
+        order.note_seen(&[seen("a", 1), seen("b", 2)], true, &[]);
+        for _ in 0..FORGET_AFTER + 1 {
+            order.note_seen(&[seen("b", 2)], true, &[PathBuf::from("a")]);
+        }
+        assert_eq!(order.added("a"), Some(1));
+        for _ in 0..FORGET_AFTER {
+            order.note_seen(&[seen("b", 2)], true, &[]);
+        }
+        assert_eq!(order.added("a"), None);
     }
 
     #[test]

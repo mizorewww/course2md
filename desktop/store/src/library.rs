@@ -115,34 +115,51 @@ impl LibraryViewCache {
         }
         if let Some(scan) = scan {
             // Each note's key in the record: its course id, or a copy's own key.
-            let named: Vec<(&Course, PathBuf, &str)> = scan
+            let named: Vec<(&Course, order::Seen)> = scan
                 .courses
                 .iter()
                 .filter_map(|course| {
                     let manifest = course.manifest.as_ref()?;
-                    let relative = organize::relative_key(&location.root, &course.dir).ok()?;
-                    Some((course, relative, manifest.course_id.as_str()))
+                    let folder = organize::relative_key(&location.root, &course.dir).ok()?;
+                    Some((
+                        course,
+                        order::Seen {
+                            folder,
+                            id: manifest.course_id.clone(),
+                            created: manifest.created_at_ms,
+                        },
+                    ))
                 })
                 .collect();
-            let keys = order::note_keys(
-                &named
+            let seen: Vec<order::Seen> = named.iter().map(|(_, seen)| seen.clone()).collect();
+            // Notes waiting on the person: being replaced (and so not listed), or with
+            // copies kept beside them. They are never forgotten, and a scan that could
+            // not list one does not count notes as gone.
+            let waiting: Vec<PathBuf> = scan
+                .attention
+                .iter()
+                .filter_map(|attention| match attention {
+                    c2m_artifact::artifact::NoteAttention::Blocked { note, .. }
+                    | c2m_artifact::artifact::NoteAttention::Kept { note, .. }
+                    | c2m_artifact::artifact::NoteAttention::Failed { note, .. } => {
+                        organize::relative_key(&location.root, note)
+                            .ok()
+                            .or_else(|| note.strip_prefix(&location.root).ok().map(Into::into))
+                    }
+                })
+                .collect();
+            let listed: std::collections::HashSet<&std::path::Path> =
+                seen.iter().map(|seen| seen.folder.as_path()).collect();
+            let complete = scan.issues.is_empty()
+                && scan.attention.len() == waiting.len()
+                && waiting
                     .iter()
-                    .map(|(_, relative, id)| (relative.as_path(), *id))
-                    .collect::<Vec<_>>(),
-            );
-            let mut seen = Vec::new();
-            for ((course, _, _), key) in named.iter().zip(keys) {
-                let created = course.manifest.as_ref().map_or(0, |m| m.created_at_ms);
-                seen.push((key.clone(), created));
+                    .all(|folder| listed.contains(folder.as_path()));
+            let (record, keys) = order::Order::observe(&location.root, &seen, complete, &waiting);
+            for ((course, _), key) in named.iter().zip(keys) {
                 cache.note_keys.insert(course.dir.clone(), key);
             }
-            // Only a scan that read everything, with nothing waiting on the person,
-            // may count a note as gone: a note being replaced is not listed.
-            let complete = scan.issues.is_empty() && scan.attention.is_empty();
-            cache.orders.insert(
-                location.root.clone(),
-                order::Order::observe(&location.root, &seen, complete),
-            );
+            cache.orders.insert(location.root.clone(), record);
             for course in &scan.courses {
                 let storage = &course.dir;
                 let Ok(relative) = organize::relative_key(&location.root, storage) else {
@@ -529,7 +546,12 @@ mod tests {
     fn a_note_waiting_on_the_person_keeps_its_place() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().to_path_buf();
-        crate::order::Order::observe(&root, &[("course-a".into(), 7)], true);
+        let seen = crate::order::Seen {
+            folder: "course-a".into(),
+            id: "course-a".into(),
+            created: 7,
+        };
+        crate::order::Order::observe(&root, &[seen], true, &[]);
         let mut location = location("library");
         location.root = root.clone();
         let scan = |attention: Vec<c2m_artifact::artifact::NoteAttention>| notes::LibraryScan {
