@@ -3,7 +3,6 @@
 // the engine behind that name, as gpui-kit-material does.
 extern crate gpui_kit as gpui;
 
-mod a11y;
 mod about;
 mod account_ui;
 mod appearance_ui;
@@ -27,6 +26,7 @@ mod settings_ui;
 mod storage_ui;
 mod task_runner;
 mod task_ui;
+mod validation;
 mod views;
 mod youtube_ui;
 
@@ -1305,7 +1305,7 @@ pub(crate) fn secondary_binding<A: gpui::Action>(
 }
 
 fn main() {
-    a11y::init_validation_diagnostics();
+    validation::init_validation_diagnostics();
     let app = gpui_kit::application().with_assets(symbols::Assets);
     app.on_reopen(|cx| {
         cx.activate(true);
@@ -1345,6 +1345,10 @@ fn main() {
             )),
             (None, None) => WindowBounds::centered(size(px(1140.), px(820.)), cx),
         };
+        // The old macOS redraw fallback (drawing synchronously when the display link
+        // stopped ticking) was not ported: the kit restarts the link on occlusion and
+        // screen changes, and nothing here needs frames while occluded. Port it only if
+        // a frozen window is ever seen.
         gpui_kit::open_window(
             WindowOptions {
                 window_bounds: Some(window_bounds),

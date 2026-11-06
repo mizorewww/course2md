@@ -1,5 +1,6 @@
 //! Product identity and build provenance, kept separate from operational settings.
-//! The worked example of a page on the kit: see docs/split/MIGRATION.md.
+//! The worked example of a page on the kit; see
+//! `.agents/skills/course2md-design/references/kit-usage.md`.
 use crate::{symbols, ui};
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};

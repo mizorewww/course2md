@@ -1,6 +1,6 @@
 # The design language
 
-What makes the app read as itself, on every page and palette. A page that loses one of these has lost part of the product's character, even if it is correct Material. Each is a kit capability, so nothing here is painted by hand. `docs/split/DESIGN-RESTORE.md` has the before-and-after, element by element, while that directory exists.
+What makes the app read as itself, on every page and palette. A page that loses one of these has lost part of the product's character, even if it is correct Material. Each is a kit capability, so nothing here is painted by hand.
 
 ## Color carries meaning, quietly
 

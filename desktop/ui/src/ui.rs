@@ -1,6 +1,22 @@
 //! The compositions pages need that `gpui_kit_material` has no component for, and
-//! nothing else. Look in the kit and its gallery first; `docs/split/MIGRATION.md` maps
-//! every old helper to its replacement. Nothing here may merely rename a kit component.
+//! nothing else. Look in the kit and its gallery first, and choose a kit component by
+//! intent (`.agents/skills/course2md-design/references/kit-usage.md`). Nothing here may
+//! merely rename a kit component.
+//!
+//! | Item | Why the kit does not cover it |
+//! | --- | --- |
+//! | `field_table`, `Field`, `add_row` | A settings section whose rows mix controls; `ListTrailing` holds no custom element |
+//! | `Resource`, `fact_row` | A kept thing's row with its commands, and one planned fact; product layout on kit parts |
+//! | `AsyncStatus`, `async_status` | One check, probe or load narrating itself; the state machine stays in the page |
+//! | `menu`, `keyed_open`, `menu_key_toggle` | `MenuPopup` and `ExposedDropdown` are controlled; these sites keep no other state |
+//! | `choice_items` | Menu items that pick one value |
+//! | `Confirm`, `confirm_host`, `dismiss_confirm`, `modal_open` | `MaterialDialog` is an element in the tree; a question asked from a handler needs one host |
+//! | `status_line` | Text with " · " between parts, breaking only between parts |
+//! | `transfer_status` | A download's title, status line and bar |
+//! | `page_title`, `tip_button`, `log_box` | A page title one step up, an icon button named by its tooltip, a task log |
+//!
+//! `task_actions` is not here: the choice of actions is about tasks, not generic, so it
+//! stays in `task_ui.rs`, rendered to both buttons and menu items.
 use crate::symbols;
 use gpui::{prelude::*, *};
 use gpui_base::{active_focus_trap, h_flex, v_flex};

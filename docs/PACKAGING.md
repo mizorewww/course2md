@@ -48,6 +48,6 @@ To retry a channel, run `brew-tap` or `aur` manually with `version`; `aur` accep
 
 ## macOS runners
 
-Every macOS job (`ci`, `native desktop`, `release`) runs on GitHub's hosted `macos-26`. A release job that finds no Metal compiler fetches Xcode's Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`) and fails if it still has none, since without it the CLI would ship without CoreML recognition. Signing and notarization use the repository secrets `MACOS_CERT_P12`, `MACOS_CERT_PASS`, `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`, imported into a temporary keychain for each job.
+CI and releases run only on GitHub-hosted runners; do not add a self-hosted one. Every macOS job (`ci`, `native desktop`, `release`) runs on `macos-26`. A release job that finds no Metal compiler fetches Xcode's Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`) and fails if it still has none, since without it the CLI would ship without CoreML recognition. Signing and notarization use the repository secrets `MACOS_CERT_P12`, `MACOS_CERT_PASS`, `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`, imported into a temporary keychain for each job.
 
 User documentation lives in the [GitHub Wiki](https://github.com/mizorewww/course2md/wiki) (`git clone git@github.com:mizorewww/course2md.wiki.git`). Keep the Chinese and English pages aligned.

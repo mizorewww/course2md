@@ -25,7 +25,7 @@ cargo run --manifest-path desktop/Cargo.toml
 
 `just install` (macOS) installs the current checkout as `/Applications/course2md.app`, keeping existing notes and settings.
 
-The UI stack comes from [`gpui-kit-material`](https://github.com/mizorewww/gpui-kit-material), which vendors patched GPUI and GPUI Base sources. `desktop/Cargo.toml`, `desktop/prefs/Cargo.toml` and `desktop/ui/Cargo.toml` pin one revision of it in their dependencies, and the root `Cargo.toml` in a `[patch]` table holding only what the build needs; bump them together.
+The UI stack comes from [`gpui-kit-material`](https://github.com/mizorewww/gpui-kit-material), which vendors patched GPUI and GPUI Base sources. The root `Cargo.toml` pins one revision of it in `[workspace.dependencies]` and in a `[patch]` table holding only what the build needs, and the desktop crates take it from the workspace; bump the revision in both places together.
 
 The app looks for the engine in `COURSE2MD_BIN`, then beside its own executable, then in a debug build `target/` of this repository, then on PATH.
 
@@ -48,7 +48,7 @@ Test-only environment variables:
 
 | Variable | Effect |
 | --- | --- |
-| `COURSE2MD_VALIDATION_WINDOW`, `_PANIC_LOG`, `_OPEN_NOTE`, `_READER` | Debug builds: initial window size, panic file, a note to open on launch and its reader panels. See `src/main.rs` and `src/a11y.rs`. |
+| `COURSE2MD_VALIDATION_WINDOW`, `_PANIC_LOG`, `_OPEN_NOTE`, `_READER` | Debug builds: initial window size, panic file, a note to open on launch and its reader panels. See `src/main.rs` and `src/validation.rs`. |
 | `COURSE2MD_CAPTURE` | `--features capture`: render pages to PNG files (`page=path.png;…`) and quit, with no screen-recording permission. See `src/capture.rs`. |
 | `COURSE2MD_TOOL_PATH` | Search path for ffmpeg, yt-dlp and other tools, replacing the bundled directory and PATH. |
 | `COURSE2MD_PERFORMANCE_LOG`, `COURSE2MD_FRAME_TRACE` | `--features performance`: frame and input-latency histograms, GPUI's frame trace. See `src/performance.rs`. |
