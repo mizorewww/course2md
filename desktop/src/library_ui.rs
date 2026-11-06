@@ -39,6 +39,23 @@ pub(crate) enum NameTarget {
     },
 }
 
+/// A library place: its library's root and the place.
+pub(crate) type PlaceKey = (PathBuf, desktop_store::order::Place);
+/// A place's sort, and its hand-made order when that changed.
+pub(crate) type PendingOrder = (desktop_store::order::Sort, Option<Vec<String>>);
+
+/// What a sort of the library's notes depends on: the notes and what is known of
+/// them, the place and its sort and hand-made order.
+#[derive(Clone, PartialEq)]
+pub(crate) struct ArrangeKey {
+    pub revision: u64,
+    pub home: Option<PathBuf>,
+    pub place: desktop_store::order::Place,
+    pub sort: desktop_store::order::Sort,
+    pub manual: u64,
+    pub courses: Vec<usize>,
+}
+
 /// The library page's own view state: its dialogs, folder tree and virtualized list.
 pub(crate) struct LibraryUi {
     pub name_dialog: Option<NameDialog>,
@@ -60,10 +77,13 @@ pub(crate) struct LibraryUi {
     pub note_columns: Option<usize>,
     /// A note moved by the keyboard, to scroll into view once it is laid out again.
     pub reveal: Option<usize>,
-    /// Places whose sort or order changed and is not yet saved, and whether a
-    /// save is under way; saves run one at a time, so the last change lands last.
-    pub order_unsaved: std::collections::BTreeSet<(PathBuf, desktop_store::order::Place)>,
-    pub order_saving: bool,
+    /// A library place's sort, and its hand-made order when that changed, not yet
+    /// saved; it is laid over the record a rescan reads until it is. Saves run one
+    /// at a time, so the last change lands last; `order_saving` is the one under way.
+    pub order_unsaved: std::collections::BTreeMap<PlaceKey, PendingOrder>,
+    pub order_saving: Option<(PathBuf, desktop_store::order::Place)>,
+    /// The last notes sorted, what decided their order, and the result.
+    pub arranged: std::cell::RefCell<Option<(ArrangeKey, Vec<usize>)>>,
 }
 
 impl LibraryUi {
@@ -83,7 +103,8 @@ impl LibraryUi {
             note_columns: None,
             reveal: None,
             order_unsaved: Default::default(),
-            order_saving: false,
+            order_saving: None,
+            arranged: Default::default(),
         }
     }
 }

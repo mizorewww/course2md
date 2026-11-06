@@ -994,6 +994,7 @@ impl Desktop {
                 }
                 this.records
                     .change(cx, |records, _| records.library.apply_scan(results));
+                this.reapply_pending_orders(cx);
                 this.apply_course_title_aliases(cx);
                 this.open_validation_note(cx);
                 this.records.change(cx, |records, _| {
