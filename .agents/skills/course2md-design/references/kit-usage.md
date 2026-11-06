@@ -1,6 +1,6 @@
 # Using the kit
 
-How a page reaches `gpui-kit-material`. Use `gpui_kit_material::prelude::*`; colors come from `theme::color(ColorRole::…)`, icons from `symbols::*`, text from `i18n/catalog.tsv` through `course2md::tr!`. For anything not covered here, in order: drop the need, compose kit components, and only then add a composition to `desktop/ui/src/ui.rs`, whose module doc says why each one exists.
+How a page reaches `gpui-kit-material`. Use `gpui_kit_material::prelude::*`; colors come from `theme::color(ColorRole::…)`, icons from `symbols::*`, text from `i18n/catalog.tsv` through `course2md::tr!`. For anything not covered here, in order: drop the need, compose kit components, and only then add a composition to `desktop/ui/src/ui.rs`, whose module doc says why each one exists. `desktop/src/about.rs` is a small worked example.
 
 ## Adding a symbol
 

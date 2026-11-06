@@ -25,7 +25,7 @@ cargo run --manifest-path desktop/Cargo.toml
 
 `just install` (macOS) installs the current checkout as `/Applications/course2md.app`, keeping existing notes and settings.
 
-The UI stack comes from [`gpui-kit-material`](https://github.com/mizorewww/gpui-kit-material), which vendors patched GPUI and GPUI Base sources. `desktop/Cargo.toml`, `desktop/prefs/Cargo.toml` and `desktop/ui/Cargo.toml` pin one revision of it in their dependencies, and the root `Cargo.toml` in a `[patch]` table holding only what the build needs; bump them together.
+The UI stack comes from [`gpui-kit-material`](https://github.com/mizorewww/gpui-kit-material), which vendors patched GPUI and GPUI Base sources. The root `Cargo.toml` pins one revision of it in `[workspace.dependencies]` and in a `[patch]` table holding only what the build needs, and the desktop crates take it from the workspace; bump the revision in both places together.
 
 The app looks for the engine in `COURSE2MD_BIN`, then beside its own executable, then in a debug build `target/` of this repository, then on PATH.
 
