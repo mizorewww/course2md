@@ -2845,26 +2845,76 @@ impl Desktop {
             .collect()
     }
 
-    /// Lays the library places' unsaved sorts over the records in view, as after a
-    /// rescan has read them again from disk.
+    /// Makes the changes to library records again over what a scan read: those
+    /// being written, those written since that scan began, notes read but not yet
+    /// written down, then sorts not yet saved. A change written before the scan
+    /// began is in what it read, and is let go. Called after every scan.
     pub(crate) fn reapply_pending_orders(&mut self, cx: &mut Context<Self>) {
         self.load_all_notes_order(cx);
+        let generation = self.library(cx).generation;
+        self.library_ui
+            .order_edits
+            .retain(|edit| order::edit_still_needed(edit.settled, generation));
+        let edits = self.library_ui.order_edits.clone();
+        let reads = self.library_ui.reads_unwritten.clone();
         let pending = self.library_ui.order_unsaved.clone();
-        if pending.is_empty() {
+        if edits.is_empty() && reads.is_empty() && pending.is_empty() {
             return;
         }
         self.records.change(cx, |records, _| {
+            let orders = &mut records.library.view_cache.orders;
+            for edit in edits {
+                edit.edit.apply(orders.entry(edit.root).or_default());
+            }
+            for ((root, key), at) in reads {
+                orders.entry(root).or_default().mark_read(&key, at);
+            }
             for ((root, place), (sort, manual)) in pending {
-                records
-                    .library
-                    .view_cache
-                    .orders
+                orders
                     .entry(root)
                     .or_default()
                     .set_place(place, sort, manual);
             }
             records.library.touch();
         });
+    }
+
+    /// Writes `edit` to the library's record off the UI thread. Until a scan that
+    /// began after the write has read it back, it is made again over every scan.
+    fn write_order_edit(&mut self, root: PathBuf, edit: order::OrderEdit, cx: &mut Context<Self>) {
+        let id = self.library_ui.next_order_edit;
+        self.library_ui.next_order_edit += 1;
+        self.library_ui
+            .order_edits
+            .push(crate::library_ui::OrderEditEntry {
+                id,
+                root: root.clone(),
+                edit: edit.clone(),
+                settled: None,
+            });
+        self.in_background(
+            move || order::Order::edit(&root, |order| edit.apply(order)),
+            move |this, result, cx| {
+                // Written or not, it stays in view until a later scan reads the record;
+                // a failure is let go then, as only sorting depends on it.
+                let _ = result;
+                this.settle_order_edit(id, cx);
+            },
+            cx,
+        );
+    }
+
+    /// Marks an edit as written as of the scan in view.
+    fn settle_order_edit(&mut self, id: u64, cx: &App) {
+        let generation = self.library(cx).generation;
+        if let Some(edit) = self
+            .library_ui
+            .order_edits
+            .iter_mut()
+            .find(|edit| edit.id == id)
+        {
+            edit.settled = Some(generation);
+        }
     }
 
     /// Saves the library places whose sort changed, one at a time, each as it is
@@ -2885,8 +2935,14 @@ impl Desktop {
         self.library_ui.order_saving = Some(key.clone());
         let (root, place) = key.clone();
         let sent = (sort, manual.clone());
+        let edit = order::OrderEdit::Place {
+            place,
+            sort,
+            manual,
+        };
+        let written = edit.clone();
         self.in_background(
-            move || order::Order::edit(&root, |order| order.set_place(place, sort, manual)),
+            move || order::Order::edit(&root, |order| written.apply(order)),
             move |this, result, cx| {
                 this.library_ui.order_saving = None;
                 // A change made while this one was saving waits for its own turn.
@@ -2894,13 +2950,30 @@ impl Desktop {
                     this.library_ui.order_unsaved.remove(&key);
                 }
                 match result {
-                    Ok(saved) => this.records.change(cx, |records, _| {
-                        records
-                            .library
-                            .view_cache
-                            .orders
-                            .insert(key.0.clone(), saved);
-                    }),
+                    Ok(_) => {
+                        // Kept until a scan that began after it reads it back.
+                        let id = this.library_ui.next_order_edit;
+                        this.library_ui.next_order_edit += 1;
+                        this.library_ui
+                            .order_edits
+                            .push(crate::library_ui::OrderEditEntry {
+                                id,
+                                root: key.0.clone(),
+                                edit,
+                                settled: Some(this.library(cx).generation),
+                            });
+                        // A folder deleted while its sort was saving is forgotten again,
+                        // so this save does not bring it back.
+                        if let Place::Folder(folder) = key.1
+                            && this
+                                .library(cx)
+                                .indexes
+                                .get(&key.0)
+                                .is_some_and(|index| !index.folders.contains_key(&folder))
+                        {
+                            this.forget_folder_orders(key.0.clone(), vec![folder], cx);
+                        }
+                    }
                     Err(error) => {
                         // Memory keeps the change in view; it is not claimed saved.
                         this.library_ui.order_unsaved.remove(&key);
@@ -2909,15 +2982,14 @@ impl Desktop {
                     }
                 }
                 this.reapply_pending_orders(cx);
-                this.records
-                    .change(cx, |records, _| records.library.touch());
                 this.save_place_orders(cx);
             },
             cx,
         );
     }
 
-    /// Forgets the sorts and orders of folders that were deleted.
+    /// Forgets the sorts and orders of folders that were deleted, including any
+    /// change to them not yet saved.
     pub(crate) fn forget_folder_orders(
         &mut self,
         root: PathBuf,
@@ -2927,27 +2999,18 @@ impl Desktop {
         self.library_ui.order_unsaved.retain(|(pending, place), _| {
             !(*pending == root && matches!(place, Place::Folder(id) if folders.contains(id)))
         });
-        let worker = (root.clone(), folders.clone());
+        self.library_ui.order_edits.retain(|edit| {
+            !(edit.root == root
+                && matches!(&edit.edit, order::OrderEdit::Place { place: Place::Folder(id), .. } if folders.contains(id)))
+        });
+        let edit = order::OrderEdit::ForgetFolders(folders);
         self.records.change(cx, |records, _| {
             if let Some(order) = records.library.view_cache.orders.get_mut(&root) {
-                for id in &folders {
-                    order.forget_folder(*id);
-                }
+                edit.apply(order);
             }
             records.library.touch();
         });
-        // A sort left behind is only an unused entry, so a failure stays quiet.
-        self.in_background(
-            move || {
-                order::Order::edit(&worker.0, |order| {
-                    for id in &worker.1 {
-                        order.forget_folder(*id);
-                    }
-                })
-            },
-            |_, _, _| {},
-            cx,
-        );
+        self.write_order_edit(root, edit, cx);
     }
 
     /// Takes the note in `storage` to where `target` is, as a drag does. Under a
@@ -3172,8 +3235,8 @@ impl Desktop {
             }))
     }
 
-    /// Notes when a note was opened, for sorting by what was read last. Opening it
-    /// again within a few minutes is not written down.
+    /// Notes when a note was opened, for sorting by what was read last: in view at
+    /// once, and written down unless it was written within the last few minutes.
     pub(crate) fn note_opened(&mut self, course: &Course, cx: &mut Context<Self>) {
         let Some(root) = self
             .course_location(course, cx)
@@ -3193,33 +3256,44 @@ impl Desktop {
         };
         let key = self.own_note_key(&listed, cx);
         let at = now_ms();
-        let (worker_key, worker_root) = (key.clone(), root.clone());
-        let changed = self.records.change(cx, |records, _| {
-            let changed = records
+        let note = (root.clone(), key.clone());
+        let written = self
+            .library_ui
+            .read_written
+            .get(&note)
+            .copied()
+            .or_else(|| {
+                self.library(cx)
+                    .view_cache
+                    .orders
+                    .get(&root)
+                    .and_then(|order| order.last_read(&key))
+            });
+        self.records.change(cx, |records, _| {
+            records
                 .library
                 .view_cache
                 .orders
-                .entry(root)
+                .entry(root.clone())
                 .or_default()
                 .mark_read(&key, at);
-            if changed {
-                records.library.touch();
-            }
-            changed
+            records.library.touch();
         });
-        if !changed {
-            return;
+        if order::read_worth_writing(written, at) {
+            self.library_ui.reads_unwritten.remove(&note);
+            self.library_ui.read_written.insert(note, at);
+            self.write_order_edit(root, order::OrderEdit::Read { key, at }, cx);
+        } else {
+            // Kept in view over later scans, and written with the next read that is.
+            self.library_ui.reads_unwritten.insert(note, at);
+            if let Some(written) = written {
+                self.library_ui
+                    .read_written
+                    .entry((root, key))
+                    .or_insert(written);
+            }
         }
-        // Only a sort by what was read last depends on it, so a failure stays quiet.
-        self.in_background(
-            move || {
-                order::Order::edit(&worker_root, |order| {
-                    order.mark_read(&worker_key, at);
-                })
-            },
-            |_, _, _| {},
-            cx,
-        );
+        cx.notify();
     }
 }
 

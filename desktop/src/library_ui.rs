@@ -39,6 +39,16 @@ pub(crate) enum NameTarget {
     },
 }
 
+/// A change to a library's record in view, and the scan generation as of which it
+/// was written (`None` while it is being written).
+#[derive(Clone)]
+pub(crate) struct OrderEditEntry {
+    pub id: u64,
+    pub root: PathBuf,
+    pub edit: desktop_store::order::OrderEdit,
+    pub settled: Option<u64>,
+}
+
 /// A library place: its library's root and the place.
 pub(crate) type PlaceKey = (PathBuf, desktop_store::order::Place);
 /// A place's sort, and its hand-made order when that changed.
@@ -82,6 +92,14 @@ pub(crate) struct LibraryUi {
     /// at a time, so the last change lands last; `order_saving` is the one under way.
     pub order_unsaved: std::collections::BTreeMap<PlaceKey, PendingOrder>,
     pub order_saving: Option<(PathBuf, desktop_store::order::Place)>,
+    /// Changes to library records being written, or written but not yet read back
+    /// by a scan that began after them; see `Desktop::reapply_pending_orders`.
+    pub order_edits: Vec<OrderEditEntry>,
+    pub next_order_edit: u64,
+    /// Notes read too soon after the time last written for them to write again, and
+    /// that time, by library root and note key.
+    pub reads_unwritten: std::collections::HashMap<(PathBuf, String), u64>,
+    pub read_written: std::collections::HashMap<(PathBuf, String), u64>,
     /// How every note sorts, once read from the app's own file; whether it is being
     /// read, saved, or changed since it was last saved.
     pub all_notes: Option<desktop_store::order::PlaceOrder>,
@@ -111,6 +129,10 @@ impl LibraryUi {
             order_unsaved: Default::default(),
             order_saving: None,
             arranged: Default::default(),
+            order_edits: Vec::new(),
+            next_order_edit: 0,
+            reads_unwritten: Default::default(),
+            read_written: Default::default(),
             all_notes: None,
             all_notes_loading: false,
             all_notes_saving: false,

@@ -394,19 +394,17 @@ impl Order {
         self.read.get(key).copied()
     }
 
-    /// Notes that the note was opened at `at`, unless it was within
-    /// [`READ_INTERVAL_MS`] of the time already noted. Returns whether it changed.
-    pub fn mark_read(&mut self, key: &str, at: u64) -> bool {
-        if self
-            .read
-            .get(key)
-            .is_some_and(|before| at.saturating_sub(*before) < READ_INTERVAL_MS)
-        {
-            return false;
-        }
-        self.read.insert(key.to_owned(), at);
-        true
+    /// Notes that the note was opened at `at`.
+    pub fn mark_read(&mut self, key: &str, at: u64) {
+        let read = self.read.entry(key.to_owned()).or_insert(at);
+        *read = (*read).max(at);
     }
+}
+
+/// Whether a note opened at `at` is worth writing down, when the time last written
+/// for it was `written`: not within [`READ_INTERVAL_MS`] of it.
+pub fn read_worth_writing(written: Option<u64>, at: u64) -> bool {
+    written.is_none_or(|written| at.saturating_sub(written) >= READ_INTERVAL_MS)
 }
 
 /// A note a library scan found.
@@ -426,6 +424,48 @@ fn folder_name(folder: &Path) -> String {
         .map(|part| part.as_os_str().to_string_lossy())
         .collect::<Vec<_>>()
         .join("/")
+}
+
+/// A change made to a library's record in view, to make again over what a scan
+/// read from disk until a scan has read it back.
+#[derive(Clone, Debug, PartialEq)]
+pub enum OrderEdit {
+    Place {
+        place: Place,
+        sort: Sort,
+        manual: Option<Vec<String>>,
+    },
+    Read {
+        key: String,
+        at: u64,
+    },
+    ForgetFolders(Vec<u64>),
+}
+
+impl OrderEdit {
+    pub fn apply(&self, order: &mut Order) {
+        match self {
+            OrderEdit::Place {
+                place,
+                sort,
+                manual,
+            } => order.set_place(*place, *sort, manual.clone()),
+            OrderEdit::Read { key, at } => order.mark_read(key, *at),
+            OrderEdit::ForgetFolders(folders) => {
+                for id in folders {
+                    order.forget_folder(*id);
+                }
+            }
+        }
+    }
+}
+
+/// Whether an edit made in view still has to be made again over what the scan of
+/// `generation` read: while it is being written (`settled` is `None`), or when it
+/// was written after that scan began (scans number up from when they begin), so
+/// the scan may have read the record before it.
+pub fn edit_still_needed(settled: Option<u64>, generation: u64) -> bool {
+    settled.is_none_or(|settled| settled >= generation)
 }
 
 /// The file beside the app's workspace record that keeps how 全部笔记 sorts.
@@ -872,13 +912,21 @@ mod tests {
     }
 
     #[test]
-    fn reading_again_soon_is_not_written_down() {
+    fn reading_again_soon_is_noted_but_not_worth_writing() {
         let mut order = Order::default();
-        assert!(order.mark_read("n", 1_000));
-        assert!(!order.mark_read("n", 1_000 + READ_INTERVAL_MS - 1));
-        assert_eq!(order.last_read("n"), Some(1_000));
-        assert!(order.mark_read("n", 1_000 + READ_INTERVAL_MS));
-        assert_eq!(order.last_read("n"), Some(1_000 + READ_INTERVAL_MS));
+        order.mark_read("n", 1_000);
+        // In view it is always the latest time, and never goes back.
+        order.mark_read("n", 1_500);
+        assert_eq!(order.last_read("n"), Some(1_500));
+        order.mark_read("n", 1_200);
+        assert_eq!(order.last_read("n"), Some(1_500));
+        // Written down only when the time last written is a while ago.
+        assert!(read_worth_writing(None, 1_000));
+        assert!(!read_worth_writing(
+            Some(1_000),
+            1_000 + READ_INTERVAL_MS - 1
+        ));
+        assert!(read_worth_writing(Some(1_000), 1_000 + READ_INTERVAL_MS));
     }
 
     #[test]
@@ -940,6 +988,43 @@ mod tests {
     }
 
     #[test]
+    fn an_edit_made_again_over_a_stale_read_keeps_what_was_changed() {
+        // A scan that read the record before a change was saved does not undo it.
+        let stale = Order::default();
+        let edits = [
+            OrderEdit::Place {
+                place: Place::Folder(1),
+                sort: sort(SortRule::Manual, true),
+                manual: Some(vec!["b".into(), "a".into()]),
+            },
+            OrderEdit::Read {
+                key: "a".into(),
+                at: 9,
+            },
+            OrderEdit::ForgetFolders(vec![2]),
+        ];
+        let mut order = stale;
+        order.set_place(Place::Folder(2), sort(SortRule::Title, true), None);
+        for edit in &edits {
+            edit.apply(&mut order);
+        }
+        assert_eq!(order.manual(Place::Folder(1)), ["b", "a"]);
+        assert_eq!(order.sort(Place::Folder(1)).rule, SortRule::Manual);
+        assert_eq!(order.last_read("a"), Some(9));
+        assert_eq!(order.sort(Place::Folder(2)), Sort::default());
+    }
+
+    #[test]
+    fn an_edit_is_made_again_until_a_scan_begun_after_it_is_read() {
+        // Being written: always made again.
+        assert!(edit_still_needed(None, 7));
+        // Written while scan 7 ran: scan 7 may have read the record before it.
+        assert!(edit_still_needed(Some(7), 7));
+        // Scan 8 began after it was written, so it read it back.
+        assert!(!edit_still_needed(Some(7), 8));
+    }
+
+    #[test]
     fn every_notes_order_lives_in_a_file_of_its_own() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("all-notes-order.json");
@@ -994,10 +1079,7 @@ mod tests {
         std::fs::write(root.join(FILE), "damaged").unwrap();
         let restored = Order::load(root);
         assert_eq!(restored.sort(Place::Unfiled), sort(SortRule::Title, true));
-        Order::edit(root, |order| {
-            order.mark_read("note", 1);
-        })
-        .unwrap();
+        Order::edit(root, |order| order.mark_read("note", 1)).unwrap();
         let kept = std::fs::read_dir(root)
             .unwrap()
             .flatten()
