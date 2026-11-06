@@ -1,0 +1,39 @@
+name: rerun unacquired
+
+# GitHub's hosted macOS runners sometimes run out of capacity and cancel a
+# job with "The job was not acquired by Runner". Run those jobs again, up to
+# twice. A run cancelled by a newer push or by hand is left alone.
+on:
+  workflow_run:
+    workflows: [ci, native desktop]
+    types: [completed]
+
+permissions:
+  actions: write
+  checks: read
+
+jobs:
+  rerun:
+    if: github.event.workflow_run.conclusion == 'cancelled' && github.event.workflow_run.run_attempt < 3
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN: ${{ github.event.workflow_run.id }}
+    steps:
+      - name: Rerun jobs no runner picked up
+        run: |
+          unacquired=0
+          for job in $(gh api "repos/$GH_REPO/actions/runs/$RUN/jobs" \
+              --jq '.jobs[] | select(.conclusion == "cancelled") | .id'); do
+            if gh api "repos/$GH_REPO/check-runs/$job/annotations" --jq '.[].message' \
+                | grep -q 'was not acquired by Runner'; then
+              unacquired=1
+            fi
+          done
+          if [ "$unacquired" = 1 ]; then
+            echo "Rerunning run $RUN: a job found no runner"
+            gh run rerun "$RUN" --failed
+          else
+            echo "Run $RUN was cancelled for another reason; leaving it"
+          fi
