@@ -8,6 +8,10 @@
 //! unfinished task writes nothing until it runs, and the engine flattens its note
 //! first then, so it needs no wait.
 //!
+//! An older app run after the migration saves into a flat note as versions again. Its
+//! version, when newer than the flat note, becomes the note at the next opening; the
+//! flat note is kept beside it in the note's copies, which the library reports.
+//!
 //! The task records follow from what is on disk, so a crash at any point is finished
 //! by the next opening: a task whose note is now the flat note points at it, and one
 //! whose version was deleted is marked replaced (`workspace::probe_artifact`). Reading
@@ -91,7 +95,8 @@ pub(crate) fn migrate_library(location: &LibraryLocation, busy: &[PathBuf]) -> M
         if !entry.file_type().is_dir() || entry.depth() == 0 {
             continue;
         }
-        if artifact::is_legacy(&dir) {
+        // A flat note an older app saved a newer version into is flattened again.
+        if artifact::needs_flatten(&dir) {
             walk.skip_current_dir();
             if busy.iter().any(|note| same(note, &dir)) {
                 migration.deferred.push(dir);

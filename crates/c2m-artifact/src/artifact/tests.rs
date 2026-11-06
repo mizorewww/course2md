@@ -1717,6 +1717,85 @@ fn a_left_lock_is_not_part_of_the_note() {
     );
 }
 
+/// A flat note an older app saved a newer version into: that version becomes the
+/// note, the person's files come along, and the flat note is kept beside it.
+#[test]
+fn a_version_an_older_app_saved_later_becomes_the_note_and_the_flat_one_is_kept() {
+    let legacy = Legacy::populated();
+    let course = legacy.course().to_path_buf();
+    flatten_legacy(&course).unwrap().unwrap();
+    std::fs::write(course.join("added-after.txt"), b"later").unwrap();
+    // An older version of the app saves into it as it did: a version, its pointer,
+    // its lock and an export made from it.
+    let resave = || {
+        legacy.version("v9", 9, "Ninth");
+        legacy.point_at("v9");
+        std::fs::write(course.join(LEGACY_PUBLISH_LOCK), b"").unwrap();
+        let exports = course.join("exports/v9/t9");
+        std::fs::create_dir_all(&exports).unwrap();
+        std::fs::write(exports.join("course.html"), b"<p>v9 export</p>").unwrap();
+    };
+    resave();
+    assert!(!is_legacy(&course));
+    assert!(needs_flatten(&course));
+    let manifest = flatten_legacy(&course).unwrap().unwrap();
+    assert_eq!(manifest.task_id, "v9");
+    let flat = note_manifest(&course).unwrap().unwrap();
+    validate_note(&course, &flat).unwrap();
+    assert!(
+        std::fs::read_to_string(course.join("course.md"))
+            .unwrap()
+            .contains("Ninth")
+    );
+    for gone in [
+        "versions",
+        "current.json",
+        LEGACY_PUBLISH_LOCK,
+        "exports/v9",
+    ] {
+        assert!(!course.join(gone).exists(), "{gone}");
+    }
+    assert_eq!(
+        std::fs::read(course.join("exports/course.t9.html")).unwrap(),
+        b"<p>v9 export</p>"
+    );
+    assert_eq!(std::fs::read(course.join("my-notes.txt")).unwrap(), b"mine");
+    assert_eq!(
+        std::fs::read(course.join("added-after.txt")).unwrap(),
+        b"later"
+    );
+    // The flat note as this app showed it, with the person's files, is kept.
+    let copies = kept_copies(&course);
+    assert_eq!(copies.len(), 1, "{copies:?}");
+    let kept = &copies[0];
+    assert!(
+        kept.file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("displaced-before-older-app")
+    );
+    assert_eq!(note_manifest(kept).unwrap().unwrap().task_id, "v2");
+    assert!(
+        std::fs::read_to_string(kept.join("course.md"))
+            .unwrap()
+            .contains("Second")
+    );
+    assert!(kept.join("added-after.txt").is_file());
+    assert!(!kept.join("versions").exists() && !kept.join("current.json").exists());
+    assert!(!needs_flatten(&course));
+    // A version older than the flat note is not taken, and nothing changes.
+    let legacy = Legacy::populated();
+    let course = legacy.course().to_path_buf();
+    flatten_legacy(&course).unwrap().unwrap();
+    legacy.version("v0", 0, "Zeroth");
+    legacy.point_at("v0");
+    assert!(!needs_flatten(&course));
+    let before = snapshot(&course);
+    assert!(flatten_legacy(&course).unwrap().is_none());
+    assert_eq!(snapshot(&course), before);
+    assert!(kept_copies(&course).is_empty());
+}
+
 /// A lock file that cannot be opened is not reported as an older app saving.
 #[test]
 fn a_lock_that_cannot_be_opened_is_not_called_busy() {

@@ -634,9 +634,13 @@ pub fn publish(
         let (kept_edits, kept_exports) = if note.is_dir() {
             // The lock a flatten or an older app left in the note is not the
             // person's file.
-            carry_over(note, old.as_ref(), &staging, &|relative| {
-                relative == LEGACY_PUBLISH_LOCK
-            })?
+            carry_over(
+                note,
+                old.as_ref(),
+                &staging,
+                &|relative| relative == LEGACY_PUBLISH_LOCK,
+                true,
+            )?
         } else {
             Default::default()
         };
@@ -887,12 +891,14 @@ fn replace_error(error: std::io::Error) -> anyhow::Error {
 /// note's own unchanged files are left behind: the new note replaces them, except
 /// an export the new note could not make again, which stays. Folders that only
 /// held the old note's own files are not recreated empty. Paths `skip` claims, and
-/// what is below them, stay behind.
+/// what is below them, stay behind; with `keep_exports` off, so do the old note's
+/// own exports.
 fn carry_over(
     note: &Path,
     old: Option<&Manifest>,
     staging: &Path,
     skip: &dyn Fn(&str) -> bool,
+    keep_exports: bool,
 ) -> Result<(Vec<String>, Vec<Asset>)> {
     let listed: HashMap<&str, &Asset> = old
         .map(|manifest| {
@@ -941,7 +947,10 @@ fn carry_over(
         });
         let existing = staging.join(&relative);
         if own {
-            if relative.starts_with("exports/") && existing.symlink_metadata().is_err() {
+            if keep_exports
+                && relative.starts_with("exports/")
+                && existing.symlink_metadata().is_err()
+            {
                 copy_entry(&source, &existing, kind)?;
                 kept_exports.extend(listed.get(relative.as_str()).map(|asset| (*asset).clone()));
             }
@@ -1503,7 +1512,12 @@ pub fn prepare_note(note_dir: &Path) -> Result<()> {
 /// note's `exports/`, and files added to the course folder come along. Every other
 /// version is deleted, only once the flat note is in place. A crash at any point
 /// leaves the course as it was or flat; running it again finishes the job.
-/// Returns the flat note's manifest, or `None` when the folder was not schema 1.
+///
+/// A flat note into which an older app saved a newer version since is flattened the
+/// same way: that version becomes the note, the person's files come along, and the
+/// flat note as this app showed it is kept beside it, among the note's copies
+/// (`displaced-before-older-app`).
+/// Returns the flat note's manifest, or `None` when the folder needed neither.
 pub fn flatten_legacy(note_dir: &Path) -> Result<Option<Manifest>> {
     let note_dir = &resolve_note(note_dir)?;
     if !note_dir.exists() && !swap_dir(note_dir)?.exists() {
@@ -1526,7 +1540,10 @@ fn flatten_tolerant(note: &Path) -> Result<()> {
 }
 
 fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
-    if !is_legacy(note) {
+    // A flat note an older app saved a newer version into after this app flattened
+    // it: that version becomes the note, and the flat note is kept beside it.
+    let resaved = !is_legacy(note);
+    if resaved && !resaved_by_older_app(note) {
         return Ok(None);
     }
     // The older app holds this lock for its whole publication of a version: one
@@ -1534,12 +1551,28 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
     // meanwhile fails to take it and stops, its paid work kept, instead of
     // landing in the course this replaces.
     let older_app = take_legacy_lock(note)?;
+    let flat = if resaved { note_manifest(note)? } else { None };
     let (version, mut manifest, passed_over) = current_version(note)?;
     let swap = swap_dir(note)?;
     std::fs::create_dir_all(&swap).map_err(|error| disk_full(error.into()))?;
     let staging = swap.join("new-flatten");
+    // The flat note as this app showed it, while it is copied.
+    let kept_staging = swap.join("new-flatten-kept");
     let publication = new_publication("flatten");
     remove_tree(&staging)?;
+    remove_tree(&kept_staging)?;
+    // What the older app wrote, which is not the flat note's: its versions, the
+    // pointer, its lock and task progress, and exports made from its versions.
+    let versions = note.join("versions");
+    let legacy_part = |relative: &str| {
+        let mut parts = relative.split('/');
+        let first = parts.next().unwrap_or_default();
+        ["current.json", "versions", LEGACY_PUBLISH_LOCK, ".work"].contains(&first)
+            || (first == "exports"
+                && parts
+                    .next()
+                    .is_some_and(|id| id == version || versions.join(id).is_dir()))
+    };
     let built = (|| {
         std::fs::create_dir(&staging)?;
         let source = note.join("versions").join(&version);
@@ -1571,8 +1604,19 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
                 )?;
             }
         }
+        if resaved {
+            // The person's files come along; the flat note's own stay with its copy.
+            carry_over(note, flat.as_ref(), &staging, &legacy_part, false)?;
+            for (relative, kind) in walk(note)? {
+                if !legacy_part(&relative) {
+                    copy_entry(&note.join(&relative), &kept_staging.join(&relative), kind)?;
+                }
+            }
+            std::fs::create_dir_all(&kept_staging)?;
+            sync_tree_dirs(&kept_staging)?;
+        }
         // Anything else a person put in the course folder.
-        for entry in std::fs::read_dir(note)? {
+        for entry in std::fs::read_dir(note)?.filter(|_| !resaved) {
             let entry = entry?;
             let name = entry.file_name().to_string_lossy().into_owned();
             if ["current.json", "versions", ".publish.lock", ".work"].contains(&name.as_str()) {
@@ -1658,16 +1702,35 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
     if let Err(error) = built {
         if !simulated_crash(&error) {
             let _ = remove_tree(&staging);
+            let _ = remove_tree(&kept_staging);
         }
         return Err(disk_full(error));
     }
+    // Kept before the swap: a crash after it must not lose the flat note. A crash
+    // before it leaves a second copy at worst.
+    let kept = if resaved {
+        let kept = unused_name(&swap, "displaced-before-older-app");
+        std::fs::rename(&kept_staging, &kept)?;
+        sync_dir(&swap)?;
+        Some(kept)
+    } else {
+        None
+    };
     // The flat note carries the lock too, held across the swap: the older app's
     // path to it then reaches this held lock, not a free one.
     let flat_lock = crate::runtime::lock_file(&staging.join(LEGACY_PUBLISH_LOCK))?;
     // Windows refuses to rename a folder with a file open inside it.
     #[cfg(windows)]
     drop((older_app, flat_lock));
-    swap_in(note, &staging, "flatten", &publication)?;
+    if let Err(error) = swap_in(note, &staging, "flatten", &publication) {
+        // The note is as it was, or recovery puts it back: it still holds the flat note.
+        if !simulated_crash(&error)
+            && let Some(kept) = &kept
+        {
+            let _ = remove_tree(kept);
+        }
+        return Err(error);
+    }
     // Not part of the flat note: removed while still held, then let go.
     let _ = std::fs::remove_file(note.join(LEGACY_PUBLISH_LOCK));
     // Already let go on Windows, above.
@@ -1715,6 +1778,27 @@ fn take_legacy_lock(note: &Path) -> Result<crate::runtime::FileLock> {
             }
         }
     }
+}
+
+/// A flat note into which an older app, run after this one flattened it, saved a
+/// newer version (`current.json` and `versions/`, which this app does not read).
+fn resaved_by_older_app(note: &Path) -> bool {
+    if !(note.join("manifest.json").is_file()
+        && note.join("current.json").is_file()
+        && note.join("versions").is_dir())
+    {
+        return false;
+    }
+    let Ok(Some(flat)) = note_manifest(note) else {
+        return false;
+    };
+    current_version(note).is_ok_and(|(_, version, _)| version.created_at_ms > flat.created_at_ms)
+}
+
+/// A course folder [`flatten_legacy`] turns into a flat note: one in the layout of
+/// versions, or a flat note an older app saved a newer version into.
+pub fn needs_flatten(note_dir: &Path) -> bool {
+    is_legacy(note_dir) || resaved_by_older_app(note_dir)
 }
 
 /// Removes the empty lock a flatten interrupted after its swap left in the flat

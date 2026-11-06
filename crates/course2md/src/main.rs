@@ -576,7 +576,7 @@ fn note_dir(dir: &std::path::Path) -> anyhow::Result<Option<std::path::PathBuf>>
             note.display()
         );
     }
-    if artifact::is_legacy(note) {
+    if artifact::needs_flatten(note) {
         artifact::flatten_legacy(note)?;
         tracing::info!(
             "已将笔记的旧版本整理为一份笔记 / Turned the note's versions into one note: {}",
