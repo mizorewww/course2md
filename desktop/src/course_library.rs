@@ -1725,11 +1725,11 @@ impl Desktop {
     /// A note's real state worth flagging on its cover or row: opening now, a task
     /// still replacing it, or content that still needs completing.
     fn note_status(&self, course: &Course, cx: &App) -> Option<Div> {
-        let busy = self
+        let task = self
             .course_location(course, cx)
             .zip(self.workspace(cx))
-            .is_some_and(|(location, workspace)| {
-                note_has_unfinished_task(
+            .and_then(|(location, workspace)| {
+                note_unfinished_task(
                     &workspace.state.tasks,
                     &location.id,
                     course
@@ -1737,11 +1737,13 @@ impl Desktop {
                         .as_ref()
                         .map(|manifest| manifest.source_id.as_str()),
                 )
-            });
+            })
+            .map(|task| task.state);
         if self.opened(cx).opening_course.as_ref() == Some(&course.dir) {
             Some(status_chip(StatusKind::Progress).child(course2md::tr!("正在打开笔记…")))
-        } else if busy {
-            Some(status_chip(StatusKind::Progress).child(course2md::tr!("正在处理")))
+        } else if let Some(state) = task {
+            let (kind, label) = task_status(state);
+            Some(status_chip(kind).child(label))
         } else if course.incomplete() {
             Some(status_chip(StatusKind::Warning).child(course2md::tr!("部分内容待补全")))
         } else {
@@ -2501,6 +2503,18 @@ impl RenderOnce for SortMenu {
     }
 }
 
+/// How a note's unfinished task shows on it: by its own state, so one stopped for
+/// the person, such as at the limit of copies kept beside the note, does not read
+/// as still processing.
+fn task_status(state: crate::workspace::TaskState) -> (StatusKind, &'static str) {
+    use crate::workspace::TaskState;
+    match state {
+        TaskState::Paused => (StatusKind::Neutral, state.label()),
+        TaskState::NeedsAttention | TaskState::Uncertain => (StatusKind::Warning, state.label()),
+        _ => (StatusKind::Progress, course2md::tr!("正在处理")),
+    }
+}
+
 /// Milliseconds since the epoch, now.
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -3052,6 +3066,26 @@ mod tests {
 
     use crate::notes::Course;
     use std::time::SystemTime;
+
+    #[test]
+    fn a_note_whose_task_stopped_for_the_person_does_not_read_as_processing() {
+        use crate::workspace::TaskState;
+        use gpui_kit_material::prelude::StatusKind;
+        let shown = |state| super::task_status(state).0;
+        assert!(matches!(
+            shown(TaskState::NeedsAttention),
+            StatusKind::Warning
+        ));
+        assert_eq!(
+            super::task_status(TaskState::NeedsAttention).1,
+            TaskState::NeedsAttention.label()
+        );
+        assert!(matches!(shown(TaskState::Uncertain), StatusKind::Warning));
+        assert!(matches!(shown(TaskState::Paused), StatusKind::Neutral));
+        for state in [TaskState::Queued, TaskState::Running, TaskState::Pausing] {
+            assert!(matches!(shown(state), StatusKind::Progress));
+        }
+    }
 
     fn course(dir: &str) -> Course {
         Course {
