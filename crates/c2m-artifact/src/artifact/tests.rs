@@ -1672,6 +1672,13 @@ fn copies_at_the_limit_stop_a_task_and_say_what_frees_it() {
         en.contains("move the copies you want to keep out") && en.contains("stop"),
         "{en}"
     );
+    // Only as many as the limit go on stopping new tasks.
+    assert!(
+        en.contains(&format!(
+            "While {MAX_KEPT_COPIES} or more copies stay in it"
+        )),
+        "{en}"
+    );
     assert!(en.contains(&swap.display().to_string()));
     for lang in [Lang::Ja, Lang::ZhHant, Lang::ZhHans] {
         let text = crate::outcome::copies_kept_message(&swap, lang);

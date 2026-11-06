@@ -1123,7 +1123,7 @@ fn discard_old(note: &Path, old: &Path) {
 
 /// Replaced notes that could not be deleted. This many refuses a new task until
 /// they are cleared, so copies of a whole note do not pile up.
-pub const MAX_KEPT_COPIES: usize = 3;
+pub const MAX_KEPT_COPIES: usize = crate::outcome::MAX_KEPT_COPIES;
 
 fn stuck_olds(note: &Path) -> Result<Vec<PathBuf>> {
     Ok(kept_copies(note))

@@ -273,14 +273,17 @@ impl std::fmt::Display for CopiesKept {
 
 impl std::error::Error for CopiesKept {}
 
+/// Copies kept beside a note that stop its new tasks until fewer are left.
+pub const MAX_KEPT_COPIES: usize = 3;
+
 /// What to do when copies kept beside a note stop its new tasks, in `lang`.
 pub fn copies_kept_message(swap: &std::path::Path, lang: c2m_i18n::i18n::Lang) -> String {
     fill(
         c2m_i18n::i18n::t_for(
-            "这份笔记旁保留的副本已达上限，在处理之前，这份笔记的新任务都会停下。请打开 {}，把要留下的副本移出这个文件夹（留在里面的仍会挡住新任务），删除其余的，然后重试。",
+            "这份笔记旁保留的副本已达上限，在处理之前，这份笔记的新任务都会停下。请打开 {}，把要留下的副本移出这个文件夹，删除其余的，然后重试；文件夹里只要还有 {} 份或更多副本，新任务就仍会停下。",
             lang,
         ),
-        &[&swap.display().to_string()],
+        &[&swap.display().to_string(), &MAX_KEPT_COPIES.to_string()],
     )
 }
 
