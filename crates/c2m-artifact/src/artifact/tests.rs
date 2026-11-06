@@ -2020,3 +2020,42 @@ fn a_flatten_that_cannot_read_the_note_in_place_keeps_its_copy() {
     assert!(flatten_legacy(&course).is_err());
     assert!(kept_copies(&course).is_empty());
 }
+
+/// A read-only lock left in a flat note does not stop a publication after its
+/// work: it is locked through a read-only handle, and removed.
+#[cfg(unix)]
+#[test]
+fn a_read_only_lock_does_not_stop_a_publication() {
+    use std::os::unix::fs::PermissionsExt;
+    let legacy = Legacy::populated();
+    let course = legacy.course().to_path_buf();
+    flatten_legacy(&course).unwrap().unwrap();
+    let lock = course.join(LEGACY_PUBLISH_LOCK);
+    std::fs::write(&lock, b"").unwrap();
+    std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o444)).unwrap();
+    // Held by the older app, it is still waited for.
+    let held = crate::runtime::try_lock_file(&lock).unwrap().unwrap();
+    assert!(crate::runtime::try_lock_file(&lock).unwrap().is_none());
+    drop(held);
+    prepare_note(&course).unwrap();
+    assert!(!lock.exists());
+    std::fs::write(&lock, b"x").unwrap();
+    std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o444)).unwrap();
+    legacy
+        .library
+        .publish(&legacy.library.target("next"), "Next", "")
+        .unwrap();
+    assert!(published_by(&course, "next").unwrap().is_some());
+}
+
+/// A lock that cannot be opened at all stops a task before its work.
+#[test]
+fn a_lock_that_cannot_be_opened_stops_the_task_before_its_work() {
+    let legacy = Legacy::populated();
+    let course = legacy.course().to_path_buf();
+    flatten_legacy(&course).unwrap().unwrap();
+    let lock = course.join(LEGACY_PUBLISH_LOCK);
+    std::fs::create_dir(&lock).unwrap();
+    let error = format!("{:#}", prepare_note(&course).unwrap_err());
+    assert!(error.contains(&lock.display().to_string()), "{error}");
+}

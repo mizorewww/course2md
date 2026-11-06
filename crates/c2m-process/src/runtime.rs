@@ -527,14 +527,22 @@ fn open_lock_file(path: &Path) -> Result<std::fs::File> {
 }
 
 /// [`lock_file`] that tells a lock someone holds (`Ok(None)`) from a lock file
-/// that could not be opened or locked (`Err`).
+/// that could not be opened or locked (`Err`). A lock file that exists but may
+/// not be written (left read-only by a copy or another user's app) is locked
+/// through a read-only handle: the lock does not need to write.
 pub fn try_lock_file(path: &Path) -> std::io::Result<Option<FileLock>> {
-    let file = std::fs::OpenOptions::new()
+    let opened = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .open(path)?;
+        .open(path);
+    let file = match opened {
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            std::fs::File::open(path).map_err(|_| error)?
+        }
+        opened => opened?,
+    };
     match file.try_lock() {
         Ok(()) => Ok(Some(FileLock { file })),
         Err(std::fs::TryLockError::WouldBlock) => Ok(None),

@@ -1535,6 +1535,15 @@ pub fn prepare_note(note_dir: &Path) -> Result<()> {
     // may reach the limit: the task stops before its work, as it would have.
     at_limit()?;
     release_legacy_lock(note_dir);
+    // The publication takes an older app's lock left in the note: one it cannot
+    // open stops the task now, before its work, not after. One that is held is
+    // waited for then.
+    let lock = note_dir.join(LEGACY_PUBLISH_LOCK);
+    if lock.symlink_metadata().is_ok()
+        && let Err(error) = crate::runtime::try_lock_file(&lock)
+    {
+        return Err(legacy_lock_error(&lock, error));
+    }
     salvage_work(note_dir, &note_dir.join(".work"))?;
     // A folder an older app made for a task that never published.
     if note_dir.is_dir() && std::fs::read_dir(note_dir)?.next().is_none() {
@@ -1851,26 +1860,29 @@ fn take_legacy_lock(note: &Path) -> Result<crate::runtime::FileLock> {
             Ok(None) => {
                 return Err(crate::outcome::NoteBusy(older_app_saving().to_string()).into());
             }
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
-                ) =>
-            {
-                return Err(anyhow::Error::new(error).context(tr!(
-                    "没有权限打开这份笔记的保存锁 {}，请检查这个文件夹的权限后重试 / No permission to open the note's save lock {}; check the folder's permissions and try again",
-                    path.display(),
-                    path.display()
-                )));
-            }
-            Err(error) => {
-                return Err(anyhow::Error::new(error).context(tr!(
-                    "无法打开这份笔记的保存锁 {} / Could not open the note's save lock {}",
-                    path.display(),
-                    path.display()
-                )));
-            }
+            Err(error) => return Err(legacy_lock_error(&path, error)),
         }
+    }
+}
+
+/// Why the older app's lock at `path` could not be opened, in words that say
+/// what to do.
+fn legacy_lock_error(path: &Path, error: std::io::Error) -> anyhow::Error {
+    if matches!(
+        error.kind(),
+        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
+    ) {
+        anyhow::Error::new(error).context(tr!(
+            "没有权限打开这份笔记的保存锁 {}，请检查这个文件夹的权限后重试 / No permission to open the note's save lock {}; check the folder's permissions and try again",
+            path.display(),
+            path.display()
+        ))
+    } else {
+        anyhow::Error::new(error).context(tr!(
+            "无法打开这份笔记的保存锁 {} / Could not open the note's save lock {}",
+            path.display(),
+            path.display()
+        ))
     }
 }
 
