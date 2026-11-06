@@ -413,7 +413,7 @@ impl Activity {
                 let found = if found == 1 {
                     c2m_i18n::tr!("已找到 1 张候选截图").to_owned()
                 } else {
-                    c2m_i18n::tr!("已找到 {} 张候选截图", found)
+                    c2m_i18n::tr!("已找到 {} 张候选截图", grouped(found))
                 };
                 if quantity.is_empty() {
                     found
@@ -758,14 +758,15 @@ pub fn quantity(stage: &Stage, current: u64, total: u64) -> String {
 }
 
 fn quantity_of(stage: &Stage, byte_download: bool, current: u64, total: u64) -> String {
+    // Counts read like the token counts: "1,234".
     if *stage == Stage::ScenesScan {
         if current == 1 {
             c2m_i18n::tr!("已检查 1 张画面").to_owned()
         } else {
-            c2m_i18n::tr!("已检查 {} 张画面", current)
+            c2m_i18n::tr!("已检查 {} 张画面", grouped(current))
         }
     } else if *stage == Stage::ScenesExtract && total > 0 {
-        c2m_i18n::tr!("已保存 {} / {} 张截图", current, total)
+        c2m_i18n::tr!("已保存 {} / {} 张截图", grouped(current), grouped(total))
     } else if byte_download {
         if total > 0 {
             format!("{} / {}", bytes(current), bytes(total))
@@ -774,7 +775,7 @@ fn quantity_of(stage: &Stage, byte_download: bool, current: u64, total: u64) -> 
         }
     } else if total > 0 {
         if *stage == Stage::Transcribe {
-            c2m_i18n::tr!("{} / {} 段", current, total)
+            c2m_i18n::tr!("{} / {} 段", grouped(current), grouped(total))
         } else {
             format!(
                 "{:.0}%",
@@ -1357,6 +1358,30 @@ mod tests {
             Some("↑ 4,750 · ↓ 130 词元")
         );
         assert_eq!(Activity::new().tokens_label(), None);
+    }
+
+    /// Counts of frames and screenshots read like the token counts, and English
+    /// says one of them in the singular.
+    #[test]
+    fn counts_are_grouped_and_one_is_singular() {
+        use c2m_i18n::i18n::{Lang, t_for};
+        assert_eq!(
+            quantity(&Stage::ScenesScan, 12_345, 0),
+            c2m_i18n::tr!("已检查 {} 张画面", "12,345")
+        );
+        assert_eq!(
+            quantity(&Stage::ScenesScan, 1, 0),
+            c2m_i18n::tr!("已检查 1 张画面")
+        );
+        assert_eq!(
+            quantity(&Stage::ScenesExtract, 1_000, 2_000),
+            c2m_i18n::tr!("已保存 {} / {} 张截图", "1,000", "2,000")
+        );
+        assert_eq!(t_for("已检查 1 张画面", Lang::En), "1 frame checked");
+        assert_eq!(
+            t_for("已找到 1 张候选截图", Lang::En),
+            "1 candidate screenshot found"
+        );
     }
 
     /// A response of one stage that lands after the next stage started is counted

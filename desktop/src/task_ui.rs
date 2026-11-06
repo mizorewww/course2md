@@ -1333,26 +1333,24 @@ impl TasksPage {
     /// workbench says the step and its measure instead, above the bar.
     fn task_step_line(&self, task: &TaskRecord, home: bool, cx: &App) -> Option<String> {
         let stages = self.task_stage_rows(task, cx);
-        let index = stages.iter().position(|stage| stage.status.running());
-        index
-            .map(|index| {
-                let stage = &stages[index];
+        // Steps that run side by side (scanning while speech is recognized) are all
+        // where the task is, each with its own number, on the one line.
+        let running: Vec<String> = stages
+            .iter()
+            .enumerate()
+            .filter(|(_, stage)| stage.status.running())
+            .map(|(index, stage)| {
                 if !home {
-                    // Steps that run side by side (scanning while speech is recognized)
-                    // are all where the task is.
-                    let titles = stages[index..]
-                        .iter()
-                        .filter(|stage| stage.status.running())
-                        .map(|stage| stage.title.as_str())
-                        .collect::<Vec<_>>()
-                        .join(course2md::tr!("、"));
-                    course2md::tr!("第 {} 步 · {}", index + 1, titles)
+                    course2md::tr!("第 {} 步 · {}", index + 1, stage.title)
                 } else if stage.detail.is_empty() {
                     stage.title.clone()
                 } else {
                     format!("{} · {}", stage.title, stage.detail)
                 }
             })
+            .collect();
+        (!running.is_empty())
+            .then(|| running.join(course2md::tr!("；")))
             .or_else(|| self.task_wait(task, cx).map(|wait| wait.label().to_owned()))
     }
 
@@ -1389,13 +1387,18 @@ impl TasksPage {
             return None;
         }
         let lines: Vec<String> = if running.len() > 1 {
-            // Steps that run side by side each say where they are, by name. On the
-            // workbench the first one is already the line above the bar.
-            running
+            // Steps that run side by side each say where they are, by name, on one
+            // line, so the card keeps its height when a second step starts. On the
+            // workbench the line above the bar already says them.
+            let measures = running
                 .iter()
-                .skip(usize::from(surface == TaskSurface::Home))
                 .filter(|stage| !stage.detail.is_empty())
                 .map(|stage| format!("{} · {}", stage.title, stage.detail))
+                .collect::<Vec<_>>()
+                .join(course2md::tr!("；"));
+            (surface != TaskSurface::Home && !measures.is_empty())
+                .then_some(measures)
+                .into_iter()
                 .collect()
         } else {
             current
