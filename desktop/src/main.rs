@@ -1090,6 +1090,7 @@ impl Desktop {
                 }
                 match result {
                     Ok(preview) => {
+                        this.note_opened(&preview.course, cx);
                         // The same duties as navigate() when leaving a page: save the draft when leaving the workbench;
                         // opening another note stops following an unrelated conversion, and a background completion never takes over.
                         if this.page == Page::New {

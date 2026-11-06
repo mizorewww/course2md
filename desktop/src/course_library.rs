@@ -6,6 +6,7 @@ use crate::folder_tree::{
 use crate::library_ui::{Moving, NameTarget};
 use crate::{symbols, ui};
 use desktop_store::library::*;
+use desktop_store::order::{self, NoteFacts, Place, Sort, SortRule};
 use desktop_tasks::task_view::TaskAction;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit_material::components::MaterialContextMenu;
@@ -16,11 +17,11 @@ use gpui_kit_material::{
     prelude::{
         ButtonIconPosition, ButtonShape, ButtonSize, ButtonTone, ButtonVariant, CardVariant,
         ConnectedButtonGroup, ITEM_INSET, IconButton, IconButtonVariant, ListDensity, ListItem,
-        ListLeading, MaterialCard, MaterialSideSheet, MaterialTooltip, NoticeKind, RADIUS_LARGE,
-        RADIUS_SMALL, SearchField, SearchFieldStyle, StatusKind, TEXT_AUX, TEXT_BODY, TILE_GAP,
-        TILE_RADIUS, TileScale, Tint, TypeRole, accessible_text, color, disclosure_chevron,
-        list_corners, material_button, media_label, notice_banner, progress, rem, spinner,
-        status_chip, tile, tile_chevron, tinted_icon,
+        ListLeading, MaterialCard, MaterialMenu, MaterialMenuItem, MaterialSideSheet,
+        MaterialTooltip, NoticeKind, RADIUS_LARGE, RADIUS_SMALL, SearchField, SearchFieldStyle,
+        StatusKind, TEXT_AUX, TEXT_BODY, TILE_GAP, TILE_RADIUS, TileScale, Tint, TypeRole,
+        accessible_text, color, disclosure_chevron, list_corners, material_button, media_label,
+        notice_banner, progress, rem, spinner, status_chip, tile, tile_chevron, tinted_icon,
     },
     tokens::shape::OuterCorners,
 };
@@ -486,6 +487,9 @@ impl Desktop {
             export(course2md::tr!("导出为 Markdown 包…"), OutputFormat::Md),
             export(course2md::tr!("导出为网页文件…"), OutputFormat::Html),
             export(course2md::tr!("导出为结构化数据…"), OutputFormat::Json).ends_group(),
+        ]);
+        commands.extend(self.note_move_commands(course, cx));
+        commands.extend([
             on_course(
                 course2md::tr!("移动到…"),
                 symbols::drive_file_move(),
@@ -786,6 +790,33 @@ impl Desktop {
             (((content + gap) / (CARD_MIN_WIDTH * scale + gap)).floor() as usize).max(1)
         });
         let (items, count) = self.library_items(columns, cx);
+        // The notes as shown, run by run, for moving one by the keyboard.
+        let mut runs: Vec<Vec<usize>> = Vec::new();
+        let mut flat = Vec::new();
+        for item in &items {
+            match item {
+                LibraryItem::GroupBody { courses, .. } => runs.push(courses.clone()),
+                LibraryItem::Cards { courses, .. } => flat.extend(courses),
+                LibraryItem::Note { course, .. } => flat.push(*course),
+                _ => {}
+            }
+        }
+        if !flat.is_empty() {
+            runs.push(flat);
+        }
+        self.library_ui.note_runs = runs;
+        self.library_ui.note_columns = columns;
+        if let Some(moved) = self.library_ui.reveal.take()
+            && let Some(row) = items.iter().position(|item| match item {
+                LibraryItem::Note { course, .. } => *course == moved,
+                LibraryItem::Cards { courses, .. } | LibraryItem::GroupBody { courses, .. } => {
+                    courses.contains(&moved)
+                }
+                _ => false,
+            })
+        {
+            self.library_ui.list.scroll_to_reveal_item(row);
+        }
         let count = count.filter(|_| controls);
         let notes = self.library_notes(items, columns, rem_px, cx);
         let pane = v_flex()
@@ -903,6 +934,7 @@ impl Desktop {
                 matches_folder.then_some(index)
             })
             .collect();
+        let courses = self.arrange_courses(courses, cx);
         if self.library_needs_recovery(&all_access, cx) {
             items.push(LibraryItem::Recovery(all_access.clone()));
         }
@@ -1331,9 +1363,16 @@ impl Desktop {
             LibraryItem::Cards { .. } => wrapper.pb(rem(GRID_GAP)),
             _ => wrapper.pb(rem(24.)),
         };
+        // A note's id follows the note, not its row, so the control holding focus
+        // keeps it when the note moves; card rows share one id for the same reason.
+        let id: ElementId = match item {
+            LibraryItem::Note { course, .. } => ("library-note", *course).into(),
+            LibraryItem::Cards { .. } => "library-cards".into(),
+            _ => ("library-item", index).into(),
+        };
         wrapper
             .child(content)
-            .id(("library-item", index))
+            .id(id)
             .tab_stop(false)
             .when_some(focus, |wrapper, focus| wrapper.track_focus(&focus))
             .into_any_element()
@@ -1460,6 +1499,7 @@ impl Desktop {
                                 })),
                         )
                     })
+                    .child(self.sort_menu(!sidebar, cx))
                     .child(
                         material_button(
                             "library-group-folders",
@@ -1554,13 +1594,31 @@ impl Desktop {
                 parts.push(course2md::tr!("本地视频").into());
             }
         }
-        parts.extend(date.map(|date| {
-            if home {
-                crate::i18n::month_day(date.month(), date.day())
-            } else {
-                date.format("%Y-%m-%d").to_string()
-            }
-        }));
+        // Sorted by when videos were published, the library shows that date; otherwise
+        // when the note was added.
+        let published = (!home && self.place_sort(cx).2.rule == SortRule::Published)
+            .then(|| self.library(cx).note_source(course)?.published.clone())
+            .flatten();
+        let date = if home || published.is_some() {
+            date
+        } else {
+            let owner = self.order_owner(cx);
+            i64::try_from(self.note_facts(course, &owner, cx).added)
+                .ok()
+                .and_then(chrono::DateTime::from_timestamp_millis)
+                .map(|instant| instant.with_timezone(&chrono::Local).date_naive())
+                .or(date)
+        };
+        match published {
+            Some(published) => parts.push(course2md::tr!("发布于 {}", published)),
+            None => parts.extend(date.map(|date| {
+                if home {
+                    crate::i18n::month_day(date.month(), date.day())
+                } else {
+                    date.format("%Y-%m-%d").to_string()
+                }
+            })),
+        }
         parts.join(" · ")
     }
 
@@ -1766,6 +1824,7 @@ impl Desktop {
                     .update(cx, |exports, cx| exports.feedback(course, cx)),
             )
             .on_drag(note_drag(course), |drag, _, _, cx| cx.new(|_| drag.clone()))
+            .map(|card| self.reorderable(card, index, cx))
             .into_any_element()
     }
 
@@ -1858,6 +1917,7 @@ impl Desktop {
             .child(row)
             .children(details)
             .on_drag(note_drag(course), |drag, _, _, cx| cx.new(|_| drag.clone()))
+            .when(!home, |row| self.reorderable(row, index, cx))
             .into_any_element()
     }
 
@@ -2303,6 +2363,623 @@ impl Desktop {
     }
 }
 
+/// How the place in view lists its notes, behind a button that names the rule; the
+/// button's arrow says which way the rule runs.
+#[derive(gpui::IntoElement)]
+struct SortMenu {
+    sort: Sort,
+    enabled: bool,
+    /// An icon button that its tooltip names, where the toolbar is short of room.
+    compact: bool,
+    desktop: WeakEntity<Desktop>,
+}
+
+/// A rule's name in the sort menu and on its button.
+fn rule_label(rule: SortRule) -> &'static str {
+    match rule {
+        SortRule::Manual => course2md::tr!("手动排序"),
+        SortRule::Added => course2md::tr!("添加时间"),
+        SortRule::Published => course2md::tr!("发布时间"),
+        SortRule::Title => course2md::tr!("标题"),
+        SortRule::Duration => course2md::tr!("时长"),
+        SortRule::LastRead => course2md::tr!("最近阅读"),
+    }
+}
+
+/// What each direction of a rule puts first: (ascending, descending).
+fn direction_labels(rule: SortRule) -> (&'static str, &'static str) {
+    match rule {
+        SortRule::Added | SortRule::Published => {
+            (course2md::tr!("最早的在前"), course2md::tr!("最新的在前"))
+        }
+        SortRule::Title => (course2md::tr!("A 到 Z"), course2md::tr!("Z 到 A")),
+        SortRule::Duration => (course2md::tr!("最短的在前"), course2md::tr!("最长的在前")),
+        SortRule::LastRead => (
+            course2md::tr!("最久未读的在前"),
+            course2md::tr!("最近读过的在前"),
+        ),
+        SortRule::Manual => ("", ""),
+    }
+}
+
+impl RenderOnce for SortMenu {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let id: ElementId = "library-sort".into();
+        let key_toggle = ui::menu_key_toggle(&id, window, cx);
+        let Self {
+            sort,
+            enabled,
+            compact,
+            desktop,
+        } = self;
+        let pick = move |sort: Sort| {
+            let desktop = desktop.clone();
+            move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                let _ = desktop.update(cx, |this, cx| this.set_place_sort(sort, cx));
+            }
+        };
+        let mut items: Vec<MaterialMenuItem> = SortRule::ALL
+            .into_iter()
+            .map(|rule| {
+                MaterialMenuItem::new(rule_label(rule))
+                    .selected(rule == sort.rule)
+                    .on_click(pick(Sort {
+                        rule,
+                        // A rule keeps the way it ran; one newly picked starts from its
+                        // usual way: newest, longest and most recently read first, A to Z.
+                        descending: if rule == sort.rule {
+                            sort.descending
+                        } else {
+                            rule != SortRule::Title
+                        },
+                    }))
+            })
+            .collect();
+        let direction = if sort.rule.has_direction() {
+            let (ascending, descending) = direction_labels(sort.rule);
+            if let Some(last) = items.pop() {
+                items.push(last.divider(true));
+            }
+            items.extend(
+                [(false, ascending), (true, descending)].map(|(way, label)| {
+                    MaterialMenuItem::new(label)
+                        .selected(way == sort.descending)
+                        .on_click(pick(Sort {
+                            rule: sort.rule,
+                            descending: way,
+                        }))
+                }),
+            );
+            let (ascending, descending) = direction_labels(sort.rule);
+            Some(if sort.descending {
+                descending
+            } else {
+                ascending
+            })
+        } else {
+            None
+        };
+        let label = rule_label(sort.rule);
+        let spoken = match direction {
+            Some(direction) => course2md::tr!("排序方式：{}，{}", label, direction),
+            None => course2md::tr!("排序方式：{}", label),
+        };
+        let icon = match (sort.rule.has_direction(), sort.descending) {
+            (false, _) => symbols::drag_indicator(),
+            (true, true) => symbols::arrow_downward(),
+            (true, false) => symbols::arrow_upward(),
+        };
+        let trigger = if compact {
+            MaterialTooltip::plain("library-sort-tip", spoken.clone())
+                .trigger(
+                    IconButton::new("library-sort-button", icon, spoken)
+                        .variant(IconButtonVariant::Tonal)
+                        .tone(ButtonTone::Neutral)
+                        .disabled(!enabled)
+                        .on_click(key_toggle),
+                )
+                .into_any_element()
+        } else {
+            material_button("library-sort-button", ButtonVariant::Tonal)
+                .tone(ButtonTone::Neutral)
+                .icon(icon)
+                .child(label)
+                .accessibility_label(spoken)
+                .disabled(!enabled)
+                .on_click(key_toggle)
+                .into_any_element()
+        };
+        ui::menu(
+            id,
+            trigger,
+            MaterialMenu::new("library-sort-items")
+                .width(COMMAND_MENU_WIDTH * 0.75)
+                .items(items),
+            window,
+            cx,
+        )
+    }
+}
+
+/// Milliseconds since the epoch, now.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// The key of the menu items and shortcuts that move a note: Option on macOS.
+fn move_shortcut(arrow: &str) -> String {
+    if cfg!(target_os = "macos") {
+        format!("⌥{arrow}")
+    } else {
+        format!("Alt+{arrow}")
+    }
+}
+
+impl Desktop {
+    /// The library whose record keeps the sort of the place in view: the library in
+    /// view, or, for every note, the default library.
+    fn order_owner(&self, cx: &App) -> PathBuf {
+        let library = self.library(cx);
+        if !library.folder_filter.is_all() {
+            return library.root.clone();
+        }
+        self.workspace(cx)
+            .and_then(|workspace| {
+                let libraries = &workspace.state.libraries;
+                libraries
+                    .iter()
+                    .find(|location| location.id == workspace.state.default_library)
+                    .or(libraries.first())
+            })
+            .map(|location| location.root.clone())
+            .unwrap_or_else(|| library.root.clone())
+    }
+
+    /// The place in view, the library keeping its sort, its sort and whether that
+    /// record has been read.
+    fn place_sort(&self, cx: &App) -> (PathBuf, Place, Sort, bool) {
+        let owner = self.order_owner(cx);
+        let place = self.library(cx).folder_filter.place();
+        let order = self.library(cx).view_cache.orders.get(&owner);
+        let sort = order.map(|order| order.sort(place)).unwrap_or_default();
+        (owner, place, sort, order.is_some())
+    }
+
+    /// A note's name in `owner`'s record: its course id, qualified by its library
+    /// when it lives in another one.
+    fn note_key(&self, course: &Course, owner: &std::path::Path, cx: &App) -> String {
+        let id = course
+            .manifest
+            .as_ref()
+            .map(|manifest| manifest.course_id.clone())
+            .unwrap_or_else(|| {
+                course
+                    .dir
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
+            });
+        match self.course_location(course, cx) {
+            Some(location) if location.root != owner => format!("{}/{id}", location.id),
+            _ => id,
+        }
+    }
+
+    /// What the sort rules read of a note: when it was added and last read come from
+    /// its own library's record.
+    fn note_facts(&self, course: &Course, owner: &std::path::Path, cx: &App) -> NoteFacts {
+        let library = self.library(cx);
+        let created = course
+            .manifest
+            .as_ref()
+            .map(|manifest| manifest.created_at_ms)
+            .unwrap_or_else(|| {
+                course
+                    .modified
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|elapsed| elapsed.as_millis() as u64)
+                    .unwrap_or(0)
+            });
+        let own = self
+            .course_location(course, cx)
+            .and_then(|location| library.view_cache.orders.get(&location.root));
+        let id = course.manifest.as_ref().map(|manifest| &manifest.course_id);
+        let source = library.note_source(course);
+        NoteFacts {
+            key: self.note_key(course, owner, cx),
+            title: course.title.clone(),
+            added: own
+                .zip(id)
+                .and_then(|(order, id)| order.added(id))
+                .unwrap_or(created),
+            published: source.and_then(|source| source.published.clone()),
+            duration: source.and_then(|source| source.duration),
+            read: own.zip(id).and_then(|(order, id)| order.last_read(id)),
+        }
+    }
+
+    /// `courses` in the place's order.
+    fn arrange_courses(&self, courses: Vec<usize>, cx: &App) -> Vec<usize> {
+        let (owner, place, sort, _) = self.place_sort(cx);
+        let library = self.library(cx);
+        let facts: Vec<NoteFacts> = courses
+            .iter()
+            .map(|index| self.note_facts(&library.courses[*index], &owner, cx))
+            .collect();
+        let manual = library
+            .view_cache
+            .orders
+            .get(&owner)
+            .map(|order| order.manual(place))
+            .unwrap_or_default();
+        order::arrange(&facts, sort, manual)
+            .into_iter()
+            .map(|position| courses[position])
+            .collect()
+    }
+
+    /// Whether notes can be moved by hand here: the place's record has been read and
+    /// the whole place is shown, not a search of it.
+    fn can_reorder(&self, cx: &App) -> bool {
+        self.place_sort(cx).3
+            && self.value(Field::Search, cx).is_empty()
+            && self.library(cx).error.is_none()
+            && self
+                .library_ui
+                .note_runs
+                .iter()
+                .map(Vec::len)
+                .sum::<usize>()
+                > 1
+    }
+
+    /// The sort menu of the place in view.
+    fn sort_menu(&self, compact: bool, cx: &mut Context<Self>) -> SortMenu {
+        let (_, _, sort, read) = self.place_sort(cx);
+        SortMenu {
+            sort,
+            enabled: read && self.library(cx).error.is_none(),
+            compact,
+            desktop: cx.weak_entity(),
+        }
+    }
+
+    /// Changes the place's sort. Picking the hand-made order the first time starts it
+    /// from the order shown.
+    fn set_place_sort(&mut self, sort: Sort, cx: &mut Context<Self>) {
+        let (owner, place, current, read) = self.place_sort(cx);
+        if !read || sort == current {
+            return;
+        }
+        let manual = (sort.rule == SortRule::Manual
+            && self
+                .library(cx)
+                .view_cache
+                .orders
+                .get(&owner)
+                .is_none_or(|order| order.manual(place).is_empty()))
+        .then(|| self.shown_keys(&owner, cx));
+        self.change_place_order(owner, place, sort, manual, cx);
+    }
+
+    /// Every note of the place in view, in its current order, as keys of `owner`.
+    fn shown_keys(&self, owner: &std::path::Path, cx: &App) -> Vec<String> {
+        let library = self.library(cx);
+        let all: Vec<usize> = self
+            .library_ui
+            .note_runs
+            .iter()
+            .flatten()
+            .copied()
+            .collect();
+        self.arrange_courses(all, cx)
+            .into_iter()
+            .map(|index| self.note_key(&library.courses[index], owner, cx))
+            .collect()
+    }
+
+    /// Sets a place's sort and order in view at once, then saves it.
+    fn change_place_order(
+        &mut self,
+        owner: PathBuf,
+        place: Place,
+        sort: Sort,
+        manual: Option<Vec<String>>,
+        cx: &mut Context<Self>,
+    ) {
+        let key = owner.clone();
+        self.records.change(cx, |records, _| {
+            records
+                .library
+                .view_cache
+                .orders
+                .entry(key)
+                .or_default()
+                .set_place(place, sort, manual)
+        });
+        self.library_ui.order_unsaved.insert((owner, place));
+        self.save_place_orders(cx);
+        cx.notify();
+    }
+
+    /// Saves the places whose order changed, one at a time, each as it is in view
+    /// when its turn comes.
+    fn save_place_orders(&mut self, cx: &mut Context<Self>) {
+        if self.library_ui.order_saving {
+            return;
+        }
+        let Some((owner, place)) = self.library_ui.order_unsaved.pop_first() else {
+            return;
+        };
+        let Some(order) = self.library(cx).view_cache.orders.get(&owner) else {
+            return self.save_place_orders(cx);
+        };
+        let (sort, manual) = (order.sort(place), order.manual(place).to_vec());
+        self.library_ui.order_saving = true;
+        self.in_background(
+            move || order::Order::edit(&owner, |order| order.set_place(place, sort, Some(manual))),
+            move |this, result, cx| {
+                this.library_ui.order_saving = false;
+                if let Err(error) = result {
+                    this.message =
+                        Some(course2md::tr!("排序方式尚未保存：{}", format!("{error:#}")));
+                }
+                this.save_place_orders(cx);
+            },
+            cx,
+        );
+    }
+
+    /// Takes the note in `storage` to where `target` is, as a drag does. Under a
+    /// sort rule the place switches to its hand-made order, starting from the order
+    /// shown.
+    fn drop_note_on(&mut self, storage: &std::path::Path, target: usize, cx: &mut Context<Self>) {
+        let library = self.library(cx);
+        let Some(moving) = library
+            .courses
+            .iter()
+            .position(|course| course.dir == storage)
+        else {
+            return;
+        };
+        if moving == target
+            || !self.can_reorder(cx)
+            || !self
+                .library_ui
+                .note_runs
+                .iter()
+                .flatten()
+                .any(|i| *i == moving)
+        {
+            return;
+        }
+        self.move_note_onto(moving, target, false, cx);
+    }
+
+    /// Moves a note one place along its run, or a card row up or down.
+    fn step_note(&mut self, index: usize, step: isize, cx: &mut Context<Self>) {
+        if !self.can_reorder(cx) {
+            return;
+        }
+        let neighbor = self.library_ui.note_runs.iter().find_map(|run| {
+            let position = run.iter().position(|i| *i == index)?;
+            run.get(position.checked_add_signed(step)?).copied()
+        });
+        if let Some(neighbor) = neighbor {
+            self.library_ui.reveal = Some(index);
+            self.move_note_onto(index, neighbor, true, cx);
+        }
+    }
+
+    fn move_note_onto(
+        &mut self,
+        moving: usize,
+        target: usize,
+        announce: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let (owner, place, sort, _) = self.place_sort(cx);
+        let library = self.library(cx);
+        let (Some(moving_course), Some(target_course)) =
+            (library.courses.get(moving), library.courses.get(target))
+        else {
+            return;
+        };
+        let title = moving_course.title.clone();
+        let moving_key = self.note_key(moving_course, &owner, cx);
+        let target_key = self.note_key(target_course, &owner, cx);
+        let shown = self.shown_keys(&owner, cx);
+        let Some(mut moved) = order::move_onto(&shown, &moving_key, &target_key) else {
+            return;
+        };
+        // Notes of a library out of reach keep their turn after the ones shown.
+        if let Some(order) = self.library(cx).view_cache.orders.get(&owner) {
+            moved.extend(
+                order
+                    .manual(place)
+                    .iter()
+                    .filter(|key| !shown.contains(key))
+                    .cloned(),
+            );
+        }
+        let switched = sort.rule != SortRule::Manual;
+        let manual = Sort {
+            rule: SortRule::Manual,
+            descending: sort.descending,
+        };
+        self.change_place_order(owner, place, manual, Some(moved), cx);
+        // Where it landed among the notes it is shown with.
+        let run = self
+            .library_ui
+            .note_runs
+            .iter()
+            .find(|run| run.contains(&moving))
+            .cloned()
+            .unwrap_or_default();
+        let total = run.len();
+        let position = self
+            .arrange_courses(run, cx)
+            .iter()
+            .position(|index| *index == moving)
+            .map_or(0, |position| position + 1);
+        if switched {
+            self.message = Some(course2md::tr!(
+                "已改为手动排序，《{}》在第 {} 位，共 {} 篇",
+                title,
+                position,
+                total
+            ));
+        } else if announce {
+            self.message = Some(course2md::tr!(
+                "《{}》在第 {} 位，共 {} 篇",
+                title,
+                position,
+                total
+            ));
+        }
+        cx.notify();
+    }
+
+    /// The note menu's commands that move it earlier and later, when it can move.
+    fn note_move_commands(&self, course: &Course, cx: &mut Context<Self>) -> Vec<Command> {
+        if !self.can_reorder(cx) {
+            return Vec::new();
+        }
+        let Some(index) = self
+            .library(cx)
+            .courses
+            .iter()
+            .position(|item| item.dir == course.dir)
+        else {
+            return Vec::new();
+        };
+        let Some((position, length)) = self
+            .library_ui
+            .note_runs
+            .iter()
+            .find_map(|run| Some((run.iter().position(|i| *i == index)?, run.len())))
+        else {
+            return Vec::new();
+        };
+        let cards = self.library_ui.note_columns.is_some();
+        let desktop = cx.weak_entity();
+        let (earlier, later) = if cards {
+            ("←", "→")
+        } else {
+            ("↑", "↓")
+        };
+        vec![
+            Command::new(
+                course2md::tr!("前移一位"),
+                symbols::arrow_upward(),
+                &desktop,
+                move |this, _, cx| this.step_note(index, -1, cx),
+            )
+            .shortcut(move_shortcut(earlier))
+            .disabled(position == 0),
+            Command::new(
+                course2md::tr!("后移一位"),
+                symbols::arrow_downward(),
+                &desktop,
+                move |this, _, cx| this.step_note(index, 1, cx),
+            )
+            .shortcut(move_shortcut(later))
+            .disabled(position + 1 >= length)
+            .ends_group(),
+        ]
+    }
+
+    /// Option with an arrow moves the focused note: along a list, or in a grid of
+    /// cards sideways one place and up or down one row.
+    fn note_move_keys(
+        &self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> impl Fn(&KeyDownEvent, &mut Window, &mut App) + 'static {
+        let columns = self.library_ui.note_columns;
+        cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+            let modifiers = event.keystroke.modifiers;
+            if !modifiers.alt || modifiers.control || modifiers.platform || modifiers.shift {
+                return;
+            }
+            let row = columns.unwrap_or(1) as isize;
+            let step = match (event.keystroke.key.as_str(), columns.is_some()) {
+                ("up", _) => -row,
+                ("down", _) => row,
+                ("left", true) => -1,
+                ("right", true) => 1,
+                _ => return,
+            };
+            cx.stop_propagation();
+            this.step_note(index, step, cx);
+        })
+    }
+
+    /// Lets notes dropped on a library note take its place, and Option with an arrow
+    /// move it; the target dims like the kit's reorderable chips while a note is over it.
+    fn reorderable(
+        &self,
+        note: Stateful<Div>,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        if self.page != Page::Library || !self.can_reorder(cx) {
+            return note;
+        }
+        note.on_key_down(self.note_move_keys(index, cx))
+            .drag_over::<NoteDrag>(|style, _, _, _| style.opacity(0.6))
+            .on_drop(cx.listener(move |this, drag: &NoteDrag, _, cx| {
+                this.drop_note_on(&drag.storage.clone(), index, cx)
+            }))
+    }
+
+    /// Notes when a note was opened, for sorting by what was read last.
+    pub(crate) fn note_opened(&mut self, course: &Course, cx: &mut Context<Self>) {
+        let Some(root) = self
+            .course_location(course, cx)
+            .map(|location| location.root.clone())
+        else {
+            return;
+        };
+        // An opened note's manifest stays with its reading; the library's copy names it.
+        let Some(id) = course
+            .manifest
+            .as_ref()
+            .or_else(|| {
+                self.library(cx)
+                    .courses
+                    .iter()
+                    .find(|item| item.dir == course.dir)
+                    .and_then(|item| item.manifest.as_ref())
+            })
+            .map(|manifest| manifest.course_id.clone())
+        else {
+            return;
+        };
+        let at = now_ms();
+        let (key, worker_root) = (id.clone(), root.clone());
+        self.records.change(cx, |records, _| {
+            records
+                .library
+                .view_cache
+                .orders
+                .entry(root)
+                .or_default()
+                .mark_read(&key, at)
+        });
+        // Only a sort by what was read last depends on it, so a failure stays quiet.
+        self.in_background(
+            move || order::Order::edit(&worker_root, |order| order.mark_read(&id, at)),
+            |_, _, _| {},
+            cx,
+        );
+    }
+}
+
 /// A place with nothing in it: a tinted icon, what that means and the way forward,
 /// which the caller appends.
 pub(crate) fn empty_state(
@@ -2372,6 +3049,7 @@ fn found_notes(count: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::LibraryItem;
+
     use crate::notes::Course;
     use std::time::SystemTime;
 

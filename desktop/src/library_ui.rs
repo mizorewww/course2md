@@ -54,6 +54,16 @@ pub(crate) struct LibraryUi {
     pub keys: Vec<String>,
     pub focus: Vec<FocusHandle>,
     pub rem: f32,
+    /// The notes as last shown, run by run (a folder group, or the whole list), and
+    /// the card columns; moving a note by the keyboard steps within its run.
+    pub note_runs: Vec<Vec<usize>>,
+    pub note_columns: Option<usize>,
+    /// A note moved by the keyboard, to scroll into view once it is laid out again.
+    pub reveal: Option<usize>,
+    /// Places whose sort or order changed and is not yet saved, and whether a
+    /// save is under way; saves run one at a time, so the last change lands last.
+    pub order_unsaved: std::collections::BTreeSet<(PathBuf, desktop_store::order::Place)>,
+    pub order_saving: bool,
 }
 
 impl LibraryUi {
@@ -69,6 +79,11 @@ impl LibraryUi {
             keys: Vec::new(),
             focus: Vec::new(),
             rem: f32::NAN,
+            note_runs: Vec::new(),
+            note_columns: None,
+            reveal: None,
+            order_unsaved: Default::default(),
+            order_saving: false,
         }
     }
 }

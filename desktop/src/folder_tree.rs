@@ -72,6 +72,8 @@ pub(crate) struct Command {
     danger: bool,
     ends_group: bool,
     disabled: bool,
+    /// The key that does the same, shown at the item's end.
+    shortcut: Option<SharedString>,
     run: CommandRun,
 }
 
@@ -101,6 +103,7 @@ impl Command {
             danger: false,
             ends_group: false,
             disabled: false,
+            shortcut: None,
             run: Rc::new(run),
         }
     }
@@ -119,6 +122,11 @@ impl Command {
         self.disabled = disabled;
         self
     }
+
+    pub(crate) fn shortcut(mut self, keys: impl Into<SharedString>) -> Self {
+        self.shortcut = Some(keys.into());
+        self
+    }
 }
 
 /// The commands as the kit's menu, `width` wide or the kit's default width.
@@ -134,15 +142,18 @@ pub(crate) fn command_menu(
     };
     menu.items(commands.into_iter().map(|command| {
         let icon = Icon::from(command.icon);
-        MaterialMenuItem::new(command.label)
-            .leading(if command.danger {
-                icon.color(color(ColorRole::ERROR))
-            } else {
-                icon
-            })
-            .divider(command.ends_group)
-            .disabled(command.disabled)
-            .on_click(move |_, window, cx| (command.run)(window, cx))
+        let item = match command.shortcut {
+            Some(keys) => MaterialMenuItem::new(command.label).trailing_text(keys),
+            None => MaterialMenuItem::new(command.label),
+        };
+        item.leading(if command.danger {
+            icon.color(color(ColorRole::ERROR))
+        } else {
+            icon
+        })
+        .divider(command.ends_group)
+        .disabled(command.disabled)
+        .on_click(move |_, window, cx| (command.run)(window, cx))
     }))
 }
 

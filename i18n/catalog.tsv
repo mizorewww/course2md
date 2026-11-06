@@ -870,6 +870,28 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 拖入本地视频	拖入本地视频	Drag local video	拖入本機影片	ローカル動画をドラッグ
 按优先顺序填写语言代码，如 zh-Hans, en	按优先顺序填写语言代码，如 zh-Hans, en	Fill in the language codes in order of priority, such as zh-Hans, en	按優先順序填寫語言代碼，如 zh-Hans, en	優先順に言語コードを入力します（例: zh-Hans, en）
 按文件夹分组	按文件夹分组	Group by folder	按資料夾分組	フォルダーごとにグループ化
+手动排序	手动排序	Manual order	手動排序	手動で並べ替え
+添加时间	添加时间	Date added	加入時間	追加日
+发布时间	发布时间	Date published	發布時間	公開日
+发布于 {}	发布于 {}	Published {}	發布於 {}	公開日 {}
+标题	标题	Title	標題	タイトル
+时长	时长	Duration	時長	長さ
+最近阅读	最近阅读	Last read	最近閱讀	最後に読んだ日
+最早的在前	最早的在前	Oldest first	最早的在前	古い順
+最新的在前	最新的在前	Newest first	最新的在前	新しい順
+A 到 Z	A 到 Z	A to Z	A 到 Z	A から Z
+Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
+最短的在前	最短的在前	Shortest first	最短的在前	短い順
+最长的在前	最长的在前	Longest first	最長的在前	長い順
+最久未读的在前	最久未读的在前	Least recently read first	最久未讀的在前	読んでから長い順
+最近读过的在前	最近读过的在前	Most recently read first	最近讀過的在前	最近読んだ順
+排序方式：{}，{}	排序方式：{}，{}	Sort: {}, {}	排序方式：{}，{}	並べ替え：{}、{}
+排序方式：{}	排序方式：{}	Sort: {}	排序方式：{}	並べ替え：{}
+排序方式尚未保存：{}	排序方式尚未保存：{}	The sort order was not saved: {}	排序方式尚未儲存：{}	並べ替えを保存できませんでした：{}
+前移一位	前移一位	Move earlier	前移一位	1 つ前へ移動
+后移一位	后移一位	Move later	後移一位	1 つ後ろへ移動
+已改为手动排序，《{}》在第 {} 位，共 {} 篇	已改为手动排序，《{}》在第 {} 位，共 {} 篇	Now in manual order: “{}” is {} of {}	已改為手動排序，《{}》在第 {} 位，共 {} 篇	手動の並び順に切り替えました。「{}」は {} 番目です（全 {} 件）
+《{}》在第 {} 位，共 {} 篇	《{}》在第 {} 位，共 {} 篇	“{}” is {} of {}	《{}》在第 {} 位，共 {} 篇	「{}」は {} 番目です（全 {} 件）
 授权回调地址无效 / Invalid authorization callback URL	授权回调地址无效	Invalid authorization callback URL	授權回呼網址無效	認可コールバック URL が無効です
 授权回调服务出错 / Authorization callback error	授权回调服务出错	Authorization callback error	授權回呼服務出錯	認可コールバックサービスエラー
 授权回调状态不匹配，请重试 / Authorization state mismatch; retry	授权回调状态不匹配，请重试	Authorization state mismatch; retry	授權回呼狀態不匹配，請重試	認可コールバックのステータスが一致しません。もう一度お試しください。
