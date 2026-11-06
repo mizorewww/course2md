@@ -515,7 +515,7 @@ impl FileLock {
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
-            match (self.file.metadata(), std::fs::metadata(path)) {
+            match (self.file.metadata(), std::fs::symlink_metadata(path)) {
                 (Ok(held), Ok(named)) => held.dev() == named.dev() && held.ino() == named.ino(),
                 _ => false,
             }

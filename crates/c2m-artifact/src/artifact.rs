@@ -1545,10 +1545,11 @@ pub fn prepare_note(note_dir: &Path) -> Result<()> {
     // open stops the task now, before its work, not after. One that is held is
     // waited for then.
     let lock = note_dir.join(LEGACY_PUBLISH_LOCK);
-    if lock.symlink_metadata().is_ok()
-        && let Err(error) = crate::runtime::try_lock_file(&lock)
-    {
-        return Err(legacy_lock_error(&lock, error));
+    if lock.symlink_metadata().is_ok() {
+        refuse_odd_lock(&lock)?;
+        if let Err(error) = crate::runtime::try_lock_file(&lock) {
+            return Err(legacy_lock_error(&lock, error));
+        }
     }
     salvage_work(note_dir, &note_dir.join(".work"))?;
     // A folder an older app made for a task that never published.
@@ -1857,6 +1858,7 @@ fn take_legacy_lock(note: &Path) -> Result<crate::runtime::FileLock> {
     let path = note.join(LEGACY_PUBLISH_LOCK);
     let deadline = std::time::Instant::now() + LOCK_WAIT;
     loop {
+        refuse_odd_lock(&path)?;
         match crate::runtime::try_lock_file(&path) {
             Ok(Some(lock)) if lock.is_at(&path) => return Ok(lock),
             // Removed or replaced between opening and locking: the lock is on a file
@@ -1870,6 +1872,19 @@ fn take_legacy_lock(note: &Path) -> Result<crate::runtime::FileLock> {
             }
             Err(error) => return Err(legacy_lock_error(&path, error)),
         }
+    }
+}
+
+/// Refuses a lock path that holds something other than a file (a link, a
+/// folder): it is never followed or locked.
+fn refuse_odd_lock(path: &Path) -> Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.is_file() => anyhow::bail!(tr!(
+            "这份笔记的保存锁不是普通文件：{}，请移走它后重试 / The note's save lock is not a regular file: {}; move it away and try again",
+            path.display(),
+            path.display()
+        )),
+        _ => Ok(()),
     }
 }
 

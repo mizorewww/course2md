@@ -2065,3 +2065,26 @@ fn a_lock_that_cannot_be_opened_stops_the_task_before_its_work() {
     let error = format!("{:#}", prepare_note(&course).unwrap_err());
     assert!(error.contains(&lock.display().to_string()), "{error}");
 }
+
+/// A lock path that is a link is refused, never followed, before a task's work
+/// and by a flatten.
+#[cfg(unix)]
+#[test]
+fn a_lock_that_is_a_link_is_refused_not_followed() {
+    let legacy = Legacy::populated();
+    let course = legacy.course().to_path_buf();
+    flatten_legacy(&course).unwrap().unwrap();
+    let target = legacy.library.library().join("elsewhere");
+    std::fs::write(&target, b"").unwrap();
+    let lock = course.join(LEGACY_PUBLISH_LOCK);
+    std::os::unix::fs::symlink(&target, &lock).unwrap();
+    let error = format!("{:#}", prepare_note(&course).unwrap_err());
+    assert!(error.contains(&lock.display().to_string()), "{error}");
+    assert!(
+        legacy
+            .library
+            .publish(&legacy.library.target("next"), "Next", "")
+            .is_err()
+    );
+    assert!(lock.symlink_metadata().unwrap().file_type().is_symlink());
+}
