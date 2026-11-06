@@ -573,7 +573,11 @@ impl TasksPage {
             (
                 attention,
                 StatusKind::Danger,
-                course2md::tr!("{} 个需要处理", attention),
+                if attention == 1 {
+                    course2md::tr!("1 个需要处理").to_owned()
+                } else {
+                    course2md::tr!("{} 个需要处理", attention)
+                },
             ),
             (
                 queued,

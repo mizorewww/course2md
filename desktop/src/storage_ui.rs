@@ -877,13 +877,15 @@ impl Desktop {
         if !storage.corrupt_records.is_empty() {
             lines.push((
                 "storage-corrupt-records",
-                AsyncStatus::Failed(
+                AsyncStatus::Failed(if storage.corrupt_records.len() == 1 {
+                    course2md::tr!("有 1 次未完成的移动记录已损坏，相关文件均已保留").into()
+                } else {
                     course2md::tr!(
                         "有 {} 次未完成的移动记录已损坏，相关文件均已保留",
                         storage.corrupt_records.len()
                     )
-                    .into(),
-                ),
+                    .into()
+                }),
             ));
         }
         let corrupt = (!storage.corrupt_records.is_empty()).then(|| {

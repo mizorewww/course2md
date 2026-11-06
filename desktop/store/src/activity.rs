@@ -407,7 +407,11 @@ impl Activity {
         let quantity = quantity_of(stage, self.counts_bytes(stage), self.current, self.total);
         match self.found.filter(|_| *stage == Stage::ScenesScan) {
             Some(found) => {
-                let found = c2m_i18n::tr!("已找到 {} 张候选截图", found);
+                let found = if found == 1 {
+                    c2m_i18n::tr!("已找到 1 张候选截图").to_owned()
+                } else {
+                    c2m_i18n::tr!("已找到 {} 张候选截图", found)
+                };
                 if quantity.is_empty() {
                     found
                 } else {
@@ -752,7 +756,11 @@ pub fn quantity(stage: &Stage, current: u64, total: u64) -> String {
 
 fn quantity_of(stage: &Stage, byte_download: bool, current: u64, total: u64) -> String {
     if *stage == Stage::ScenesScan {
-        c2m_i18n::tr!("已检查 {} 张画面", current)
+        if current == 1 {
+            c2m_i18n::tr!("已检查 1 张画面").to_owned()
+        } else {
+            c2m_i18n::tr!("已检查 {} 张画面", current)
+        }
     } else if *stage == Stage::ScenesExtract && total > 0 {
         c2m_i18n::tr!("已保存 {} / {} 张截图", current, total)
     } else if byte_download {

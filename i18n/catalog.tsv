@@ -22,6 +22,7 @@ YouTube 要求登录时，可使用浏览器中的 YouTube 登录	YouTube 要求
 YouTube 账号	YouTube 账号	YouTube account	YouTube 帳號	YouTube アカウント
 \n✓ 可用 · - 可选或未设置 · ! 需要检查 · ✗ 必须修复	\n✓ 可用 · - 可选或未设置 · ! 需要检查 · ✗ 必须修复	\n✓ available · - optional or unset · ! needs attention · ✗ must fix	\n✓ 可用 · - 可選或未設定 · ! 需要檢查 · ✗ 必須修復	\n✓ 利用可能 · - 任意または未設定 · ! 要確認 · ✗ 要修正
 \n以及另外 {} 份笔记。	\n以及另外 {} 份笔记。	\nand {} more notes.	\n以及另外 {} 份筆記。	\nほか {} 件のノート。
+\n以及另外 1 份笔记。	\n以及另外 1 份笔记。	\nand 1 more note.	\n以及另外 1 份筆記。	\nほか 1 件のノート。
 \n当前识别方式	\n当前识别方式	\nConfigured speech backend	\n目前語音辨識方式	\n現在の音声認識方式
 \n必需工具	\n必需工具	\nRequired tools	\n必需工具	\n必須ツール
 \n按用途选装	\n按用途选装	\nOptional tools by use	\n依用途選裝	\n用途別のオプション
@@ -247,6 +248,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 二维码已过期	二维码已过期	QR code has expired	QR 碼已過期	QRコードの有効期限が切れています
 二维码已过期，请重新运行 course2md --login bilibili / QR code expired; run course2md --login bilibili again	二维码已过期，请重新运行 course2md --login bilibili	QR code expired; run course2md --login bilibili again	QR 碼已過期，請重新執行 course2md --login bilibili	QR コードの有効期限が切れています。course2md --login bilibili を再実行してください。
 二维码约 {} 秒后过期	二维码约 {} 秒后过期	QR code expires in approximately {} seconds	QR 碼約 {} 秒後過期	QR コードの有効期限は約 {} 秒後に切れます
+二维码约 1 秒后过期	二维码约 1 秒后过期	QR code expires in approximately 1 second	QR 碼約 1 秒後過期	QR コードの有効期限は約 1 秒後に切れます
 云端 API（需服务端点和 API Key，可能收费） / Cloud API (endpoint and API key required; charges may apply)	云端 API（需服务端点和 API Key，可能收费）	Cloud API (endpoint and API key required; charges may apply)	雲端 API（需服務端點和 API Key，可能收費）	クラウド API (サービス エンドポイントと API キーが必要、料金が適用される場合があります)
 云端服务	云端服务	Cloud service	雲端服務	クラウドサービス
 云端识别地址 / Cloud speech API base URL (OpenAI-compatible)	云端识别地址	Cloud speech API base URL (OpenAI-compatible)	雲端辨識網址	クラウド音声認識の URL
@@ -523,6 +525,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 参数无效：{}	参数无效：{}	Invalid arguments: {}	參數無效：{}	無効なパラメータ: {}
 参数：	参数：	Arguments:	參數：	引数:
 发现 {} 项必需依赖或配置问题；请按上方提示修复	发现 {} 项必需依赖或配置问题；请按上方提示修复	Fix the {} required-tool or configuration issues listed above	發現 {} 項必需依賴或設定問題；請依上方提示修復	上記の必須ツールまたは設定の問題 {} 件を修正してください
+发现 1 项必需依赖或配置问题；请按上方提示修复	发现 1 项必需依赖或配置问题；请按上方提示修复	Fix the required-tool or configuration issue listed above	發現 1 項必需依賴或設定問題；請依上方提示修復	上記の必須ツールまたは設定の問題 1 件を修正してください
 发送反馈	发送反馈	Send feedback	傳送意見回饋	フィードバックを送信する
 发送文字和截图 / Send text and slide images	发送文字和截图	Send text and slide images	傳送文字和截圖	テキストとスクリーンショットを送信する
 取消	取消	Cancel	取消	キャンセル
@@ -535,9 +538,10 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 取消转换	取消转换	Cancel conversion	取消轉換	変換をキャンセルする
 取消重新定位	取消重新定位	Cancel relocation	取消重新定位	場所の再指定をキャンセル
 另存一份摘要（Markdown）到此目录 / Also save each summary as Markdown in this directory	另存一份摘要（Markdown）到此目录	Also save each summary as Markdown in this directory	另存一份摘要（Markdown）到此目錄	各要約を Markdown としてこのディレクトリにも保存
-另有 {} 个位置未纳入搜索	另有 {} 个位置未纳入搜索	{} more locations were not included in the search	另有 {} 個位置未納入搜尋	ほかに {} か所が検索の対象外です
-另有 {} 个条目无法确认	另有 {} 个条目无法确认	There are {} more entries that cannot be confirmed	另有 {} 個條目無法確認	確認できないエントリがさらに {} 件あります
+另有 {} 个位置未纳入搜索	另有 {} 个位置未纳入搜索	Locations not included in the search: {} more	另有 {} 個位置未納入搜尋	ほかに {} か所が検索の対象外です
+另有 {} 个条目无法确认	另有 {} 个条目无法确认	Entries that cannot be confirmed: {} more	另有 {} 個條目無法確認	確認できないエントリがさらに {} 件あります
 另有 {} 份笔记无法读取。\n	另有 {} 份笔记无法读取。\n	{} more notes could not be read.\n	另有 {} 份筆記無法讀取。\n	ほかに {} 件のノートを読み込めませんでした。\n
+另有 1 份笔记无法读取。\n	另有 1 份笔记无法读取。\n	1 more note could not be read.\n	另有 1 份筆記無法讀取。\n	ほかに 1 件のノートを読み込めませんでした。\n
 只想用视频自带字幕？按 Esc 退出，加 --transcript-source subtitle 重新运行。 / Subtitles only? Press Esc and rerun with --transcript-source subtitle.	只想用视频自带字幕？按 Esc 退出，加 --transcript-source subtitle 重新运行。	Subtitles only? Press Esc and rerun with --transcript-source subtitle.	只想用影片自帶字幕？按 Esc 退出，加 --transcript-source subtitle 重新執行。	動画付属の字幕だけを使いたい場合は、Esc で終了し、--transcript-source subtitle を付けて再実行してください。
 只看画面的某块区域判断翻页，格式：左%,上%-右%,下% / Detect slide changes in a region: left%,top%-right%,bottom%	只看画面的某块区域判断翻页，格式：左%,上%-右%,下%	Detect slide changes in a region: left%,top%-right%,bottom%	只看畫面的某塊區域判斷翻頁，格式：左%,上%-右%,下%	画面の特定の領域だけを見てページ送りを判定します。形式：左%,上%-右%,下%
 可用	可用	Available	可用	利用可能
@@ -704,8 +708,11 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 已扫码，请在手机上确认登录。/ Code scanned; confirm the login on your phone.	已扫码，请在手机上确认登录。	Code scanned; confirm the login on your phone.	已掃碼，請在手機上確認登入。	コードがスキャンされました。携帯電話でログインを確認してください。
 已找到	已找到	Found	已找到	見つかりました
 已找到 {} 张候选截图	已找到 {} 张候选截图	{} candidate screenshots found	已找到 {} 張候選截圖	候補スクリーンショット {} 枚
+已找到 1 张候选截图	已找到 1 张候选截图	1 candidate screenshot found	已找到 1 張候選截圖	候補スクリーンショット 1 枚
 已找到 {} 张候选截图 / Found {} candidate slides	已找到 {} 张候选截图	Found {} candidate slides	已找到 {} 張候選截圖	{} 枚の候補スクリーンショットが見つかりました
+已找到 1 张候选截图 / Found 1 candidate slide	已找到 1 张候选截图	Found 1 candidate slide	已找到 1 張候選截圖	1 枚の候補スクリーンショットが見つかりました
 已把 {} 个视频加入队列	已把 {} 个视频加入队列	{} videos have been queued	已把 {} 個影片加入佇列	{} 本の動画をキューに追加しました
+已把 1 个视频加入队列	已把 1 个视频加入队列	1 video has been queued	已把 1 個影片加入佇列	1 本の動画をキューに追加しました
 已收到回应，但服务未接受这项测试请求	已收到回应，但服务未接受这项测试请求	Response received, but the test request was not accepted by the service	已收到回應，但服務未接受這項測試請求	応答を受信しましたが、テスト要求はサービスによって受け入れられませんでした
 已暂停	已暂停	Paused	已暫停	一時停止中
 已有后续处理任务	已有后续处理任务	There are follow-up processing tasks	已有後續處理任務	フォローアップ処理タスクがあります
@@ -714,6 +721,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 已有笔记	已有笔记	Notes already exist	已有筆記	ノートあり
 已有笔记，保存在「{}」	已有笔记，保存在「{}」	Notes already exist, saved in "{}"	已有筆記，儲存在「{}」	すでにノートがあり、「{}」に保存されています
 已检查 {} 张画面	已检查 {} 张画面	{} frames checked	已檢查 {} 張畫面	{} フレームがチェックされました
+已检查 1 张画面	已检查 1 张画面	1 frame checked	已檢查 1 張畫面	1 フレームがチェックされました
 已检测到	已检测到	Detected	已偵測到	検出されました
 已检测到设备	已检测到设备	Device detected	已偵測到裝置	デバイスが検出されました
 已添加笔记库位置	已添加笔记库位置	Note library location added	已新增筆記庫位置	ノートライブラリの場所を追加しました
@@ -736,6 +744,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 已退出首次使用向导 / Exited the first-run wizard	已退出首次使用向导	Exited the first-run wizard	已退出首次使用嚮導	初回ウィザードを終了しました
 已选的 Apple 识别方式未完成；任务参数和进度已保留 / Selected Apple transcription failed; task settings retained	已选的 Apple 识别方式未完成；任务参数和进度已保留	Selected Apple transcription failed; task settings retained	已選的 Apple 辨識方式未完成；任務參數和進度已保留	選択した Apple の認識方法が完了しませんでした。タスクの設定と進行状況は保持されています
 已重建 {} 项任务记录，未启动处理。原始记录保存在 {}。{}	已重建 {} 项任务记录，未启动处理。原始记录保存在 {}。{}	{} task records have been rebuilt and processing has not been started. Original records are kept at {}. {}	已重建 {} 項任務記錄，未啟動處理。原始記錄儲存在 {}。{}	{} 件のタスク記録を再構築しました。処理は開始していません。元の記録は {} に保存されています。{}
+已重建 1 项任务记录，未启动处理。原始记录保存在 {}。{}	已重建 1 项任务记录，未启动处理。原始记录保存在 {}。{}	1 task record has been rebuilt and processing has not been started. Original records are kept at {}. {}	已重建 1 項任務記錄，未啟動處理。原始記錄儲存在 {}。{}	1 件のタスク記録を再構築しました。処理は開始していません。元の記録は {} に保存されています。{}
 已重新定位到 {}	已重新定位到 {}	Relocated to {}	已重新定位到 {}	場所を {} に再指定しました
 已重新开始整理文件夹，原损坏文件已另存	已重新开始整理文件夹，原损坏文件已另存	Folder organization restarted; the original damaged file was saved separately.	已重新開始整理資料夾，原損壞檔案已另存	フォルダーの整理を再開しました。元の破損ファイルは別に保存されています。
 带图时系统提示说明截图用途	带图时系统提示说明截图用途	With images, the system prompt explains what the screenshots are for	帶圖時系統提示說明截圖用途	画像付きの場合、システムプロンプトでスクリーンショットの用途を説明
@@ -927,6 +936,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 放弃移动，保留副本	放弃移动，保留副本	Cancel move, keep copy	放棄移動，保留副本	移動を中止し、コピーを残す
 整理好的笔记会出现在这里	整理好的笔记会出现在这里	Organized notes will appear here	整理好的筆記會出現在這裡	整理されたノートがここに表示されます
 整理选中的 {} 个视频	整理选中的 {} 个视频	Organize {} selected videos	整理選中的 {} 個影片	選択した {} 本の動画を整理
+整理选中的 1 个视频	整理选中的 1 个视频	Organize 1 selected video	整理選中的 1 個影片	選択した 1 本の動画を整理
 整理选中的视频	整理选中的视频	Organize selected videos	整理選中的影片	選択した動画を整理する
 文件	文件	File	檔案	ファイル
 文件名含有无法识别的字符，请改名后重试	文件名含有无法识别的字符，请改名后重试	The file name contains unrecognizable characters, please change the name and try again	檔名含有無法辨識的字元，請改名後重試	ファイル名に認識できない文字が含まれています。名前を変更して再試行してください。
@@ -1100,7 +1110,9 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 最近备份无法读取，原记录已保留	最近备份无法读取，原记录已保留	The latest backup cannot be read, the original record has been retained	最近備份無法讀取，原記錄已保留	最新のバックアップを読み取ることができません。元の記録は保持されています。
 最近的笔记	最近的笔记	Recent notes	最近的筆記	最近のノート
 有 {} 个未完成任务引用此服务；这些任务中用到此服务的步骤将不再继续。	有 {} 个未完成任务引用此服务；这些任务中用到此服务的步骤将不再继续。	{} unfinished tasks use this service; their steps that need it will not continue.	有 {} 個未完成任務引用此服務；這些任務中用到此服務的步驟將不再繼續。	{} 件の未完了タスクがこのサービスを使用しています。このサービスが必要な手順は続行されません。
+有 1 个未完成任务引用此服务；这个任务中用到此服务的步骤将不再继续。	有 1 个未完成任务引用此服务；这个任务中用到此服务的步骤将不再继续。	1 unfinished task uses this service; its steps that need it will not continue.	有 1 個未完成任務引用此服務；這個任務中用到此服務的步驟將不再繼續。	1 件の未完了タスクがこのサービスを使用しています。このサービスが必要な手順は続行されません。
 有 {} 次未完成的移动记录已损坏，相关文件均已保留	有 {} 次未完成的移动记录已损坏，相关文件均已保留	{} unfinished move records are corrupted and related files have been retained	有 {} 次未完成的移動記錄已損壞，相關檔案均已保留	{} 件の未完了の移動記録が破損しています。関連ファイルはすべて保持されています
+有 1 次未完成的移动记录已损坏，相关文件均已保留	有 1 次未完成的移动记录已损坏，相关文件均已保留	1 unfinished move record is corrupted and related files have been retained	有 1 次未完成的移動記錄已損壞，相關檔案均已保留	1 件の未完了の移動記録が破損しています。関連ファイルはすべて保持されています
 有字幕时直接用字幕，没有字幕时使用语音识别	有字幕时直接用字幕，没有字幕时使用语音识别	Use subtitles when available; otherwise use speech recognition	有字幕時直接使用字幕，沒有字幕時使用語音辨識	字幕があれば字幕を使用し、なければ音声認識を使用します
 有效服务版本记录不完整	有效服务版本记录不完整	The effective service version record is incomplete	有效服務版本記錄不完整	有効なサービス バージョン レコードが不完全です
 有效的模型分片索引 / a valid model shard index	有效的模型分片索引	a valid model shard index	有效的模型分片索引	有効なモデルシャードインデックス
@@ -1469,6 +1481,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 登录跳转缺少地址 / Login redirect is missing an address	登录跳转缺少地址	Login redirect is missing an address	登入重新導向缺少網址	ログインリダイレクトにURLがありません
 目前使用 {}	目前使用 {}	Currently using {}	目前使用 {}	現在{}を使用しています
 目前可读取 {} 份笔记：\n{}	目前可读取 {} 份笔记：\n{}	{} notes are currently readable:\n{}	目前可讀取 {} 份筆記：\n{}	現在読み取り可能なノートは {} 件です:\n{}
+目前可读取 1 份笔记：\n{}	目前可读取 1 份笔记：\n{}	1 note is currently readable:\n{}	目前可讀取 1 份筆記：\n{}	現在読み取り可能なノートは 1 件です:\n{}
 目录	目录	Directory	目錄	ディレクトリ
 目录正被另一任务使用：{}。请等待任务结束	目录正被另一任务使用：{}。请等待任务结束	Directory is in use: {}. Wait for the task to finish.	目錄正被另一項任務使用：{}。請等待任務結束	ディレクトリは別のタスクで使用中です: {}。タスクが終了するまでお待ちください
 目标不属于这次移动，未修改目标内容	目标不属于这次移动，未修改目标内容	The destination is not part of this move; its contents were not modified.	目標不屬於這次移動，未修改目標內容	移動先はこの移動のものではないため、内容は変更されていません。
@@ -1692,6 +1705,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 请先重新读取视频，确认字幕对应的来源	请先重新读取视频，确认字幕对应的来源	Please re-read the video first to confirm the source of the subtitles.	請先重新讀取影片，確認字幕對應的來源	まず動画をもう一度読み込んで、字幕に対応する入力元を確認してください。
 请在浏览器中完成授权（约 3 分钟内）	请在浏览器中完成授权（约 3 分钟内）	Please complete the authorization in the browser (within about 3 minutes)	請在瀏覽器中完成授權（約 3 分鐘內）	ブラウザ上で認証を完了してください（3分程度以内）
 请在约 {} 秒内确认	请在约 {} 秒内确认	Please confirm within about {} seconds	請在約 {} 秒內確認	約 {} 秒以内に確認してください
+请在约 1 秒内确认	请在约 1 秒内确认	Please confirm within about 1 second	請在約 1 秒內確認	約 1 秒以内に確認してください
 请填写笔记名称	请填写笔记名称	Please fill in the note name	請填寫筆記名稱	ノート名を入力してください
 请安装支持显卡的 llama.cpp 和驱动，或改用 CPU 识别。 / Install a GPU-capable llama.cpp and driver, or use CPU transcription.	请安装支持显卡的 llama.cpp 和驱动，或改用 CPU 识别。	Install a GPU-capable llama.cpp and driver, or use CPU transcription.	請安裝支援顯示卡的 llama.cpp 和驅動程式，或改用 CPU 辨識。	GPU に対応した llama.cpp とドライバーをインストールするか、CPU での認識に切り替えてください。
 请检查路径；含空格的路径需加引号	请检查路径；含空格的路径需加引号	Check the path and quote paths containing spaces.	請檢查路徑；包含空格的路徑需加上引號	パスを確認してください。スペースを含むパスは引用符で囲む必要があります。
@@ -1967,6 +1981,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 填写接口地址和 API Key，适用于大多数云端服务	填写接口地址和 API Key，适用于大多数云端服务	Enter an endpoint and API key; works with most cloud services	填寫介面網址和 API 金鑰，適用於大多數雲端服務	エンドポイントと API キーを入力します。多くのクラウドサービスで使えます
 复制原视频链接	复制原视频链接	Copy video link	複製原影片連結	元の動画リンクをコピー
 已在 {} 检测到 {} 个模型	已在 {} 检测到 {} 个模型	{}: found {} models	已在 {} 偵測到 {} 個模型	{} で {} 個のモデルを検出しました
+已在 {} 检测到 1 个模型	已在 {} 检测到 1 个模型	{}: found 1 model	已在 {} 偵測到 1 個模型	{} で 1 個のモデルを検出しました
 已是默认保存位置	已是默认保存位置	Already the default location	已是預設儲存位置	既定の保存先です
 已是默认服务	已是默认服务	Already the default service	已是預設服務	既定のサービスです
 已添加的服务	已添加的服务	Added services	已新增的服務	追加済みのサービス
@@ -1991,6 +2006,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 未检测到 Ollama，请安装并打开 Ollama	未检测到 Ollama，请安装并打开 Ollama	Ollama was not found. Install and open Ollama.	未偵測到 Ollama，請安裝並開啟 Ollama	Ollama が見つかりません。Ollama をインストールして起動してください
 账号操作	账号操作	Account actions	帳號操作	アカウントの操作
 {} 项检查全部通过	{} 项检查全部通过	All {} checks passed	{} 項檢查全部通過	{} 件のチェックにすべて合格しました
+1 项检查已通过	1 项检查已通过	1 check passed	1 項檢查已通過	1 件のチェックに合格しました
 复制诊断信息	复制诊断信息	Copy diagnostics	複製診斷資訊	診断情報をコピー
 ChatGPT 登录已失效，请重新登录	ChatGPT 登录已失效，请重新登录	Your ChatGPT sign-in has expired. Sign in again.	ChatGPT 登入已失效，請重新登入	ChatGPT のサインインが期限切れです。もう一度サインインしてください
 接口地址	接口地址	Endpoint	介面網址	エンドポイント
@@ -2045,6 +2061,7 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 {} 个正在处理	{} 个正在处理	{} processing	{} 個正在處理	処理中 {} 件
 {} 个排队中	{} 个排队中	{} queued	{} 個排隊中	待機中 {} 件
 {} 个需要处理	{} 个需要处理	{} need attention	{} 個需要處理	対応が必要 {} 件
+1 个需要处理	1 个需要处理	1 needs attention	1 個需要處理	対応が必要 1 件
 全部暂停	全部暂停	Pause all	全部暫停	すべて一時停止
 全部继续	全部继续	Resume all	全部繼續	すべて再開
 任务顺序尚未保存：{}	任务顺序尚未保存：{}	Task order was not saved: {}	任務順序尚未儲存：{}	タスクの順序を保存できませんでした: {}
@@ -2071,7 +2088,7 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 新建子文件夹	新建子文件夹	New subfolder	新增子資料夾	新しいサブフォルダー
 这里已有同名文件夹	这里已有同名文件夹	A folder with this name already exists here	這裡已有同名資料夾	ここには同じ名前のフォルダーがすでにあります
 不能把文件夹移到它自己里面	不能把文件夹移到它自己里面	A folder cannot move into itself	不能把資料夾移到它自己裡面	フォルダーをそれ自身の中に移動することはできません
-其中的 {} 个子文件夹也会删除；笔记会保留，移到未分类	其中的 {} 个子文件夹也会删除；笔记会保留，移到未分类	Its {} subfolders are deleted too; notes are kept and move to Unfiled	其中的 {} 個子資料夾也會刪除；筆記會保留，移到未分類	中の {} 個のサブフォルダーも削除されます。ノートは残り、未分類に移動します
+其中的 {} 个子文件夹也会删除；笔记会保留，移到未分类	其中的 {} 个子文件夹也会删除；笔记会保留，移到未分类	Subfolders inside it are deleted too ({}); notes are kept and move to Unfiled	其中的 {} 個子資料夾也會刪除；筆記會保留，移到未分類	中の {} 個のサブフォルダーも削除されます。ノートは残り、未分類に移動します
 {} 个已暂停	{} 个已暂停	{} paused	{} 個已暫停	一時停止中 {} 件
 视频摘要	视频摘要	Video summary	影片摘要	動画の概要
 核心要点	核心要点	Key points	核心要點	要点
@@ -2213,7 +2230,9 @@ AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not conf
 校对后有变化的段落会重新翻译	校对后有变化的段落会重新翻译	Paragraphs that change in proofreading are translated again	校對後有變化的段落會重新翻譯	校正で変わった段落は再翻訳されます
 还会生成此前因此未能开始的摘要	还会生成此前因此未能开始的摘要	The summary these requests kept from starting is also generated	還會產生此前因此未能開始的摘要	これらのリクエストのために開始できなかった要約も生成されます
 {}未完成的 {} 段都会发送，包括以上内容	{}未完成的 {} 段都会发送，包括以上内容	{}: all {} unfinished paragraphs are sent, including the requests above	{}未完成的 {} 段都會傳送，包括以上內容	{}：未完了の {} 段落はすべて送信されます（上記を含む）
+{}未完成的 1 段会发送，包括以上内容	{}未完成的 1 段会发送，包括以上内容	{}: the 1 unfinished paragraph is sent, including the requests above	{}未完成的 1 段會傳送，包括以上內容	{}：未完了の 1 段落が送信されます（上記を含む）
 还会翻译此前未能完成的 {} 段	还会翻译此前未能完成的 {} 段	The {} paragraphs not translated before are translated too	還會翻譯此前未能完成的 {} 段	以前に翻訳できなかった {} 段落も翻訳されます
+还会翻译此前未能完成的 1 段	还会翻译此前未能完成的 1 段	The 1 paragraph not translated before is translated too	還會翻譯此前未能完成的 1 段	以前に翻訳できなかった 1 段落も翻訳されます
 还会生成此前未能开始的翻译	还会生成此前未能开始的翻译	The translation that could not start before is made too	還會產生此前未能開始的翻譯	以前に開始できなかった翻訳も作成されます
 此笔记需要更新版本的软件 / This note needs a newer version of course2md	此笔记需要更新版本的软件	This note needs a newer version of course2md	此筆記需要更新版本的軟體	このノートには新しいバージョンの course2md が必要です
 计划补做后笔记已被更改，请重新补做 / The note changed since this repair was planned	计划补做后笔记已被更改，请重新补做	The note changed since this repair was planned	計畫補做後筆記已被更改，請重新補做	やり直しを計画した後にノートが変更されました。もう一度やり直してください
@@ -2230,6 +2249,7 @@ AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not conf
 补做没有完成更多内容，笔记未改动 / Nothing more was finished; the note is unchanged	补做没有完成更多内容，笔记未改动	Nothing more was finished; the note is unchanged	補做沒有完成更多內容，筆記未變動	やり直しで新たに完了したものはありません。ノートは変更されていません
 已将笔记的旧版本整理为一份笔记 / Turned the note's versions into one note: {}	已将笔记的旧版本整理为一份笔记：{}	Turned the note's versions into one note: {}	已將筆記的舊版本整理為一份筆記：{}	ノートの古い版を 1 つのノートにまとめました：{}
 {} 个已有进行中的任务，未重复加入	{} 个已有进行中的任务，未重复加入	{} already have a task in progress and were not added again	{} 個已有進行中的任務，未重複加入	{} 件は進行中のタスクがあるため、追加しませんでした
+1 个已有进行中的任务，未重复加入	1 个已有进行中的任务，未重复加入	1 already has a task in progress and was not added again	1 個已有進行中的任務，未重複加入	1 件は進行中のタスクがあるため、追加しませんでした
 你改过的文件已另存为 {}	你改过的文件已另存为 {}	Your edited files were kept as {}	你改過的檔案已另存為 {}	編集したファイルは {} として保存しました
 待确认的请求不属于笔记中可补做的部分，请调整后重新生成	待确认的请求不属于笔记中可补做的部分，请调整后重新生成	The unconfirmed requests are not part of the note that can be filled in; adjust the options and regenerate	待確認的請求不屬於筆記中可補做的部分，請調整後重新產生	未確認のリクエストはノートの未完了分ではありません。設定を調整して再生成してください
 笔记的旧版本已删除：每个视频现在只保留一份笔记，重新生成或补做会直接更新它。	笔记的旧版本已删除：每个视频现在只保留一份笔记，重新生成或补做会直接更新它。	Older versions of your notes were removed. Each video now keeps one note; regenerating or filling in updates it in place.	筆記的舊版本已刪除：每個影片現在只保留一份筆記，重新產生或補做會直接更新它。	ノートの古いバージョンは削除されました。各動画のノートは 1 つだけになり、再生成や未完了分の処理はそのノートを直接更新します。
@@ -2267,7 +2287,8 @@ course2md 不在“应用程序”文件夹中。请先退出 course2md，在访
 这份笔记上次被替换时中断，无法自动恢复，所有文件都已原样保留。请打开 {}，把其中存有你笔记的 old- 开头的文件夹移到 {} 并改名为 {}，再删除那里的 live 文件，然后重试。	这份笔记上次被替换时中断，无法自动恢复，所有文件都已原样保留。请打开 {}，把其中存有你笔记的 old- 开头的文件夹移到 {} 并改名为 {}，再删除那里的 live 文件，然后重试。	Replacing this note was interrupted and cannot be finished automatically; every file was kept as it was. Open {}, move the folder starting with old- that holds your note to {} and rename it {}, delete the live file there, then try again.	這份筆記上次被取代時中斷，無法自動復原，所有檔案都已原樣保留。請開啟 {}，把其中存有你筆記的 old- 開頭的資料夾移到 {} 並改名為 {}，再刪除那裡的 live 檔案，然後重試。	このノートの置き換えが途中で止まり、自動では元に戻せません。すべてのファイルはそのまま残っています。{} を開き、ノートが入っている old- で始まるフォルダを {} に移して名前を {} に変え、そこにある live ファイルを削除してから、もう一度お試しください。
 无法完成这份笔记的恢复，所有文件都已保留；请检查 {} 的权限和可用空间后重试	无法完成这份笔记的恢复，所有文件都已保留；请检查 {} 的权限和可用空间后重试	Could not finish recovering this note; every file was kept. Check the permissions and free space of {} and try again	無法完成這份筆記的復原，所有檔案都已保留；請檢查 {} 的權限和可用空間後重試	このノートの復元を完了できませんでした。すべてのファイルは残っています。{} の権限と空き容量を確認してから、もう一度お試しください
 笔记旁保留了 {} 份副本，请查看：{}	笔记旁保留了 {} 份副本，请查看：{}	{} copies are kept beside a note; please look at: {}	筆記旁保留了 {} 份副本，請查看：{}	ノートの横にコピーが {} 件残っています。確認してください：{}
-{} 旁保留了 {} 份副本（替换中断时留下，无法确认是否还需要），请查看后删除不需要的	{} 旁保留了 {} 份副本（替换中断时留下，无法确认是否还需要），请查看后删除不需要的	{} has {} copies kept beside it (left when a replacement was interrupted; whether they are still needed is not known). Look at them and delete what you do not need	{} 旁保留了 {} 份副本（取代中斷時留下，無法確認是否還需要），請查看後刪除不需要的	{} の横にコピーが {} 件残っています（置き換えが中断したときのもので、まだ必要かどうか分かりません）。確認して不要なものを削除してください
+笔记旁保留了 1 份副本，请查看：{}	笔记旁保留了 1 份副本，请查看：{}	1 copy is kept beside a note; please look at: {}	筆記旁保留了 1 份副本，請查看：{}	ノートの横にコピーが 1 件残っています。確認してください：{}
+{} 旁保留了 {} 份副本（替换中断时留下，无法确认是否还需要），请查看后删除不需要的	{} 旁保留了 {} 份副本（替换中断时留下，无法确认是否还需要），请查看后删除不需要的	Copies kept beside {}: {} (left when a replacement was interrupted; whether they are still needed is not known). Look at them and delete what you do not need	{} 旁保留了 {} 份副本（取代中斷時留下，無法確認是否還需要），請查看後刪除不需要的	{} の横にコピーが {} 件残っています（置き換えが中断したときのもので、まだ必要かどうか分かりません）。確認して不要なものを削除してください
 打开需要处理的文件夹	打开需要处理的文件夹	Open the folder to sort out	開啟需要處理的資料夾	対応が必要なフォルダを開く
 这份笔记旁保留的副本已达上限，在处理之前，这份笔记的新任务都会停下。请打开 {}，把要留下的副本移出这个文件夹，删除其余的，然后重试；文件夹里只要还有 {} 份或更多副本，新任务就仍会停下。	这份笔记旁保留的副本已达上限，在处理之前，这份笔记的新任务都会停下。请打开 {}，把要留下的副本移出这个文件夹，删除其余的，然后重试；文件夹里只要还有 {} 份或更多副本，新任务就仍会停下。	Too many copies are kept beside this note, so new tasks for it stop until they are sorted out. Open {}, move the copies you want to keep out of that folder, delete the rest, then try again. While {} or more copies stay in it, new tasks keep stopping.	這份筆記旁保留的副本已達上限，在處理之前，這份筆記的新任務都會停下。請開啟 {}，把要留下的副本移出這個資料夾，刪除其餘的，然後重試；資料夾裡只要還有 {} 份或更多副本，新任務就仍會停下。	このノートの横に残っているコピーが上限に達したため、整理するまでこのノートの新しいタスクは止まります。{} を開き、残したいコピーはこのフォルダの外へ移し、残りを削除してから、もう一度お試しください。フォルダにコピーが {} 件以上残っている間は、新しいタスクは止まったままです。
 旧版应用正在保存这份笔记，请等它完成后重试 / An older version of the app is saving this note; try again when it finishes	旧版应用正在保存这份笔记，请等它完成后重试	An older version of the app is saving this note; try again when it finishes	舊版應用程式正在儲存這份筆記，請等它完成後重試	以前のバージョンのアプリがこのノートを保存しています。完了してからもう一度お試しください

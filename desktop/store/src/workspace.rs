@@ -560,11 +560,11 @@ impl TaskRecord {
                 && uncertain(part)
                 && let Some(Some(count)) = unfinished(outcome).filter(|count| *count != Some(0))
             {
-                also.push(c2m_i18n::tr!(
-                    "{}未完成的 {} 段都会发送，包括以上内容",
-                    label,
-                    count
-                ));
+                also.push(if count == 1 {
+                    c2m_i18n::tr!("{}未完成的 1 段会发送，包括以上内容", label)
+                } else {
+                    c2m_i18n::tr!("{}未完成的 {} 段都会发送，包括以上内容", label, count)
+                });
             }
         }
         let translation = &outcomes.translation;
@@ -581,6 +581,7 @@ impl TaskRecord {
                 also.push(c2m_i18n::tr!("校对后有变化的段落会重新翻译").to_owned());
             }
             match unfinished(translation) {
+                Some(Some(1)) => also.push(c2m_i18n::tr!("还会翻译此前未能完成的 1 段").to_owned()),
                 Some(Some(count)) if count > 0 => {
                     also.push(c2m_i18n::tr!("还会翻译此前未能完成的 {} 段", count))
                 }
@@ -2488,15 +2489,31 @@ impl Workspace {
         state.recover();
         hydrate_draft_subtitles(&mut state, &path);
         c2m_core::fsio::atomic_write(&path, &serde_json::to_vec(&state)?)?;
-        let recovery = c2m_i18n::tr!(
-            "已重建 {} 项任务记录，未启动处理。原始记录保存在 {}。{}",
+        let rebuilt = |count: usize, archive: &std::path::Path, issues: String| {
+            // English counts its noun; the catalog keeps the singular apart.
+            if count == 1 {
+                c2m_i18n::tr!(
+                    "已重建 1 项任务记录，未启动处理。原始记录保存在 {}。{}",
+                    archive.display(),
+                    issues
+                )
+            } else {
+                c2m_i18n::tr!(
+                    "已重建 {} 项任务记录，未启动处理。原始记录保存在 {}。{}",
+                    count,
+                    archive.display(),
+                    issues
+                )
+            }
+        };
+        let recovery = rebuilt(
             state.tasks.len(),
-            archive.display(),
+            &archive,
             if issues.is_empty() {
                 String::new()
             } else {
                 issues.join(c2m_i18n::tr!("；"))
-            }
+            },
         );
         Ok(Self::assemble(state, Some(recovery), path))
     }
