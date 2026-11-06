@@ -2874,6 +2874,39 @@ impl Desktop {
         );
     }
 
+    /// Forgets the sorts and orders of folders that were deleted.
+    pub(crate) fn forget_folder_orders(
+        &mut self,
+        root: PathBuf,
+        folders: Vec<u64>,
+        cx: &mut Context<Self>,
+    ) {
+        self.library_ui.order_unsaved.retain(|(pending, place), _| {
+            !(*pending == root && matches!(place, Place::Folder(id) if folders.contains(id)))
+        });
+        let worker = (root.clone(), folders.clone());
+        self.records.change(cx, |records, _| {
+            if let Some(order) = records.library.view_cache.orders.get_mut(&root) {
+                for id in &folders {
+                    order.forget_folder(*id);
+                }
+            }
+            records.library.touch();
+        });
+        // A sort left behind is only an unused entry, so a failure stays quiet.
+        self.in_background(
+            move || {
+                order::Order::edit(&worker.0, |order| {
+                    for id in &worker.1 {
+                        order.forget_folder(*id);
+                    }
+                })
+            },
+            |_, _, _| {},
+            cx,
+        );
+    }
+
     /// Takes the note in `storage` to where `target` is, as a drag does. Under a
     /// sort rule the place switches to its hand-made order, starting from the order
     /// shown.

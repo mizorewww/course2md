@@ -966,24 +966,28 @@ impl Desktop {
                 this.edit_folders(
                     root,
                     move |library| {
+                        let removed = library.subtree(id);
                         library.remove(id);
-                        Ok(())
+                        Ok(removed)
                     },
                     move |this, result, cx| match result {
                         // Drafts keep the deleted folder so their next submission
                         // asks for a deliberate destination.
-                        Ok(()) => this.records.change(cx, |records, _| {
-                            let library = &mut records.library;
-                            let removed = library.folder_filter.folder_id().is_some_and(|folder| {
-                                library
-                                    .indexes
-                                    .get(&removed_root)
-                                    .is_none_or(|index| !index.folders.contains_key(&folder))
-                            });
-                            if library.root == removed_root && removed {
-                                library.folder_filter = FolderFilter::Unfiled;
-                            }
-                        }),
+                        Ok(removed) => {
+                            this.forget_folder_orders(removed_root.clone(), removed, cx);
+                            this.records.change(cx, |records, _| {
+                                let library = &mut records.library;
+                                let removed =
+                                    library.folder_filter.folder_id().is_some_and(|folder| {
+                                        library.indexes.get(&removed_root).is_none_or(|index| {
+                                            !index.folders.contains_key(&folder)
+                                        })
+                                    });
+                                if library.root == removed_root && removed {
+                                    library.folder_filter = FolderFilter::Unfiled;
+                                }
+                            })
+                        }
                         Err(error) => {
                             this.message =
                                 Some(course2md::tr!("无法删除文件夹：{}", format!("{error:#}")))
