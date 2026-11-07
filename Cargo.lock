@@ -2875,7 +2875,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.9.0"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=3d044fd2de0930b60ea28fdca8d499eaf3b237d4#3d044fd2de0930b60ea28fdca8d499eaf3b237d4"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=2b764e59e59e60e52981641e114f89ec0576de6a#2b764e59e59e60e52981641e114f89ec0576de6a"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2916,7 +2916,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.9.0"
-source = "git+https://github.com/longbridge/gpui-kit?rev=b2aaa3e5f9a387dea74981586bfca33e7e08420d#b2aaa3e5f9a387dea74981586bfca33e7e08420d"
+source = "git+https://github.com/longbridge/gpui-kit?rev=46bf6d498fa101a3b11cc64e6d8c20d28d17b720#46bf6d498fa101a3b11cc64e6d8c20d28d17b720"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2963,7 +2963,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.9.0"
-source = "git+https://github.com/longbridge/gpui-kit?rev=b2aaa3e5f9a387dea74981586bfca33e7e08420d#b2aaa3e5f9a387dea74981586bfca33e7e08420d"
+source = "git+https://github.com/longbridge/gpui-kit?rev=46bf6d498fa101a3b11cc64e6d8c20d28d17b720#46bf6d498fa101a3b11cc64e6d8c20d28d17b720"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2974,7 +2974,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast"
 version = "0.1.13"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=3d044fd2de0930b60ea28fdca8d499eaf3b237d4#3d044fd2de0930b60ea28fdca8d499eaf3b237d4"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=2b764e59e59e60e52981641e114f89ec0576de6a#2b764e59e59e60e52981641e114f89ec0576de6a"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -3045,7 +3045,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-apple"
 version = "0.1.13"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=3d044fd2de0930b60ea28fdca8d499eaf3b237d4#3d044fd2de0930b60ea28fdca8d499eaf3b237d4"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=2b764e59e59e60e52981641e114f89ec0576de6a#2b764e59e59e60e52981641e114f89ec0576de6a"
 dependencies = [
  "anyhow",
  "async-task",
@@ -3129,7 +3129,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-macos"
 version = "0.1.13"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=3d044fd2de0930b60ea28fdca8d499eaf3b237d4#3d044fd2de0930b60ea28fdca8d499eaf3b237d4"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=2b764e59e59e60e52981641e114f89ec0576de6a#2b764e59e59e60e52981641e114f89ec0576de6a"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -3286,7 +3286,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit"
 version = "0.9.0"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=3d044fd2de0930b60ea28fdca8d499eaf3b237d4#3d044fd2de0930b60ea28fdca8d499eaf3b237d4"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=2b764e59e59e60e52981641e114f89ec0576de6a#2b764e59e59e60e52981641e114f89ec0576de6a"
 dependencies = [
  "gpui-base",
  "gpui-component",
@@ -3303,7 +3303,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-assets"
 version = "0.9.0"
-source = "git+https://github.com/longbridge/gpui-kit?rev=b2aaa3e5f9a387dea74981586bfca33e7e08420d#b2aaa3e5f9a387dea74981586bfca33e7e08420d"
+source = "git+https://github.com/longbridge/gpui-kit?rev=46bf6d498fa101a3b11cc64e6d8c20d28d17b720#46bf6d498fa101a3b11cc64e6d8c20d28d17b720"
 dependencies = [
  "anyhow",
  "gpui-fast",
@@ -3318,7 +3318,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-material"
 version = "0.1.0"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=3d044fd2de0930b60ea28fdca8d499eaf3b237d4#3d044fd2de0930b60ea28fdca8d499eaf3b237d4"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=2b764e59e59e60e52981641e114f89ec0576de6a#2b764e59e59e60e52981641e114f89ec0576de6a"
 dependencies = [
  "gpui-base",
  "gpui-kit",
@@ -3331,7 +3331,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-material-color"
 version = "0.1.0"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=3d044fd2de0930b60ea28fdca8d499eaf3b237d4#3d044fd2de0930b60ea28fdca8d499eaf3b237d4"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=2b764e59e59e60e52981641e114f89ec0576de6a#2b764e59e59e60e52981641e114f89ec0576de6a"
 dependencies = [
  "serde",
 ]
@@ -3339,12 +3339,27 @@ dependencies = [
 [[package]]
 name = "gpui-material-symbols"
 version = "0.1.0"
-source = "git+https://github.com/mizorewww/gpui-material-symbols?rev=593aa15a46076f3e2870c23c0e4fd79f94f105bd#593aa15a46076f3e2870c23c0e4fd79f94f105bd"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1da65df096d894de5595af5ef03421df6ddae5d1ad1ff37f9492c5e05378a9d"
 dependencies = [
  "anyhow",
  "gpui-kit",
+ "gpui-material-symbols-outlined",
+ "gpui-material-symbols-rounded",
  "ttf-parser",
 ]
+
+[[package]]
+name = "gpui-material-symbols-outlined"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f621abc870ea487254ea6aebb6aaa8d6ac883626a7f80a05b45af78c8356e6a"
+
+[[package]]
+name = "gpui-material-symbols-rounded"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "124f5f8f97c034ca4666123891d2869625523770eae849958614594370068706"
 
 [[package]]
 name = "gpui-pre"

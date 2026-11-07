@@ -4273,9 +4273,11 @@ mod tests {
                 .contains("## 问题由来\n\n### [▶ 01:00](https://video.example/?t=60)")
         );
         // The summary is one panel, which names it; its text stays the note's.
-        assert!(document.markdown.contains(
-            "<!-- surface:summary -->\n\n总览 \\*不是强调\\*\n\n- 第一点\n- 第二点 $x$\n\n<!-- /surface -->"
-        ));
+        assert!(
+            document
+                .markdown
+                .contains("> [!summary]\n> 总览 \\*不是强调\\*\n>\n> - 第一点\n> - 第二点 $x$\n\n")
+        );
         assert!(!document.markdown.contains("## 摘要"));
         assert!(document.markdown.contains("> A translation"));
         // A section's screenshot follows its paragraphs.

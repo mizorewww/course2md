@@ -491,9 +491,15 @@ pub fn extensions(line_width: Arc<AtomicU32>) -> MarkdownExtensions {
 /// The block surface a note's summary is drawn in.
 pub const SUMMARY_SURFACE: &str = "summary";
 
-/// `blocks` as one block surface named `name`: what they hold stays the note's text.
+/// `blocks` as one block surface named `name`: a blockquote opening with its
+/// `[!name]` marker line, whose quoted blocks stay the note's text.
 pub fn surface(name: &str, blocks: &str) -> String {
-    format!("<!-- surface:{name} -->\n\n{blocks}\n\n<!-- /surface -->")
+    let mut quoted = format!("> [!{name}]");
+    for line in blocks.lines() {
+        quoted.push_str(if line.is_empty() { "\n>" } else { "\n> " });
+        quoted.push_str(line);
+    }
+    quoted
 }
 
 /// The summary's panel: the secondary container, with its title and sparkle. The title
@@ -532,7 +538,7 @@ fn summary_panel(window: &mut Window, _: &mut App) -> Div {
 /// [`extensions`], plus what only a whole note holds.
 pub fn note_extensions(line_width: Arc<AtomicU32>, render: RenderBlock) -> MarkdownExtensions {
     extensions(line_width)
-        .parser_revision(4)
+        .parser_revision(5)
         .plugin(ReaderBlock { render })
         .plugin(SourceLink)
         .block_surface(SUMMARY_SURFACE, summary_panel)
@@ -663,7 +669,7 @@ mod tests {
 
     #[test]
     fn a_formula_keeps_to_one_line_so_its_lines_open_no_block() {
-        // A line of a formula starting a block, such as a surface's fence, would end
+        // A line of a formula starting a block, such as an HTML comment, would end
         // the formula and the paragraph around it.
         assert_eq!(
             blocks("设 $a\n<!-- /surface -->$ 为"),
