@@ -17,7 +17,7 @@ anyhow.workspace = true
 [build-dependencies]
 # Its fonts stay in the build script: build.rs renders what assets/symbols.txt lists,
 # and the app keeps `embedded-symbols` off.
-gpui-material-symbols = { workspace = true, features = ["embed-assets"] }
+gpui-material-symbols = { workspace = true, features = ["outlined", "rounded"] }
 
 [dev-dependencies]
 gpui-kit = { workspace = true, features = ["test-support"] }
