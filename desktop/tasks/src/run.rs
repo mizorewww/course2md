@@ -24,6 +24,12 @@ fn service_refs(task: &TaskRecord) -> ServiceRefs {
     }
 }
 
+/// Whether a service the task needs is no longer saved or was deleted, so that
+/// starting it again could only stop with the same reason.
+pub fn services_missing(preferences: &preferences::Store, task: &TaskRecord) -> bool {
+    preferences.services_missing(&task.plan.config, &service_refs(task))
+}
+
 /// The credential references a task needs resolved before it can start.
 pub fn needed_credentials(
     preferences: &preferences::Store,
@@ -486,6 +492,111 @@ mod tests {
             serde_json::from_slice(&task_control(&preferences, &task).unwrap()).unwrap();
         assert_eq!(control["stopped_services"], serde_json::json!(["removed"]));
         assert_eq!(control["intent"], serde_json::json!("run"));
+    }
+
+    /// A task planned with a service that is no longer saved stops before it starts,
+    /// offers no resume that could only stop again, leads with adjusting it, and the
+    /// new attempt follows the current default while the task keeps its own version.
+    #[test]
+    fn a_task_whose_service_is_gone_goes_on_as_a_new_attempt_with_the_default() {
+        use crate::task_view::{TaskAction, TaskFacts, TaskSurface, lead_action, task_actions_for};
+        use desktop_prefs::preferences::{
+            Authentication, BindingScope, ServiceDraft, ServiceProtocol, ServicePurpose, Store,
+        };
+        let (root, mut workspace, id) = queued_task();
+        let mut preferences = Store::open(
+            root.path().join("preferences"),
+            std::sync::Arc::new(desktop_prefs::credentials::MemoryCredentialVault::new()),
+        );
+        let mut draft = ServiceDraft::new(ServicePurpose::Ai);
+        draft.protocol = ServiceProtocol::OllamaChat;
+        draft.authentication = Authentication::None;
+        draft.address = "http://127.0.0.1:9".into();
+        draft.model = "default-model".into();
+        let draft = preferences.commit_service_draft(draft, None).unwrap();
+        let verified = Store::verify_credential(
+            preferences.vault().as_ref(),
+            preferences.publication_credential(&draft.id).unwrap(),
+        )
+        .unwrap();
+        let default = preferences
+            .commit_publication(&draft.id, BindingScope::Defaults, verified)
+            .unwrap();
+
+        workspace
+            .transaction(|state| {
+                let task = state.task_mut(&id).unwrap();
+                task.plan.config.llm.enabled = true;
+                task.plan.ai_service = Some("service-version-gone".into());
+                Ok(())
+            })
+            .unwrap();
+        let task = workspace.state.task(&id).unwrap().clone();
+        let error = needed_credentials(&preferences, &task).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            c2m_i18n::tr!("任务使用的服务已不在设置中，请调整后重试并选择服务")
+        );
+        assert!(services_missing(&preferences, &task));
+        fail_before_start(&mut workspace, &id, &error).unwrap();
+        let task = workspace.state.task(&id).unwrap().clone();
+        let facts = TaskFacts {
+            active: false,
+            expanded: false,
+            library: None,
+            needs_reassociation: false,
+            queue: Vec::new(),
+        };
+        for surface in [TaskSurface::Home, TaskSurface::Card, TaskSurface::Menu] {
+            let actions = task_actions_for(&task, surface, &facts, true);
+            assert!(!actions.contains(&TaskAction::Resume));
+            assert!(actions.contains(&TaskAction::Adjust));
+        }
+        let home = task_actions_for(&task, TaskSurface::Home, &facts, true);
+        assert_eq!(
+            lead_action(&home, &task, TaskSurface::Home),
+            Some(&TaskAction::Adjust)
+        );
+        // With its service there, continuing stays the way on.
+        let home = task_actions_for(&task, TaskSurface::Home, &facts, false);
+        assert_eq!(
+            lead_action(&home, &task, TaskSurface::Home),
+            Some(&TaskAction::Resume)
+        );
+
+        crate::plan::adjust_task(&mut workspace.state, &preferences, &id, None).unwrap();
+        let input = workspace.state.draft().unwrap();
+        assert_eq!(input.retry_of.as_deref(), Some(id.as_str()));
+        assert_eq!(input.ai_service, None);
+        assert_eq!(
+            preferences
+                .plan_refs(&desktop_prefs::preferences::ServiceRefs {
+                    asr: input.asr_service.clone(),
+                    llm: input.ai_service.clone(),
+                })
+                .llm,
+            Some(default.id.clone())
+        );
+        assert_eq!(
+            workspace
+                .state
+                .task(&id)
+                .unwrap()
+                .plan
+                .ai_service
+                .as_deref(),
+            Some("service-version-gone"),
+            "the task keeps the version its requests were made with"
+        );
+
+        // A choice still saved is kept.
+        let mut input = workspace.state.draft().unwrap().clone();
+        input.ai_service = Some(default.id.clone());
+        assert!(!crate::plan::forget_missing_draft_services(
+            &preferences,
+            &mut input
+        ));
+        assert_eq!(input.ai_service, Some(default.id));
     }
 
     /// A note the person had edited is replaced; the task's result tells them where

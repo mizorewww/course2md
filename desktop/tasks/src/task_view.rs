@@ -513,9 +513,15 @@ pub fn lead_action<'a>(
     let read = (home && task.state == TaskState::Partial)
         .then(|| actions.iter().find(|action| **action == TaskAction::Read))
         .flatten();
+    // A task that cannot continue as it is goes on as a new attempt.
+    let adjust = || {
+        (task.state == TaskState::NeedsAttention && !task.has_uncertain())
+            .then(|| actions.iter().find(|action| **action == TaskAction::Adjust))
+            .flatten()
+    };
     // A running task has nothing to decide, so its next step is the next video.
     let working = runs_in_card(task);
-    read.or_else(recovery).or_else(|| {
+    read.or_else(recovery).or_else(adjust).or_else(|| {
         actions
             .iter()
             .find(|action| home && working && **action == TaskAction::NextVideo)
@@ -841,6 +847,18 @@ pub fn task_actions(
     surface: TaskSurface,
     facts: &TaskFacts<'_>,
 ) -> Vec<TaskAction> {
+    task_actions_for(task, surface, facts, false)
+}
+
+/// [`task_actions`] for a task that `services_missing` (see `run::services_missing`):
+/// a service it needs is no longer saved or was deleted, so continuing it could only
+/// stop again. It offers no Resume; adjusting it, a new attempt, is the way on.
+pub fn task_actions_for(
+    task: &TaskRecord,
+    surface: TaskSurface,
+    facts: &TaskFacts<'_>,
+    services_missing: bool,
+) -> Vec<TaskAction> {
     use TaskAction::*;
     let active = facts.active;
     let uncertain = task.has_uncertain() && !task.held;
@@ -866,7 +884,10 @@ pub fn task_actions(
         if task.state == TaskState::NeedsAttention && task.events.model_required && !uncertain {
             recovery.push(PrepareModel);
         }
-        if matches!(task.state, TaskState::Paused | TaskState::NeedsAttention) && !uncertain {
+        if matches!(task.state, TaskState::Paused | TaskState::NeedsAttention)
+            && !uncertain
+            && !services_missing
+        {
             recovery.push(Resume);
         }
         if !uncertain {
