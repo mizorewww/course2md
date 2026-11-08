@@ -1440,7 +1440,8 @@ impl Desktop {
             .workspace
             .iter()
             .flat_map(|workspace| &workspace.state.tasks)
-            .filter(|task| task.state == TaskState::NeedsAttention)
+            // A paused task resumes with the services it names, so it is affected too.
+            .filter(|task| matches!(task.state, TaskState::NeedsAttention | TaskState::Paused))
             .filter(|task| desktop_tasks::run::services_missing(&self.preferences, task))
             .map(|task| task.id.clone())
             .collect();
