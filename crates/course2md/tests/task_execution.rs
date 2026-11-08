@@ -2077,3 +2077,77 @@ fi
             .unwrap();
     assert!(note.contains("Renamed Teacher"), "{note}");
 }
+
+/// A command-line task interrupted before the command line ran tasks bound its work
+/// folder to the identity it chose then. It continues there under the task's identity,
+/// and a request whose outcome its receipts leave unknown stays held, not sent again.
+#[test]
+fn a_task_from_before_the_command_line_ran_tasks_keeps_its_uncertain_request_held() {
+    if !common::ffmpeg_available() {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let video = local_lecture(root.path());
+    let source = video.display().to_string();
+    let (ai, arrived, release) = holding_ai();
+    let first = spawn_cli(root.path(), &source, &ai, |_| {});
+    let library = root.path().join("out/local");
+    let work = interrupt_at_summary(first, &ai, &arrived, &release, &library);
+
+    // The identity the command line bound before, for the same options: its digest is
+    // the task's id, which names the folder.
+    let opts = course2md::options::RunOpts {
+        json: true,
+        out: Some("out".into()),
+        transcript_source: Some(TranscriptSource::Subtitle),
+        formats: Some(vec![course2md::config::OutputFormat::Md]),
+        slide_mode: Some(SlideMode::First),
+        llm: true,
+        summarize: true,
+        llm_model: Some("test-model".into()),
+        no_llm_hint: true,
+        model_dir: Some(root.path().join("models")),
+        llm_api_key: Some("private-cli-key".into()),
+        llm_base_url: Some(ai.url.clone()),
+        ..Default::default()
+    };
+    let cfg = course2md::options::resolve(source.clone(), &opts, &ConfigFile::default()).unwrap();
+    let source_id = format!(
+        "local:sha256:{}",
+        course2md::execution::file_digest(&video).unwrap()
+    );
+    let former = serde_json::json!({
+        "source_id": source_id,
+        "config": cfg.redacted_for_identity(&cfg.out_root),
+        "title": "lecture",
+    });
+    assert_eq!(
+        course2md::digest::json_digest(&former).unwrap().as_str(),
+        work.file_name().unwrap().to_str().unwrap()
+    );
+    std::fs::write(
+        work.join("task-identity.json"),
+        serde_json::to_vec_pretty(&former).unwrap(),
+    )
+    .unwrap();
+    // Its summary receipt says the outcome is unknown, as a run that saw the
+    // connection drop would have recorded.
+    let summary = course2md::dispatch::receipts(&work)
+        .unwrap()
+        .into_iter()
+        .find(|receipt| receipt.purpose == "summary")
+        .unwrap();
+    let path = work
+        .join("requests")
+        .join(format!("{}.json", summary.stable_id));
+    let mut saved: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    saved["state"] = "uncertain".into();
+    std::fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();
+
+    let second = spawn_cli(root.path(), &source, &ai, |_| {})
+        .wait_with_output()
+        .unwrap();
+    assert_continued_without_paying(&second, &ai, &work);
+    assert_ne!(identity(&work), former);
+}
