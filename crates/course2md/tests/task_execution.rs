@@ -1796,10 +1796,16 @@ fn relocation_updates_owned_paths_only_after_verifying_the_copy() {
     assert!(course2md::execution::relocate_work_bindings(&old, &new).is_err());
 }
 
-/// Starts the command line on `video` with AI proofreading and a summary from `ai`,
+/// Starts the command line on `source` with AI proofreading and a summary from `ai`,
 /// isolated like [`spawn_task`]: only the options given here configure it.
-fn spawn_cli(root: &Path, video: &Path, ai: &MockAi) -> Child {
-    Command::new(env!("CARGO_BIN_EXE_course2md"))
+fn spawn_cli(
+    root: &Path,
+    source: &str,
+    ai: &MockAi,
+    configure: impl FnOnce(&mut Command),
+) -> Child {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_course2md"));
+    command
         .current_dir(root)
         .env("COURSE2MD_LANG", "zh-Hans")
         .env("XDG_CONFIG_HOME", root.join("config"))
@@ -1807,10 +1813,10 @@ fn spawn_cli(root: &Path, video: &Path, ai: &MockAi) -> Child {
         .env("HOME", root)
         .env_remove("RUST_LOG")
         .env_remove("COURSE2MD_ASR_API_KEY")
-        .arg(video)
-        .args(["--json", "-o", "out", "--transcript-source", "subtitle"])
-        .args(["--formats", "md", "--slide-mode", "first"])
-        .args(["--llm", "--summarize", "--llm-model", "test-model"])
+        .arg(source)
+        .args(CLI_OPTIONS)
+        .args(["--model-dir"])
+        .arg(root.join("models"))
         .args([
             "--llm-api-key",
             "private-cli-key",
@@ -1819,25 +1825,38 @@ fn spawn_cli(root: &Path, video: &Path, ai: &MockAi) -> Child {
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap()
+        .stderr(Stdio::piped());
+    configure(&mut command);
+    command.spawn().unwrap()
 }
 
-#[test]
-fn the_command_line_runs_a_task_and_resumes_it_without_paying_twice() {
-    if !common::ffmpeg_available() {
-        return;
-    }
-    let root = tempfile::tempdir().unwrap();
-    let video = root.path().join("lecture.mp4");
-    common::fixture_video(&video, 3);
-    std::fs::write(
-        root.path().join("lecture.srt"),
-        "1\n00:00:00,000 --> 00:00:01,000\n第一段原文。\n\n2\n00:00:02,000 --> 00:00:03,000\n第二段原文。\n",
-    )
-    .unwrap();
-    // The summary request of the first run is held until that run has been killed.
+/// What [`spawn_cli`] chooses, besides the model folder and the AI service.
+const CLI_OPTIONS: [&str; 14] = [
+    "--json",
+    "-o",
+    "out",
+    "--transcript-source",
+    "subtitle",
+    "--formats",
+    "md",
+    "--slide-mode",
+    "first",
+    "--llm",
+    "--summarize",
+    "--llm-model",
+    "test-model",
+    "--no-llm-hint",
+];
+
+const TWO_CUES: &str = "1\n00:00:00,000 --> 00:00:01,000\n第一段原文。\n\n2\n00:00:02,000 --> 00:00:03,000\n第二段原文。\n";
+
+/// An AI service that answers proofreading item for item and holds the first summary
+/// request until the run that sent it is killed ([`interrupt_at_summary`]).
+fn holding_ai() -> (
+    MockAi,
+    std::sync::mpsc::Receiver<()>,
+    std::sync::mpsc::Sender<()>,
+) {
     let samples = common::fake_ai();
     let marker = samples["markers"]["proofread"].as_str().unwrap().to_owned();
     let summary = samples["responses"]["summary"].clone();
@@ -1861,53 +1880,55 @@ fn the_command_line_runs_a_task_and_resumes_it_without_paying_twice() {
         };
         Some((200, reply))
     });
+    (ai, summary_arrived, release)
+}
 
-    // A fresh run binds its work directory as a task, then is interrupted mid-request.
-    let mut first = spawn_cli(root.path(), &video, &ai);
-    summary_arrived
+/// Kills `run` while its summary request is in flight: proofreading was paid for and
+/// the summary's response is lost. Returns the task's one work folder under `library`.
+fn interrupt_at_summary(
+    mut run: Child,
+    ai: &MockAi,
+    arrived: &std::sync::mpsc::Receiver<()>,
+    release: &std::sync::mpsc::Sender<()>,
+    library: &Path,
+) -> std::path::PathBuf {
+    arrived
         .recv_timeout(std::time::Duration::from_secs(120))
         .expect("the first run reaches its summary");
-    first.kill().unwrap();
-    first.wait().unwrap();
+    run.kill().unwrap();
+    run.wait().unwrap();
     release.send(()).unwrap();
     assert_eq!(ai.calls.load(Ordering::SeqCst), 2);
-    let work_root = root.path().join("out/local/.course2md/work");
-    let works: Vec<_> = std::fs::read_dir(&work_root)
+    let mut works: Vec<_> = std::fs::read_dir(library.join(".course2md/work"))
         .unwrap()
         .map(|entry| entry.unwrap().path())
         .collect();
     assert_eq!(works.len(), 1, "{works:?}");
-    let work = &works[0];
-    let identity: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(work.join("task-identity.json")).unwrap()).unwrap();
-    assert_eq!(identity["operation"]["kind"], "generate");
-    assert_eq!(identity["schema"], course2md::execution::REQUEST_SCHEMA);
-    assert_eq!(
-        identity["task_id"].as_str(),
-        work.file_name().unwrap().to_str()
-    );
-    assert!(!identity.to_string().contains("private-cli-key"));
+    works.remove(0)
+}
 
-    // The same command continues that task: the proofreading it paid for is reused,
-    // and the summary whose response was lost is not sent again.
-    let second = spawn_cli(root.path(), &video, &ai)
-        .wait_with_output()
-        .unwrap();
-    let observed = events(&second);
-    assert!(second.status.success(), "{observed:#?}");
+fn identity(work: &Path) -> serde_json::Value {
+    serde_json::from_slice(&std::fs::read(work.join("task-identity.json")).unwrap()).unwrap()
+}
+
+/// A run after the interruption: it continues `work` and sends nothing, holding back the
+/// summary whose response was lost, and publishes the proofread note.
+fn assert_continued_without_paying(output: &Output, ai: &MockAi, work: &Path) {
+    let observed = events(output);
+    assert!(output.status.success(), "{observed:#?}");
     assert_eq!(ai.calls.load(Ordering::SeqCst), 2, "{observed:#?}");
     assert!(observed.iter().any(|event| event["type"] == "blocked"
         && event["reason"] == "uncertain"
         && event["purpose"] == "summary"));
     let done = observed.last().unwrap();
     assert_eq!(done["type"], "done");
-    let note = Path::new(done["out_dir"].as_str().unwrap());
-    assert!(note.is_absolute() && note.starts_with(root.path().canonicalize().unwrap()));
     assert_eq!(done["task_id"].as_str(), work.file_name().unwrap().to_str());
     assert_eq!(
         done["outcomes"]["proofreading"]["status"], "succeeded",
         "{done:#}"
     );
+    let note = Path::new(done["out_dir"].as_str().unwrap());
+    assert!(note.is_absolute());
     assert!(
         std::fs::read_to_string(note.join("course.md"))
             .unwrap()
@@ -1915,21 +1936,144 @@ fn the_command_line_runs_a_task_and_resumes_it_without_paying_twice() {
     );
     let receipts = course2md::dispatch::receipts(work).unwrap();
     assert_eq!(receipts.len(), 2);
-    for (purpose, state) in [
-        ("proofreading", course2md::dispatch::State::Completed),
-        ("summary", course2md::dispatch::State::Uncertain),
-    ] {
-        let receipt = receipts.iter().find(|r| r.purpose == purpose).unwrap();
-        assert_eq!((&receipt.state, receipt.attempt), (&state, 1));
+    use course2md::dispatch::State;
+    let receipt = |purpose| receipts.iter().find(|r| r.purpose == purpose).unwrap();
+    assert_eq!(receipt("proofreading").state, State::Completed);
+    // Sent once; its outcome is unknown whether or not the run that sent it got to say so.
+    assert!(matches!(
+        receipt("summary").state,
+        State::Sending | State::Uncertain
+    ));
+    assert!(receipts.iter().all(|receipt| receipt.attempt == 1));
+    assert_eq!(identity(work)["operation"]["kind"], "generate");
+}
+
+fn local_lecture(root: &Path) -> std::path::PathBuf {
+    let video = root.join("lecture.mp4");
+    common::fixture_video(&video, 3);
+    std::fs::write(root.join("lecture.srt"), TWO_CUES).unwrap();
+    video
+}
+
+#[test]
+fn the_command_line_runs_a_task_and_resumes_it_without_paying_twice() {
+    if !common::ffmpeg_available() {
+        return;
     }
+    let root = tempfile::tempdir().unwrap();
+    let video = local_lecture(root.path());
+    let source = video.display().to_string();
+    let (ai, arrived, release) = holding_ai();
+
+    // A fresh run binds its work directory as a task, then is interrupted mid-request.
+    let first = spawn_cli(root.path(), &source, &ai, |_| {});
+    let library = root.path().join("out/local");
+    let work = interrupt_at_summary(first, &ai, &arrived, &release, &library);
+    let bound = identity(&work);
+    assert_eq!(bound["operation"]["kind"], "generate");
+    assert_eq!(bound["schema"], course2md::execution::REQUEST_SCHEMA);
+    assert_eq!(
+        bound["task_id"].as_str(),
+        work.file_name().unwrap().to_str()
+    );
+    assert!(!bound.to_string().contains("private-cli-key"));
+
+    // The same command continues that task: the proofreading it paid for is reused,
+    // and the summary whose response was lost is not sent again.
+    let second = spawn_cli(root.path(), &source, &ai, |_| {})
+        .wait_with_output()
+        .unwrap();
+    assert_continued_without_paying(&second, &ai, &work);
+    assert_eq!(identity(&work), bound);
 
     // Once the task has published its note, running it again sends nothing.
-    let third = spawn_cli(root.path(), &video, &ai)
+    let third = spawn_cli(root.path(), &source, &ai, |_| {})
         .wait_with_output()
         .unwrap();
     let observed = events(&third);
     assert!(third.status.success(), "{observed:#?}");
     assert_eq!(observed.last().unwrap()["type"], "done");
     assert_eq!(ai.calls.load(Ordering::SeqCst), 2);
-    assert_eq!(std::fs::read_dir(&work_root).unwrap().count(), 1);
+    assert_eq!(
+        std::fs::read_dir(library.join(".course2md/work"))
+            .unwrap()
+            .count(),
+        1
+    );
+}
+
+/// A site may report another uploader or duration on the next probe. The task's
+/// identity leaves both out, so the command still continues the task it began.
+#[test]
+fn a_changed_uploader_or_duration_still_continues_the_command_line_task() {
+    use std::os::unix::fs::PermissionsExt;
+    if !common::ffmpeg_available() {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let video = root.path().join("fixture.mp4");
+    common::fixture_video(&video, 3);
+    let bin = root.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let script = bin.join("yt-dlp");
+    std::fs::write(
+        &script,
+        r#"#!/bin/sh
+output=''
+subtitles=0
+simulate=0
+json=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -J|--dump-single-json) json=1 ;;
+    --simulate) simulate=1 ;;
+    --no-simulate) simulate=0 ;;
+    -o) shift; output="$1" ;;
+    --skip-download) subtitles=1 ;;
+  esac
+  shift
+done
+if [ "$simulate" -eq 1 ]; then
+  :
+elif [ "$subtitles" -eq 1 ]; then
+  printf '%s' "$CLI_TEST_CUES" > "$output.en.srt"
+else
+  /bin/cp "$CLI_TEST_VIDEO" "$output"
+fi
+if [ "$json" -eq 1 ]; then
+  printf '{"title":"Test lecture","id":"test","uploader":"%s","webpage_url":"https://example.test/video","duration":%s,"extractor":"test","subtitles":{"en":[{"ext":"srt","url":"https://example.test/en.srt"}]},"automatic_captions":{}}\n' "$CLI_TEST_UPLOADER" "$CLI_TEST_DURATION"
+fi
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let site = |uploader: &'static str, duration: &'static str| {
+        let (bin, video) = (bin.clone(), video.clone());
+        move |command: &mut Command| {
+            let path = std::env::var("PATH").unwrap_or_default();
+            command
+                .env("PATH", format!("{}:{path}", bin.display()))
+                .env("CLI_TEST_VIDEO", &video)
+                .env("CLI_TEST_CUES", TWO_CUES)
+                .env("CLI_TEST_UPLOADER", uploader)
+                .env("CLI_TEST_DURATION", duration);
+        }
+    };
+    let (ai, arrived, release) = holding_ai();
+    let source = "https://example.test/video";
+    let first = spawn_cli(root.path(), source, &ai, site("First Teacher", "3"));
+    let library = root.path().join("out/test");
+    let work = interrupt_at_summary(first, &ai, &arrived, &release, &library);
+    let bound = identity(&work);
+
+    let second = spawn_cli(root.path(), source, &ai, site("Renamed Teacher", "3.5"))
+        .wait_with_output()
+        .unwrap();
+    assert_continued_without_paying(&second, &ai, &work);
+    assert_eq!(identity(&work), bound);
+    let done = events(&second).pop().unwrap();
+    let note =
+        std::fs::read_to_string(Path::new(done["out_dir"].as_str().unwrap()).join("course.md"))
+            .unwrap();
+    assert!(note.contains("Renamed Teacher"), "{note}");
 }

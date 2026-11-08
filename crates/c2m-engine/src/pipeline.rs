@@ -135,8 +135,11 @@ pub async fn run(cfg: &PipelineConfig, models: ModelDownload<'_>) -> Result<()> 
             .filter(|title| !title.trim().is_empty())
             .unwrap_or_else(|| source_id.clone()),
         source_id,
-        author: meta.uploader.clone(),
-        duration: meta.duration.max(0.),
+        // Left out of the task's identity, as the former one left them out: a site may
+        // report another uploader or duration on the next probe, and the task must still
+        // continue. The note takes both from this run's probe (`Cli::meta`).
+        author: String::new(),
+        duration: 0.,
         subtitle: None,
         subtitle_events: None,
         config: crate::options::file_for(cfg),
