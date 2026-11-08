@@ -2004,6 +2004,8 @@ fn the_command_line_runs_a_task_and_resumes_it_without_paying_twice() {
 
 /// A site may report another uploader or duration on the next probe. The task's
 /// identity leaves both out, so the command still continues the task it began.
+/// The stand-in yt-dlp is a shell script.
+#[cfg(unix)]
 #[test]
 fn a_changed_uploader_or_duration_still_continues_the_command_line_task() {
     use std::os::unix::fs::PermissionsExt;
