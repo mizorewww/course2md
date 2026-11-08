@@ -557,6 +557,12 @@ mod tests {
             lead_action(&home, &task, TaskSurface::Home),
             Some(&TaskAction::Adjust)
         );
+        // With another way to recover offered too, the workbench keeps adjusting.
+        let mut model = task.clone();
+        model.events.model_required = true;
+        let home = task_actions_for(&model, TaskSurface::Home, &facts, true);
+        assert!(home.contains(&TaskAction::PrepareModel));
+        assert!(home.contains(&TaskAction::Adjust));
         // With its service there, continuing stays the way on.
         let home = task_actions_for(&task, TaskSurface::Home, &facts, false);
         assert_eq!(

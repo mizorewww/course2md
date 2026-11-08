@@ -1011,8 +1011,9 @@ pub fn task_actions_for(
                 if has_note {
                     actions.push(Read);
                 }
-                // The rest stays behind ⋯: this card is one step of the workbench.
-                if recovery.len() > 1 {
+                // The rest stays behind ⋯: this card is one step of the workbench. A
+                // task whose service is gone keeps 调整后重试, its only way on.
+                if recovery.len() > 1 && !services_missing {
                     recovery.retain(|action| *action != Adjust);
                 }
                 actions.extend(recovery);
