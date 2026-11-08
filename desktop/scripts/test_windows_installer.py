@@ -43,16 +43,34 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("function PrepareToInstall(var NeedsRestart: Boolean): String;", code)
         self.assertIn("if CurUninstallStep = usUninstall then", code)
         self.assertEqual(code.count("StopProgramsIn(ExpandConstant('{app}'))"), 2)
-        # Only executables under the install directory, never one elsewhere by name.
-        self.assertIn("$_.ExecutablePath.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase)",
-                      code)
-        self.assertNotIn("taskkill", code)
-        # The uninstaller runs from {app} and waits for its copy in TEMP: stopping
-        # it, or this process or an ancestor, would end the uninstall itself.
-        self.assertIn("-notlike ''unins*.exe''", code)
-        self.assertIn("'$id = ' + IntToStr(GetCurrentProcessId) + '; '", code)
-        self.assertIn("-not $spared.ContainsKey([string]$_.ProcessId)", code)
-        self.assertIn("external 'GetCurrentProcessId@kernel32.dll stdcall'", code)
+        # Only the package's own executables, by exact path, and only in a
+        # directory that holds the app: never another program in a shared one.
+        self.assertIn("$targets.ContainsKey($_.ExecutablePath.ToLowerInvariant())", code)
+        self.assertIn("$targets[$path.ToLowerInvariant()] = 1", code)
+        self.assertIn("if not FileExists(Dir + '\\course2md-desktop.exe') then begin", code)
+        self.assertIn('-Programs "{#Programs}"', code)
+        for wildcard in ("StartsWith", "-like", "-match", "taskkill"):
+            self.assertNotIn(wildcard, code)
+        # The path reaches PowerShell as a -File argument, never inside its code.
+        self.assertIn("-File \"' + Script +", code)
+        self.assertNotIn("-Command", code)
+        self.assertIn("Get-CimInstance Win32_Process -OperationTimeoutSec 10", code)
+
+    def test_programs_are_exactly_the_package_executables(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            package = Path(tmp)
+            for name in ("course2md.exe", "course2md-desktop.exe", "yt-dlp/yt-dlp.exe",
+                         "llama.cpp/llama-server.exe", "llama.cpp/ggml.dll", "README.md",
+                         "yt-dlp/_internal/python3.dll"):
+                (package / name).parent.mkdir(parents=True, exist_ok=True)
+                (package / name).write_bytes(b"")
+            listed = windows_installer.programs(package)
+            self.assertEqual(listed, ["course2md-desktop.exe", "course2md.exe",
+                                      "llama.cpp\\llama-server.exe", "yt-dlp\\yt-dlp.exe"])
+            arguments = compile_arguments("ISCC.exe", "3.0.0", package, Path("out"))
+            self.assertIn("/DPrograms=" + "|".join(listed), arguments)
+            # Inno Setup's uninstaller is not the package's, so it is never stopped.
+            self.assertFalse([name for name in listed if name.startswith("unins")])
 
     def test_installs_the_whole_package_with_its_layout(self):
         self.assertIn(r'Source: "{#SourceDir}\*"; DestDir: "{app}"; '
@@ -62,10 +80,11 @@ class ScriptTests(unittest.TestCase):
         # Settings, model caches and libraries live outside {app}; the script
         # may delete only inside its own directory.
         self.assertNotIn("[UninstallDelete]", SCRIPT)
-        # [Code] only stops programs; it deletes nothing.
+        # [Code] only stops programs; it deletes nothing but its temporary script.
         code = SCRIPT.split("[Code]", 1)[1]
-        for call in ("DelTree", "DeleteFile", "RemoveDir", "Remove-Item"):
+        for call in ("DelTree", "RemoveDir", "Remove-Item"):
             self.assertNotIn(call, code)
+        self.assertEqual(re.findall(r"DeleteFile\([^)]*\)", code), ["DeleteFile(Script)"])
         for line in SCRIPT.splitlines():
             if line.startswith("Type: filesandordirs"):
                 self.assertRegex(line, r'Name: "\{app\}\\[^"]+"$')

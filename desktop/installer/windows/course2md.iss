@@ -8,6 +8,8 @@
 ;   OutputDir      where the setup program is written
 ;   OutputName     its file name without .exe
 ;   IconFile       the application icon
+;   Programs       the package's .exe files, relative and joined by |: the only
+;                  programs setup and the uninstaller stop
 ;   Sign           (optional) sign the setup program and its uninstaller with the
 ;                  SignTool "course2md" given to ISCC as /Scourse2md=<command>
 ;
@@ -48,8 +50,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 ; Not the Restart Manager: the app's window does not answer its session-end
 ; messages, and a silent upgrade waited on it indefinitely. [Code] stops
-; whatever runs from the install instead, before setup or the uninstaller
-; touches a file; tasks resume from their checkpoints on the next start.
+; the package's own programs running from the install instead, before setup
+; or the uninstaller touches a file; tasks resume from their checkpoints on the next start.
 CloseApplications=no
 RestartApplications=no
 SetupIconFile={#IconFile}
@@ -90,44 +92,62 @@ Name: "{autodesktop}\course2md"; Filename: "{app}\course2md-desktop.exe"; Tasks:
 Filename: "{app}\course2md-desktop.exe"; Description: "{cm:LaunchProgram,course2md}"; Flags: nowait postinstall skipifsilent
 
 [Code]
-function GetCurrentProcessId: Cardinal;
-  external 'GetCurrentProcessId@kernel32.dll stdcall';
+// Stops the package's own programs if they run from the install directory:
+// only processes whose executable is exactly {app}\<one of Programs>, the
+// .exe files the package installs (windows_installer.py lists them), so a
+// directory shared with other software never loses its other programs. The
+// script and both values reach PowerShell as a file and -File arguments,
+// never as code, so no character of the path is interpreted. It waits up to
+// 30 s and exits 1 if one is still running.
+function StopScript: String;
+begin
+  Result :=
+    'param([string]$Dir, [string]$Programs)' + #13#10 +
+    '$ErrorActionPreference = ''SilentlyContinue''' + #13#10 +
+    '$targets = @{}' + #13#10 +
+    '$files = New-Object -ComObject Scripting.FileSystemObject' + #13#10 +
+    'foreach ($name in $Programs.Split(''|'')) {' + #13#10 +
+    '  $path = Join-Path $Dir $name' + #13#10 +
+    '  $targets[$path.ToLowerInvariant()] = 1' + #13#10 +
+    '  try { $targets[$files.GetFile($path).ShortPath.ToLowerInvariant()] = 1 } catch { }' + #13#10 +
+    '}' + #13#10 +
+    'function Running { @(Get-CimInstance Win32_Process -OperationTimeoutSec 10 | Where-Object {' + #13#10 +
+    '  $_.ExecutablePath -and $targets.ContainsKey($_.ExecutablePath.ToLowerInvariant()) }) }' + #13#10 +
+    '$deadline = (Get-Date).AddSeconds(30)' + #13#10 +
+    'do {' + #13#10 +
+    '  $found = Running' + #13#10 +
+    '  if ($found.Count -eq 0) { exit 0 }' + #13#10 +
+    '  foreach ($process in $found) { Stop-Process -Id $process.ProcessId -Force }' + #13#10 +
+    '  Start-Sleep -Milliseconds 250' + #13#10 +
+    '} while ((Get-Date) -lt $deadline)' + #13#10 +
+    'if ((Running).Count -eq 0) { exit 0 } else { exit 1 }' + #13#10;
+end;
 
-// Stops every program running from the install directory (the app, its engine
-// and the bundled tools) and waits up to 30 s for them to exit. Only processes
-// whose executable lies under Dir are stopped, never a same-named program
-// elsewhere. Spared: the uninstaller (unins*.exe), which runs from Dir and
-// waits for its copy in TEMP, and this process with all its ancestors.
 procedure StopProgramsIn(Dir: String);
 var
-  Literal, Script: String;
+  Script: String;
   ResultCode: Integer;
 begin
-  if not DirExists(Dir) then
+  Dir := RemoveBackslash(Dir);
+  // Only a directory that holds this app; a fresh install has nothing to stop.
+  if not FileExists(Dir + '\course2md-desktop.exe') then begin
+    Log('No course2md install in ' + Dir + '; nothing to stop');
     Exit;
-  // A PowerShell single-quoted literal doubles its quotes.
-  Literal := AddBackslash(Dir);
-  StringChangeEx(Literal, '''', '''''', True);
-  Script :=
-    '$dir = ''' + Literal + '''; ' +
-    '$all = @(Get-CimInstance Win32_Process); $spared = @{}; ' +
-    '$id = ' + IntToStr(GetCurrentProcessId) + '; ' +
-    'while ($id -and -not $spared.ContainsKey([string]$id)) { $spared[[string]$id] = 1; ' +
-    '$id = ($all | Where-Object { $_.ProcessId -eq $id } | Select-Object -First 1).ParentProcessId }; ' +
-    '$running = { Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and ' +
-    '$_.ExecutablePath.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase) -and ' +
-    '-not $spared.ContainsKey([string]$_.ProcessId) -and ' +
-    '([IO.Path]::GetFileName($_.ExecutablePath) -notlike ''unins*.exe'') } }; ' +
-    '& $running | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; ' +
-    '$deadline = (Get-Date).AddSeconds(30); ' +
-    'while ((& $running) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }';
+  end;
+  Script := AddBackslash(GetTempDir) + 'course2md-stop-programs.ps1';
+  if not SaveStringToFile(Script, StopScript, False) then begin
+    Log('Could not write ' + Script + '; programs were not stopped');
+    Exit;
+  end;
   Log('Stopping programs running from ' + Dir);
   if Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-          '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + Script + '"',
+          '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + Script +
+          '" -Dir "' + Dir + '" -Programs "{#Programs}"',
           '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
     Log('Stopped programs running from the install (exit code ' + IntToStr(ResultCode) + ')')
   else
     Log('Could not run PowerShell to stop programs: ' + SysErrorMessage(ResultCode));
+  DeleteFile(Script);
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;

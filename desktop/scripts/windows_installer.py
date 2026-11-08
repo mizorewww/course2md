@@ -34,6 +34,13 @@ def file_version(version):
     return ".".join([*match.groups(), "0"])
 
 
+def programs(source):
+    """The package's executables, relative with backslashes: setup and the
+    uninstaller stop exactly these when they run from the install."""
+    return sorted("\\".join(path.relative_to(source).parts)
+                  for path in Path(source).rglob("*.exe"))
+
+
 def compile_arguments(iscc, version, source, output_dir, sign=None):
     """The ISCC command line that builds the setup program for `source`.
 
@@ -42,7 +49,7 @@ def compile_arguments(iscc, version, source, output_dir, sign=None):
     defines = {
         "AppId": APP_ID, "AppVersion": version, "FileVersion": file_version(version),
         "SourceDir": str(source), "OutputDir": str(output_dir), "OutputName": OUTPUT_NAME,
-        "IconFile": str(ICON),
+        "IconFile": str(ICON), "Programs": "|".join(programs(source)),
     }
     signing = [f"/S{SIGN_TOOL}={sign}", "/DSign"] if sign else []
     return [str(iscc), "/Qp", *(f"/D{name}={value}" for name, value in defines.items()),
@@ -97,6 +104,8 @@ def build(source, version, output_dir, required, sign=None):
             raise SystemExit(message)
         print(f"warning: {message}; only the portable ZIP was built")
         return None
+    if "course2md-desktop.exe" not in programs(source):
+        raise SystemExit(f"{source} holds no course2md-desktop.exe")
     subprocess.run(compile_arguments(iscc, version, source, output_dir, sign), check=True)
     return Path(output_dir) / f"{OUTPUT_NAME}.exe"
 
