@@ -347,6 +347,24 @@ fn by_simplified() -> &'static HashMap<&'static str, Entry> {
     })
 }
 
+/// Rows by their text in any interface language: a message the app saved in the
+/// language it showed then (a task's error) reads in the one shown now.
+fn by_any_language() -> &'static HashMap<&'static str, Entry> {
+    static INDEX: OnceLock<HashMap<&'static str, Entry>> = OnceLock::new();
+    INDEX.get_or_init(|| {
+        let mut index = HashMap::new();
+        for entry in catalog().values() {
+            for text in entry {
+                // Short texts ("OK", a unit) are shared by unrelated rows.
+                if text.chars().count() >= 4 {
+                    index.entry(*text).or_insert(*entry);
+                }
+            }
+        }
+        index
+    })
+}
+
 /// Rows whose Simplified Chinese text has `{}` values, split at them, longest literal
 /// text first: "校对 00:00–00:17 的文字" is a row with its values filled in.
 fn simplified_templates() -> &'static [(Vec<&'static str>, Entry)] {
@@ -403,6 +421,9 @@ fn engine_part(part: &str, lang: Lang, depth: u8) -> Option<Cow<'static, str>> {
         return Some(Cow::Borrowed(entry[lang as usize]));
     }
     if let Some(entry) = by_simplified().get(part) {
+        return Some(Cow::Borrowed(entry[lang as usize]));
+    }
+    if let Some(entry) = by_any_language().get(part) {
         return Some(Cow::Borrowed(entry[lang as usize]));
     }
     if depth < 2 {
@@ -541,6 +562,20 @@ mod tests {
             "EOF while parsing"
         );
         assert_eq!(engine_message_for("", Lang::En), "");
+    }
+
+    /// The desktop saves a task's error in the language it showed then; the task
+    /// reads in the language shown now.
+    #[test]
+    fn a_message_saved_in_another_interface_language_reads_in_this_one() {
+        let source = "任务使用的服务已不在设置中，请调整后重试并选择服务";
+        let english = t_for(source, Lang::En);
+        assert_ne!(english, source);
+        assert_eq!(engine_message_for(english, Lang::ZhHans), source);
+        assert_eq!(
+            engine_message_for(t_for(source, Lang::Ja), Lang::En),
+            english
+        );
     }
 
     #[test]
