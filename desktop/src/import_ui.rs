@@ -793,7 +793,8 @@ impl Desktop {
                         .w_full()
                         .min_w_0()
                         .bg(color(ColorRole::SURFACE))
-                        .rounded(TILE_RADIUS)
+                        // A panel on its own, as the options panel below it.
+                        .rounded(RADIUS_HERO)
                         .flex()
                         .flex_col()
                         .gap(rem(16.))
@@ -836,6 +837,7 @@ impl Desktop {
                 .gap(rem(8.))
                 .child(
                     tile([true; 4])
+                        .rounded(RADIUS_HERO)
                         .flex()
                         .flex_wrap()
                         .items_center()
@@ -2570,13 +2572,26 @@ impl Desktop {
             .children(candidates)
             .children(self.source_preview_error(cx))
             .child(
-                // The options belong to one input: joined to its video card (the
-                // preview or the task in its place), otherwise on their own.
+                // The options belong to one input: with its video card (the preview or
+                // the task in its place) they are one surface, the card, a hairline,
+                // then the options; otherwise the panel stands alone.
                 v_flex()
                     .w_full()
                     .min_w_0()
-                    .gap(TILE_GAP)
+                    .when(attached, |unit| {
+                        unit.rounded(RADIUS_HERO)
+                            .overflow_hidden()
+                            .bg(color(ColorRole::SURFACE))
+                    })
                     .children(card)
+                    .when(attached, |unit| {
+                        unit.child(
+                            MaterialDivider::new("video-unit-divider")
+                                .variant(DividerVariant::MiddleInset)
+                                .inset_start(ITEM_INSET)
+                                .inset_end(ITEM_INSET),
+                        )
+                    })
                     .child(options),
             )
             .when_some(cancelled, |view, id| {
