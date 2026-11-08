@@ -2294,8 +2294,10 @@ impl Desktop {
                                             SharedString::from(format!("recent-attention-{id}")),
                                             task.plan.title.clone(),
                                         )
-                                        .min_w(rem(160.))
-                                        .flex_1(),
+                                        // The state and action move under a title that
+                                        // needs the width, not one character of it.
+                                        .flex_1()
+                                        .flex_basis(rem(240.)),
                                 )
                                 // The same colour as on Tasks: a failure is red, a pause amber.
                                 .child(
