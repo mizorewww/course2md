@@ -149,10 +149,6 @@ jobs:
       APPLE_API_P8: ${{ secrets.APPLE_API_KEY }}
       APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-      # Optional Authenticode signing of the Windows installer: a base64 .pfx
-      # and its password. Without them the installer ships unsigned.
-      WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
-      WINDOWS_CERT_PASS: ${{ secrets.WINDOWS_CERT_PASS }}
     steps:
       - uses: actions/checkout@v4
       - name: Require the Metal compiler on macOS
@@ -188,20 +184,24 @@ jobs:
         # on Windows the per-user installer beside the portable ZIP.
         timeout-minutes: 45
         run: python -u desktop/scripts/package.py --no-build
+      # Optional Authenticode signing: rebuilds the installer with Inno Setup's
+      # SignTool, which signs the setup program and its embedded uninstaller.
+      # Only this step sees the certificate; without it the installer ships unsigned.
       - name: Sign Windows installer (optional, needs WINDOWS_CERT_PFX)
-        if: runner.os == 'Windows' && env.WINDOWS_CERT_PFX != ''
+        if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+          WINDOWS_CERT_PASS: ${{ secrets.WINDOWS_CERT_PASS }}
         run: |
-          $installer = (Get-Item target/packages/course2md-desktop-windows-x64-setup.exe).FullName
-          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
-            Sort-Object FullName -Descending | Select-Object -First 1
-          if (-not $signtool) { Write-Error 'signtool.exe is unavailable'; exit 1 }
+          if (-not $env:WINDOWS_CERT_PFX) {
+            Write-Host 'No WINDOWS_CERT_PFX secret: the installer stays unsigned.'
+            exit 0
+          }
           $pfx = Join-Path $env:RUNNER_TEMP 'windows-signing.pfx'
           try {
             [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX))
-            & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASS /fd sha256 /tr http://timestamp.digicert.com /td sha256 $installer
-            if ($LASTEXITCODE) { exit $LASTEXITCODE }
-            & $signtool.FullName verify /pa $installer
+            python -u desktop/scripts/windows_installer.py build target/packages/course2md-desktop-windows-AMD64 --sign-pfx $pfx
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
           } finally {
             Remove-Item -Force $pfx -ErrorAction SilentlyContinue

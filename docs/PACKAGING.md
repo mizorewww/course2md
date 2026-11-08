@@ -48,7 +48,7 @@ On Windows `package.py` also builds `course2md-desktop-windows-x64-setup.exe` wi
 
 `python desktop/scripts/windows_installer.py smoke <setup.exe> <package directory>` installs into a temporary directory, checks every file, the registered version and the engine (`--version`, and `doctor` must report each bundled tool from the install directory), upgrades in place while the installed app and a long-running bundled ffmpeg run (both must be closed and their files replaced), uninstalls and checks that user data stays. The `native desktop` workflow runs it on every desktop change, and the release workflow on the installer it publishes.
 
-The installer is unsigned unless the repository has the secrets `WINDOWS_CERT_PFX` (a base64 code-signing .pfx) and `WINDOWS_CERT_PASS`; then the release workflow's **Sign Windows installer** step signs it with Authenticode. Unsigned, Windows SmartScreen warns on first run (**More info → Run anyway**); release notes should say so. The ZIP remains the portable build.
+The installer is unsigned unless the repository has the secrets `WINDOWS_CERT_PFX` (a base64 code-signing .pfx) and `WINDOWS_CERT_PASS`; then the release workflow's **Sign Windows installer** step, the only step that sees them, rebuilds it with Inno Setup's `SignTool`, which signs the setup program and its embedded uninstaller with Authenticode (`windows_installer.py build <package> --sign-pfx <file>` locally). The programs inside the package are not signed. Unsigned, Windows SmartScreen warns on first run (**More info → Run anyway**); release notes should say so. The ZIP remains the portable build.
 
 ## Publishing a version
 

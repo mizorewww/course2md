@@ -34,15 +34,39 @@ def file_version(version):
     return ".".join([*match.groups(), "0"])
 
 
-def compile_arguments(iscc, version, source, output_dir):
-    """The ISCC command line that builds the setup program for `source`."""
+def compile_arguments(iscc, version, source, output_dir, sign=None):
+    """The ISCC command line that builds the setup program for `source`.
+
+    `sign`, a SignTool command (sign_command), signs the setup program and
+    the uninstaller it embeds."""
     defines = {
         "AppId": APP_ID, "AppVersion": version, "FileVersion": file_version(version),
         "SourceDir": str(source), "OutputDir": str(output_dir), "OutputName": OUTPUT_NAME,
         "IconFile": str(ICON),
     }
+    signing = [f"/S{SIGN_TOOL}={sign}", "/DSign"] if sign else []
     return [str(iscc), "/Qp", *(f"/D{name}={value}" for name, value in defines.items()),
-            str(SCRIPT)]
+            *signing, str(SCRIPT)]
+
+
+SIGN_TOOL = "course2md"
+TIMESTAMP_URL = "http://timestamp.digicert.com"
+
+
+def sign_command(signtool, pfx, password):
+    """Inno Setup's SignTool command for Authenticode with a .pfx: in it $q is a
+    quote, $$ a dollar sign and $f the quoted file to sign."""
+    def quoted(text):
+        return "$q" + str(text).replace("$", "$$") + "$q"
+    return (f"{quoted(signtool)} sign /f {quoted(pfx)} /p {quoted(password)} /fd sha256 "
+            f"/tr {TIMESTAMP_URL} /td sha256 $f")
+
+
+def find_signtool(environ=os.environ):
+    """The newest Windows SDK's x64 signtool.exe."""
+    base = environ.get("ProgramFiles(x86)")
+    found = sorted(Path(base).glob("Windows Kits/10/bin/*/x64/signtool.exe")) if base else []
+    return found[-1] if found else None
 
 
 def find_iscc(environ=os.environ):
@@ -63,7 +87,7 @@ def find_iscc(environ=os.environ):
     return None
 
 
-def build(source, version, output_dir, required):
+def build(source, version, output_dir, required, sign=None):
     """Compile the setup program; a release build stops without Inno Setup."""
     iscc = find_iscc()
     if iscc is None:
@@ -73,7 +97,7 @@ def build(source, version, output_dir, required):
             raise SystemExit(message)
         print(f"warning: {message}; only the portable ZIP was built")
         return None
-    subprocess.run(compile_arguments(iscc, version, source, output_dir), check=True)
+    subprocess.run(compile_arguments(iscc, version, source, output_dir, sign), check=True)
     return Path(output_dir) / f"{OUTPUT_NAME}.exe"
 
 
@@ -250,6 +274,9 @@ def main(argv=None):
     build_parser = commands.add_parser("build", help="compile the setup program for a package")
     build_parser.add_argument("package", type=Path, help="the package directory (the ZIP's contents)")
     build_parser.add_argument("--output", type=Path, help="default: the package's parent")
+    build_parser.add_argument("--sign-pfx", type=Path, metavar="PATH",
+                              help="sign the setup program and its uninstaller with this "
+                                   "certificate; its password comes from WINDOWS_CERT_PASS")
     smoke_parser = commands.add_parser("smoke", help="install, upgrade and uninstall a setup program")
     smoke_parser.add_argument("installer", type=Path)
     smoke_parser.add_argument("package", type=Path, help="the package directory it was built from")
@@ -258,7 +285,18 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.command == "build":
         package = args.package.resolve()
-        print(build(package, workspace_version(), args.output or package.parent, required=True))
+        sign = signtool = None
+        if args.sign_pfx:
+            signtool = find_signtool()
+            if signtool is None:
+                raise SystemExit("Signing needs signtool.exe from the Windows SDK")
+            sign = sign_command(signtool, args.sign_pfx.resolve(),
+                                os.environ.get("WINDOWS_CERT_PASS", ""))
+        installer = build(package, workspace_version(), args.output or package.parent,
+                          required=True, sign=sign)
+        if signtool:
+            subprocess.run([str(signtool), "verify", "/pa", str(installer)], check=True)
+        print(installer)
     else:
         if sys.platform != "win32":
             raise SystemExit("The installer smoke test runs on Windows")

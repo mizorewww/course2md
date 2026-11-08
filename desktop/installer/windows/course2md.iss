@@ -8,6 +8,8 @@
 ;   OutputDir      where the setup program is written
 ;   OutputName     its file name without .exe
 ;   IconFile       the application icon
+;   Sign           (optional) sign the setup program and its uninstaller with the
+;                  SignTool "course2md" given to ISCC as /Scourse2md=<command>
 ;
 ; Every file of the package is installed with its relative path unchanged, so
 ; the app finds its engine and bundled tools beside course2md-desktop.exe as
@@ -58,6 +60,9 @@ Compression=lzma2/max
 SolidCompression=yes
 OutputDir={#OutputDir}
 OutputBaseFilename={#OutputName}
+#ifdef Sign
+SignTool=course2md
+#endif
 
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"

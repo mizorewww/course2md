@@ -61,6 +61,23 @@ class ScriptTests(unittest.TestCase):
         self.assertIn(f"/DAppId={APP_ID}", arguments)
         self.assertEqual(arguments[-1], str(windows_installer.SCRIPT))
 
+    def test_signing_is_optional_and_covers_the_uninstaller(self):
+        unsigned = compile_arguments("ISCC.exe", "3.0.0", Path("pkg"), Path("out"))
+        self.assertFalse([argument for argument in unsigned
+                          if argument.startswith("/S") or argument == "/DSign"])
+        signed = compile_arguments("ISCC.exe", "3.0.0", Path("pkg"), Path("out"), sign="cmd $f")
+        self.assertIn("/Scourse2md=cmd $f", signed)
+        self.assertIn("/DSign", signed)
+        self.assertIn("#ifdef Sign\nSignTool=course2md\n#endif", SCRIPT)
+        # Inno Setup signs the embedded uninstaller with SignTool unless told not to.
+        self.assertIsNone(setup_directive("SignedUninstaller"))
+
+    def test_sign_command_quotes_paths_and_escapes_dollars(self):
+        command = windows_installer.sign_command(
+            r"C:\Program Files (x86)\signtool.exe", r"D:\t\a.pfx", "pa$s")
+        self.assertEqual(command, r"$qC:\Program Files (x86)\signtool.exe$q sign /f $qD:\t\a.pfx$q "
+                         "/p $qpa$$s$q /fd sha256 /tr http://timestamp.digicert.com /td sha256 $f")
+
     def test_every_language_file_exists_and_starts_with_a_bom(self):
         for name in re.findall(r'MessagesFile: "\{#SourcePath\}([^"]+)"', SCRIPT):
             data = (windows_installer.SCRIPT.parent / name).read_bytes()
