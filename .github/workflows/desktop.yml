@@ -75,6 +75,11 @@ jobs:
       - name: Clippy
         # --no-deps keeps the GPUI crates' deprecation warnings out of the log.
         run: cargo clippy -p course2md-desktop -p desktop-prefs -p desktop-accounts -p desktop-store -p desktop-reader-core -p desktop-tasks -p desktop-ui --all-targets --no-deps -- -D warnings
+      - name: Clippy, capture and performance builds
+        # The capture and performance features are macOS tools; build them so a
+        # change to either is compiled somewhere.
+        if: runner.os == 'macOS'
+        run: cargo clippy -p course2md-desktop --features capture,performance --all-targets --no-deps -- -D warnings
       - name: Check and test desktop
         run: cargo test -p course2md-desktop -p desktop-prefs -p desktop-accounts -p desktop-store -p desktop-reader-core -p desktop-tasks -p desktop-ui
       - name: Catalog matches the strings the app looks up
