@@ -281,6 +281,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 任务 · {}	任务 · {}	Tasks · {}	任務 · {}	タスク · {}
 任务不存在	任务不存在	Task not found	找不到任務	タスクが見つかりません
 任务与笔记位置必须是绝对路径 / Task paths must be absolute	任务与笔记位置必须是绝对路径	Task paths must be absolute	任務與筆記位置必須是絕對路徑	タスクとノートの場所は絶対パスである必要があります
+任务使用的服务已不在设置中，请调整后重试并选择服务	任务使用的服务已不在设置中，请调整后重试并选择服务	The service this task used is no longer in settings. Adjust and try again with a service selected.	任務使用的服務已不在設定中，請調整後重試並選擇服務	このタスクで使っていたサービスは設定にありません。調整して再試行し、サービスを選択してください
 任务保存位置尚未恢复	任务保存位置尚未恢复	The task save location has not been restored	任務儲存位置尚未恢復	タスクの保存場所が復元されていません
 任务保存位置暂时不可用	任务保存位置暂时不可用	The task save location is temporarily unavailable	任務儲存位置暫時不可用	タスクの保存場所が一時的に利用できなくなりました
 任务保存位置记录缺失	任务保存位置记录缺失	The task save location record is missing	任務儲存位置記錄缺失	タスクの保存場所レコードがありません
@@ -866,7 +867,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 扫描画面	扫描画面	Scanning frames	掃描畫面	フレームをスキャン中
 扫描画面 / Scanning video frames	扫描画面	Scanning video frames	掃描畫面	フレームをスキャン中
 找不到 course2md 引擎。请将 CLI 放在应用旁，或设置 COURSE2MD_BIN。	找不到 course2md 引擎。请将 CLI 放在应用旁，或设置 COURSE2MD_BIN。	course2md engine not found. Place the CLI next to the app, or set COURSE2MD_BIN.	找不到 course2md 引擎。請將 CLI 放在應用程式旁，或設定 COURSE2MD_BIN。	course2md エンジンが見つかりません。CLI をアプリの隣に配置するか、COURSE2MD_BIN を設定してください。
-找不到任务使用的服务版本，请选择服务后建立新尝试	找不到任务使用的服务版本，请选择服务后建立新尝试	The service version used by the task cannot be found. Please select the service and create a new attempt.	找不到任務使用的服務版本，請選擇服務後建立新嘗試	タスクで使用されているサービスのバージョンが見つかりません。サービスを選択し、新しい試行を作成してください。
 找不到已下载的视频，请允许重新下载 / The downloaded video is missing; allow downloading it again	找不到已下载的视频，请允许重新下载	The downloaded video is missing; allow downloading it again	找不到已下載的影片，請允許重新下載	ダウンロードした動画が見つかりません。再ダウンロードを許可してください
 找不到当前笔记	找不到当前笔记	Current note not found	找不到目前筆記	現在のノートが見つかりません
 找不到此服务	找不到此服务	This service cannot be found	找不到此服務	このサービスは見つかりません
