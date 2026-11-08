@@ -1313,10 +1313,10 @@ impl Desktop {
                     )
                 },
             );
+        // The card's footer: under the cover and the facts, across the card.
         let actions = h_flex()
             .w_full()
             .min_w_0()
-            .mt_auto()
             .gap(rem(8.))
             .items_center()
             .flex_wrap()
@@ -1431,8 +1431,7 @@ impl Desktop {
                     )),
             )
             .child(self.text_source_control(&source, window, cx))
-            .children(recovery.facts)
-            .child(actions);
+            .children(recovery.facts);
         Some(motion::state_enter(
             "import-selected-source-enter",
             tile([true, true, false, false])
@@ -1446,7 +1445,7 @@ impl Desktop {
                         .w_full()
                         .min_w_0()
                         .flex_wrap()
-                        .items_stretch()
+                        .items_start()
                         .gap(rem(20.))
                         .child(cover)
                         .child(info),
@@ -1460,7 +1459,8 @@ impl Desktop {
                     recovery
                         .notice
                         .map(|notice| div().w_full().pt(rem(16.)).child(notice)),
-                ),
+                )
+                .child(div().w_full().pt(rem(16.)).child(actions)),
         ))
     }
 
