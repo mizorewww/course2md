@@ -997,8 +997,10 @@ impl TasksPage {
             .child(task_status_label(task))
         });
         let context_menu = self.task_menu(task, cx);
-        // The running card's progress and actions stay in its text column.
-        let inner = on_home_running.then(|| self.task_body(task, place, window, cx));
+        // The running card's progress and actions stay in its text column; a task that
+        // waits on the person says why across the card, as the draft's obstacle does.
+        let in_column = on_home_running && !needs_person(task);
+        let inner = in_column.then(|| self.task_body(task, place, window, cx));
         let (outer, head, body) = match place {
             CardPlace::Row { outer, number } => {
                 // An open row's details continue its surface below it.
@@ -1031,7 +1033,7 @@ impl TasksPage {
                 (
                     [true, true, false, false],
                     head.into_any_element(),
-                    !on_home_running,
+                    !in_column,
                 )
             }
         };
