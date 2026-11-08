@@ -221,6 +221,14 @@ def _start_installed(app):
     return running
 
 
+def _stopped(log, app):
+    """Whether a setup or uninstaller log records stopping the install's programs."""
+    lines = [line for line in log.splitlines() if "programs running from" in line]
+    print("\n".join(lines))
+    return (f"Stopping programs running from {app}".casefold() in log.casefold()
+            and "Stopped programs running from the install (exit code 0)" in log)
+
+
 def _replaced(log, path):
     """Whether setup's log records installing `path` over the existing file."""
     entries = log.split("-- File entry --")
@@ -270,6 +278,7 @@ def smoke(installer, package, work, version):
                 pass
             _check(process.poll() is not None, f"the upgrade closed the running {name}")
         log = (work / "upgrade.log").read_text(encoding="utf-8", errors="replace")
+        _check(_stopped(log, app), "setup stopped the programs running from the install")
         for name, _ in running:
             _check(_replaced(log, app / name), f"the upgrade replaced the running {name}")
         _check(not stale.exists(), "an upgrade replaces llama.cpp/ instead of mixing versions")
@@ -278,6 +287,8 @@ def smoke(installer, package, work, version):
         uninstalled = True
         returncode = _uninstall(app, work / "uninstall.log")
         _check(returncode == 0, f"the uninstaller exited with 0 (exit code {returncode})")
+        log = (work / "uninstall.log").read_text(encoding="utf-8", errors="replace")
+        _check(_stopped(log, app), "the uninstaller checked for programs running from the install")
         # The uninstaller finishes from a copy of itself in TEMP.
         deadline = time.monotonic() + 120
         while (app.exists() or _uninstall_entry()) and time.monotonic() < deadline:
