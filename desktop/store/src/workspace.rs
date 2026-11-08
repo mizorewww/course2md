@@ -2043,6 +2043,36 @@ fn keep_old_mirror(directory: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The library folders a record from before 3.0 names, read for their `root` alone. A
+/// folder that is there and carries a library identity comes back under that identity
+/// and its own name; any other is returned without one. Nothing is written.
+fn older_library_roots(bytes: &[u8]) -> Vec<(PathBuf, Option<LibraryLocation>)> {
+    let Ok(record) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+        return Vec::new();
+    };
+    let roots = record["libraries"].as_array().into_iter().flatten();
+    roots
+        .filter_map(|library| Some(PathBuf::from(library["root"].as_str()?)))
+        .filter(|root| root.is_absolute())
+        .map(|root| {
+            let id = std::fs::read_to_string(root.join(crate::storage::LIBRARY_ID_FILE))
+                .ok()
+                .map(|id| id.trim().to_owned())
+                .filter(|id| root.is_dir() && c2m_engine::execution::valid_id(id));
+            let location = id.map(|id| LibraryLocation {
+                id,
+                name: root.file_name().map_or_else(
+                    || root.display().to_string(),
+                    |name| name.to_string_lossy().into_owned(),
+                ),
+                root: root.clone(),
+                previous_roots: Vec::new(),
+            });
+            (root, location)
+        })
+        .collect()
+}
+
 /// A record or mirror an app before 3.0 wrote (schema 1), which this one no longer reads.
 fn older_record(bytes: &[u8]) -> bool {
     serde_json::from_slice::<serde_json::Value>(bytes)
@@ -2451,6 +2481,28 @@ impl Workspace {
                 state.libraries.push(location);
             }
         }
+        // A record from before 3.0 gives back only where its libraries are, and only a
+        // folder that names its library itself; another is for the person to add again.
+        let mut issues = Vec::new();
+        for (_, bytes) in originals.iter().filter(|(_, bytes)| older_record(bytes)) {
+            for (folder, found) in older_library_roots(bytes) {
+                match found {
+                    Some(location)
+                        if !state
+                            .libraries
+                            .iter()
+                            .any(|l| l.id == location.id || l.root == location.root) =>
+                    {
+                        state.libraries.push(location)
+                    }
+                    Some(_) => {}
+                    None => issues.push(c2m_i18n::tr!(
+                        "旧版本记录中的笔记库 {} 需要在存储设置中重新添加",
+                        folder.display()
+                    )),
+                }
+            }
+        }
         if !state
             .libraries
             .iter()
@@ -2458,7 +2510,6 @@ impl Workspace {
         {
             state.libraries.append(&mut initial.libraries);
         }
-        let mut issues = Vec::new();
         state.adopt_tasks(salvage(&records, "tasks"));
         for library in state.libraries.clone() {
             if check_library(&library).is_ok() {
@@ -3456,9 +3507,40 @@ mod tests {
             );
             assert!(!backup.exists(), "nothing replaces it, not even a backup");
         }
-        // Rebuilding, which a person chooses, archives it before writing a new record.
+        // Rebuilding, which a person chooses, archives it before writing a new record. Of
+        // the old record it reads only where the libraries are: one that names itself
+        // comes back, and one that does not is for the person to add again.
+        let marked = dir.path().join("marked");
+        let unmarked = dir.path().join("unmarked");
+        std::fs::create_dir_all(&marked).unwrap();
+        std::fs::create_dir_all(&unmarked).unwrap();
+        std::fs::write(marked.join(".course2md-library-id"), "library-two").unwrap();
+        old["libraries"] = serde_json::json!([
+            {"id": "ignored-id", "name": "Ignored", "root": marked, "extra": 1},
+            {"id": "library-three", "name": "Three", "root": unmarked},
+            {"id": "library-gone", "name": "Gone", "root": dir.path().join("gone")},
+        ]);
+        let bytes = serde_json::to_vec(&old).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
         let rebuilt = Workspace::rebuild_at(path.clone(), root, Default::default()).unwrap();
         assert_eq!(rebuilt.state.schema, SCHEMA);
+        let restored = rebuilt.state.library("library-two").unwrap();
+        assert_eq!(
+            (restored.root.as_path(), restored.name.as_str()),
+            (marked.as_path(), "marked")
+        );
+        assert!(check_library(restored).is_ok());
+        assert!(rebuilt.state.libraries.iter().all(|l| l.root != unmarked));
+        let message = rebuilt.recovery.clone().unwrap();
+        assert!(
+            message.contains(&unmarked.display().to_string()),
+            "{message}"
+        );
+        assert!(
+            message.contains(&dir.path().join("gone").display().to_string()),
+            "{message}"
+        );
+        assert!(!unmarked.join(".course2md-library-id").exists());
         let archived = std::fs::read_dir(dir.path())
             .unwrap()
             .flatten()
