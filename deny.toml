@@ -65,7 +65,4 @@ allow-git = [
     "https://github.com/longbridge/gpui-kit",
     "https://github.com/mizorewww/gpui-kit-material",
     "https://github.com/mizorewww/gpui-material-symbols",
-    "https://github.com/mizorewww/model-fetch",
-    "https://github.com/mizorewww/slide-detect",
-    "https://github.com/mizorewww/subtitle-parse",
 ]
