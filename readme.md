@@ -8,7 +8,7 @@
 
 Paste a YouTube or Bilibili link, or drop in a local video. course2md captures a screenshot every time the slide changes, transcribes what is said beneath it, and keeps the result in a library on your computer.
 
-[![Latest release](https://img.shields.io/github/v/release/mizorewww/course2md?label=download)](https://github.com/mizorewww/course2md/releases/latest)
+[![Newest release, previews included](https://img.shields.io/github/v/release/mizorewww/course2md?include_prereleases&sort=semver&label=release)](https://github.com/mizorewww/course2md/releases)
 [![License: MIT](https://img.shields.io/github/license/mizorewww/course2md)](LICENSE)
 ![macOS · Windows · Linux](https://img.shields.io/badge/desktop-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-blue)
 

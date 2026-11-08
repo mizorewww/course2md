@@ -8,7 +8,7 @@
 
 粘贴 YouTube 或 Bilibili 链接，或拖入本地视频。course2md 在每次换页时截图，把讲解的话整理在截图下方，并保存在你电脑上的笔记库里。
 
-[![最新版本](https://img.shields.io/github/v/release/mizorewww/course2md?label=%E4%B8%8B%E8%BD%BD)](https://github.com/mizorewww/course2md/releases/latest)
+[![最新版本（含预览版）](https://img.shields.io/github/v/release/mizorewww/course2md?include_prereleases&sort=semver&label=%E7%89%88%E6%9C%AC)](https://github.com/mizorewww/course2md/releases)
 [![License: MIT](https://img.shields.io/github/license/mizorewww/course2md)](LICENSE)
 ![macOS · Windows · Linux](https://img.shields.io/badge/desktop-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-blue)
 
