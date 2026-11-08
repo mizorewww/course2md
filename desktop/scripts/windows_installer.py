@@ -154,8 +154,8 @@ def _start_installed(app):
     quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
              "stderr": subprocess.DEVNULL}
     running = [("course2md-desktop.exe",
-                subprocess.Popen([str(app / "course2md-desktop.exe")], cwd=app, **quiet)),
-               ("ffmpeg.exe", subprocess.Popen(tool, cwd=app, **quiet))]
+                subprocess.Popen([str(app / "course2md-desktop.exe")], cwd=app.parent, **quiet)),
+               ("ffmpeg.exe", subprocess.Popen(tool, cwd=app.parent, **quiet))]
     time.sleep(15)
     for name, process in running:
         _check(process.poll() is None, f"{name} is running from the install before the upgrade")
@@ -168,6 +168,11 @@ def _replaced(log, path):
     target = f"Dest filename: {path}".casefold()
     return any(target in entry.casefold() and "Successfully installed the file." in entry
                for entry in entries)
+
+
+def _uninstall(app):
+    return subprocess.run([str(app / "unins000.exe"), "/VERYSILENT", "/SUPPRESSMSGBOXES",
+                           "/NORESTART"], timeout=600)
 
 
 def smoke(installer, package, work, version):
@@ -184,42 +189,51 @@ def smoke(installer, package, work, version):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("kept\n", encoding="utf-8")
 
-    _run_setup(installer, work / "install.log", f"/DIR={app}")
-    _installed(package, app, version, start_menu)
+    # Whatever fails after setup starts, the runner is left without the install.
+    running, uninstalled = [], False
+    try:
+        _run_setup(installer, work / "install.log", f"/DIR={app}")
+        _installed(package, app, version, start_menu)
 
-    # Upgrade in place while the app and a long-running bundled tool run from
-    # the install: no /DIR, so setup must find the install through the AppId,
-    # close both, and replace their files; a stale file in a directory the
-    # package owns must go.
-    stale = app / "llama.cpp/stale-from-older-version.dll"
-    stale.parent.mkdir(exist_ok=True)
-    stale.write_bytes(b"")
-    running = _start_installed(app)
-    _run_setup(installer, work / "upgrade.log")
-    for name, process in running:
-        try:
-            process.wait(timeout=60)
-        except subprocess.TimeoutExpired:
-            pass
-        _check(process.poll() is not None, f"the upgrade closed the running {name}")
-    log = (work / "upgrade.log").read_text(encoding="utf-8", errors="replace")
-    for name, _ in running:
-        _check(_replaced(log, app / name), f"the upgrade replaced the running {name}")
-    _check(not stale.exists(), "an upgrade replaces llama.cpp/ instead of mixing versions")
-    _installed(package, app, version, start_menu)
+        # Upgrade in place while the app and a long-running bundled tool run from
+        # the install: no /DIR, so setup must find the install through the AppId,
+        # close both, and replace their files; a stale file in a directory the
+        # package owns must go.
+        stale = app / "llama.cpp/stale-from-older-version.dll"
+        stale.parent.mkdir(exist_ok=True)
+        stale.write_bytes(b"")
+        running.extend(_start_installed(app))
+        _run_setup(installer, work / "upgrade.log")
+        for name, process in running:
+            try:
+                process.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                pass
+            _check(process.poll() is not None, f"the upgrade closed the running {name}")
+        log = (work / "upgrade.log").read_text(encoding="utf-8", errors="replace")
+        for name, _ in running:
+            _check(_replaced(log, app / name), f"the upgrade replaced the running {name}")
+        _check(not stale.exists(), "an upgrade replaces llama.cpp/ instead of mixing versions")
+        _installed(package, app, version, start_menu)
 
-    uninstaller = app / "unins000.exe"
-    result = subprocess.run([str(uninstaller), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
-                            timeout=600)
-    _check(result.returncode == 0, "the uninstaller exited with 0")
-    # The uninstaller finishes from a copy of itself in TEMP.
-    deadline = time.monotonic() + 120
-    while (app.exists() or _uninstall_entry()) and time.monotonic() < deadline:
-        time.sleep(2)
-    leftover = package_files(app) if app.exists() else []
-    _check(not app.exists(), f"the install directory is removed (left: {leftover[:10]})")
-    _check(_uninstall_entry() is None, "Windows no longer lists the program")
-    _check(not start_menu.exists(), "the Start menu shortcut is removed")
+        result = _uninstall(app)
+        uninstalled = True
+        _check(result.returncode == 0, "the uninstaller exited with 0")
+        # The uninstaller finishes from a copy of itself in TEMP.
+        deadline = time.monotonic() + 120
+        while (app.exists() or _uninstall_entry()) and time.monotonic() < deadline:
+            time.sleep(2)
+        leftover = package_files(app) if app.exists() else []
+        _check(not app.exists(), f"the install directory is removed (left: {leftover[:10]})")
+        _check(_uninstall_entry() is None, "Windows no longer lists the program")
+        _check(not start_menu.exists(), "the Start menu shortcut is removed")
+    finally:
+        for _, process in running:
+            if process.poll() is None:
+                process.kill()
+        if not uninstalled and (app / "unins000.exe").is_file():
+            print("installer smoke test: uninstalling after a failure")
+            _uninstall(app)
     for path in user_data:
         _check(path.is_file(), f"user data survives uninstall: {path}")
         path.unlink()
