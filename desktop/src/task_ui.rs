@@ -1638,8 +1638,34 @@ impl TasksPage {
                 )
                 .on_click(action_click(cx.weak_entity(), id.clone(), action.clone()))
         });
-        let mut buttons: Vec<MaterialButton> = buttons.collect();
+        let mut buttons: Vec<Option<MaterialButton>> = buttons.map(Some).collect();
         let home_running = surface == TaskSurface::Home && runs_in_card(task);
+        // On the workbench, why the task stopped is one notice in its card that holds
+        // the way on, the card's one primary action, as a draft's obstacle is.
+        let reasons = task_reasons(task);
+        let notice = (surface == TaskSurface::Home && needs_person(task) && !reasons.is_empty())
+            .then(|| {
+                let lead = lead
+                    .as_ref()
+                    .and_then(|lead| actions.iter().position(|action| action == lead))
+                    .and_then(|index| buttons[index].take());
+                notice_banner(
+                    SharedString::from(format!("task-reason-{id}")),
+                    if task.state == TaskState::NeedsAttention {
+                        NoticeKind::Danger
+                    } else {
+                        NoticeKind::Warning
+                    },
+                    reasons.join("\n"),
+                )
+                .rounded(RADIUS_LARGE)
+                .children(lead)
+            });
+        let reasons = if notice.is_some() {
+            Vec::new()
+        } else {
+            reasons
+        };
         // Stopping stands apart from what goes on; those wrap as one trailing group.
         let leading_cancel = (home_running)
             .then(|| {
@@ -1648,7 +1674,8 @@ impl TasksPage {
                     .position(|action| *action == TaskAction::Cancel)
             })
             .flatten()
-            .map(|index| buttons.remove(index));
+            .and_then(|index| buttons[index].take());
+        let buttons: Vec<MaterialButton> = buttons.into_iter().flatten().collect();
         let buttons = if home_running {
             h_flex()
                 .w_full()
@@ -1711,19 +1738,15 @@ impl TasksPage {
             .min_w_0()
             .gap(rem(12.))
             .pl(ruler)
-            .children(
-                task_reasons(task)
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, reason)| {
-                        error_text(
-                            SharedString::from(format!("task-reason-{id}-{index}")),
-                            reason,
-                        )
-                        .text_size(TEXT_BODY)
-                        .whitespace_normal()
-                    }),
-            )
+            .children(notice)
+            .children(reasons.into_iter().enumerate().map(|(index, reason)| {
+                error_text(
+                    SharedString::from(format!("task-reason-{id}-{index}")),
+                    reason,
+                )
+                .text_size(TEXT_BODY)
+                .whitespace_normal()
+            }))
             .children(
                 consequence
                     .map(|text| ("consequence", text))
