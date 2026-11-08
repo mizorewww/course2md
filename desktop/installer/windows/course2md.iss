@@ -17,6 +17,8 @@
 ;
 ; ChineseSimplified.isl and ChineseTraditional.isl are Inno Setup's user-contributed
 ; translations (jrsoftware/issrc tag is-6_7_1, Files/Languages/Unofficial).
+; Modified: ChineseSimplified.isl was saved with a UTF-8 BOM, so the compiler
+; reads it as UTF-8; its text is unchanged. ChineseTraditional.isl is unmodified.
 
 #ifndef AppId
   #error AppId must be defined
