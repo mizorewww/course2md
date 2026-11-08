@@ -174,6 +174,9 @@ pub(crate) struct ShellFacts {
     pub storage_busy: bool,
     /// Where the model a waiting task needs stands, once its card asked to prepare it.
     pub models: HashMap<String, ModelPreparation>,
+    /// Tasks that name a service no longer saved or deleted: they cannot continue as
+    /// they are, and adjusting them (a new attempt) is the way on.
+    pub services_missing: HashSet<String>,
 }
 
 /// The model preparation a task's card started.
@@ -373,7 +376,12 @@ impl TasksPage {
         surface: TaskSurface,
         cx: &App,
     ) -> Vec<TaskAction> {
-        task_actions(task, surface, &self.task_facts(task, cx))
+        task_actions_for(
+            task,
+            surface,
+            &self.task_facts(task, cx),
+            self.facts.services_missing.contains(&task.id),
+        )
     }
 
     fn task_stage_rows(&self, task: &TaskRecord, cx: &App) -> Vec<TaskStage> {

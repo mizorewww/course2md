@@ -2102,7 +2102,7 @@ impl Desktop {
                         self.settings_ui.pending_generation = None;
                     }
                     PreferenceGroup::Application => self.settings_ui.pending_application = None,
-                    PreferenceGroup::Services => {}
+                    PreferenceGroup::Services => self.forget_missing_draft_services(cx),
                 }
                 self.settings_ui.initialized = false;
                 // Rehydrate on the event path now rather than on the next visit; rendering never does this.

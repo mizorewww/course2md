@@ -8,18 +8,19 @@ impl Desktop {
         purpose: ServicePurpose,
         cx: &App,
     ) -> Option<ServiceVersion> {
-        let fixed =
-            self.workspace(cx)
-                .and_then(|w| w.state.draft())
-                .and_then(|draft| match purpose {
-                    ServicePurpose::Speech => draft.asr_service.clone(),
-                    ServicePurpose::Ai => draft.ai_service.clone(),
-                });
-        let defaults = self.preferences.default_refs();
-        let id = fixed.or(match purpose {
-            ServicePurpose::Speech => defaults.asr,
-            ServicePurpose::Ai => defaults.llm,
-        })?;
+        let draft = self.workspace(cx).and_then(|w| w.state.draft());
+        // The draft's own choice while it is still saved, otherwise the default, as its
+        // plan resolves them.
+        let refs = self
+            .preferences
+            .plan_refs(&crate::preferences::ServiceRefs {
+                asr: draft.and_then(|draft| draft.asr_service.clone()),
+                llm: draft.and_then(|draft| draft.ai_service.clone()),
+            });
+        let id = match purpose {
+            ServicePurpose::Speech => refs.asr,
+            ServicePurpose::Ai => refs.llm,
+        }?;
         self.preferences.version(&id).cloned()
     }
 
@@ -266,10 +267,12 @@ impl Desktop {
         let bound = self
             .workspace(cx)
             .and_then(|w| w.state.draft())
-            .is_some_and(|draft| match purpose {
-                ServicePurpose::Speech => draft.asr_service.is_some(),
-                ServicePurpose::Ai => draft.ai_service.is_some(),
-            });
+            .and_then(|draft| match purpose {
+                ServicePurpose::Speech => draft.asr_service.as_deref(),
+                ServicePurpose::Ai => draft.ai_service.as_deref(),
+            })
+            // A choice no longer saved follows the default, so it is not this note's own.
+            .is_some_and(|id| self.preferences.usable_in_snapshot(id));
         view.when(bound, |view| {
             view.child(
                 h_flex()
@@ -1570,6 +1573,7 @@ impl Desktop {
                     Ok(released) => {
                         this.forget_credentials(released);
                         this.clear_settings_failure(PreferenceGroup::Services);
+                        this.forget_missing_draft_services(cx);
                     }
                     Err(error) => {
                         // The retire marker is written before the group is persisted,
