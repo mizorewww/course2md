@@ -2094,7 +2094,6 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 下移	下移	Move down	下移	下へ移動
 移到最后	移到最后	Move to bottom	移到最後	末尾へ移動
 更多操作	更多操作	More actions	更多操作	その他の操作
-保存到 {}	保存到 {}	Saved to {}	儲存到 {}	保存先: {}
 只能调整排队中的任务	只能调整排队中的任务	Only queued tasks can be reordered	只能調整排隊中的任務	並べ替えられるのは待機中のタスクだけです
 第 {} 步 · {}	第 {} 步 · {}	Step {} · {}	第 {} 步 · {}	ステップ {} · {}
 笔记只能移到它所在保存位置里的文件夹	笔记只能移到它所在保存位置里的文件夹	A note can only move to folders in its own storage location	筆記只能移到它所在儲存位置裡的資料夾	ノートは保存場所内のフォルダーにのみ移動できます
@@ -2317,3 +2316,5 @@ course2md 不在“应用程序”文件夹中。请先退出 course2md，在访
 填写名称	填写名称	Enter a name	填寫名稱	名前を入力
 所选服务已不在设置中，这次笔记改用默认服务「{}」	所选服务已不在设置中，这次笔记改用默认服务「{}」	The chosen service is no longer in settings; this note uses the default service “{}”	所選服務已不在設定中，這次筆記改用預設服務「{}」	選択したサービスは設定にありません。このノートには既定のサービス「{}」を使います
 其他任务结束后才能下载模型	其他任务结束后才能下载模型	The model can be downloaded once the current job finishes	其他任務結束後才能下載模型	現在のジョブが終わるとモデルをダウンロードできます
+保存在「{}」	保存在「{}」	Saved in “{}”	儲存在「{}」	「{}」に保存済み
+将保存到「{}」	将保存到「{}」	Will be saved to “{}”	將儲存到「{}」	「{}」に保存予定

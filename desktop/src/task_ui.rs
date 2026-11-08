@@ -863,7 +863,11 @@ impl TasksPage {
     /// Where a task saves, as its supporting line.
     fn task_destination(&self, task: &TaskRecord, cx: &App) -> String {
         match self.task_library(task, cx) {
-            Some(location) => course2md::tr!("保存到 {}", location.label()),
+            // Only a note that exists is saved; until then it is where it will go.
+            Some(location) if task.artifact.is_some() => {
+                course2md::tr!("保存在「{}」", location.label())
+            }
+            Some(location) => course2md::tr!("将保存到「{}」", location.label()),
             None => course2md::tr!("保存位置暂时不可用").to_owned(),
         }
     }
@@ -1013,11 +1017,19 @@ impl TasksPage {
                 (outer, head.into_any_element(), expanded)
             }
             CardPlace::Open { outer } => {
+                // Once several steps are reached, their chips under the bar say which
+                // runs; the title column does not say it again.
+                let stages = self.task_stage_rows(task, cx);
+                let chips = stages.len() > 1
+                    && (stages.iter().any(|stage| stage.status.running())
+                        || self.is_running_task(&task.id, cx));
                 let facts = (
                     self.task_destination(task, cx),
                     self.task_cover(task, cx),
                     COVER_WIDTH,
-                    self.task_step_line(task, false, cx),
+                    (!chips)
+                        .then(|| self.task_step_line(task, false, cx))
+                        .flatten(),
                 );
                 let head = self.task_card_head(task, place, chip, more, None, facts);
                 (outer, head.into_any_element(), true)
@@ -1624,33 +1636,15 @@ impl TasksPage {
             .flatten()
             .and_then(|index| buttons[index].take());
         let buttons: Vec<MaterialButton> = buttons.into_iter().flatten().collect();
-        let buttons = if home_running {
-            h_flex()
-                .w_full()
-                .min_w_0()
-                .gap(rem(8.))
-                .flex_wrap()
-                .children(leading_cancel)
-                .child(
-                    h_flex()
-                        .ml_auto()
-                        .gap(rem(8.))
-                        .flex_wrap()
-                        .justify_end()
-                        .children(buttons),
-                )
-        } else {
-            h_flex()
-                .w_full()
-                .min_w_0()
-                .gap(rem(8.))
-                .flex_wrap()
-                .when(
-                    !needs_person(task) || matches!(place, CardPlace::Home),
-                    |row| row.justify_end(),
-                )
-                .children(buttons)
-        };
+        // The card's actions are one trailing group, stopping first.
+        let buttons = h_flex()
+            .w_full()
+            .min_w_0()
+            .gap(rem(8.))
+            .flex_wrap()
+            .justify_end()
+            .children(leading_cancel)
+            .children(buttons);
         let details = (self.task_list.expanded.as_ref() == Some(&id)).then(|| {
             let content = v_flex()
                 .w_full()
