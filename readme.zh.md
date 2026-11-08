@@ -18,11 +18,11 @@
 
 ## 下载
 
-[![下载 macOS 版](https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.4/course2md-gui-macos-arm64.dmg)
-[![下载 Windows 版](https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-Windows-0078D4?style=for-the-badge&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0wIDBoMTEuNHYxMS40SDB6TTEyLjYgMEgyNHYxMS40SDEyLjZ6TTAgMTIuNmgxMS40VjI0SDB6TTEyLjYgMTIuNkgyNFYyNEgxMi42eiIvPjwvc3ZnPg%3D%3D)](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.4/course2md-desktop-windows-AMD64.zip)
-[![下载 Linux 版](https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.4/course2md-desktop-linux-x86_64.tar.gz)
+[![下载 macOS 版](https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.5/course2md-gui-macos-arm64.dmg)
+[![下载 Windows 版](https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-Windows-0078D4?style=for-the-badge&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0wIDBoMTEuNHYxMS40SDB6TTEyLjYgMEgyNHYxMS40SDEyLjZ6TTAgMTIuNmgxMS40VjI0SDB6TTEyLjYgMTIuNkgyNFYyNEgxMi42eiIvPjwvc3ZnPg%3D%3D)](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.5/course2md-desktop-windows-x64-setup.exe)
+[![下载 Linux 版](https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.5/course2md-desktop-linux-x86_64.tar.gz)
 
-当前版本 3.0.0-alpha.4（3.0 预览版）：[macOS DMG](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.4/course2md-gui-macos-arm64.dmg)（Apple 芯片，macOS 15 及以上）· [Windows ZIP](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.4/course2md-desktop-windows-AMD64.zip)（x64，便携版，需完整解压）· [Linux tar.gz](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.4/course2md-desktop-linux-x86_64.tar.gz)（x86_64）· [全部版本](https://github.com/mizorewww/course2md/releases)
+当前版本 3.0.0-alpha.5（3.0 预览版）：[macOS DMG](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.5/course2md-gui-macos-arm64.dmg)（Apple 芯片，macOS 15 及以上）· [Windows 安装程序](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.5/course2md-desktop-windows-x64-setup.exe)（x64；另有[便携版 ZIP](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.5/course2md-desktop-windows-AMD64.zip)）· [Linux tar.gz](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.5/course2md-desktop-linux-x86_64.tar.gz)（x86_64）· [全部版本](https://github.com/mizorewww/course2md/releases)
 
 macOS 也可以用 Homebrew 安装：`brew install --cask mizorewww/tap/course2md-gui@alpha`。每个安装包都自带转换引擎和视频工具，各系统的安装步骤见[安装](#安装)。
 
@@ -107,12 +107,14 @@ macOS 也可以用 Homebrew 安装：`brew install --cask mizorewww/tap/course2m
 brew install --cask mizorewww/tap/course2md-gui@alpha
 ```
 
-然后从「应用程序」打开 **course2md**。不使用 Homebrew 时，[下载 DMG](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.4/course2md-gui-macos-arm64.dmg)，把 **course2md** 拖入「应用程序」即可，详见 [macOS 指南](https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#macos-apple-silicon)。
+然后从「应用程序」打开 **course2md**。不使用 Homebrew 时，[下载 DMG](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.5/course2md-gui-macos-arm64.dmg)，把 **course2md** 拖入「应用程序」即可，详见 [macOS 指南](https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#macos-apple-silicon)。
 
 ### Windows（x64）
 
-1. [下载便携包（ZIP）](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.4/course2md-desktop-windows-AMD64.zip)，**完整解压**到固定文件夹。包内已有 `ffmpeg`、`yt-dlp`、`aria2`、`uv`（Intel NPU 识别）和用于显卡（Vulkan）与 CPU 识别的 `llama-server`。显卡和 CPU 识别还需要 [Microsoft Visual C++ 运行库](https://aka.ms/vs/17/release/vc_redist.x64.exe)；缺少时，「运行检查」会提示并给出安装程序链接。
-2. 打开解压目录中的 **course2md-desktop.exe**，其他文件保持在同一目录。
+1. [下载安装程序](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.5/course2md-desktop-windows-x64-setup.exe)并运行。它只为当前用户安装，不需要管理员权限，之后的版本会原地升级。安装程序尚未签名，SmartScreen 会先询问：选择「更多信息 → 仍要运行」。
+2. 从「开始」菜单打开 **course2md**。应用已包含 `ffmpeg`、`yt-dlp`、`aria2`、`uv`（Intel NPU 识别）和用于显卡（Vulkan）与 CPU 识别的 `llama-server`。显卡和 CPU 识别还需要 [Microsoft Visual C++ 运行库](https://aka.ms/vs/17/release/vc_redist.x64.exe)；缺少时，「运行检查」会提示并给出安装程序链接。
+
+不想安装时，可[下载便携版 ZIP](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.5/course2md-desktop-windows-AMD64.zip)，**完整解压**到固定文件夹，打开其中的 **course2md-desktop.exe**，其他文件保持在同一目录。卸载会保留设置、已下载的模型和笔记。
 
 ### Arch Linux / CachyOS（x86_64）
 
@@ -124,7 +126,7 @@ yay -S course2md-gui-bin
 
 ### Ubuntu 及其他 Linux（x86_64）
 
-[下载 tar.gz](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.4/course2md-desktop-linux-x86_64.tar.gz)，按 [Linux 指南](https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#其他-linux-x64)安装图形库，解压后运行 `./course2md-desktop`。基于 Ubuntu 24.04 构建，已内置 `ffmpeg`、`yt-dlp`、`uv` 和 `llama-server`（显卡识别使用系统的 Vulkan 驱动）。
+[下载 tar.gz](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.5/course2md-desktop-linux-x86_64.tar.gz)，按 [Linux 指南](https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#其他-linux-x64)安装图形库，解压后运行 `./course2md-desktop`。基于 Ubuntu 24.04 构建，已内置 `ffmpeg`、`yt-dlp`、`uv` 和 `llama-server`（显卡识别使用系统的 Vulkan 驱动）。
 
 Intel Mac 和 Linux ARM64 暂无桌面应用，可以使用[命令行工具](#命令行工具)。
 
