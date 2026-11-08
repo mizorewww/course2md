@@ -128,6 +128,18 @@ fn readable_first_line(message: &str) -> Option<&str> {
     (!first.contains("WARNING:") && !first.contains("ERROR:")).then_some(first)
 }
 
+/// What stands between the previewed video and its conversion, placed where it belongs
+/// in the card: facts beside the video, one notice for an obstacle with its repairs, and
+/// the actions that take the start action's place.
+#[derive(Default)]
+struct Recovery {
+    facts: Vec<AnyElement>,
+    notice: Option<Div>,
+    actions: Vec<MaterialButton>,
+    /// An obstacle stands: 开始转换 stays in its place, unavailable, until it is resolved.
+    blocked: bool,
+}
+
 /// What a subtitle read belongs to. Its late result counts only while all of this holds.
 struct SubtitleRead {
     generation: u64,
@@ -1311,6 +1323,8 @@ impl Desktop {
                     .ml_auto()
                     .gap(rem(8.))
                     .items_center()
+                    .flex_wrap()
+                    .justify_end()
                     .child(
                         material_button("replace-source", ButtonVariant::Outlined)
                             .tone(ButtonTone::Accent)
@@ -1325,6 +1339,7 @@ impl Desktop {
                                 }
                             })),
                     )
+                    .children(recovery.actions)
                     .when(self.can_start_input(cx), |row| {
                         row.child(
                             material_button("start-conversion", ButtonVariant::Filled)
@@ -1333,7 +1348,8 @@ impl Desktop {
                                 .child(course2md::tr!("开始转换"))
                                 .track_focus(&self.import_submit_focus)
                                 .disabled(
-                                    self.import.pending_conversion.is_some()
+                                    recovery.blocked
+                                        || self.import.pending_conversion.is_some()
                                         || self.import.preview_cancel.is_some(),
                                 )
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -1400,6 +1416,7 @@ impl Desktop {
                     )),
             )
             .child(self.text_source_control(&source, window, cx))
+            .children(recovery.facts)
             .child(actions);
         Some(motion::state_enter(
             "import-selected-source-enter",
@@ -1424,7 +1441,11 @@ impl Desktop {
                     details_open,
                     details,
                 ))
-                .children(recovery.map(|recovery| recovery.pt(rem(16.)))),
+                .children(
+                    recovery
+                        .notice
+                        .map(|notice| div().w_full().pt(rem(16.)).child(notice)),
+                ),
         ))
     }
 
@@ -2522,6 +2543,7 @@ impl Desktop {
         {
             self.scrolls[Page::New as usize].set_offset(point(px(0.), px(-offset)));
         }
+        self.workbench_notice = None;
         let compact = is_compact(window);
         let opening_result = self.opened(cx).reading && self.import.following_conversion.is_some();
         let linked_task = self.workbench_linked_task(cx).cloned();
@@ -2725,7 +2747,7 @@ impl Desktop {
 
     /// What stands between this video and a conversion, each obstacle with its one
     /// way forward. Only unresolved choices interrupt a submitted conversion.
-    fn conversion_recovery(&mut self, cx: &mut Context<Self>) -> Option<Div> {
+    fn conversion_recovery(&mut self, cx: &mut Context<Self>) -> Recovery {
         let busy = self.work.read(cx).job.is_some()
             || self.workspace(cx).is_some_and(|workspace| {
                 workspace.state.tasks.iter().any(|task| {
@@ -2764,7 +2786,11 @@ impl Desktop {
         // Waiting for the component or location checks is progress, not a failure.
         let checking = !preferences_blocked && (self.environment.is_none() || plan_pending);
         let mut facts: Vec<AnyElement> = Vec::new();
+        // Repairs belong to the obstacle's notice; the rest take the start action's place
+        // in the card's trailing group, the filled one last.
+        let mut repairs: Vec<MaterialButton> = Vec::new();
         let mut actions: Vec<MaterialButton> = Vec::new();
+        let mut lead: Option<MaterialButton> = None;
         // An outlined action reads as live: its label is primary (G3).
         let button = |id: &'static str, variant, icon, label: &'static str| {
             material_button(id, variant)
@@ -2780,10 +2806,10 @@ impl Desktop {
                 || !environment.ffprobe
                 || (self.online(cx) && !environment.ytdlp)
         }) {
-            actions.push(
+            repairs.push(
                 button(
                     "repair-conversion-components",
-                    ButtonVariant::Outlined,
+                    ButtonVariant::Tonal,
                     symbols::settings(),
                     course2md::tr!("检查所需组件"),
                 )
@@ -2798,10 +2824,10 @@ impl Desktop {
             );
         }
         if let Some(issue) = preferences_issue {
-            actions.push(
+            repairs.push(
                 button(
                     "repair-generation-preferences",
-                    ButtonVariant::Outlined,
+                    ButtonVariant::Tonal,
                     symbols::refresh(),
                     if issue.can_retry {
                         course2md::tr!("重试保存处理选项")
@@ -2838,10 +2864,10 @@ impl Desktop {
             })
         {
             let id = library.id.clone();
-            actions.push(
+            repairs.push(
                 button(
                     "reassociate-import-location",
-                    ButtonVariant::Outlined,
+                    ButtonVariant::Tonal,
                     symbols::database(),
                     course2md::tr!("重新关联此保存位置"),
                 )
@@ -2861,7 +2887,7 @@ impl Desktop {
                 )
                 .into_any_element(),
             );
-            actions.push(
+            lead = Some(
                 button(
                     "show-matching-task",
                     ButtonVariant::Filled,
@@ -2898,7 +2924,7 @@ impl Desktop {
                 );
             }
             let title = self.library(cx).course_display_title(&course);
-            actions.push(
+            lead = Some(
                 button(
                     "open-existing-note",
                     ButtonVariant::Filled,
@@ -2947,10 +2973,10 @@ impl Desktop {
                 })),
             );
         } else if let Some(purpose) = self.missing_import_service(cx) {
-            actions.push(
+            repairs.push(
                 button(
                     "configure-conversion-service",
-                    ButtonVariant::Filled,
+                    ButtonVariant::Tonal,
                     symbols::settings(),
                     match purpose {
                         ServicePurpose::Speech => course2md::tr!("设置语音识别服务"),
@@ -2978,7 +3004,8 @@ impl Desktop {
                     .on_click(cx.listener(|this, _, window, cx| this.start_conversion(window, cx))),
                 );
             }
-            actions.push(
+            actions.insert(
+                0,
                 button(
                     "cancel-pending-conversion",
                     ButtonVariant::Text,
@@ -2992,35 +3019,37 @@ impl Desktop {
                 })),
             );
         }
-        if let Some(message) = submission_error {
-            let status = if checking {
-                ui::AsyncStatus::Busy(message.into())
-            } else {
-                ui::AsyncStatus::Failed(message.into())
-            };
-            facts.extend(
-                ui::async_status("import-submit-status", &status, None, cx)
-                    .map(IntoElement::into_any_element),
-            );
+        // A check still under way is status beside the video; an obstacle is one notice
+        // in the card with the way past it, and the conversion cannot start until then.
+        let mut notice = None;
+        match submission_error {
+            Some(message) if checking => facts.extend(
+                ui::async_status(
+                    "import-submit-status",
+                    &ui::AsyncStatus::Busy(message.into()),
+                    None,
+                    cx,
+                )
+                .map(IntoElement::into_any_element),
+            ),
+            Some(message) => {
+                notice = Some(
+                    notice_banner("import-submit-status", NoticeKind::Danger, message.clone())
+                        .rounded(RADIUS_LARGE)
+                        .children(repairs.drain(..)),
+                );
+                self.workbench_notice = Some(message);
+            }
+            None => {}
         }
-        if facts.is_empty() && actions.is_empty() {
-            return None;
+        // Without an obstacle to explain them, repairs wait with the card's actions.
+        actions.splice(0..0, repairs);
+        Recovery {
+            facts,
+            blocked: notice.is_some(),
+            notice,
+            actions: actions.into_iter().chain(lead).collect(),
         }
-        Some(
-            v_flex()
-                .w_full()
-                .min_w_0()
-                .gap(rem(12.))
-                .children(facts)
-                .child(
-                    h_flex()
-                        .w_full()
-                        .gap(rem(8.))
-                        .flex_wrap()
-                        .justify_end()
-                        .children(actions),
-                ),
-        )
     }
 }
 
