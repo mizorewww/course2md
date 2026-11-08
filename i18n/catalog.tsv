@@ -1926,7 +1926,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 重试打开	重试打开	Retry opening	重試開啟	開くのを再試行
 重试补做	重试补做	Retry reprocessing	重試補做	再処理を再試行
 重试转换	重试转换	Retry conversion	重試轉換	変換を再試行する
-重试预览	重试预览	Retry preview	重試預覽	プレビューを再試行する
 钥匙串中找不到此服务的凭据，请重新保存 API Key	钥匙串中找不到此服务的凭据，请重新保存 API Key	The credentials for this service were not found in the keychain. Please save the API key again.	鑰匙圈中找不到此服務的憑證，請重新儲存 API 金鑰	このサービスの認証情報がキーチェーンに見つかりませんでした。API キーを再度保存してください。
 链接无效；请提供完整的视频链接 / Invalid URL; provide a complete video URL	链接无效；请提供完整的视频链接	Invalid URL; provide a complete video URL	連結無效；請提供完整的影片連結	無効なリンクです。完全な動画リンクを提供してください
 链接缺少主机名 / URL is missing a host	链接缺少主机名	URL is missing a host	連結缺少主機名	リンクにホスト名がありません

@@ -1161,6 +1161,10 @@ impl Desktop {
             return Some(supporting("import-source-error", error.clone()).into_any_element());
         }
         let needs_login = source::legacy_login_failure_from_text(error);
+        // A tool the read needs is missing: Settings › 应用程序 checks and repairs them.
+        let components_missing = self.environment.as_ref().is_some_and(|environment| {
+            !environment.ffmpeg || !environment.ffprobe || (self.online(cx) && !environment.ytdlp)
+        });
         let message = if needs_login {
             course2md::tr!("视频需要登录后读取，请登录后重试预览")
         } else {
@@ -1184,15 +1188,28 @@ impl Desktop {
                         h_flex()
                             .gap(rem(8.))
                             .flex_wrap()
-                            .child(
-                                material_button("retry-source", ButtonVariant::Outlined)
-                                    .tone(ButtonTone::Accent)
-                                    .icon(symbols::refresh())
-                                    .child(course2md::tr!("重试预览"))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.inspect_source(window, cx)
-                                    })),
-                            )
+                            // The field's own 预览视频 tries again; the notice offers only
+                            // what that cannot do.
+                            .when(components_missing, |row| {
+                                row.child(
+                                    material_button(
+                                        "source-components-repair",
+                                        ButtonVariant::Tonal,
+                                    )
+                                    .icon(symbols::settings())
+                                    .child(course2md::tr!("检查所需组件"))
+                                    .on_click(cx.listener(
+                                        |this, _, window, cx| {
+                                            this.open_settings(window, cx);
+                                            this.select_settings_tab(
+                                                crate::settings_ui::SettingsTab::Application,
+                                                window,
+                                                cx,
+                                            );
+                                        },
+                                    )),
+                                )
+                            })
                             .when(
                                 self.online(cx)
                                     && needs_login
@@ -1203,9 +1220,8 @@ impl Desktop {
                                     row.child(
                                         material_button(
                                             "source-login-repair",
-                                            ButtonVariant::Outlined,
+                                            ButtonVariant::Tonal,
                                         )
-                                        .tone(ButtonTone::Accent)
                                         .icon(symbols::bilibili())
                                         .child(course2md::tr!("登录 Bilibili"))
                                         .on_click(
@@ -1226,9 +1242,8 @@ impl Desktop {
                                     row.child(
                                         material_button(
                                             "source-youtube-repair",
-                                            ButtonVariant::Outlined,
+                                            ButtonVariant::Tonal,
                                         )
-                                        .tone(ButtonTone::Accent)
                                         .icon(symbols::smart_display())
                                         .child(course2md::tr!("连接 YouTube"))
                                         .on_click(
