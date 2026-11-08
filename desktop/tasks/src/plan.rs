@@ -174,11 +174,15 @@ pub fn apply_draft_options(draft: &mut workspace::Draft, options: ConversionOpti
 /// Forgets the draft's own service choices that are no longer saved or whose service
 /// was deleted, so it follows the default as its plan already does
 /// (`preferences::Store::plan_refs`). Returns whether anything changed. A choice
-/// still saved stays, an older version of a service included.
+/// still saved stays, an older version of a service included. While the services
+/// record cannot be read, nothing is known to be gone, so nothing is forgotten.
 pub fn forget_missing_draft_services(
     preferences: &preferences::Store,
     draft: &mut workspace::Draft,
 ) -> bool {
+    if preferences.is_blocked(preferences::PreferenceGroup::Services) {
+        return false;
+    }
     let mut changed = false;
     for choice in [&mut draft.asr_service, &mut draft.ai_service] {
         if choice

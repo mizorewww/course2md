@@ -589,6 +589,22 @@ mod tests {
             "the task keeps the version its requests were made with"
         );
 
+        // While the services record cannot be read, nothing is forgotten.
+        let services = root.path().join("preferences").join("services.json");
+        std::fs::write(&services, b"{damaged").unwrap();
+        std::fs::write(desktop_prefs::store::backup_path(&services), b"{damaged").unwrap();
+        let unreadable = Store::open(
+            root.path().join("preferences"),
+            std::sync::Arc::new(desktop_prefs::credentials::MemoryCredentialVault::new()),
+        );
+        let mut input = workspace.state.draft().unwrap().clone();
+        input.ai_service = Some("service-version-gone".into());
+        assert!(!crate::plan::forget_missing_draft_services(
+            &unreadable,
+            &mut input
+        ));
+        assert_eq!(input.ai_service.as_deref(), Some("service-version-gone"));
+
         // A choice still saved is kept.
         let mut input = workspace.state.draft().unwrap().clone();
         input.ai_service = Some(default.id.clone());

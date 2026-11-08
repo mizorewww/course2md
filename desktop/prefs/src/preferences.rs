@@ -1049,7 +1049,13 @@ impl Store {
     /// service was deleted, or that a services reset or an older backup no longer holds,
     /// falls back instead of leaving the input unable to start. A task already planned
     /// keeps the versions it names, which its requests are identified by.
+    ///
+    /// While the services record cannot be read, nothing is known to be gone: the
+    /// input's own choices stay as they are, and dispatch reports the record.
     pub fn plan_refs(&self, chosen: &ServiceRefs) -> ServiceRefs {
+        if self.is_blocked(PreferenceGroup::Services) {
+            return chosen.clone();
+        }
         let pick = |own: &Option<ServiceVersionId>, default: &Option<ServiceVersionId>| {
             own.clone()
                 .filter(|id| self.usable_in_snapshot(id))
@@ -2729,6 +2735,23 @@ mod tests {
         assert!(recovered.config_for_refs(&config, &held).is_err());
         assert!(recovered.services_missing(&config, &held));
         assert_eq!(recovered.plan_refs(&held).llm, Some(first.id));
+
+        // Unreadable, backup included: nothing is known to be gone, so the explicit
+        // choice stays and nothing reports it missing.
+        let (directory, mut store) = isolated();
+        publish(&mut store, "first", BindingScope::Defaults);
+        let chosen = publish(&mut store, "chosen", BindingScope::CurrentTask);
+        let services = directory.path().join("services.json");
+        std::fs::write(&services, b"{damaged").unwrap();
+        std::fs::write(crate::store::backup_path(&services), b"{damaged").unwrap();
+        let unreadable = open(directory.path(), store.vault());
+        assert!(unreadable.is_blocked(PreferenceGroup::Services));
+        let held = ServiceRefs {
+            asr: None,
+            llm: Some(chosen.id.clone()),
+        };
+        assert_eq!(unreadable.plan_refs(&held), held);
+        assert!(!unreadable.services_missing(&config, &held));
 
         // Reset: nothing is saved and nothing is the default any more.
         let (_directory, mut store) = isolated();
