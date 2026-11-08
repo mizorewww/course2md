@@ -336,7 +336,7 @@ impl Desktop {
             .preparing
             .take()
             .unwrap_or_else(|| self.default_model_request());
-        let for_tasks = std::mem::take(&mut self.settings_ui.model_diagnostics.preparing_for_tasks);
+        self.settings_ui.model_diagnostics.preparing_for_tasks = false;
         let name = model_label(&request.model);
         let message = if success {
             course2md::tr!("{} 已准备完成", name)
@@ -361,13 +361,15 @@ impl Desktop {
             cancelled: cancelled && !success,
         });
         self.refresh_model_diagnostics(cx);
-        if success && for_tasks {
+        // However it was prepared, from a task's card or from Settings, the tasks
+        // that stopped only for this model go on.
+        if success {
             self.resume_tasks_awaiting_model(&request, cx);
         }
         cx.notify();
     }
     /// Continues the tasks that stopped only for `request`'s model, now that it is
-    /// ready: the person's "Download and prepare the model" asked for that.
+    /// ready, whether a task's card or Settings prepared it.
     fn resume_tasks_awaiting_model(&mut self, request: &Request, cx: &mut Context<Self>) {
         let fallback = self.recommended_local_provider();
         let ids = self

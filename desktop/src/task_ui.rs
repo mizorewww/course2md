@@ -1721,6 +1721,21 @@ impl TasksPage {
             .children(self.uncertain_block(task, cx))
             .children(progress)
             .children(chips)
+            // Why 下载并准备模型 cannot start yet, beside it.
+            .when(
+                actions.contains(&TaskAction::PrepareModel) && self.work.read(cx).job.is_some(),
+                |body| {
+                    body.child(
+                        accessible_text(
+                            SharedString::from(format!("task-model-wait-{id}")),
+                            course2md::tr!("其他任务结束后才能下载模型"),
+                        )
+                        .text_size(TEXT_AUX)
+                        .text_color(color(ColorRole::ON_SURFACE_VARIANT))
+                        .whitespace_normal(),
+                    )
+                },
+            )
             .child(buttons)
             .children(details)
             .children(log)
