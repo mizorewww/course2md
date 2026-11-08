@@ -413,7 +413,12 @@ pub fn conversion_gate(gate: GateInputs) -> ConversionGate {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct PlanKey {
     pub workspace: u64,
+    /// The generation preferences' revision.
     pub preferences: u64,
+    /// The services record's revision and whether it can be read: a service added,
+    /// changed or deleted changes which one the plan uses.
+    pub services: u64,
+    pub services_blocked: bool,
     pub defaults_pending: bool,
     pub source: u64,
     pub reading: bool,
@@ -586,6 +591,8 @@ mod tests {
         let waiting = PlanKey {
             workspace: 3,
             preferences: 2,
+            services: 5,
+            services_blocked: false,
             defaults_pending: false,
             source: 1,
             reading: true,
@@ -606,6 +613,15 @@ mod tests {
             },
             PlanKey {
                 reading: false,
+                ..waiting
+            },
+            // A default service saved after the plan said none was set.
+            PlanKey {
+                services: 6,
+                ..waiting
+            },
+            PlanKey {
+                services_blocked: true,
                 ..waiting
             },
         ] {

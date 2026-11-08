@@ -2737,6 +2737,12 @@ impl Desktop {
             preferences: self
                 .preferences
                 .revision(crate::preferences::PreferenceGroup::Generation),
+            services: self
+                .preferences
+                .revision(crate::preferences::PreferenceGroup::Services),
+            services_blocked: self
+                .preferences
+                .is_blocked(crate::preferences::PreferenceGroup::Services),
             defaults_pending: self.preference_defaults_pending,
             source: self.import.preview_generation,
             reading: self.import.reading(),
