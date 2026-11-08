@@ -348,20 +348,33 @@ fn by_simplified() -> &'static HashMap<&'static str, Entry> {
 }
 
 /// Rows by their text in any interface language: a message the app saved in the
-/// language it showed then (a task's error) reads in the one shown now.
+/// language it showed then (a task's error) reads in the one shown now. A text that
+/// rows translate differently ("Continue" is both 继续 and 继续生成) is left out, so
+/// a lookup never guesses and the result does not depend on the catalog's order.
 fn by_any_language() -> &'static HashMap<&'static str, Entry> {
     static INDEX: OnceLock<HashMap<&'static str, Entry>> = OnceLock::new();
     INDEX.get_or_init(|| {
-        let mut index = HashMap::new();
+        let mut index: HashMap<&'static str, Option<Entry>> = HashMap::new();
         for entry in catalog().values() {
             for text in entry {
                 // Short texts ("OK", a unit) are shared by unrelated rows.
-                if text.chars().count() >= 4 {
-                    index.entry(*text).or_insert(*entry);
+                if text.chars().count() < 4 {
+                    continue;
                 }
+                index
+                    .entry(*text)
+                    .and_modify(|known| {
+                        if known.is_some_and(|known| known != *entry) {
+                            *known = None;
+                        }
+                    })
+                    .or_insert(Some(*entry));
             }
         }
         index
+            .into_iter()
+            .filter_map(|(text, entry)| Some((text, entry?)))
+            .collect()
     })
 }
 
@@ -576,6 +589,36 @@ mod tests {
             engine_message_for(t_for(source, Lang::Ja), Lang::En),
             english
         );
+    }
+
+    /// A text two rows translate differently is not re-translated, and the index
+    /// holds only texts whose rows agree, whatever order the catalog loads in.
+    #[test]
+    fn a_text_rows_disagree_on_is_not_retranslated() {
+        let mut seen: HashMap<&str, Vec<Entry>> = HashMap::new();
+        for entry in catalog().values() {
+            for text in entry {
+                seen.entry(*text).or_default().push(*entry);
+            }
+        }
+        let ambiguous: Vec<&str> = seen
+            .iter()
+            .filter(|(text, rows)| {
+                text.chars().count() >= 4 && rows.iter().any(|row| *row != rows[0])
+            })
+            .map(|(text, _)| *text)
+            .collect();
+        assert!(!ambiguous.is_empty());
+        for text in ambiguous {
+            assert!(!by_any_language().contains_key(text), "{text}");
+            // Not a catalog key or a Simplified Chinese row either: kept as written.
+            if catalog().get(text).is_none() && by_simplified().get(text).is_none() {
+                assert_eq!(engine_message_for(text, Lang::ZhHans), text);
+            }
+        }
+        for (text, entry) in by_any_language() {
+            assert!(seen[text].iter().all(|row| row == entry), "{text}");
+        }
     }
 
     #[test]
