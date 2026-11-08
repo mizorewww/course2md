@@ -35,10 +35,18 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(setup_directive("DefaultDirName"), r"{autopf}\course2md")
         self.assertIsNone(setup_directive("PrivilegesRequiredOverridesAllowed"))
 
-    def test_an_upgrade_closes_the_running_app_by_force(self):
-        # The app's window does not answer the Restart Manager's session-end
-        # messages, so a polite close would leave setup waiting or failing.
-        self.assertEqual(setup_directive("CloseApplications"), "force")
+    def test_setup_and_uninstall_stop_programs_running_from_the_install(self):
+        # The app's window does not answer the Restart Manager, which left a
+        # silent upgrade waiting; [Code] stops the programs itself.
+        self.assertEqual(setup_directive("CloseApplications"), "no")
+        code = SCRIPT.split("[Code]", 1)[1]
+        self.assertIn("function PrepareToInstall(var NeedsRestart: Boolean): String;", code)
+        self.assertIn("if CurUninstallStep = usUninstall then", code)
+        self.assertEqual(code.count("StopProgramsIn(ExpandConstant('{app}'))"), 2)
+        # Only executables under the install directory, never one elsewhere by name.
+        self.assertIn("$_.ExecutablePath.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase)",
+                      code)
+        self.assertNotIn("taskkill", code)
 
     def test_installs_the_whole_package_with_its_layout(self):
         self.assertIn(r'Source: "{#SourceDir}\*"; DestDir: "{app}"; '
@@ -48,7 +56,10 @@ class ScriptTests(unittest.TestCase):
         # Settings, model caches and libraries live outside {app}; the script
         # may delete only inside its own directory.
         self.assertNotIn("[UninstallDelete]", SCRIPT)
-        self.assertNotIn("[Code]", SCRIPT)
+        # [Code] only stops programs; it deletes nothing.
+        code = SCRIPT.split("[Code]", 1)[1]
+        for call in ("DelTree", "DeleteFile", "RemoveDir", "Remove-Item"):
+            self.assertNotIn(call, code)
         for line in SCRIPT.splitlines():
             if line.startswith("Type: filesandordirs"):
                 self.assertRegex(line, r'Name: "\{app\}\\[^"]+"$')

@@ -46,11 +46,11 @@ ShowLanguageDialog=auto
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
-; An upgrade closes whatever runs from the install (the app, its engine and
-; tools) through the Restart Manager before replacing files. The app's window
-; does not answer the session-end messages the Restart Manager sends first,
-; so it is terminated: tasks resume from their checkpoints on the next start.
-CloseApplications=force
+; Not the Restart Manager: the app's window does not answer its session-end
+; messages, and a silent upgrade waited on it indefinitely. [Code] stops
+; whatever runs from the install instead, before setup or the uninstaller
+; touches a file; tasks resume from their checkpoints on the next start.
+CloseApplications=no
 RestartApplications=no
 SetupIconFile={#IconFile}
 UninstallDisplayIcon={app}\course2md-desktop.exe
@@ -88,3 +88,47 @@ Name: "{autodesktop}\course2md"; Filename: "{app}\course2md-desktop.exe"; Tasks:
 
 [Run]
 Filename: "{app}\course2md-desktop.exe"; Description: "{cm:LaunchProgram,course2md}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// Stops every program running from the install directory (the app, its engine
+// and the bundled tools) and waits up to 30 s for them to exit. Only processes
+// whose executable lies under Dir are stopped, never a same-named program
+// elsewhere.
+procedure StopProgramsIn(Dir: String);
+var
+  Literal, Script: String;
+  ResultCode: Integer;
+begin
+  if not DirExists(Dir) then
+    Exit;
+  // A PowerShell single-quoted literal doubles its quotes.
+  Literal := AddBackslash(Dir);
+  StringChangeEx(Literal, '''', '''''', True);
+  Script :=
+    '$dir = ''' + Literal + '''; ' +
+    '$running = { Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and ' +
+    '$_.ExecutablePath.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase) } }; ' +
+    '& $running | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; ' +
+    '$deadline = (Get-Date).AddSeconds(30); ' +
+    'while ((& $running) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }';
+  Log('Stopping programs running from ' + Dir);
+  if Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+          '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + Script + '"',
+          '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Log('Stopped programs running from the install (exit code ' + IntToStr(ResultCode) + ')')
+  else
+    Log('Could not run PowerShell to stop programs: ' + SysErrorMessage(ResultCode));
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  // On an upgrade {app} is the earlier install's directory.
+  StopProgramsIn(ExpandConstant('{app}'));
+  Result := '';
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+    StopProgramsIn(ExpandConstant('{app}'));
+end;
