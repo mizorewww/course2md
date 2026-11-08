@@ -2875,7 +2875,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.9.0"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=2a70c1d790173b07ab168a3f9094b72b9cf38bf5#2a70c1d790173b07ab168a3f9094b72b9cf38bf5"
+source = "git+https://github.com/longbridge/gpui-kit?rev=8da4e005258ac0aac9a6a332cce746eeaafa08a8#8da4e005258ac0aac9a6a332cce746eeaafa08a8"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2916,7 +2916,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.9.0"
-source = "git+https://github.com/longbridge/gpui-kit?rev=46bf6d498fa101a3b11cc64e6d8c20d28d17b720#46bf6d498fa101a3b11cc64e6d8c20d28d17b720"
+source = "git+https://github.com/longbridge/gpui-kit?rev=8da4e005258ac0aac9a6a332cce746eeaafa08a8#8da4e005258ac0aac9a6a332cce746eeaafa08a8"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2963,7 +2963,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.9.0"
-source = "git+https://github.com/longbridge/gpui-kit?rev=46bf6d498fa101a3b11cc64e6d8c20d28d17b720#46bf6d498fa101a3b11cc64e6d8c20d28d17b720"
+source = "git+https://github.com/longbridge/gpui-kit?rev=8da4e005258ac0aac9a6a332cce746eeaafa08a8#8da4e005258ac0aac9a6a332cce746eeaafa08a8"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2974,7 +2974,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast"
 version = "0.1.13"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=2a70c1d790173b07ab168a3f9094b72b9cf38bf5#2a70c1d790173b07ab168a3f9094b72b9cf38bf5"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=579f16374daac4a27b02de45de8d91e636bda860#579f16374daac4a27b02de45de8d91e636bda860"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -3045,7 +3045,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-apple"
 version = "0.1.13"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=2a70c1d790173b07ab168a3f9094b72b9cf38bf5#2a70c1d790173b07ab168a3f9094b72b9cf38bf5"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=579f16374daac4a27b02de45de8d91e636bda860#579f16374daac4a27b02de45de8d91e636bda860"
 dependencies = [
  "anyhow",
  "async-task",
@@ -3129,7 +3129,8 @@ dependencies = [
 [[package]]
 name = "gpui-fast-macos"
 version = "0.1.13"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=2a70c1d790173b07ab168a3f9094b72b9cf38bf5#2a70c1d790173b07ab168a3f9094b72b9cf38bf5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d809f618f836aff7fc654c00c3f6e64d41abd83713140998dd83e8ad6906b1e9"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -3198,8 +3199,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-web"
 version = "0.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5194d398f801160d6be5660055a14b175aed9b2dbca348d56065d742b11dbd9"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=579f16374daac4a27b02de45de8d91e636bda860#579f16374daac4a27b02de45de8d91e636bda860"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -3286,7 +3286,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit"
 version = "0.9.0"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=2a70c1d790173b07ab168a3f9094b72b9cf38bf5#2a70c1d790173b07ab168a3f9094b72b9cf38bf5"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=579f16374daac4a27b02de45de8d91e636bda860#579f16374daac4a27b02de45de8d91e636bda860"
 dependencies = [
  "gpui-base",
  "gpui-component",
@@ -3303,7 +3303,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-assets"
 version = "0.9.0"
-source = "git+https://github.com/longbridge/gpui-kit?rev=46bf6d498fa101a3b11cc64e6d8c20d28d17b720#46bf6d498fa101a3b11cc64e6d8c20d28d17b720"
+source = "git+https://github.com/longbridge/gpui-kit?rev=8da4e005258ac0aac9a6a332cce746eeaafa08a8#8da4e005258ac0aac9a6a332cce746eeaafa08a8"
 dependencies = [
  "anyhow",
  "gpui-fast",
@@ -3318,7 +3318,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-material"
 version = "0.1.0"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=2a70c1d790173b07ab168a3f9094b72b9cf38bf5#2a70c1d790173b07ab168a3f9094b72b9cf38bf5"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=579f16374daac4a27b02de45de8d91e636bda860#579f16374daac4a27b02de45de8d91e636bda860"
 dependencies = [
  "gpui-base",
  "gpui-kit",
@@ -3331,7 +3331,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-material-color"
 version = "0.1.0"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=2a70c1d790173b07ab168a3f9094b72b9cf38bf5#2a70c1d790173b07ab168a3f9094b72b9cf38bf5"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=579f16374daac4a27b02de45de8d91e636bda860#579f16374daac4a27b02de45de8d91e636bda860"
 dependencies = [
  "serde",
 ]
@@ -3364,8 +3364,7 @@ checksum = "124f5f8f97c034ca4666123891d2869625523770eae849958614594370068706"
 [[package]]
 name = "gpui-pre"
 version = "0.3.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9303c771abf2acff2a96d706f69d9a82088c4770173a07cce88f0002431d887d"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=579f16374daac4a27b02de45de8d91e636bda860#579f16374daac4a27b02de45de8d91e636bda860"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -3436,8 +3435,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-apple"
 version = "0.3.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c0bea8ffa563d3a1ada533e148bb55be7fb873c178979e889a3d1204f8e1b91"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=579f16374daac4a27b02de45de8d91e636bda860#579f16374daac4a27b02de45de8d91e636bda860"
 dependencies = [
  "anyhow",
  "async-task",
@@ -3777,8 +3775,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-web"
 version = "0.3.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad51fcf6e251d45b092fd4a98a26325eb9cf6ad4e6228b0c6bc50672db9e0563"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=579f16374daac4a27b02de45de8d91e636bda860#579f16374daac4a27b02de45de8d91e636bda860"
 dependencies = [
  "anyhow",
  "async-channel",

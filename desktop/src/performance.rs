@@ -60,12 +60,6 @@ pub fn start(window: &mut Window, cx: &App) {
                             "elapsed_ms": elapsed_ms,
                             "window_active_at_sample": active,
                             "frame_events": events.into_iter().map(|event| match event {
-                                gpui::profiler::FrameEvent::Complete(frame) => json!({
-                                    "kind": "complete",
-                                    "age_ms": frame.start.elapsed().as_secs_f64() * 1000.,
-                                    "duration_ms": frame.duration().as_secs_f64() * 1000.,
-                                    "presentation_wait_ms": frame.presentation_wait.as_secs_f64() * 1000.,
-                                }),
                                 gpui::profiler::FrameEvent::Draw(frame) => json!({
                                     "kind": "draw",
                                     "age_ms": frame.draw_start.elapsed().as_secs_f64() * 1000.,
@@ -76,7 +70,6 @@ pub fn start(window: &mut Window, cx: &App) {
                                     "kind": "present",
                                     "age_ms": frame.present_start.elapsed().as_secs_f64() * 1000.,
                                     "present_ms": frame.present_duration().as_secs_f64() * 1000.,
-                                    "successful_new_frame": frame.successful_new_frame,
                                 }),
                             }).collect::<Vec<_>>(),
                             "draw": histogram!(frames.draw_duration_histogram),
