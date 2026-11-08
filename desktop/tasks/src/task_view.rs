@@ -884,9 +884,13 @@ pub fn task_actions_for(
         if task.state == TaskState::NeedsAttention && task.events.model_required && !uncertain {
             recovery.push(PrepareModel);
         }
+        // A task stopped for its speech model goes on when the model is prepared, which
+        // resumes it; continuing before then could only stop again.
+        let model_missing = task.state == TaskState::NeedsAttention && task.events.model_required;
         if matches!(task.state, TaskState::Paused | TaskState::NeedsAttention)
             && !uncertain
             && !services_missing
+            && !model_missing
         {
             recovery.push(Resume);
         }
@@ -1246,7 +1250,8 @@ mod tests {
             path: None,
         });
         let actions = task_actions(&task, TaskSurface::Card, &facts());
-        assert!(actions.contains(&Action::Resume));
+        // Preparing the model resumes the task; continuing before that would stop again.
+        assert!(!actions.contains(&Action::Resume));
         assert_eq!(
             lead_action(&actions, &task, TaskSurface::Card),
             Some(&Action::PrepareModel)
