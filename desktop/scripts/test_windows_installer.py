@@ -47,6 +47,12 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("$_.ExecutablePath.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase)",
                       code)
         self.assertNotIn("taskkill", code)
+        # The uninstaller runs from {app} and waits for its copy in TEMP: stopping
+        # it, or this process or an ancestor, would end the uninstall itself.
+        self.assertIn("-notlike ''unins*.exe''", code)
+        self.assertIn("'$id = ' + IntToStr(GetCurrentProcessId) + '; '", code)
+        self.assertIn("-not $spared.ContainsKey([string]$_.ProcessId)", code)
+        self.assertIn("external 'GetCurrentProcessId@kernel32.dll stdcall'", code)
 
     def test_installs_the_whole_package_with_its_layout(self):
         self.assertIn(r'Source: "{#SourceDir}\*"; DestDir: "{app}"; '

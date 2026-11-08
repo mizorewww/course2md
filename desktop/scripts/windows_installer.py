@@ -169,7 +169,7 @@ def _run_setup(installer, log, *extra):
     what = f"setup ({' '.join(extra) or 'upgrade'})"
     returncode = _run_bounded([str(installer), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
                                f"/LOG={log}", *extra], log, what)
-    _check(returncode == 0, f"{what} exited with 0")
+    _check(returncode == 0, f"{what} exited with 0 (exit code {returncode})")
 
 
 def _installed(package, app, version, start_menu):
@@ -267,7 +267,8 @@ def smoke(installer, package, work, version):
         _installed(package, app, version, start_menu)
 
         uninstalled = True
-        _check(_uninstall(app, work / "uninstall.log") == 0, "the uninstaller exited with 0")
+        returncode = _uninstall(app, work / "uninstall.log")
+        _check(returncode == 0, f"the uninstaller exited with 0 (exit code {returncode})")
         # The uninstaller finishes from a copy of itself in TEMP.
         deadline = time.monotonic() + 120
         while (app.exists() or _uninstall_entry()) and time.monotonic() < deadline:

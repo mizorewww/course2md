@@ -90,10 +90,14 @@ Name: "{autodesktop}\course2md"; Filename: "{app}\course2md-desktop.exe"; Tasks:
 Filename: "{app}\course2md-desktop.exe"; Description: "{cm:LaunchProgram,course2md}"; Flags: nowait postinstall skipifsilent
 
 [Code]
+function GetCurrentProcessId: Cardinal;
+  external 'GetCurrentProcessId@kernel32.dll stdcall';
+
 // Stops every program running from the install directory (the app, its engine
 // and the bundled tools) and waits up to 30 s for them to exit. Only processes
 // whose executable lies under Dir are stopped, never a same-named program
-// elsewhere.
+// elsewhere. Spared: the uninstaller (unins*.exe), which runs from Dir and
+// waits for its copy in TEMP, and this process with all its ancestors.
 procedure StopProgramsIn(Dir: String);
 var
   Literal, Script: String;
@@ -106,8 +110,14 @@ begin
   StringChangeEx(Literal, '''', '''''', True);
   Script :=
     '$dir = ''' + Literal + '''; ' +
+    '$all = @(Get-CimInstance Win32_Process); $spared = @{}; ' +
+    '$id = ' + IntToStr(GetCurrentProcessId) + '; ' +
+    'while ($id -and -not $spared.ContainsKey([string]$id)) { $spared[[string]$id] = 1; ' +
+    '$id = ($all | Where-Object { $_.ProcessId -eq $id } | Select-Object -First 1).ParentProcessId }; ' +
     '$running = { Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and ' +
-    '$_.ExecutablePath.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase) } }; ' +
+    '$_.ExecutablePath.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase) -and ' +
+    '-not $spared.ContainsKey([string]$_.ProcessId) -and ' +
+    '([IO.Path]::GetFileName($_.ExecutablePath) -notlike ''unins*.exe'') } }; ' +
     '& $running | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; ' +
     '$deadline = (Get-Date).AddSeconds(30); ' +
     'while ((& $running) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }';
