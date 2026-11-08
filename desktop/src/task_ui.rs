@@ -370,6 +370,11 @@ impl TasksPage {
         }
     }
 
+    /// Whether a service task `id` needs is no longer saved or was deleted.
+    pub(crate) fn services_missing(&self, id: &str) -> bool {
+        self.facts.services_missing.contains(id)
+    }
+
     pub(crate) fn task_actions(
         &self,
         task: &TaskRecord,

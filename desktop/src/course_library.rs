@@ -2194,7 +2194,8 @@ impl Desktop {
                 course2md::tr!("阅读笔记")
             };
             actions = actions.child(
-                action("attention-read", ButtonVariant::Tonal)
+                action("attention-read", ButtonVariant::Outlined)
+                    .tone(ButtonTone::Accent)
                     .icon(symbols::menu_book())
                     .child(label)
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -2207,7 +2208,12 @@ impl Desktop {
         let lead = {
             let tasks = self.tasks.read(cx);
             let actions = tasks.task_actions(&task, TaskSurface::Home, cx);
-            lead_action(&actions, &task, TaskSurface::Home)
+            // A task whose service is gone can only go on as a new attempt, whatever
+            // else it offers.
+            let adjust = tasks.services_missing(&task.id) && actions.contains(&TaskAction::Adjust);
+            adjust
+                .then_some(&TaskAction::Adjust)
+                .or_else(|| lead_action(&actions, &task, TaskSurface::Home))
                 .filter(|action| {
                     matches!(
                         action,
@@ -2216,38 +2222,39 @@ impl Desktop {
                 })
                 .cloned()
         };
-        let next = if !requires_repair && !uncertain && !partial_components.is_empty() {
-            let labels = partial_components
-                .iter()
-                .map(|component| component.as_str().to_owned())
-                .collect::<Vec<_>>();
-            let task_id = id.clone();
-            action("retry", ButtonVariant::Text)
-                .icon(symbols::refresh())
-                .child(desktop_tasks::task_view::retry_components_label(&labels))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    let parts = partial_components.clone();
-                    this.reprocess_task(task_id.clone(), parts, Vec::new(), cx);
-                }))
-        } else {
-            let next = lead.unwrap_or(if requires_repair {
-                TaskAction::Repair
-            } else if !uncertain && task.state == TaskState::Paused {
-                TaskAction::Resume
+        let next =
+            if lead.is_none() && !requires_repair && !uncertain && !partial_components.is_empty() {
+                let labels = partial_components
+                    .iter()
+                    .map(|component| component.as_str().to_owned())
+                    .collect::<Vec<_>>();
+                let task_id = id.clone();
+                action("retry", ButtonVariant::Tonal)
+                    .icon(symbols::refresh())
+                    .child(desktop_tasks::task_view::retry_components_label(&labels))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let parts = partial_components.clone();
+                        this.reprocess_task(task_id.clone(), parts, Vec::new(), cx);
+                    }))
             } else {
-                TaskAction::ViewTask
-            });
-            let (label, icon, _) = self.tasks.read(cx).present(&next, &task, cx);
-            action(label, ButtonVariant::Text)
-                .icon(icon)
-                .child(label)
-                .on_click(crate::task_ui::action_click(
-                    self.tasks.downgrade(),
-                    id.clone(),
-                    next,
-                ))
-        };
-        actions = actions.child(next.tone(ButtonTone::Neutral));
+                let next = lead.unwrap_or(if requires_repair {
+                    TaskAction::Repair
+                } else if !uncertain && task.state == TaskState::Paused {
+                    TaskAction::Resume
+                } else {
+                    TaskAction::ViewTask
+                });
+                let (label, icon, _) = self.tasks.read(cx).present(&next, &task, cx);
+                action(label, ButtonVariant::Tonal)
+                    .icon(icon)
+                    .child(label)
+                    .on_click(crate::task_ui::action_click(
+                        self.tasks.downgrade(),
+                        id.clone(),
+                        next,
+                    ))
+            };
+        actions = actions.child(next);
         let scale = TileScale::Regular;
         let summary = desktop_tasks::task_view::task_attention_summary(&task);
         // The video card above already says this obstacle; one place is enough.
@@ -2303,15 +2310,25 @@ impl Desktop {
                                 .child(
                                     status_chip(crate::task_ui::task_status_kind(task.state))
                                         .child(task.state.label()),
-                                )
-                                .child(actions),
+                                ),
                         )
-                        .children(summary.map(|summary| {
-                            scale.support(
+                        // Why it waits, with the way on inside the same notice as on
+                        // Tasks; the action never stands above its cause.
+                        .child(match summary {
+                            Some(summary) => notice_banner(
                                 SharedString::from(format!("recent-summary-{id}")),
+                                if task.state == TaskState::NeedsAttention {
+                                    NoticeKind::Danger
+                                } else {
+                                    NoticeKind::Warning
+                                },
                                 summary,
                             )
-                        })),
+                            .rounded(RADIUS_LARGE)
+                            .child(actions)
+                            .into_any_element(),
+                            None => actions.into_any_element(),
+                        }),
                 ),
         )
     }
