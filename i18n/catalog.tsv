@@ -2084,10 +2084,6 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 双语翻译	双语翻译	Bilingual translation	雙語翻譯	バイリンガル翻訳
 不翻译	不翻译	Off	不翻譯	翻訳しない
 每段文字下方附上译文；已是该语言的视频不翻译	每段文字下方附上译文；已是该语言的视频不翻译	Each paragraph is followed by its translation; videos already in this language are not translated	每段文字下方附上譯文；已是該語言的影片不翻譯	各段落の下に訳文を添えます。すでにこの言語の動画は翻訳しません
-{} 个正在处理	{} 个正在处理	{} processing	{} 個正在處理	処理中 {} 件
-{} 个排队中	{} 个排队中	{} queued	{} 個排隊中	待機中 {} 件
-{} 个需要处理	{} 个需要处理	{} need attention	{} 個需要處理	対応が必要 {} 件
-1 个需要处理	1 个需要处理	1 needs attention	1 個需要處理	対応が必要 1 件
 全部暂停	全部暂停	Pause all	全部暫停	すべて一時停止
 全部继续	全部继续	Resume all	全部繼續	すべて再開
 任务顺序尚未保存：{}	任务顺序尚未保存：{}	Task order was not saved: {}	任務順序尚未儲存：{}	タスクの順序を保存できませんでした: {}
@@ -2115,7 +2111,6 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 这里已有同名文件夹	这里已有同名文件夹	A folder with this name already exists here	這裡已有同名資料夾	ここには同じ名前のフォルダーがすでにあります
 不能把文件夹移到它自己里面	不能把文件夹移到它自己里面	A folder cannot move into itself	不能把資料夾移到它自己裡面	フォルダーをそれ自身の中に移動することはできません
 其中的 {} 个子文件夹也会删除；笔记会保留，移到未分类	其中的 {} 个子文件夹也会删除；笔记会保留，移到未分类	Subfolders inside it are deleted too ({}); notes are kept and move to Unfiled	其中的 {} 個子資料夾也會刪除；筆記會保留，移到未分類	中の {} 個のサブフォルダーも削除されます。ノートは残り、未分類に移動します
-{} 个已暂停	{} 个已暂停	{} paused	{} 個已暫停	一時停止中 {} 件
 视频摘要	视频摘要	Video summary	影片摘要	動画の概要
 核心要点	核心要点	Key points	核心要點	要点
 内容大纲	内容大纲	Outline	內容大綱	アウトライン

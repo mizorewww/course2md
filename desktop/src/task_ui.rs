@@ -562,45 +562,14 @@ impl TasksPage {
             .into_any_element()
     }
 
-    /// The page title with a chip for each kind of work there is, and the
-    /// action that stops or resumes all of it.
+    /// The page title and the action that stops or resumes all of the work.
     fn queue_page_header(&self, tasks: &[TaskRecord], cx: &mut Context<Self>) -> Div {
         let TaskCounts {
-            running,
-            attention,
-            queued,
             resumable,
             pausable,
+            ..
         } = task_counts(tasks);
-        let chips = [
-            (
-                running,
-                StatusKind::Progress,
-                course2md::tr!("{} 个正在处理", running),
-            ),
-            (
-                attention,
-                StatusKind::Danger,
-                if attention == 1 {
-                    course2md::tr!("1 个需要处理").to_owned()
-                } else {
-                    course2md::tr!("{} 个需要处理", attention)
-                },
-            ),
-            (
-                queued,
-                StatusKind::Neutral,
-                course2md::tr!("{} 个排队中", queued),
-            ),
-            (
-                resumable,
-                StatusKind::Neutral,
-                course2md::tr!("{} 个已暂停", resumable),
-            ),
-        ]
-        .into_iter()
-        .filter(|(count, ..)| *count > 0)
-        .map(|(_, kind, text)| status_chip(kind).child(text));
+        // Each group below names its kind of work; the title does not count it again.
         h_flex()
             .w_full()
             .min_w_0()
@@ -614,8 +583,7 @@ impl TasksPage {
                     .flex_basis(rem(320.))
                     .min_w_0()
                     .gap(rem(8.))
-                    .child(ui::page_title("tasks-page-title", course2md::tr!("任务")))
-                    .child(h_flex().gap(rem(8.)).flex_wrap().children(chips)),
+                    .child(ui::page_title("tasks-page-title", course2md::tr!("任务"))),
             )
             .child(
                 h_flex()
@@ -1006,7 +974,12 @@ impl TasksPage {
         let more = self.task_menu_button(task, window, cx);
         // On the workbench the running card's status is its step; Tasks owns the rest.
         let on_home_running = matches!(place, CardPlace::Home) && runs_in_card(task);
+        // In its group on Tasks, a card whose state is the group's title does not
+        // repeat it.
+        let named_by_group = matches!(place, CardPlace::Open { .. })
+            && task_status_label(task) == task_group(task).label();
         let chip = (!on_home_running
+            && !named_by_group
             && (task.state != TaskState::Queued || !matches!(place, CardPlace::Row { .. })))
         .then(|| {
             // A running title already says what is being generated; the chip only
@@ -1640,27 +1613,26 @@ impl TasksPage {
         });
         let mut buttons: Vec<Option<MaterialButton>> = buttons.map(Some).collect();
         let home_running = surface == TaskSurface::Home && runs_in_card(task);
-        // On the workbench, why the task stopped is one notice in its card that holds
-        // the way on, the card's one primary action, as a draft's obstacle is.
+        // Why the task stopped is one notice in its card that holds the way on, the
+        // card's one primary action, as a draft's obstacle is on the workbench.
         let reasons = task_reasons(task);
-        let notice = (surface == TaskSurface::Home && needs_person(task) && !reasons.is_empty())
-            .then(|| {
-                let lead = lead
-                    .as_ref()
-                    .and_then(|lead| actions.iter().position(|action| action == lead))
-                    .and_then(|index| buttons[index].take());
-                notice_banner(
-                    SharedString::from(format!("task-reason-{id}")),
-                    if task.state == TaskState::NeedsAttention {
-                        NoticeKind::Danger
-                    } else {
-                        NoticeKind::Warning
-                    },
-                    reasons.join("\n"),
-                )
-                .rounded(RADIUS_LARGE)
-                .children(lead)
-            });
+        let notice = (!row && needs_person(task) && !reasons.is_empty()).then(|| {
+            let lead = lead
+                .as_ref()
+                .and_then(|lead| actions.iter().position(|action| action == lead))
+                .and_then(|index| buttons[index].take());
+            notice_banner(
+                SharedString::from(format!("task-reason-{id}")),
+                if task.state == TaskState::NeedsAttention {
+                    NoticeKind::Danger
+                } else {
+                    NoticeKind::Warning
+                },
+                reasons.join("\n"),
+            )
+            .rounded(RADIUS_LARGE)
+            .children(lead)
+        });
         let reasons = if notice.is_some() {
             Vec::new()
         } else {
