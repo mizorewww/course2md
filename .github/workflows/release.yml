@@ -209,8 +209,16 @@ jobs:
       # The installer as published: install, upgrade in place, uninstall.
       - name: Windows installer smoke test
         if: runner.os == 'Windows'
-        timeout-minutes: 20
+        # Each setup and uninstaller run stops itself after 5 minutes.
+        timeout-minutes: 35
         run: python -u desktop/scripts/windows_installer.py smoke target/packages/course2md-desktop-windows-x64-setup.exe target/packages/course2md-desktop-windows-AMD64
+      # Setup's and the uninstaller's own logs, when the smoke test fails.
+      - uses: actions/upload-artifact@v4
+        if: failure() && runner.os == 'Windows'
+        with:
+          name: installer-smoke-logs
+          path: ${{ runner.temp }}/installer-smoke/*.log
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: native-${{ runner.os }}

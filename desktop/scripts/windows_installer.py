@@ -138,12 +138,38 @@ def _check(condition, message):
     print(f"ok: {message}")
 
 
+# Each setup or uninstaller run gets this long, well inside the CI step's
+# timeout, so a hang ends here with its log instead of killing the step.
+SETUP_TIMEOUT = 300
+
+
+def _log_tail(log):
+    if Path(log).is_file():
+        print(f"--- last lines of {log} ---")
+        print(Path(log).read_text(encoding="utf-8", errors="replace")[-6000:])
+
+
+def _run_bounded(command, log, what):
+    """Run setup or the uninstaller; on a hang print its log and end its process tree."""
+    process = subprocess.Popen(command)
+    try:
+        returncode = process.wait(timeout=SETUP_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        _log_tail(log)
+        # Setup runs its wizard as a child process (and the uninstaller a copy of itself).
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)], check=False)
+        process.wait(timeout=60)
+        raise SystemExit(f"installer smoke test: {what} did not finish in {SETUP_TIMEOUT} s")
+    if returncode:
+        _log_tail(log)
+    return returncode
+
+
 def _run_setup(installer, log, *extra):
-    result = subprocess.run([str(installer), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
-                             f"/LOG={log}", *extra], timeout=900)
-    if result.returncode and Path(log).is_file():
-        print(Path(log).read_text(encoding="utf-8", errors="replace")[-4000:])
-    _check(result.returncode == 0, f"setup exited with 0 ({' '.join(extra) or 'upgrade'})")
+    what = f"setup ({' '.join(extra) or 'upgrade'})"
+    returncode = _run_bounded([str(installer), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
+                               f"/LOG={log}", *extra], log, what)
+    _check(returncode == 0, f"{what} exited with 0")
 
 
 def _installed(package, app, version, start_menu):
@@ -165,7 +191,7 @@ def _installed(package, app, version, start_menu):
     env = {**os.environ, "PATH": os.pathsep.join([str(system / "System32"), str(system)])}
     doctor = subprocess.run([str(app / "course2md.exe"), "--lang", "en", "doctor"],
                             capture_output=True, text=True, encoding="utf-8", errors="replace",
-                            env=env, timeout=300)
+                            env=env, timeout=180)
     print(doctor.stdout + doctor.stderr)
     problems = doctor_problems(doctor.stdout, app)
     _check(not problems, f"the engine runs the bundled tools from the install ({problems})")
@@ -194,9 +220,9 @@ def _replaced(log, path):
                for entry in entries)
 
 
-def _uninstall(app):
-    return subprocess.run([str(app / "unins000.exe"), "/VERYSILENT", "/SUPPRESSMSGBOXES",
-                           "/NORESTART"], timeout=600)
+def _uninstall(app, log):
+    return _run_bounded([str(app / "unins000.exe"), "/VERYSILENT", "/SUPPRESSMSGBOXES",
+                         "/NORESTART", f"/LOG={log}"], log, "the uninstaller")
 
 
 def smoke(installer, package, work, version):
@@ -240,9 +266,8 @@ def smoke(installer, package, work, version):
         _check(not stale.exists(), "an upgrade replaces llama.cpp/ instead of mixing versions")
         _installed(package, app, version, start_menu)
 
-        result = _uninstall(app)
         uninstalled = True
-        _check(result.returncode == 0, "the uninstaller exited with 0")
+        _check(_uninstall(app, work / "uninstall.log") == 0, "the uninstaller exited with 0")
         # The uninstaller finishes from a copy of itself in TEMP.
         deadline = time.monotonic() + 120
         while (app.exists() or _uninstall_entry()) and time.monotonic() < deadline:
@@ -257,7 +282,10 @@ def smoke(installer, package, work, version):
                 process.kill()
         if not uninstalled and (app / "unins000.exe").is_file():
             print("installer smoke test: uninstalling after a failure")
-            _uninstall(app)
+            try:
+                _uninstall(app, work / "cleanup-uninstall.log")
+            except (OSError, SystemExit, subprocess.SubprocessError) as error:
+                print(f"installer smoke test: cleanup failed: {error}")
     for path in user_data:
         _check(path.is_file(), f"user data survives uninstall: {path}")
         path.unlink()
