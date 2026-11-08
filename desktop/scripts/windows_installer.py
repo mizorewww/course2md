@@ -147,6 +147,29 @@ def _installed(package, app, version, start_menu):
     _check(not problems, f"the engine runs the bundled tools from the install ({problems})")
 
 
+def _start_installed(app):
+    """The installed app and a bundled tool that keeps running, as during a task."""
+    tool = [str(app / "ffmpeg.exe"), "-hide_banner", "-nostdin", "-loglevel", "error", "-re",
+            "-f", "lavfi", "-i", "anullsrc=r=8000", "-t", "1800", "-f", "null", "-"]
+    quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
+             "stderr": subprocess.DEVNULL}
+    running = [("course2md-desktop.exe",
+                subprocess.Popen([str(app / "course2md-desktop.exe")], cwd=app, **quiet)),
+               ("ffmpeg.exe", subprocess.Popen(tool, cwd=app, **quiet))]
+    time.sleep(15)
+    for name, process in running:
+        _check(process.poll() is None, f"{name} is running from the install before the upgrade")
+    return running
+
+
+def _replaced(log, path):
+    """Whether setup's log records installing `path` over the existing file."""
+    entries = log.split("-- File entry --")
+    target = f"Dest filename: {path}".casefold()
+    return any(target in entry.casefold() and "Successfully installed the file." in entry
+               for entry in entries)
+
+
 def smoke(installer, package, work, version):
     installer, package, work = Path(installer).resolve(), Path(package).resolve(), Path(work)
     work.mkdir(parents=True, exist_ok=True)
@@ -164,12 +187,24 @@ def smoke(installer, package, work, version):
     _run_setup(installer, work / "install.log", f"/DIR={app}")
     _installed(package, app, version, start_menu)
 
-    # Upgrade in place: no /DIR, so setup must find the install through the
-    # AppId; a stale file in a directory the package owns must go.
+    # Upgrade in place while the app and a long-running bundled tool run from
+    # the install: no /DIR, so setup must find the install through the AppId,
+    # close both, and replace their files; a stale file in a directory the
+    # package owns must go.
     stale = app / "llama.cpp/stale-from-older-version.dll"
     stale.parent.mkdir(exist_ok=True)
     stale.write_bytes(b"")
+    running = _start_installed(app)
     _run_setup(installer, work / "upgrade.log")
+    for name, process in running:
+        try:
+            process.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            pass
+        _check(process.poll() is not None, f"the upgrade closed the running {name}")
+    log = (work / "upgrade.log").read_text(encoding="utf-8", errors="replace")
+    for name, _ in running:
+        _check(_replaced(log, app / name), f"the upgrade replaced the running {name}")
     _check(not stale.exists(), "an upgrade replaces llama.cpp/ instead of mixing versions")
     _installed(package, app, version, start_menu)
 

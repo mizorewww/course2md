@@ -42,8 +42,11 @@ ShowLanguageDialog=auto
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
-; An upgrade closes a running app (and its engine) before replacing files.
-CloseApplications=yes
+; An upgrade closes whatever runs from the install (the app, its engine and
+; tools) through the Restart Manager before replacing files. The app's window
+; does not answer the session-end messages the Restart Manager sends first,
+; so it is terminated: tasks resume from their checkpoints on the next start.
+CloseApplications=force
 RestartApplications=no
 SetupIconFile={#IconFile}
 UninstallDisplayIcon={app}\course2md-desktop.exe

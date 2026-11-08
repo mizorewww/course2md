@@ -35,6 +35,11 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(setup_directive("DefaultDirName"), r"{autopf}\course2md")
         self.assertIsNone(setup_directive("PrivilegesRequiredOverridesAllowed"))
 
+    def test_an_upgrade_closes_the_running_app_by_force(self):
+        # The app's window does not answer the Restart Manager's session-end
+        # messages, so a polite close would leave setup waiting or failing.
+        self.assertEqual(setup_directive("CloseApplications"), "force")
+
     def test_installs_the_whole_package_with_its_layout(self):
         self.assertIn(r'Source: "{#SourceDir}\*"; DestDir: "{app}"; '
                       'Flags: ignoreversion recursesubdirs createallsubdirs', SCRIPT)
@@ -86,6 +91,15 @@ class SmokeHelperTests(unittest.TestCase):
                 (Path(root) / "yt-dlp/yt-dlp.exe").write_bytes(b"")
             (Path(package) / "ffmpeg.exe").write_bytes(b"")
             self.assertEqual(missing_files(package, app), [Path("ffmpeg.exe")])
+
+    def test_replaced_reads_the_file_entry_of_that_file(self):
+        app = Path("D:/a/course2md app")
+        log = (f"-- File entry --\nDest filename: {app / 'ffmpeg.exe'}\nDest file exists.\n"
+               "Installing the file.\nSuccessfully installed the file.\n"
+               f"-- File entry --\nDest filename: {app / 'course2md-desktop.exe'}\n"
+               "Dest file exists.\nInstalling the file.\n")
+        self.assertTrue(windows_installer._replaced(log, app / "ffmpeg.exe"))
+        self.assertFalse(windows_installer._replaced(log, app / "course2md-desktop.exe"))
 
     def test_doctor_must_find_each_tool_in_the_install_directory(self):
         app = Path("D:/a/_temp/course2md app")
