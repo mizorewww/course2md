@@ -104,7 +104,7 @@ macOS 也可以用 Homebrew 安装：`brew install --cask mizorewww/tap/course2m
 使用 [Homebrew](https://brew.sh) 时，这条命令会安装应用以及 `yt-dlp` 和 `aria2`（加快模型下载）：
 
 ```sh
-brew install --cask mizorewww/tap/course2md-gui
+brew install --cask mizorewww/tap/course2md-gui@alpha
 ```
 
 然后从「应用程序」打开 **course2md**。不使用 Homebrew 时，[下载 DMG](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.4/course2md-gui-macos-arm64.dmg)，把 **course2md** 拖入「应用程序」即可，详见 [macOS 指南](https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#macos-apple-silicon)。

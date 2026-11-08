@@ -104,7 +104,7 @@ The desktop app includes the conversion engine and the video tools it runs (`ffm
 With [Homebrew](https://brew.sh), this installs the app together with `yt-dlp` and `aria2` (faster model downloads):
 
 ```sh
-brew install --cask mizorewww/tap/course2md-gui
+brew install --cask mizorewww/tap/course2md-gui@alpha
 ```
 
 Then open **course2md** from **Applications**. Without Homebrew, [download the DMG](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.4/course2md-gui-macos-arm64.dmg) and drag **course2md** to Applications; see the [macOS guide](https://github.com/mizorewww/course2md/wiki/GUI-Installation#macos-apple-silicon).

@@ -14,6 +14,8 @@ from versioning import PRERELEASE_CHANNELS, parse_release
 
 ROOT = Path(__file__).resolve().parents[1]
 READMES = {"readme.md": "## Download", "readme.zh.md": "## 下载"}
+INSTALL = {"readme.md": "## Install", "readme.zh.md": "## 安装"}
+CASK = re.compile(r"mizorewww/tap/(course2md-gui(?:@[a-z]+)?)(?![\w@-])")
 RELEASES = "https://github.com/mizorewww/course2md/releases"
 DOWNLOAD = re.compile(re.escape(RELEASES) + r"/(?:download/([^/\s)]+)|latest/download)/([^\s)\"']+)")
 BADGE = re.compile(r"\[!\[[^\]]+\]\((https://img\.shields\.io/[^)\s]+)\)\]\(([^)\s]+)\)")
@@ -48,13 +50,20 @@ def cask(version):
     return "course2md-gui" if channel == "stable" else f"course2md-gui@{channel}"
 
 
-def download_section(text, heading):
-    """The download section, which must be the README's first second-level heading."""
+def section(text, heading):
+    """The text from `heading` to the next second-level heading."""
     headings = [match.start() for match in re.finditer(r"^## ", text, re.MULTILINE)]
     start = text.find(heading + "\n")
-    assert headings and start == headings[0], f"{heading} must be the first section"
+    assert start in headings, f"missing {heading}"
     following = [position for position in headings if position > start]
     return text[start:following[0] if following else len(text)]
+
+
+def download_section(text, heading):
+    """The download section, which must be the README's first second-level heading."""
+    first = re.search(r"^## ", text, re.MULTILINE)
+    assert first and text.startswith(heading + "\n", first.start()), f"{heading} must be the first section"
+    return section(text, heading)
 
 
 class ReadmeDownloadTests(unittest.TestCase):
@@ -89,12 +98,14 @@ class ReadmeDownloadTests(unittest.TestCase):
                 self.assertIn(f"]({RELEASES})", section)
                 self.assertIn(self.version, section.replace(f"v{self.version}/", ""))
 
-    def test_homebrew_command_matches_the_release_channel(self):
+    def test_homebrew_cask_matches_the_release_channel(self):
+        expected = cask(self.version)
         for name, text in self.readmes.items():
             with self.subTest(readme=name):
-                section = download_section(text, READMES[name])
-                self.assertEqual(re.findall(r"mizorewww/tap/(course2md-gui\S*?)`", section),
-                                 [cask(self.version)])
+                self.assertEqual(CASK.findall(download_section(text, READMES[name])), [expected])
+                self.assertEqual(CASK.findall(section(text, INSTALL[name])), [expected])
+                # Nowhere else may a README offer another channel's cask.
+                self.assertEqual(set(CASK.findall(text)), {expected})
 
     def test_release_order_and_channels(self):
         self.assertLess(release_key("3.0.0-alpha.4"), release_key("3.0.0-alpha.10"))
