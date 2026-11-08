@@ -2291,7 +2291,6 @@ AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not conf
 笔记暂时无法读取：{}	笔记暂时无法读取：{}	The note cannot be read right now: {}	筆記暫時無法讀取：{}	ノートを現在読み込めません: {}
 重新生成	重新生成	Regenerate	重新產生	再生成
 重新生成笔记	重新生成笔记	Regenerate the note	重新產生筆記	ノートを再生成
-重新生成（覆盖当前笔记）	重新生成（覆盖当前笔记）	Regenerate (replaces the current note)	重新產生（覆寫目前筆記）	再生成（現在のノートを上書き）
 正在更新这份笔记，完成后这里会自动刷新	正在更新这份笔记，完成后这里会自动刷新	Updating this note; this page refreshes when it's done	正在更新這份筆記，完成後這裡會自動重新整理	このノートを更新しています。完了するとここが自動で更新されます
 这份笔记等待更新，完成后这里会自动刷新	这份笔记等待更新，完成后这里会自动刷新	This note is waiting to be updated; this page refreshes when it's done	這份筆記正在等待更新，完成後這裡會自動重新整理	このノートは更新待ちです。完了するとここが自動で更新されます
 这份笔记的更新已暂停	这份笔记的更新已暂停	Updating this note is paused	這份筆記的更新已暫停	このノートの更新は一時停止中です

@@ -2956,7 +2956,7 @@ impl Desktop {
                     "regenerate-note",
                     ButtonVariant::Outlined,
                     symbols::refresh(),
-                    course2md::tr!("重新生成（覆盖当前笔记）"),
+                    course2md::tr!("重新生成"),
                 )
                 .track_focus(&self.import_submit_focus)
                 .disabled(
