@@ -1,4 +1,4 @@
-//! Where model files come from, for this application. `model-fetch` holds the hosts and
+//! Where model files come from, for this application. `mirror-fetch` holds the hosts and
 //! their order; this is the policy.
 //!
 //! `HF_ENDPOINT` is authoritative when set. Otherwise this machine's own locale and
@@ -11,10 +11,10 @@
 //! a model. It happens only when chosen with `COURSE2MD_IP_LOOKUP=1`, and then only
 //! when files are missing.
 
-use model_fetch::{Reason, local_country, lookup_country, normalize_endpoint, system_time_zone};
+use mirror_fetch::{Reason, local_country, lookup_country, normalize_endpoint, system_time_zone};
 use std::sync::OnceLock;
 
-pub use model_fetch::{Endpoints, MIRROR, ORIGIN};
+pub use mirror_fetch::{Endpoints, MIRROR, ORIGIN};
 
 fn ip_lookup_allowed() -> bool {
     std::env::var("COURSE2MD_IP_LOOKUP")

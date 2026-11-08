@@ -31,9 +31,9 @@ native libraries; `--workspace` adds the desktop. Every crate inherits its versi
 | `desktop-ui` | `desktop/ui` | Shared compositions on `gpui-kit-material` (settings rows, confirm dialogs, note text, formulas, symbols), without page state |
 | `course2md-desktop` | `desktop` | The app: pages, windows and the `course2md-desktop` binary |
 
-Three libraries split out of the engine live in repositories of their own and are pinned by
-git revision in the root `Cargo.toml`: `subtitle-parse` (used by `c2m-source` and `c2m-ai`),
-`slide-detect` (`c2m-engine`) and `model-fetch` (`c2m-asr`). They return typed errors and
+Three libraries split out of the engine live in repositories of their own and come from
+crates.io, at the versions in the root `Cargo.toml`: `subtitle-parse` (used by `c2m-source` and
+`c2m-ai`), `slide-detect` (`c2m-engine`) and `mirror-fetch` (`c2m-asr`). They return typed errors and
 events and carry no `tr!`; the crate that calls them translates. The desktop's interface comes
 from `gpui-kit-material`, pinned at one revision of its `main` in `[workspace.dependencies]`
 and in every `[patch]` entry.
