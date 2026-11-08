@@ -975,27 +975,21 @@ impl TasksPage {
         // On the workbench the running card's status is its step; Tasks owns the rest.
         let on_home_running = matches!(place, CardPlace::Home) && runs_in_card(task);
         // In its group on Tasks, a card whose state is the group's title does not
-        // repeat it.
+        // repeat it, and a running card's step line says what it is doing.
+        let generating = task.state == TaskState::Running && task.intent == Intent::Run;
         let named_by_group = matches!(place, CardPlace::Open { .. })
-            && task_status_label(task) == task_group(task).label();
+            && (generating || task_status_label(task) == task_group(task).label());
         let chip = (!on_home_running
             && !named_by_group
             && (task.state != TaskState::Queued || !matches!(place, CardPlace::Row { .. })))
         .then(|| {
-            // A running title already says what is being generated; the chip only
-            // carries the state.
-            let generating = task.state == TaskState::Running && task.intent == Intent::Run;
             // A task whose note another replaced is history, not a success.
             status_chip(if task.replaced_by.is_some() {
                 StatusKind::Neutral
             } else {
                 task_status_kind(task.state)
             })
-            .child(if generating && matches!(place, CardPlace::Open { .. }) {
-                course2md::tr!("处理中").to_owned()
-            } else {
-                task_status_label(task)
-            })
+            .child(task_status_label(task))
         });
         let context_menu = self.task_menu(task, cx);
         // The running card's progress and actions stay in its text column.
@@ -1210,12 +1204,7 @@ impl TasksPage {
         } else {
             task.plan.title.clone()
         };
-        let generating = task.state == TaskState::Running && task.intent == Intent::Run;
-        let title = if generating && !home {
-            course2md::tr!("正在生成《{}》", title)
-        } else {
-            title
-        };
+        // The video's name: its group and step line say what is happening to it.
         // Where it saves, where its text comes from and which service
         // receives it, on one line; on the workbench, whose video it is.
         let support = if home {
@@ -1239,22 +1228,21 @@ impl TasksPage {
             .items_start()
             .flex_wrap()
             .gap(rem(16.))
-            .map(|head| {
-                // A task that needs the person leads with that, not its video. Only a
-                // failure is red: a paused, partial or uncertain task is a warning.
-                if !home && needs_person(task) {
-                    head.child(tinted_icon(
-                        symbols::warning(),
-                        if task.state == TaskState::NeedsAttention {
-                            Tint::Danger
-                        } else {
-                            Tint::Amber
-                        },
-                        ui::RESOURCE_ICON,
-                    ))
-                } else {
-                    head.child(video_cover(cover, cover_width))
-                }
+            // Every task leads with its video; one that needs the person says so in
+            // the notice under it (red for a failure, amber for a pause or a partial).
+            .child({
+                // The same cover as the video's preview, its duration included.
+                let source = &task.plan.source;
+                let duration = (source.duration.is_finite() && source.duration > 0.)
+                    .then(|| course2md::render::fmt_ts(source.duration));
+                video_cover(cover, cover_width).when_some(duration, |cover, duration| {
+                    cover.child(
+                        media_label(format!("task-duration-{id}"), duration)
+                            .absolute()
+                            .right(rem(8.))
+                            .bottom(rem(8.)),
+                    )
+                })
             })
             .child(
                 v_flex()
@@ -1268,26 +1256,7 @@ impl TasksPage {
                             .min_w_0()
                             .items_start()
                             .gap(rem(8.))
-                            .map(|row| {
-                                if !home && needs_person(task) {
-                                    row.child(
-                                        // It shrinks before the menu beside it, and a long
-                                        // title ends in an ellipsis on its second line.
-                                        TileScale::Regular
-                                            .label(format!("task-title-{id}"), title.clone())
-                                            .flex_1()
-                                            .min_w_0()
-                                            .whitespace_normal()
-                                            .text_ellipsis()
-                                            .line_clamp(2),
-                                    )
-                                } else {
-                                    row.child(
-                                        video_title(format!("task-title-{id}"), title.clone())
-                                            .flex_1(),
-                                    )
-                                }
-                            })
+                            .child(video_title(format!("task-title-{id}"), title.clone()).flex_1())
                             .children(title_chip)
                             .child(more),
                     )
@@ -1699,17 +1668,10 @@ impl TasksPage {
         let log = task_log_text(task)
             .filter(|_| self.task_list.logs_open.contains(&id))
             .map(|text| ui::log_box(&id, text));
-        // A task that waits for the person keeps its explanation on the text's ruler too.
-        let ruler = if needs_person(task) && !matches!(place, CardPlace::Home) {
-            rem(ui::RESOURCE_ICON_SIZE + 16.)
-        } else {
-            rem(0.)
-        };
         v_flex()
             .w_full()
             .min_w_0()
             .gap(rem(12.))
-            .pl(ruler)
             .children(notice)
             .children(reasons.into_iter().enumerate().map(|(index, reason)| {
                 error_text(
