@@ -52,10 +52,11 @@ pub enum ModelDownload<'a> {
     Refused,
 }
 
-/// Traditional CLI entry. Its generated task directory is stable for compatible recovery.
-/// New settings or --no-resume use another work directory; a new result replaces the note.
+/// Command-line entry. The video is probed here; the run is then an ordinary task
+/// (`execution::Request`). Its id is the digest of what the command line chose, so the
+/// same settings continue the same work directory and do not make again a note the
+/// task already published; `--no-resume` starts another task.
 pub async fn run(cfg: &PipelineConfig, models: ModelDownload<'_>) -> Result<()> {
-    let started = Instant::now();
     cfg.validate()
         .context(tr!("配置预检失败 / Invalid settings"))?;
     let local = Path::new(&cfg.url);
@@ -71,8 +72,7 @@ pub async fn run(cfg: &PipelineConfig, models: ModelDownload<'_>) -> Result<()> 
             fetch::probe_video(&cfg.url, &TaskControl::default()).await?,
         ))
     };
-    // 本地视频先探时长：成功进 meta；失败不当 0 静默（merge 会失真），
-    // 延迟到诊断作用域内返回，失败同样写 run.json
+    // A local video's duration is probed first; a failure is not taken as zero.
     let local_duration = if is_local {
         Some(media::probe_duration(local).await.context(tr!(
             "无法探测本地视频时长 / Could not probe the local video duration"
@@ -98,8 +98,10 @@ pub async fn run(cfg: &PipelineConfig, models: ModelDownload<'_>) -> Result<()> 
             },
         }
     };
-    let local_duration_error = local_duration.and_then(|probe| probe.err());
     progress::done(Stage::Fetch);
+    if let Some(Err(error)) = local_duration {
+        return Err(error);
+    }
     let platform = config::platform_from(&cfg.url, &meta.extractor);
     let source_id = if is_local {
         format!("local:sha256:{}", meta.id)
@@ -107,9 +109,11 @@ pub async fn run(cfg: &PipelineConfig, models: ModelDownload<'_>) -> Result<()> 
         format!("{platform}:{}", meta.id)
     };
     let course_id = execution::digest(source_id.as_bytes());
-    let course_dir = cfg.out_root.join(&platform).join(&course_id);
-    let binding = cli_binding(&source_id, cfg, &meta.title);
-    let mut task_id = crate::digest::json_digest(&binding)?;
+    let course_dir = std::path::absolute(&cfg.out_root)?
+        .join(&platform)
+        .join(&course_id);
+    let former = cli_binding(&source_id, cfg, &meta.title);
+    let mut task_id = crate::digest::json_digest(&former)?;
     if !cfg.resume {
         task_id = format!(
             "{}-{}",
@@ -119,60 +123,74 @@ pub async fn run(cfg: &PipelineConfig, models: ModelDownload<'_>) -> Result<()> 
                 .as_nanos()
         );
     }
-    let target = Target {
-        task_id: task_id.clone(),
+    let request = execution::Request {
+        schema: execution::REQUEST_SCHEMA,
+        operation: execution::Operation::Generate,
+        work_dir: artifact::work_dir(&course_dir, &task_id)?,
+        task_id,
         course_id,
+        version_id: None,
+        source: cfg.url.clone(),
+        title: Some(meta.title.clone())
+            .filter(|title| !title.trim().is_empty())
+            .unwrap_or_else(|| source_id.clone()),
         source_id,
+        // Left out of the task's identity, as the former one left them out: a site may
+        // report another uploader or duration on the next probe, and the task must still
+        // continue. The note takes both from this run's probe (`Cli::meta`).
+        author: String::new(),
+        duration: 0.,
+        subtitle: None,
+        subtitle_events: None,
+        config: crate::options::file_for(cfg),
+        allow_unauthenticated_asr: false,
         course_dir,
-        replaces: None,
+        control_path: None,
+        service_versions: Default::default(),
     };
-    // Before the work directory: an older app kept task progress inside the note.
-    {
-        let note = target.course_dir.clone();
-        blocking(move || artifact::prepare_note(&note)).await?;
-    }
-    // Held until the task ends: a second task for this note stops before it pays.
-    let _claim = artifact::claim_note(&target.course_dir)?;
-    let work = execution::enter_work_dir(
-        &artifact::work_dir(&target.course_dir, &task_id)?,
-        &binding,
-        ControlSource::default(),
-    )?;
-    let task = Task {
-        cfg,
-        job: work.job(),
-        target: &target,
-        is_local,
-        started,
+    request.validate()?;
+    let cfg = request.resolve_typed()?;
+    let cli = Cli {
+        meta,
+        probed,
+        models,
+        former,
     };
-    task.recording_failure(&platform, &meta.id, async {
-        if let Some(error) = local_duration_error {
-            return Err(error);
-        }
-        task.generate(
-            &meta,
-            SubtitleInput::Discover(probed),
-            Credentials::Cli(models),
-        )
-        .await
-    })
-    .await
+    run_task(&request, &cfg, Caller::Cli(Box::new(cli))).await
 }
 
-/// The identity a CLI task binds its work directory to; its digest names the task.
-/// Identities record the output root as `out_dir`, the value the settings once
-/// carried there before the pipeline chose the work directory.
+/// The identity a CLI task bound its work directory to before the command line ran
+/// tasks; its digest still names the task. Identities record the output root as
+/// `out_dir`, the value the settings once carried there.
 pub(crate) fn cli_binding(source_id: &str, cfg: &PipelineConfig, title: &str) -> serde_json::Value {
     serde_json::json!({"source_id": source_id, "config": cfg.redacted_for_identity(&cfg.out_root), "title": title})
 }
 
-/// Desktop entry: all mutable configuration and credentials have already been resolved.
+/// Who runs a task: the desktop app (`run-task`), or the command line.
+pub(crate) enum Caller<'a> {
+    /// Stop as on quit once this process is gone.
+    Task(ParentProcess),
+    Cli(Box<Cli<'a>>),
+}
+
+/// What only a command-line run has.
+pub(crate) struct Cli<'a> {
+    /// The video as probed, which the note describes as it is.
+    meta: VideoMeta,
+    probed: Option<Box<fetch::OnlineVideo>>,
+    models: ModelDownload<'a>,
+    /// The identity this task's work directory had before the command line ran
+    /// tasks ([`cli_binding`]): a task interrupted then continues where it was.
+    former: serde_json::Value,
+}
+
+/// Every entry point ends here, with configuration and credentials resolved.
 pub(crate) async fn run_task(
     request: &execution::Request,
     cfg: &PipelineConfig,
-    parent: ParentProcess,
+    caller: Caller<'_>,
 ) -> Result<()> {
-    // The caller (`execution::run`) validates through `Request::resolve`.
+    // The caller validates through `Request::resolve`.
     let started = Instant::now();
     let target = request.target();
     {
@@ -206,13 +224,18 @@ pub(crate) async fn run_task(
         let (request, cfg) = (request.clone(), cfg.clone());
         blocking(move || request.binding(&cfg)).await?
     };
+    let (parent, former) = match &caller {
+        Caller::Task(parent) => (Some(*parent), None),
+        Caller::Cli(cli) => (None, Some(&cli.former)),
+    };
     let work = execution::enter_work_dir(
         &request.work_dir,
         &binding,
+        former,
         ControlSource {
             control_path: request.control_path.clone(),
             service_versions: request.service_versions.clone(),
-            parent: Some(parent),
+            parent,
         },
     )?;
     let is_local = Path::new(&request.source).is_file();
@@ -229,18 +252,33 @@ pub(crate) async fn run_task(
         started,
     };
     task.recording_failure(&platform, &request.source_id, async {
-        if let execution::Operation::Reprocess {
-            note_dir,
-            components,
-            prior_work_dir,
-            ..
-        } = &request.operation
-        {
-            return task
-                .reprocess(request, note_dir, components, prior_work_dir.as_deref())
-                .await;
+        match (&request.operation, caller) {
+            (
+                execution::Operation::Reprocess {
+                    note_dir,
+                    components,
+                    prior_work_dir,
+                    ..
+                },
+                _,
+            ) => {
+                task.reprocess(request, note_dir, components, prior_work_dir.as_deref())
+                    .await
+            }
+            (execution::Operation::Generate, Caller::Cli(cli)) => {
+                let Cli {
+                    meta,
+                    probed,
+                    models,
+                    ..
+                } = *cli;
+                let input = SubtitleInput::Discover(probed);
+                task.generate(&meta, input, Credentials::Cli(models)).await
+            }
+            (execution::Operation::Generate, Caller::Task(_)) => {
+                task.generate_requested(request, platform.clone()).await
+            }
         }
-        task.generate_requested(request, platform.clone()).await
     })
     .await
 }

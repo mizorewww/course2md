@@ -2001,16 +2001,19 @@ pub fn reconcile_receipts(task: &mut TaskRecord) -> Result<()> {
     Ok(())
 }
 
-/// What a task said before streams were saved, kept in the mirror of that time.
+/// Where a mirror written before streams were saved is set aside. It is not read.
 const OLD_MIRROR_FILE: &str = "task-record-v1.json";
 
-/// The events a task saved, read back: what an older mirror held, then its stream.
+/// The events a task saved, read back from its stream.
 fn read_task_events(task: &TaskRecord) -> Result<JobEvents> {
-    let old_mirror: Option<TaskMirror> =
-        desktop_prefs::store::read(&task.work_dir.join(OLD_MIRROR_FILE))
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok());
-    let mut events = old_mirror.map_or_else(JobEvents::default, |mirror| mirror.task.events);
+    let mut events = JobEvents::default();
+    let old_mirror = task.work_dir.join(OLD_MIRROR_FILE);
+    if old_mirror.is_file() {
+        events.logs.push(c2m_i18n::tr!(
+            "此任务在旧版本中的进度记录不再读取，原文件保留在 {}",
+            old_mirror.display()
+        ));
+    }
     match desktop_prefs::store::read(&task.work_dir.join(TASK_EVENTS_FILE)) {
         Ok(bytes) => events.replay(&bytes),
         Err(error)
@@ -2030,21 +2033,50 @@ fn read_task_events(task: &TaskRecord) -> Result<JobEvents> {
     Ok(events)
 }
 
-/// A mirror written before streams were saved is the only place left for what the task
-/// said, once the record has been rewritten: it moves aside rather than be overwritten.
+/// A mirror written before streams were saved is not read, and moves aside, unchanged,
+/// rather than be overwritten by this task's next mirror.
 fn keep_old_mirror(directory: &Path) -> Result<()> {
     let path = directory.join("task-record.json");
-    let Ok(bytes) = desktop_prefs::store::read(&path) else {
-        return Ok(());
-    };
-    #[derive(Deserialize)]
-    struct Schema {
-        schema: u32,
-    }
-    if serde_json::from_slice::<Schema>(&bytes).is_ok_and(|mirror| mirror.schema == 1) {
+    if desktop_prefs::store::read(&path).is_ok_and(|bytes| older_record(&bytes)) {
         std::fs::rename(&path, directory.join(OLD_MIRROR_FILE))?;
     }
     Ok(())
+}
+
+/// The library folders a record from before 3.0 names, read for their `root` alone. A
+/// folder that is there and carries a library identity comes back under that identity
+/// and its own name; any other is returned without one. Nothing is written.
+fn older_library_roots(bytes: &[u8]) -> Vec<(PathBuf, Option<LibraryLocation>)> {
+    let Ok(record) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+        return Vec::new();
+    };
+    let roots = record["libraries"].as_array().into_iter().flatten();
+    roots
+        .filter_map(|library| Some(PathBuf::from(library["root"].as_str()?)))
+        .filter(|root| root.is_absolute())
+        .map(|root| {
+            let id = std::fs::read_to_string(root.join(crate::storage::LIBRARY_ID_FILE))
+                .ok()
+                .map(|id| id.trim().to_owned())
+                .filter(|id| root.is_dir() && c2m_engine::execution::valid_id(id));
+            let location = id.map(|id| LibraryLocation {
+                id,
+                name: root.file_name().map_or_else(
+                    || root.display().to_string(),
+                    |name| name.to_string_lossy().into_owned(),
+                ),
+                root: root.clone(),
+                previous_roots: Vec::new(),
+            });
+            (root, location)
+        })
+        .collect()
+}
+
+/// A record or mirror an app before 3.0 wrote (schema 1), which this one no longer reads.
+fn older_record(bytes: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(bytes)
+        .is_ok_and(|record| record.get("schema").and_then(|v| v.as_u64()) == Some(1))
 }
 
 /// What the startup check found on disk for one task.
@@ -2226,32 +2258,29 @@ pub(crate) fn read_library_tasks(location: &LibraryLocation) -> (Vec<TaskRecord>
         if entry.file_type().is_ok_and(|kind| kind.is_symlink()) || !snapshot.is_file() {
             continue;
         }
-        let restored = desktop_prefs::store::read(&snapshot).and_then(|bytes| {
-            let value: serde_json::Value = serde_json::from_slice(&bytes)?;
-            let mirror: TaskMirror = serde_json::from_value(value.clone())?;
+        let bytes = desktop_prefs::store::read(&snapshot).unwrap_or_default();
+        let restored = (|| {
+            let mirror: TaskMirror = serde_json::from_slice(&bytes)?;
             ensure!(
-                mirror.schema <= SCHEMA
+                mirror.schema == SCHEMA
                     && c2m_engine::execution::valid_id(&mirror.task.id)
                     && entry.file_name().to_str() == Some(mirror.task.id.as_str()),
                 c2m_i18n::tr!("任务镜像身份不匹配")
             );
             let mut task = mirror.task;
-            // A mirror older than `root` names its folder in its own work directory.
-            let root = mirror.root.or_else(|| {
-                Path::new(value["task"]["work_dir"].as_str()?)
-                    .ancestors()
-                    .nth(3)
-                    .map(Path::to_path_buf)
-            });
-            if let Some(root) = root {
+            if let Some(root) = mirror.root {
                 task.relocate(&root, &location.root);
             }
             task.plan.library_id = location.id.clone();
             task.work_dir = entry.path();
-            Ok(task)
-        });
+            anyhow::Ok(task)
+        })();
         match restored {
             Ok(task) => tasks.push(task),
+            Err(_) if older_record(&bytes) => issues.push(c2m_i18n::tr!(
+                "{} 的任务记录来自 3.0 之前的版本，此版本不再读取，原文件已保留",
+                entry.file_name().to_string_lossy()
+            )),
             Err(_) => issues.push(c2m_i18n::tr!(
                 "{} 的任务参数仍无法读取，材料已保留",
                 entry.file_name().to_string_lossy()
@@ -2413,8 +2442,10 @@ impl Workspace {
             !originals.is_empty(),
             c2m_i18n::tr!("原任务记录不存在，请重新打开应用建立新记录")
         );
+        // A record from before 3.0 is archived with the rest, and nothing is read from it.
         let records: Vec<serde_json::Value> = originals
             .iter()
+            .filter(|(_, bytes)| !older_record(bytes))
             .filter_map(|(_, bytes)| serde_json::from_slice(bytes).ok())
             .collect();
         ensure!(
@@ -2450,6 +2481,28 @@ impl Workspace {
                 state.libraries.push(location);
             }
         }
+        // A record from before 3.0 gives back only where its libraries are, and only a
+        // folder that names its library itself; another is for the person to add again.
+        let mut issues = Vec::new();
+        for (_, bytes) in originals.iter().filter(|(_, bytes)| older_record(bytes)) {
+            for (folder, found) in older_library_roots(bytes) {
+                match found {
+                    Some(location)
+                        if !state
+                            .libraries
+                            .iter()
+                            .any(|l| l.id == location.id || l.root == location.root) =>
+                    {
+                        state.libraries.push(location)
+                    }
+                    Some(_) => {}
+                    None => issues.push(c2m_i18n::tr!(
+                        "旧版本记录中的笔记库 {} 需要在存储设置中重新添加",
+                        folder.display()
+                    )),
+                }
+            }
+        }
         if !state
             .libraries
             .iter()
@@ -2457,7 +2510,6 @@ impl Workspace {
         {
             state.libraries.append(&mut initial.libraries);
         }
-        let mut issues = Vec::new();
         state.adopt_tasks(salvage(&records, "tasks"));
         for library in state.libraries.clone() {
             if check_library(&library).is_ok() {
@@ -2563,10 +2615,12 @@ impl Workspace {
                 "任务记录由较新版本创建，请使用对应版本打开。原记录和备份均保留，尚未启动任务。"
             ));
         }
-        // The first rewrite drops what the record used to carry for each task, and its
-        // mirror in the library normally holds the same. This copy covers the rest.
-        if schema == Some(1) {
-            let _ = std::fs::copy(&path, path.with_extension("schema1.json"));
+        // Left exactly as it is: rebuilding the record archives it first.
+        if schema.is_some_and(|schema| schema < SCHEMA as u64) {
+            bail!(c2m_i18n::tr!(
+                "任务记录来自 3.0 之前的版本，此版本不再读取。原记录已原样保留：{}。可以选择「备份并重建任务记录」开始新的记录。",
+                path.display()
+            ));
         }
         let mut state = if path.exists() {
             match Self::read(&path) {
@@ -2860,15 +2914,14 @@ impl Workspace {
     }
 
     fn read(path: &Path) -> Result<State> {
-        let mut state: State = serde_json::from_slice(
+        let state: State = serde_json::from_slice(
             &desktop_prefs::store::read(path)
                 .with_context(|| c2m_i18n::tr!("读取 {}", path.display()))?,
         )?;
         ensure!(
-            state.schema <= SCHEMA,
+            state.schema == SCHEMA,
             c2m_i18n::tr!("任务记录版本不受支持，请使用创建这些任务的应用版本")
         );
-        state.schema = SCHEMA;
         ensure!(
             state.library(&state.default_library).is_some(),
             c2m_i18n::tr!("默认保存位置记录缺失")
@@ -3104,7 +3157,6 @@ pub fn accept_source(draft: &mut Draft, revision: u64, source: Source) -> bool {
 mod tests {
     use super::*;
     use c2m_engine::execution::Component;
-    use c2m_protocol::progress::Stage;
 
     #[test]
     fn the_default_library_name_reads_in_the_interface_language() {
@@ -3430,83 +3482,118 @@ mod tests {
     }
 
     #[test]
-    fn records_and_mirrors_from_before_event_streams_keep_everything_they_said() {
+    fn a_record_from_before_3_0_is_left_as_it_is_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = test_workspace(dir.path());
+        let path = ws.storage_path().to_owned();
+        let mut old = serde_json::to_value(&ws.state).unwrap();
+        old["schema"] = serde_json::json!(1);
+        let bytes = serde_json::to_vec(&old).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        let backup = desktop_prefs::store::backup_path(&path);
+        let _ = std::fs::remove_file(&backup);
+        let root = ws.state.libraries[0].root.clone();
+        for _ in 0..2 {
+            let error = Workspace::open_at_inline(path.clone(), root.clone(), Default::default())
+                .err()
+                .expect("an old record is not opened");
+            let message = format!("{error:#}");
+            assert!(message.contains(&path.display().to_string()), "{message}");
+            assert!(message.contains("3.0"), "{message}");
+            assert_eq!(
+                std::fs::read(&path).unwrap(),
+                bytes,
+                "the record is unchanged"
+            );
+            assert!(!backup.exists(), "nothing replaces it, not even a backup");
+        }
+        // Rebuilding, which a person chooses, archives it before writing a new record. Of
+        // the old record it reads only where the libraries are: one that names itself
+        // comes back, and one that does not is for the person to add again.
+        let marked = dir.path().join("marked");
+        let unmarked = dir.path().join("unmarked");
+        std::fs::create_dir_all(&marked).unwrap();
+        std::fs::create_dir_all(&unmarked).unwrap();
+        std::fs::write(marked.join(".course2md-library-id"), "library-two").unwrap();
+        old["libraries"] = serde_json::json!([
+            {"id": "ignored-id", "name": "Ignored", "root": marked, "extra": 1},
+            {"id": "library-three", "name": "Three", "root": unmarked},
+            {"id": "library-gone", "name": "Gone", "root": dir.path().join("gone")},
+        ]);
+        let bytes = serde_json::to_vec(&old).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        let rebuilt = Workspace::rebuild_at(path.clone(), root, Default::default()).unwrap();
+        assert_eq!(rebuilt.state.schema, SCHEMA);
+        let restored = rebuilt.state.library("library-two").unwrap();
+        assert_eq!(
+            (restored.root.as_path(), restored.name.as_str()),
+            (marked.as_path(), "marked")
+        );
+        assert!(check_library(restored).is_ok());
+        assert!(rebuilt.state.libraries.iter().all(|l| l.root != unmarked));
+        let message = rebuilt.recovery.clone().unwrap();
+        assert!(
+            message.contains(&unmarked.display().to_string()),
+            "{message}"
+        );
+        assert!(
+            message.contains(&dir.path().join("gone").display().to_string()),
+            "{message}"
+        );
+        assert!(!unmarked.join(".course2md-library-id").exists());
+        let archived = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("workspace-recovery")
+            })
+            .map(|entry| std::fs::read(entry.path().join("workspace.json")).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(archived, [bytes]);
+    }
+
+    #[test]
+    fn a_task_mirror_from_before_event_streams_is_not_read_and_is_kept() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
         let library = ws.state.default_library.clone();
         let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         ws.state.task_mut(&id).unwrap().state = TaskState::NeedsAttention;
-        let root = ws.state.libraries[0].root.clone();
-        let work = root.join(".course2md/work").join(&id);
-        std::fs::create_dir_all(&work).unwrap();
-        // The shape the previous version wrote, derived fields and all.
-        let mut old = serde_json::to_value(&ws.state).unwrap();
-        old["schema"] = serde_json::json!(1);
-        let task = old["tasks"][0].as_object_mut().unwrap();
-        task.insert("work_dir".into(), serde_json::json!(work));
-        task.insert("handled_by".into(), serde_json::Value::Null);
-        task.insert("error".into(), serde_json::json!("服务拒绝凭据"));
-        task.insert("logs".into(), serde_json::json!(["一行日志"]));
-        task.insert(
-            "stages".into(),
-            serde_json::json!({"transcribe":
-                {"status": "done", "current": 7, "total": 7, "detail": null}}),
-        );
-        task.insert(
-            "blocked".into(),
-            serde_json::json!([{"reason": "paused", "request_id": null,
-                "purpose": null, "message": "已暂停"}]),
-        );
-        let mirror = serde_json::json!({"schema": 1, "task": old["tasks"][0]});
-        let path = ws.storage_path().to_owned();
-        std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
-        // A library that is offline when the old record is first rewritten keeps
-        // its tasks' details in the mirror beside their materials.
-        let parked = dir.path().join("offline");
-        std::fs::write(work.join("task-record.json"), mirror.to_string()).unwrap();
-        std::fs::rename(&root, &parked).unwrap();
-        let options = ConversionOptions::default();
-        let mut opened =
-            Workspace::open_at_inline(path.clone(), root.clone(), options.clone()).unwrap();
-        assert!(
-            !root.exists(),
-            "reading must not recreate an offline library"
-        );
-        let task = opened.state.task(&id).unwrap();
-        assert_eq!(task.events.logs, ["一行日志"]);
-        assert!(!task.events.loaded);
-        opened.transaction(|_| Ok(())).unwrap();
-        let kept = std::fs::read_to_string(path.with_extension("schema1.json")).unwrap();
-        assert!(kept.contains("一行日志"));
-        let rewritten = std::fs::read_to_string(&path).unwrap();
-        assert!(!rewritten.contains("一行日志") && rewritten.contains("服务拒绝凭据"));
-        assert!(serde_json::from_str::<serde_json::Value>(&rewritten).unwrap()["schema"] == SCHEMA);
+        ws.save().unwrap();
+        ws.library_writes().drain();
+        let location = ws.state.libraries[0].clone();
+        let work = ws.state.task(&id).unwrap().work_dir.clone();
+        let mut task = serde_json::to_value(ws.state.task(&id).unwrap()).unwrap();
+        task["logs"] = serde_json::json!(["一行日志"]);
+        let old = serde_json::to_vec(&serde_json::json!({"schema": 1, "task": task})).unwrap();
+        std::fs::write(work.join("task-record.json"), &old).unwrap();
 
-        // Back online: the stream is written from the mirror, and nothing was lost.
-        std::fs::rename(&parked, &root).unwrap();
-        let reopened = Workspace::open_at_inline(path, root.clone(), options).unwrap();
-        let task = reopened.state.task(&id).unwrap();
-        assert!(task.events.loaded);
-        assert_eq!(task.events.logs, ["一行日志"]);
-        assert_eq!(task.events.error.as_deref(), Some("服务拒绝凭据"));
-        assert_eq!(task.events.blocked[0].message, "已暂停");
-        assert!(task.events.stages[&Stage::Transcribe].done);
-        assert_eq!(task.work_dir, work);
-        let upgraded = std::fs::read_to_string(work.join("task-record.json")).unwrap();
-        assert!(!upgraded.contains("一行日志"));
-        assert!(work.join(OLD_MIRROR_FILE).is_file());
-        // What it says from now on follows what it said then.
-        std::fs::write(
-            work.join(TASK_EVENTS_FILE),
-            "{\"type\":\"log\",\"level\":\"info\",\"message\":\"下一行\"}\n",
-        )
-        .unwrap();
-        let again =
-            Workspace::open_at_inline(reopened.path.clone(), root, Default::default()).unwrap();
-        assert_eq!(
-            again.state.task(&id).unwrap().events.logs,
-            ["一行日志", "下一行"]
+        // A library read back for its tasks names it, and leaves it.
+        let (tasks, issues) = read_library_tasks(&location);
+        assert!(tasks.is_empty());
+        assert_eq!(issues.len(), 1);
+        assert!(
+            issues[0].contains(&id) && issues[0].contains("3.0"),
+            "{issues:?}"
         );
+        assert_eq!(std::fs::read(work.join("task-record.json")).unwrap(), old);
+
+        // Opening the record moves it aside unchanged, reads none of it, and says where.
+        let reopened = test_workspace(dir.path());
+        reopened.library_writes().drain();
+        let logs = &reopened.state.task(&id).unwrap().events.logs;
+        assert!(!logs.iter().any(|line| line == "一行日志"), "{logs:?}");
+        assert!(
+            logs.iter()
+                .any(|line| line.contains(&work.join(OLD_MIRROR_FILE).display().to_string())),
+            "{logs:?}"
+        );
+        assert_eq!(std::fs::read(work.join(OLD_MIRROR_FILE)).unwrap(), old);
+        let mirror = std::fs::read(work.join("task-record.json")).unwrap();
+        assert!(!older_record(&mirror));
     }
 
     #[test]

@@ -305,8 +305,21 @@ impl Request {
 
     /// Expects a request that passed [`Request::validate`] (as [`Request::read`] ensures).
     pub fn resolve(&self) -> Result<PipelineConfig> {
-        let mut cfg =
-            crate::options::resolve(self.source.clone(), &Default::default(), &self.config)?;
+        self.resolve_with(&Default::default())
+    }
+
+    /// [`Self::resolve`] for settings a person typed on the command line: a speech model
+    /// they named is the model, as `options::resolve` keeps one given as an option, and a
+    /// retired one is refused, not replaced.
+    pub(crate) fn resolve_typed(&self) -> Result<PipelineConfig> {
+        self.resolve_with(&crate::options::RunOpts {
+            asr_model: self.config.defaults.asr_model.clone(),
+            ..Default::default()
+        })
+    }
+
+    fn resolve_with(&self, opts: &crate::options::RunOpts) -> Result<PipelineConfig> {
+        let mut cfg = crate::options::resolve(self.source.clone(), opts, &self.config)?;
         // Recovery is a task invariant, not a configurable preference. Where the
         // task works comes from `work_dir` and `course_dir`, not the settings.
         cfg.resume = true;
@@ -437,6 +450,7 @@ impl WorkDir {
 pub(crate) fn enter_work_dir(
     work_dir: &Path,
     binding: &serde_json::Value,
+    former: Option<&serde_json::Value>,
     source: crate::dispatch::ControlSource,
 ) -> Result<WorkDir> {
     std::fs::create_dir_all(work_dir)?;
@@ -448,7 +462,7 @@ pub(crate) fn enter_work_dir(
         .with_context(|| {
             crate::tr!("目录正被另一任务使用：{}。请等待任务结束", path.display()).to_string()
         })?;
-    bind_work_dir(work_dir, binding)?;
+    bind_work_dir(work_dir, binding, former)?;
     let control = crate::dispatch::TaskControl::open(work_dir, source)?;
     Ok(WorkDir {
         job: Job {
@@ -460,13 +474,21 @@ pub(crate) fn enter_work_dir(
 }
 
 /// A mismatch is evidence that this is a different task; preserve both old work and error.
-pub(crate) fn bind_work_dir(work_dir: &Path, binding: &serde_json::Value) -> Result<()> {
+/// `former` is the identity the same task bound before, which takes the current one.
+pub(crate) fn bind_work_dir(
+    work_dir: &Path,
+    binding: &serde_json::Value,
+    former: Option<&serde_json::Value>,
+) -> Result<()> {
     std::fs::create_dir_all(work_dir)?;
     let path = work_dir.join("task-identity.json");
     if path.exists() {
         let old: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?).context(
             tr!("任务进度身份损坏，原文件已保留 / Task identity is damaged"),
         )?;
+        if former == Some(&old) {
+            return crate::fsio::atomic_write(&path, &serde_json::to_vec_pretty(binding)?);
+        }
         anyhow::ensure!(
             old == *binding,
             tr!(
@@ -490,7 +512,7 @@ pub(crate) fn bind_work_dir(work_dir: &Path, binding: &serde_json::Value) -> Res
 pub async fn run(request: Request, parent: crate::dispatch::ParentProcess) -> Result<()> {
     let cfg = request.resolve()?;
     // No settings::load, environment credential resolution or wizard on this path.
-    crate::pipeline::run_task(&request, &cfg, parent).await
+    crate::pipeline::run_task(&request, &cfg, crate::pipeline::Caller::Task(parent)).await
 }
 
 /// Call only while all writers are paused and the library copy has been verified.
@@ -582,10 +604,15 @@ mod tests {
     #[test]
     fn immutable_work_rejects_changed_inputs_without_destroying_progress() {
         let dir = tempfile::tempdir().unwrap();
-        bind_work_dir(dir.path(), &serde_json::json!({"title":"A"})).unwrap();
+        bind_work_dir(dir.path(), &serde_json::json!({"title":"A"}), None).unwrap();
         std::fs::write(dir.path().join("asr.jsonl"), "saved result").unwrap();
-        bind_work_dir(dir.path(), &serde_json::json!({"title":"A"})).unwrap();
-        assert!(bind_work_dir(dir.path(), &serde_json::json!({"title":"B"})).is_err());
+        bind_work_dir(dir.path(), &serde_json::json!({"title":"A"}), None).unwrap();
+        assert!(bind_work_dir(dir.path(), &serde_json::json!({"title":"B"}), None).is_err());
+        // The identity the same task bound before gives way to the current one.
+        let former = serde_json::json!({"title":"A"});
+        bind_work_dir(dir.path(), &serde_json::json!({"title":"C"}), Some(&former)).unwrap();
+        bind_work_dir(dir.path(), &serde_json::json!({"title":"C"}), Some(&former)).unwrap();
+        assert!(bind_work_dir(dir.path(), &serde_json::json!({"title":"A"}), None).is_err());
         assert_eq!(
             std::fs::read_to_string(dir.path().join("asr.jsonl")).unwrap(),
             "saved result"
@@ -674,6 +701,84 @@ mod tests {
             request.validate().is_err(),
             "the repaired note is the task's"
         );
+    }
+
+    /// What a command line chose comes back from the settings its request carries, a
+    /// speech model it named included.
+    #[test]
+    fn a_command_line_request_resolves_to_what_was_typed() {
+        use crate::{config::AsrProvider, options::RunOpts};
+        let root = std::env::temp_dir().join("library");
+        let mut file = ConfigFile::default();
+        file.defaults.similarity = Some(0.7);
+        file.llm.enabled = true;
+        file.llm.api_key = "key".into();
+        let typed = [
+            RunOpts {
+                out: Some("relative/out".into()),
+                roi: Some("10.5%,0%-90%,87.25%".into()),
+                similarity: Some(0.1 + 0.2),
+                provider: Some(AsrProvider::Api),
+                asr_api_key: Some("asr".into()),
+                formats: Some(vec![crate::config::OutputFormat::Json]),
+                no_keep_video: true,
+                translate: Some("en".into()),
+                gpu_layers: Some(3),
+                ..Default::default()
+            },
+            // Refused when speech is needed, as the command line always refused it.
+            RunOpts {
+                provider: Some(AsrProvider::Npu),
+                asr_model: Some("qwen3-1.7b".into()),
+                ..Default::default()
+            },
+            RunOpts {
+                provider: Some(AsrProvider::Npu),
+                asr_model: Some("dseditor/Qwen3-ASR-1.7B-INT8_OpenVINO".into()),
+                ..Default::default()
+            },
+            RunOpts {
+                provider: Some(AsrProvider::Cpu),
+                asr_model: Some("qwen3-0.6b".into()),
+                ..Default::default()
+            },
+        ];
+        for opts in typed {
+            let cfg = crate::options::resolve("video.mp4".into(), &opts, &file).unwrap();
+            let request = Request {
+                schema: REQUEST_SCHEMA,
+                operation: Operation::Generate,
+                task_id: "task".into(),
+                course_id: "course".into(),
+                version_id: None,
+                source: "video.mp4".into(),
+                source_id: "local:sha256:0".into(),
+                title: "Lecture".into(),
+                author: String::new(),
+                duration: 0.,
+                subtitle: None,
+                subtitle_events: None,
+                config: crate::options::file_for(&cfg),
+                allow_unauthenticated_asr: false,
+                work_dir: root.join(".course2md/work/task"),
+                course_dir: root.join("course"),
+                control_path: None,
+                service_versions: Default::default(),
+            };
+            request.validate().unwrap();
+            let mut sent = request.resolve_typed().unwrap();
+            // A task always resumes; a fresh command line already chose a new task id.
+            sent.resume = cfg.resume;
+            assert_eq!(
+                serde_json::to_value(&sent).unwrap(),
+                serde_json::to_value(&cfg).unwrap()
+            );
+            if sent.provider == AsrProvider::Npu && sent.asr_model.as_deref() == Some("qwen3-1.7b")
+            {
+                let error = sent.validate_asr_with_auth(true, true).unwrap_err();
+                assert!(format!("{error:#}").contains("Qwen3"), "{error:#}");
+            }
+        }
     }
 
     #[test]
