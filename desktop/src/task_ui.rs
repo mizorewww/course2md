@@ -588,7 +588,7 @@ impl TasksPage {
             .child(
                 h_flex()
                     .gap(rem(8.))
-                    .when(pausable > 0, |row| {
+                    .when(pausable > 1, |row| {
                         row.child(
                             material_button("tasks-pause-all", ButtonVariant::Outlined)
                                 .tone(ButtonTone::Accent)
@@ -597,7 +597,7 @@ impl TasksPage {
                                 .on_click(cx.listener(|_, _, _, cx| cx.emit(TasksEvent::PauseAll))),
                         )
                     })
-                    .when(resumable > 0, |row| {
+                    .when(resumable > 1, |row| {
                         row.child(
                             material_button("tasks-resume-all", ButtonVariant::Outlined)
                                 .tone(ButtonTone::Accent)
