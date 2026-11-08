@@ -1165,7 +1165,10 @@ impl Desktop {
         let components_missing = self.environment.as_ref().is_some_and(|environment| {
             !environment.ffmpeg || !environment.ffprobe || (self.online(cx) && !environment.ytdlp)
         });
-        let message = if needs_login {
+        let message = if components_missing {
+            // The action beside it says where to check; the message says what is wrong.
+            course2md::tr!("缺少读取视频所需的组件")
+        } else if needs_login {
             course2md::tr!("视频需要登录后读取，请登录后重试预览")
         } else {
             readable_first_line(error)
