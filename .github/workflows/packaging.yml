@@ -3,9 +3,9 @@ name: packaging
 on:
   push:
     branches: [main]
-    paths: ['packaging/**', 'desktop/scripts/**', 'install.sh', '.github/actions/packaging-tests/**', '.github/workflows/packaging.yml']
+    paths: ['packaging/**', 'desktop/scripts/**', 'desktop/installer/**', 'install.sh', 'readme.md', 'readme.zh.md', 'Cargo.toml', '.github/actions/packaging-tests/**', '.github/workflows/packaging.yml']
   pull_request:
-    paths: ['packaging/**', 'desktop/scripts/**', 'install.sh', '.github/actions/packaging-tests/**', '.github/workflows/packaging.yml']
+    paths: ['packaging/**', 'desktop/scripts/**', 'desktop/installer/**', 'install.sh', 'readme.md', 'readme.zh.md', 'Cargo.toml', '.github/actions/packaging-tests/**', '.github/workflows/packaging.yml']
 
 permissions:
   contents: read

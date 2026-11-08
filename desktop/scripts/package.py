@@ -15,6 +15,7 @@ from dmg import build_install_dmg
 import ffmpeg_bundle
 import licenses
 import prebuilt
+import windows_installer
 import ytdlp_bundle
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -204,6 +205,9 @@ def main():
     except ImportError as error:
         raise SystemExit("Install packaging tools: python -m pip install -r "
                          "desktop/scripts/requirements-packaging.txt") from error
+    if system == "Windows" and tools_required and windows_installer.find_iscc() is None:
+        raise SystemExit("Building the Windows installer needs Inno Setup 6.3 or later "
+                         "(winget install JRSoftware.InnoSetup, or set ISCC)")
     if tools_required and not args.no_ffmpeg and ffmpeg_bundle.supported(system, platform.machine()):
         if missing := ffmpeg_bundle.missing_build_tools(TOOL_CACHE):
             raise SystemExit(f"Building the bundled ffmpeg needs {', '.join(missing)}: python -m pip "
@@ -352,6 +356,10 @@ def main():
     else:
         archive = shutil.make_archive(str(base), "zip" if system == "Windows" else "gztar", base.parent, base.name)
     print(archive)
+    if system == "Windows":
+        # The setup program installs the same files the portable ZIP holds.
+        if installer := windows_installer.build(base, version, base.parent, required=tools_required):
+            print(installer)
 
 
 if __name__ == "__main__":

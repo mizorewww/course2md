@@ -95,8 +95,24 @@ jobs:
           df -h .
       # --require-tools: a tool that cannot be bundled, or that fails to run
       # (an ffmpeg without https, a missing library), fails the job.
+      # On Windows this also builds the per-user installer.
       - name: Package development build
         run: python desktop/scripts/package.py --debug --no-build --require-tools
+      # Installs into a temporary directory, checks every file and the engine
+      # (its version, and that it runs the bundled tools from the install),
+      # upgrades in place, uninstalls, and checks that user data stays.
+      - name: Windows installer smoke test
+        if: runner.os == 'Windows'
+        # Each setup and uninstaller run stops itself after 5 minutes.
+        timeout-minutes: 35
+        run: python -u desktop/scripts/windows_installer.py smoke target/packages/course2md-desktop-windows-x64-setup.exe target/packages/course2md-desktop-windows-AMD64
+      # Setup's and the uninstaller's own logs, when the smoke test fails.
+      - uses: actions/upload-artifact@v4
+        if: failure() && runner.os == 'Windows'
+        with:
+          name: installer-smoke-logs-pr
+          path: ${{ runner.temp }}/installer-smoke/*.log
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: course2md-desktop-${{ runner.os }}
@@ -104,3 +120,4 @@ jobs:
             target/packages/*.zip
             target/packages/*.tar.gz
             target/packages/*.dmg
+            target/packages/*-setup.exe
