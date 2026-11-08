@@ -25,6 +25,8 @@ const WORKBENCH_WIDTH: Rems = rem(760.);
 const HERO_GAP: Rems = rem(20.);
 /// The link field to the line under it: the drop hint or the source switch (H4).
 const HERO_HINT_GAP: Rems = rem(24.);
+/// The link / local file switch: room for both labels with their icons.
+const SOURCE_KIND_WIDTH: Rems = rem(360.);
 
 fn workbench_column() -> Div {
     div()
@@ -658,19 +660,30 @@ impl Desktop {
                 .min_w_0()
                 .gap(HERO_HINT_GAP)
                 .child(
+                    // The kit's segmented button, bounded so its two segments read as one
+                    // switch under the title rather than a full-width bar.
                     h_flex().w_full().justify_center().child(
-                        ConnectedButtonGroup::new("source-kind", course2md::tr!("视频来源"))
-                            .tone(ButtonTone::Neutral)
-                            .options([
-                                ("online", course2md::tr!("视频链接")),
-                                ("local", course2md::tr!("本地文件")),
-                            ])
-                            .icon("online", symbols::link())
-                            .icon("local", symbols::movie())
-                            .selected("local")
-                            .on_change(cx.listener(|this, value: &SharedString, window, cx| {
-                                this.switch_source_kind(value.as_ref() == "online", window, cx);
-                            })),
+                        div().w(SOURCE_KIND_WIDTH).max_w_full().child(
+                            ConnectedButtonGroup::new("source-kind", course2md::tr!("视频来源"))
+                                .segmented()
+                                .tone(ButtonTone::Neutral)
+                                .options([
+                                    ("online", course2md::tr!("视频链接")),
+                                    ("local", course2md::tr!("本地文件")),
+                                ])
+                                .icon("online", symbols::link())
+                                .icon("local", symbols::movie())
+                                .selected("local")
+                                .on_change(cx.listener(
+                                    |this, value: &SharedString, window, cx| {
+                                        this.switch_source_kind(
+                                            value.as_ref() == "online",
+                                            window,
+                                            cx,
+                                        );
+                                    },
+                                )),
+                        ),
                     ),
                 )
                 .children(local);
