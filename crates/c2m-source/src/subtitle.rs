@@ -10,7 +10,7 @@ use subtitle_parse::{DecodeError, ReadError, best_file, normalize_language};
 
 pub use subtitle_parse::{
     Track as SubtitleTrack, TrackKind as SubtitleKind, TrackOrigin as SubtitleOrigin,
-    is_subtitle_file, sidecars as sidecar_tracks, sort_tracks,
+    is_subtitle_file, sort_tracks,
 };
 
 /// How many tracks a default choice tries before it gives up: the chosen one and
@@ -283,6 +283,21 @@ pub fn pick_subtitle_file(dir: &Path) -> Option<PathBuf> {
     preferred_file(subtitle_parse::files_in(dir), c2m_i18n::i18n::lang().code())
 }
 
+/// The sidecars of a local video, at absolute paths. `subtitle-parse` keeps the form of the
+/// video's path, so a bare `lecture.mp4` would give a bare `lecture.srt`; a track stored with
+/// a task or read by another process must not depend on this process's working directory.
+pub fn sidecar_tracks(video: &Path) -> Vec<SubtitleTrack> {
+    match std::env::current_dir() {
+        Ok(cwd) => sidecar_tracks_in(video, &cwd),
+        Err(_) if video.is_absolute() => subtitle_parse::sidecars(video),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn sidecar_tracks_in(video: &Path, cwd: &Path) -> Vec<SubtitleTrack> {
+    subtitle_parse::sidecars(&cwd.join(video))
+}
+
 /// 本地视频的同名字幕 sidecar（`lecture.srt`、`lecture.zh.vtt` 等，与桌面端同一发现规则），
 /// 界面语言优先、其次英文。A task that has its transcript keeps it, so this choice
 /// never changes under a resumed task.
@@ -462,6 +477,25 @@ mod tests {
     }
 
     #[test]
+    fn a_blank_line_in_a_cue_does_not_split_it() {
+        let event = |start: f64, text: &str| TranscriptEvent {
+            start,
+            end: start + 1.,
+            text: text.into(),
+            raw: None,
+            translation: None,
+        };
+        let events = [event(1., "first\n\n  \nsecond"), event(3., "third")];
+        let srt = to_srt(&events);
+        assert!(srt.contains("first\nsecond\n\n2\n"), "{srt}");
+        let parsed = parse_subtitle(&srt);
+        assert_eq!(parsed.len(), 2);
+        assert_eq!((parsed[0].start, parsed[1].start), (1., 3.));
+        assert!(parsed[0].text.contains("first") && parsed[0].text.contains("second"));
+        assert_eq!(parsed[1].text, "third");
+    }
+
+    #[test]
     fn read_failures_keep_their_words_and_causes() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("lesson.srt");
@@ -516,6 +550,27 @@ mod tests {
         assert_eq!(
             pick_subtitle_file(dir.path()).unwrap(),
             dir.path().join("sub.zh-Hans.srt")
+        );
+    }
+
+    #[test]
+    fn a_bare_video_name_finds_its_sidecars_at_absolute_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("lecture.srt"), b"x").unwrap();
+        std::fs::write(other.path().join("lecture.srt"), b"x").unwrap();
+        let picked = preferred_file(
+            sidecar_tracks_in(Path::new("lecture.mp4"), dir.path()),
+            "en",
+        )
+        .unwrap();
+        assert_eq!(picked, dir.path().join("lecture.srt"));
+        assert!(picked.is_absolute());
+        // An absolute video keeps its own directory, whatever the working directory.
+        let video = other.path().join("lecture.mp4");
+        assert_eq!(
+            preferred_file(sidecar_tracks_in(&video, dir.path()), "en").unwrap(),
+            other.path().join("lecture.srt")
         );
     }
 }
