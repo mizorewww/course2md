@@ -927,6 +927,36 @@ impl Desktop {
         }
     }
 
+    /// After a service leaves the settings (deleted, or the group reset), the current
+    /// draft stops naming it and follows the default, as its plan already does.
+    pub(crate) fn forget_missing_draft_services(&mut self, cx: &mut Context<Self>) {
+        let preferences = &self.preferences;
+        let stale = self
+            .workspace(cx)
+            .and_then(|workspace| workspace.state.draft())
+            .is_some_and(|draft| {
+                [&draft.asr_service, &draft.ai_service]
+                    .into_iter()
+                    .flatten()
+                    .any(|id| !preferences.usable_in_snapshot(id))
+            });
+        if !stale {
+            return;
+        }
+        let result = self.records.change(cx, |records, _| {
+            Some(records.workspace.as_mut()?.transaction(|state| {
+                if let Some(draft) = state.draft_mut() {
+                    desktop_tasks::plan::forget_missing_draft_services(preferences, draft);
+                }
+                Ok(())
+            }))
+        });
+        if let Some(Err(error)) = result {
+            self.report(course2md::tr!("当前输入尚未保存：{}"), error);
+        }
+        cx.notify();
+    }
+
     pub fn adjust_task(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         if self.is_running_task(&id, cx) {
             self.message =
@@ -945,11 +975,22 @@ impl Desktop {
         cx.spawn_in(window, async move |this, cx| {
             let events = events.await.flatten();
             let _ = this.update_in(cx, |this, window, cx| {
-                let adjusted = this.transact(
-                    course2md::tr!("尚未打开任务调整选项：{}"),
-                    |state| state.adjust_task(&id, events),
-                    cx,
-                );
+                // A service the task named that is gone gives way to the default.
+                let preferences = &this.preferences;
+                let adjusted = this
+                    .records
+                    .change(cx, |records, _| {
+                        Some(records.workspace.as_mut()?.transaction(|state| {
+                            desktop_tasks::plan::adjust_task(state, preferences, &id, events)
+                        }))
+                    })
+                    .and_then(|result| {
+                        result
+                            .map_err(|error| {
+                                this.report(course2md::tr!("尚未打开任务调整选项：{}"), error)
+                            })
+                            .ok()
+                    });
                 if adjusted.is_some() {
                     this.import.following_conversion = None;
                     this.invalidate_source();
@@ -1395,11 +1436,21 @@ impl Desktop {
                 Some((task.id.clone(), preparation))
             })
             .collect();
+        let services_missing = records
+            .workspace
+            .iter()
+            .flat_map(|workspace| &workspace.state.tasks)
+            // A paused task resumes with the services it names, so it is affected too.
+            .filter(|task| matches!(task.state, TaskState::NeedsAttention | TaskState::Paused))
+            .filter(|task| desktop_tasks::run::services_missing(&self.preferences, task))
+            .map(|task| task.id.clone())
+            .collect();
         task_ui::ShellFacts {
             services,
             reassociate,
             storage_busy: self.storage_ui.busy,
             models,
+            services_missing,
         }
     }
 }

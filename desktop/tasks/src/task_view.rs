@@ -298,6 +298,34 @@ pub(crate) fn ai_stage_outcome(
 /// The hint older engines attached to failures no account could fix (V1).
 const LEGACY_LOGIN_HINT: &str = "提示：请在设置的账号中重新登录 B 站后重试。 / Hint: sign in to Bilibili again in Settings and retry.";
 
+/// Saved task messages whose wording a later version replaced, by their old Simplified
+/// Chinese or English text, and the catalog row that says it now.
+const RENAMED_MESSAGES: &[(&str, &str)] = &[
+    (
+        "找不到任务使用的服务版本，请选择服务后建立新尝试",
+        "任务使用的服务已不在设置中，请调整后重试并选择服务",
+    ),
+    (
+        "The service version used by the task cannot be found. Please select the service and create a new attempt.",
+        "任务使用的服务已不在设置中，请调整后重试并选择服务",
+    ),
+    (
+        "找不到任務使用的服務版本，請選擇服務後建立新嘗試",
+        "任务使用的服务已不在设置中，请调整后重试并选择服务",
+    ),
+    (
+        "タスクで使用されているサービスのバージョンが見つかりません。サービスを選択し、新しい試行を作成してください。",
+        "任务使用的服务已不在设置中，请调整后重试并选择服务",
+    ),
+];
+
+fn renamed_message(text: &str) -> &str {
+    RENAMED_MESSAGES
+        .iter()
+        .find(|(old, _)| *old == text)
+        .map_or(text, |(_, now)| now)
+}
+
 /// A task's failure in the interface language. A refused result names its parts
 /// from the error's structure, not from the engine's Simplified Chinese words.
 fn task_error_summary(task: &TaskRecord) -> Option<String> {
@@ -354,8 +382,11 @@ fn failure_summary_in(
         let summary = summary
             .strip_prefix(LEGACY_LOGIN_HINT)
             .map_or(summary, |rest| rest.trim_start_matches([':', ' ']));
-        // The worker writes for machine consumers in Simplified Chinese; the
-        // person reads it in the interface language.
+        // A message an older version saved under wording since replaced.
+        let summary = renamed_message(summary);
+        // The worker writes for machine consumers in Simplified Chinese, and the
+        // desktop saves its own in the language it showed then; the person reads
+        // either in the interface language.
         let summary = c2m_i18n::i18n::engine_message_for(summary, lang);
         let summary = summary.as_str();
         // A long cause (a tool's own error line) is cut, not replaced: the start
@@ -513,9 +544,15 @@ pub fn lead_action<'a>(
     let read = (home && task.state == TaskState::Partial)
         .then(|| actions.iter().find(|action| **action == TaskAction::Read))
         .flatten();
+    // A task that cannot continue as it is goes on as a new attempt.
+    let adjust = || {
+        (task.state == TaskState::NeedsAttention && !task.has_uncertain())
+            .then(|| actions.iter().find(|action| **action == TaskAction::Adjust))
+            .flatten()
+    };
     // A running task has nothing to decide, so its next step is the next video.
     let working = runs_in_card(task);
-    read.or_else(recovery).or_else(|| {
+    read.or_else(recovery).or_else(adjust).or_else(|| {
         actions
             .iter()
             .find(|action| home && working && **action == TaskAction::NextVideo)
@@ -841,6 +878,18 @@ pub fn task_actions(
     surface: TaskSurface,
     facts: &TaskFacts<'_>,
 ) -> Vec<TaskAction> {
+    task_actions_for(task, surface, facts, false)
+}
+
+/// [`task_actions`] for a task that `services_missing` (see `run::services_missing`):
+/// a service it needs is no longer saved or was deleted, so continuing it could only
+/// stop again. It offers no Resume; adjusting it, a new attempt, is the way on.
+pub fn task_actions_for(
+    task: &TaskRecord,
+    surface: TaskSurface,
+    facts: &TaskFacts<'_>,
+    services_missing: bool,
+) -> Vec<TaskAction> {
     use TaskAction::*;
     let active = facts.active;
     let uncertain = task.has_uncertain() && !task.held;
@@ -866,7 +915,14 @@ pub fn task_actions(
         if task.state == TaskState::NeedsAttention && task.events.model_required && !uncertain {
             recovery.push(PrepareModel);
         }
-        if matches!(task.state, TaskState::Paused | TaskState::NeedsAttention) && !uncertain {
+        // A task stopped for its speech model goes on when the model is prepared, which
+        // resumes it; continuing before then could only stop again.
+        let model_missing = task.state == TaskState::NeedsAttention && task.events.model_required;
+        if matches!(task.state, TaskState::Paused | TaskState::NeedsAttention)
+            && !uncertain
+            && !services_missing
+            && !model_missing
+        {
             recovery.push(Resume);
         }
         if !uncertain {
@@ -955,8 +1011,9 @@ pub fn task_actions(
                 if has_note {
                     actions.push(Read);
                 }
-                // The rest stays behind ⋯: this card is one step of the workbench.
-                if recovery.len() > 1 {
+                // The rest stays behind ⋯: this card is one step of the workbench. A
+                // task whose service is gone keeps 调整后重试, its only way on.
+                if recovery.len() > 1 && !services_missing {
                     recovery.retain(|action| *action != Adjust);
                 }
                 actions.extend(recovery);
@@ -1225,7 +1282,8 @@ mod tests {
             path: None,
         });
         let actions = task_actions(&task, TaskSurface::Card, &facts());
-        assert!(actions.contains(&Action::Resume));
+        // Preparing the model resumes the task; continuing before that would stop again.
+        assert!(!actions.contains(&Action::Resume));
         assert_eq!(
             lead_action(&actions, &task, TaskSurface::Card),
             Some(&Action::PrepareModel)
@@ -1239,6 +1297,32 @@ mod tests {
         });
         let actions = task_actions(&task, TaskSurface::Card, &facts());
         assert!(!actions.contains(&Action::PrepareModel));
+    }
+
+    /// A saved error reads in the interface language shown now, whatever language
+    /// it was saved in, and under the wording that replaced an older one.
+    #[test]
+    fn a_saved_error_reads_in_the_current_language_and_wording() {
+        use c2m_i18n::i18n::{Lang, t_for};
+        let now = "任务使用的服务已不在设置中，请调整后重试并选择服务";
+        for saved in [
+            "找不到任务使用的服务版本，请选择服务后建立新尝试",
+            "找不到任務使用的服務版本，請選擇服務後建立新嘗試",
+            "タスクで使用されているサービスのバージョンが見つかりません。サービスを選択し、新しい試行を作成してください。",
+            t_for(now, Lang::En),
+            t_for(now, Lang::Ja),
+        ] {
+            assert_eq!(
+                super::failure_summary_in(TaskState::NeedsAttention, Some(saved), Lang::En)
+                    .as_deref(),
+                Some(t_for(now, Lang::En))
+            );
+            assert_eq!(
+                super::failure_summary_in(TaskState::NeedsAttention, Some(saved), Lang::ZhHans)
+                    .as_deref(),
+                Some(now)
+            );
+        }
     }
 
     /// Copies at the limit stop a task: the card says, in full and in the

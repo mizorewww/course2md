@@ -171,6 +171,48 @@ pub fn apply_draft_options(draft: &mut workspace::Draft, options: ConversionOpti
     draft.options = options;
 }
 
+/// Forgets the draft's own service choices that are no longer saved or whose service
+/// was deleted, so it follows the default as its plan already does
+/// (`preferences::Store::plan_refs`). Returns whether anything changed. A choice
+/// still saved stays, an older version of a service included. While the services
+/// record cannot be read, nothing is known to be gone, so nothing is forgotten.
+pub fn forget_missing_draft_services(
+    preferences: &preferences::Store,
+    draft: &mut workspace::Draft,
+) -> bool {
+    if preferences.is_blocked(preferences::PreferenceGroup::Services) {
+        return false;
+    }
+    let mut changed = false;
+    for choice in [&mut draft.asr_service, &mut draft.ai_service] {
+        if choice
+            .as_deref()
+            .is_some_and(|id| !preferences.usable_in_snapshot(id))
+        {
+            *choice = None;
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// A new attempt at task `id`: the form takes its options as `State::adjust_task`
+/// does, and a service it named that is no longer saved or was deleted gives way to
+/// the current default. The task itself, and the versions its requests were made
+/// with, are unchanged; the new attempt is a task of its own with its own requests.
+pub fn adjust_task(
+    state: &mut workspace::State,
+    preferences: &preferences::Store,
+    id: &str,
+    subtitle_events: Option<Vec<c2m_core::timeline::TranscriptEvent>>,
+) -> Result<()> {
+    state.adjust_task(id, subtitle_events)?;
+    if let Some(draft) = state.draft_mut() {
+        forget_missing_draft_services(preferences, draft);
+    }
+    Ok(())
+}
+
 /// The single write path for the current draft: apply `edit` to a copy and
 /// commit it in one workspace transaction. An edit that changes nothing
 /// neither writes nor moves the timestamp. Returns whether a write happened.
@@ -462,11 +504,10 @@ impl PlanInputs<'_> {
         source: source::Source,
         title: String,
     ) -> Result<TaskPlan> {
-        let defaults = self.preferences.default_refs();
-        let refs = ServiceRefs {
-            asr: draft.asr_service.clone().or(defaults.asr),
-            llm: draft.ai_service.clone().or(defaults.llm),
-        };
+        let refs = self.preferences.plan_refs(&ServiceRefs {
+            asr: draft.asr_service.clone(),
+            llm: draft.ai_service.clone(),
+        });
         let config = match validation {
             PlanValidation::Preview => self.preferences.config_for_preview(&config, &refs)?,
             PlanValidation::Submission => self.preferences.config_for_refs(&config, &refs)?,

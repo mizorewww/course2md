@@ -7,7 +7,7 @@ use crate::library_ui::{Moving, NameTarget};
 use crate::{symbols, ui};
 use desktop_store::library::*;
 use desktop_store::order::{self, NoteFacts, Place, Sort, SortRule};
-use desktop_tasks::task_view::TaskAction;
+use desktop_tasks::task_view::{TaskAction, TaskSurface, lead_action};
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit_material::components::MaterialContextMenu;
 use gpui_kit_material::{
@@ -48,16 +48,12 @@ fn cover(image: Option<PathBuf>, icon: SymbolIcon) -> Div {
         .aspect_ratio(16. / 9.)
         .overflow_hidden()
         .bg(color(ColorRole::SECONDARY_CONTAINER))
-        .child(match image {
-            Some(path) => img(path)
-                .size_full()
-                .object_fit(ObjectFit::Cover)
-                .into_any_element(),
-            None => Icon::from(icon)
+        .child(
+            Icon::from(icon)
                 .size(rem(24.))
-                .color(color(ColorRole::ON_SECONDARY_CONTAINER))
-                .into_any_element(),
-        })
+                .color(color(ColorRole::ON_SECONDARY_CONTAINER)),
+        )
+        .children(image.map(crate::import_ui::cover_fill))
 }
 
 /// The cover of a note or task row.
@@ -1927,7 +1923,8 @@ impl Desktop {
             .into_any_element()
     }
 
-    /// Every queued/running task remains visible without replacing the source input.
+    /// Tasks waiting on the person, then every queued/running task, without replacing
+    /// the source input. A task is not a note: these stay out of 最近的笔记.
     pub fn workbench_active_tasks_section(
         &self,
         window: &mut Window,
@@ -1935,6 +1932,7 @@ impl Desktop {
     ) -> Option<Div> {
         use crate::workspace::{Intent, TaskState};
         let linked = self.current_input_task(cx).map(|task| task.id.clone());
+        let attention = self.workbench_attention_tasks(cx);
         let tasks: Vec<_> = self
             .workspace(cx)?
             .state
@@ -1950,13 +1948,18 @@ impl Desktop {
             })
             .cloned()
             .collect();
-        if tasks.is_empty() {
+        if tasks.is_empty() && attention.is_empty() {
             return None;
         }
         let scale = TileScale::Regular;
-        let count = tasks.len();
+        let waiting = attention.len();
+        let count = waiting + tasks.len();
         let mut list = v_flex().w_full().min_w_0().gap(TILE_GAP);
+        for (index, task) in attention.iter().enumerate() {
+            list = list.child(self.attention_row(task.clone(), list_corners(index, count), cx));
+        }
         for (index, task) in tasks.iter().enumerate() {
+            let index = waiting + index;
             let id = task.id.clone();
             let queued = task.state == TaskState::Queued && !self.is_running_task(&id, cx);
             let cancel = id.clone();
@@ -2035,10 +2038,41 @@ impl Desktop {
         }
         Some(home_section(
             "workbench-active-title",
-            course2md::tr!("正在处理"),
+            if waiting > 0 {
+                course2md::tr!("任务")
+            } else {
+                course2md::tr!("正在处理")
+            },
             None,
             list,
         ))
+    }
+
+    /// Tasks that wait on the person, newest first: stopped, unconfirmed, paused, or a
+    /// note with parts left to redo. The current input's own task shows in its card.
+    fn workbench_attention_tasks(&self, cx: &App) -> Vec<crate::workspace::TaskRecord> {
+        use crate::workspace::TaskState;
+        let linked = self.current_input_task(cx).map(|task| task.id.clone());
+        let mut attention: Vec<_> = self
+            .records
+            .read(cx)
+            .workspace
+            .iter()
+            .flat_map(|workspace| &workspace.state.tasks)
+            .filter(|task| {
+                Some(&task.id) != linked.as_ref()
+                    && task.handled_by.is_none()
+                    && (matches!(
+                        task.state,
+                        TaskState::NeedsAttention | TaskState::Uncertain | TaskState::Paused
+                    ) || (task.state == TaskState::Partial
+                        && task.artifact.is_some()
+                        && !desktop_tasks::task_view::task_component_failures(task).is_empty()))
+            })
+            .collect();
+        attention.sort_by_key(|task| std::cmp::Reverse(task.updated));
+        attention.truncate(2);
+        attention.into_iter().cloned().collect()
     }
 
     /// A queued or running task's live status: the status line (a spinner
@@ -2160,7 +2194,8 @@ impl Desktop {
                 course2md::tr!("阅读笔记")
             };
             actions = actions.child(
-                action("attention-read", ButtonVariant::Tonal)
+                action("attention-read", ButtonVariant::Outlined)
+                    .tone(ButtonTone::Accent)
                     .icon(symbols::menu_book())
                     .child(label)
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -2168,106 +2203,145 @@ impl Desktop {
                     })),
             );
         }
-        let next = if !requires_repair && !uncertain && !partial_components.is_empty() {
-            let labels = partial_components
-                .iter()
-                .map(|component| component.as_str().to_owned())
-                .collect::<Vec<_>>();
-            let task_id = id.clone();
-            action("retry", ButtonVariant::Text)
-                .icon(symbols::refresh())
-                .child(desktop_tasks::task_view::retry_components_label(&labels))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    let parts = partial_components.clone();
-                    this.reprocess_task(task_id.clone(), parts, Vec::new(), cx);
-                }))
-        } else {
-            let next = if requires_repair {
-                TaskAction::Repair
-            } else if !uncertain && task.state == TaskState::Paused {
-                TaskAction::Resume
-            } else {
-                TaskAction::ViewTask
-            };
-            let (label, icon, _) = self.tasks.read(cx).present(&next, &task, cx);
-            action(label, ButtonVariant::Text)
-                .icon(icon)
-                .child(label)
-                .on_click(crate::task_ui::action_click(
-                    self.tasks.downgrade(),
-                    id.clone(),
-                    next,
-                ))
+        // The row's way on is the one its task leads with elsewhere: 调整后重试 for a task
+        // whose service is gone, a repair, a resume, otherwise the task itself.
+        let lead = {
+            let tasks = self.tasks.read(cx);
+            let actions = tasks.task_actions(&task, TaskSurface::Home, cx);
+            // A task whose service is gone can only go on as a new attempt, whatever
+            // else it offers.
+            let adjust = tasks.services_missing(&task.id) && actions.contains(&TaskAction::Adjust);
+            adjust
+                .then_some(&TaskAction::Adjust)
+                .or_else(|| lead_action(&actions, &task, TaskSurface::Home))
+                .filter(|action| {
+                    matches!(
+                        action,
+                        TaskAction::Adjust | TaskAction::Repair | TaskAction::Resume
+                    )
+                })
+                .cloned()
         };
-        actions = actions.child(next.tone(ButtonTone::Neutral));
+        let next =
+            if lead.is_none() && !requires_repair && !uncertain && !partial_components.is_empty() {
+                let labels = partial_components
+                    .iter()
+                    .map(|component| component.as_str().to_owned())
+                    .collect::<Vec<_>>();
+                let task_id = id.clone();
+                action("retry", ButtonVariant::Tonal)
+                    .icon(symbols::refresh())
+                    .child(desktop_tasks::task_view::retry_components_label(&labels))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let parts = partial_components.clone();
+                        this.reprocess_task(task_id.clone(), parts, Vec::new(), cx);
+                    }))
+            } else {
+                let next = lead.unwrap_or(if requires_repair {
+                    TaskAction::Repair
+                } else if !uncertain && task.state == TaskState::Paused {
+                    TaskAction::Resume
+                } else {
+                    TaskAction::ViewTask
+                });
+                let (label, icon, _) = self.tasks.read(cx).present(&next, &task, cx);
+                action(label, ButtonVariant::Tonal)
+                    .icon(icon)
+                    .child(label)
+                    .on_click(crate::task_ui::action_click(
+                        self.tasks.downgrade(),
+                        id.clone(),
+                        next,
+                    ))
+            };
+        actions = actions.child(next);
         let scale = TileScale::Regular;
         let summary = desktop_tasks::task_view::task_attention_summary(&task);
+        // The video card above already says this obstacle; one place is enough.
+        let summary = (summary != task.state.label()
+            && self.workbench_notice.as_deref() != Some(summary.as_str()))
+        .then_some(summary);
+        let cover = task.plan.source.cover.clone().or_else(|| {
+            self.library(cx)
+                .cover_by_source
+                .get(&task.plan.source_id)
+                .cloned()
+        });
         list_surface(outer).child(
-            v_flex()
+            h_flex()
                 .w_full()
                 .min_w_0()
                 .px(ITEM_INSET)
                 .py(rem(16.))
-                .gap(rem(8.))
+                .gap(rem(16.))
+                .items_start()
+                .child(row_cover(
+                    cover,
+                    if task.state == TaskState::Paused {
+                        symbols::pause()
+                    } else {
+                        symbols::movie()
+                    },
+                ))
                 .child(
-                    h_flex()
-                        .w_full()
+                    v_flex()
+                        .flex_1()
                         .min_w_0()
-                        .gap(rem(12.))
-                        .items_center()
-                        .flex_wrap()
+                        .gap(rem(8.))
                         .child(
-                            scale
-                                .label(
-                                    SharedString::from(format!("recent-attention-{id}")),
-                                    task.plan.title.clone(),
+                            h_flex()
+                                .w_full()
+                                .min_w_0()
+                                .gap(rem(12.))
+                                .items_center()
+                                .flex_wrap()
+                                .child(
+                                    scale
+                                        .label(
+                                            SharedString::from(format!("recent-attention-{id}")),
+                                            task.plan.title.clone(),
+                                        )
+                                        // The state and action move under a title that
+                                        // needs the width, not one character of it.
+                                        .flex_1()
+                                        .flex_basis(rem(240.)),
                                 )
-                                .min_w(rem(160.))
-                                .flex_1(),
+                                // The same colour as on Tasks: a failure is red, a pause amber.
+                                .child(
+                                    status_chip(crate::task_ui::task_status_kind(task.state))
+                                        .child(task.state.label()),
+                                ),
                         )
-                        // The same colour as on Tasks: a failure is red, a pause amber.
-                        .child(
-                            status_chip(crate::task_ui::task_status_kind(task.state))
-                                .child(task.state.label()),
-                        )
-                        .child(actions),
-                )
-                .when(summary != task.state.label(), |card| {
-                    card.child(
-                        scale.support(SharedString::from(format!("recent-summary-{id}")), summary),
-                    )
-                }),
+                        // Why it waits, with the way on inside the same notice as on
+                        // Tasks; the action never stands above its cause.
+                        .child(match summary {
+                            Some(summary) => notice_banner(
+                                SharedString::from(format!("recent-summary-{id}")),
+                                if task.state == TaskState::NeedsAttention {
+                                    NoticeKind::Danger
+                                } else {
+                                    NoticeKind::Warning
+                                },
+                                summary,
+                            )
+                            .rounded(RADIUS_LARGE)
+                            .child(actions)
+                            .into_any_element(),
+                            None => actions.into_any_element(),
+                        }),
+                ),
         )
     }
 
-    /// Workbench "最近笔记": attention tasks first, then recent readable notes.
-    /// First use keeps a compact explanation below the source input.
-    /// Notes waiting on the person stay listed even when recent notes are
-    /// turned off; only finished notes and the empty state follow the setting.
+    /// Workbench "最近的笔记": recent readable notes, or first use's compact explanation.
+    /// Tasks waiting on the person are listed with the other tasks above it.
     pub fn recent_notes_section(&self, cx: &mut Context<Self>) -> Option<Div> {
-        use crate::workspace::TaskState;
         let show_notes = self.desktop_settings.home_recent_notes;
-        let linked = self.current_input_task(cx).map(|task| task.id.clone());
-        let mut attention: Vec<_> = self
-            .records
-            .read(cx)
-            .workspace
-            .iter()
-            .flat_map(|workspace| &workspace.state.tasks)
-            .filter(|task| {
-                Some(&task.id) != linked.as_ref()
-                    && task.handled_by.is_none()
-                    && (matches!(
-                        task.state,
-                        TaskState::NeedsAttention | TaskState::Uncertain | TaskState::Paused
-                    ) || (task.state == TaskState::Partial
-                        && task.artifact.is_some()
-                        && !desktop_tasks::task_view::task_component_failures(task).is_empty()))
-            })
-            .collect();
-        attention.sort_by_key(|task| std::cmp::Reverse(task.updated));
-        attention.truncate(2);
-        let attention: Vec<_> = attention.into_iter().cloned().collect();
+        if !show_notes {
+            return None;
+        }
+        // A note whose task waits on the person is listed with that task, above.
+        let attention = self.workbench_attention_tasks(cx);
         let notes: Vec<usize> = self
             .library(cx)
             .courses
@@ -2278,13 +2352,10 @@ impl Desktop {
                     .iter()
                     .any(|task| task.artifact.as_ref() == Some(&course.dir))
             })
-            .take(if show_notes { 4 } else { 0 })
+            .take(4)
             .map(|(index, _)| index)
             .collect();
-        if attention.is_empty() && !show_notes {
-            return None;
-        }
-        if attention.is_empty() && notes.is_empty() {
+        if notes.is_empty() {
             return Some(home_section(
                 "recent-title",
                 course2md::tr!("最近的笔记"),
@@ -2292,24 +2363,14 @@ impl Desktop {
                 self.recent_empty(cx),
             ));
         }
-        let count = attention.len() + notes.len();
+        let count = notes.len();
         let mut rows = v_flex().w_full().min_w_0();
-        let mut position = 0;
-        for task in attention {
-            rows = rows.child(self.attention_row(task, list_corners(position, count), cx));
-            position += 1;
-        }
-        for index in notes {
+        for (position, index) in notes.into_iter().enumerate() {
             rows = rows.child(self.note_row(index, list_corners(position, count), cx));
-            position += 1;
         }
         Some(home_section(
             "recent-title",
-            if show_notes {
-                course2md::tr!("最近的笔记")
-            } else {
-                course2md::tr!("需要处理")
-            },
+            course2md::tr!("最近的笔记"),
             Some(
                 material_button("recent-all", ButtonVariant::Text)
                     .icon(symbols::chevron_right())

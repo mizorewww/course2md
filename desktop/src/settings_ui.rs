@@ -1807,18 +1807,19 @@ impl Desktop {
                 symbols::check_circle(),
                 Tint::Green,
                 course2md::tr!("一切正常"),
-                if checked == 1 {
+                Some(if checked == 1 {
                     course2md::tr!("1 项检查已通过").to_owned()
                 } else {
                     course2md::tr!("{} 项检查全部通过", checked)
-                },
+                }),
             )
         } else {
+            // The chips below mark which check needs repair; a count would say it again.
             (
                 symbols::warning(),
                 Tint::Amber,
                 course2md::tr!("需要修复"),
-                course2md::tr!("{} 项检查未通过", failed),
+                None,
             )
         };
         // The capabilities sit on the summary's text ruler.
@@ -1866,7 +1867,7 @@ impl Desktop {
                                     .text(
                                         "diagnostic-summary",
                                         summary_title,
-                                        Some(summary_detail.into()),
+                                        summary_detail.map(Into::into),
                                     )
                                     .flex_1()
                                     .flex_basis(rem(200.)),
@@ -2102,7 +2103,7 @@ impl Desktop {
                         self.settings_ui.pending_generation = None;
                     }
                     PreferenceGroup::Application => self.settings_ui.pending_application = None,
-                    PreferenceGroup::Services => {}
+                    PreferenceGroup::Services => self.forget_missing_draft_services(cx),
                 }
                 self.settings_ui.initialized = false;
                 // Rehydrate on the event path now rather than on the next visit; rendering never does this.

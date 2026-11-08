@@ -121,6 +121,9 @@ struct Desktop {
     /// The workspace record and the libraries' notes, which every page reads.
     records: Entity<desktop_store::records::Records>,
     workspace_error: Option<String>,
+    /// The obstacle the workbench's video card shows this frame, so nothing else on the
+    /// page repeats it.
+    workbench_notice: Option<String>,
     import: desktop_tasks::import::ImportSession,
     /// The running job, a task's or a model's, and the event loop's deadlines.
     work: Entity<Work>,
@@ -467,6 +470,7 @@ impl Desktop {
             storage_ui: Default::default(),
             records,
             workspace_error,
+            workbench_notice: None,
             import: Default::default(),
             work,
             tasks,

@@ -174,6 +174,9 @@ pub(crate) struct ShellFacts {
     pub storage_busy: bool,
     /// Where the model a waiting task needs stands, once its card asked to prepare it.
     pub models: HashMap<String, ModelPreparation>,
+    /// Tasks that name a service no longer saved or deleted: they cannot continue as
+    /// they are, and adjusting them (a new attempt) is the way on.
+    pub services_missing: HashSet<String>,
 }
 
 /// The model preparation a task's card started.
@@ -367,13 +370,23 @@ impl TasksPage {
         }
     }
 
+    /// Whether a service task `id` needs is no longer saved or was deleted.
+    pub(crate) fn services_missing(&self, id: &str) -> bool {
+        self.facts.services_missing.contains(id)
+    }
+
     pub(crate) fn task_actions(
         &self,
         task: &TaskRecord,
         surface: TaskSurface,
         cx: &App,
     ) -> Vec<TaskAction> {
-        task_actions(task, surface, &self.task_facts(task, cx))
+        task_actions_for(
+            task,
+            surface,
+            &self.task_facts(task, cx),
+            self.facts.services_missing.contains(&task.id),
+        )
     }
 
     fn task_stage_rows(&self, task: &TaskRecord, cx: &App) -> Vec<TaskStage> {
@@ -554,45 +567,14 @@ impl TasksPage {
             .into_any_element()
     }
 
-    /// The page title with a chip for each kind of work there is, and the
-    /// action that stops or resumes all of it.
+    /// The page title and the action that stops or resumes all of the work.
     fn queue_page_header(&self, tasks: &[TaskRecord], cx: &mut Context<Self>) -> Div {
         let TaskCounts {
-            running,
-            attention,
-            queued,
             resumable,
             pausable,
+            ..
         } = task_counts(tasks);
-        let chips = [
-            (
-                running,
-                StatusKind::Progress,
-                course2md::tr!("{} 个正在处理", running),
-            ),
-            (
-                attention,
-                StatusKind::Danger,
-                if attention == 1 {
-                    course2md::tr!("1 个需要处理").to_owned()
-                } else {
-                    course2md::tr!("{} 个需要处理", attention)
-                },
-            ),
-            (
-                queued,
-                StatusKind::Neutral,
-                course2md::tr!("{} 个排队中", queued),
-            ),
-            (
-                resumable,
-                StatusKind::Neutral,
-                course2md::tr!("{} 个已暂停", resumable),
-            ),
-        ]
-        .into_iter()
-        .filter(|(count, ..)| *count > 0)
-        .map(|(_, kind, text)| status_chip(kind).child(text));
+        // Each group below names its kind of work; the title does not count it again.
         h_flex()
             .w_full()
             .min_w_0()
@@ -606,13 +588,12 @@ impl TasksPage {
                     .flex_basis(rem(320.))
                     .min_w_0()
                     .gap(rem(8.))
-                    .child(ui::page_title("tasks-page-title", course2md::tr!("任务")))
-                    .child(h_flex().gap(rem(8.)).flex_wrap().children(chips)),
+                    .child(ui::page_title("tasks-page-title", course2md::tr!("任务"))),
             )
             .child(
                 h_flex()
                     .gap(rem(8.))
-                    .when(pausable > 0, |row| {
+                    .when(pausable > 1, |row| {
                         row.child(
                             material_button("tasks-pause-all", ButtonVariant::Outlined)
                                 .tone(ButtonTone::Accent)
@@ -621,7 +602,7 @@ impl TasksPage {
                                 .on_click(cx.listener(|_, _, _, cx| cx.emit(TasksEvent::PauseAll))),
                         )
                     })
-                    .when(resumable > 0, |row| {
+                    .when(resumable > 1, |row| {
                         row.child(
                             material_button("tasks-resume-all", ButtonVariant::Outlined)
                                 .tone(ButtonTone::Accent)
@@ -882,7 +863,11 @@ impl TasksPage {
     /// Where a task saves, as its supporting line.
     fn task_destination(&self, task: &TaskRecord, cx: &App) -> String {
         match self.task_library(task, cx) {
-            Some(location) => course2md::tr!("保存到 {}", location.label()),
+            // Only a note that exists is saved; until then it is where it will go.
+            Some(location) if task.artifact.is_some() => {
+                course2md::tr!("保存在「{}」", location.label())
+            }
+            Some(location) => course2md::tr!("将保存到「{}」", location.label()),
             None => course2md::tr!("保存位置暂时不可用").to_owned(),
         }
     }
@@ -998,27 +983,28 @@ impl TasksPage {
         let more = self.task_menu_button(task, window, cx);
         // On the workbench the running card's status is its step; Tasks owns the rest.
         let on_home_running = matches!(place, CardPlace::Home) && runs_in_card(task);
+        // In its group on Tasks, a card whose state is the group's title does not
+        // repeat it, and a running card's step line says what it is doing.
+        let generating = task.state == TaskState::Running && task.intent == Intent::Run;
+        let named_by_group = matches!(place, CardPlace::Open { .. })
+            && (generating || task_status_label(task) == task_group(task).label());
         let chip = (!on_home_running
+            && !named_by_group
             && (task.state != TaskState::Queued || !matches!(place, CardPlace::Row { .. })))
         .then(|| {
-            // A running title already says what is being generated; the chip only
-            // carries the state.
-            let generating = task.state == TaskState::Running && task.intent == Intent::Run;
             // A task whose note another replaced is history, not a success.
             status_chip(if task.replaced_by.is_some() {
                 StatusKind::Neutral
             } else {
                 task_status_kind(task.state)
             })
-            .child(if generating && matches!(place, CardPlace::Open { .. }) {
-                course2md::tr!("处理中").to_owned()
-            } else {
-                task_status_label(task)
-            })
+            .child(task_status_label(task))
         });
         let context_menu = self.task_menu(task, cx);
-        // The running card's progress and actions stay in its text column.
-        let inner = on_home_running.then(|| self.task_body(task, place, window, cx));
+        // The running card's progress and actions stay in its text column; a task that
+        // waits on the person says why across the card, as the draft's obstacle does.
+        let in_column = on_home_running && !needs_person(task);
+        let inner = in_column.then(|| self.task_body(task, place, window, cx));
         let (outer, head, body) = match place {
             CardPlace::Row { outer, number } => {
                 // An open row's details continue its surface below it.
@@ -1031,11 +1017,19 @@ impl TasksPage {
                 (outer, head.into_any_element(), expanded)
             }
             CardPlace::Open { outer } => {
+                // Once several steps are reached, their chips under the bar say which
+                // runs; the title column does not say it again.
+                let stages = self.task_stage_rows(task, cx);
+                let chips = stages.len() > 1
+                    && (stages.iter().any(|stage| stage.status.running())
+                        || self.is_running_task(&task.id, cx));
                 let facts = (
                     self.task_destination(task, cx),
                     self.task_cover(task, cx),
                     COVER_WIDTH,
-                    self.task_step_line(task, false, cx),
+                    (!chips)
+                        .then(|| self.task_step_line(task, false, cx))
+                        .flatten(),
                 );
                 let head = self.task_card_head(task, place, chip, more, None, facts);
                 (outer, head.into_any_element(), true)
@@ -1051,7 +1045,7 @@ impl TasksPage {
                 (
                     [true, true, false, false],
                     head.into_any_element(),
-                    !on_home_running,
+                    !in_column,
                 )
             }
         };
@@ -1229,12 +1223,7 @@ impl TasksPage {
         } else {
             task.plan.title.clone()
         };
-        let generating = task.state == TaskState::Running && task.intent == Intent::Run;
-        let title = if generating && !home {
-            course2md::tr!("正在生成《{}》", title)
-        } else {
-            title
-        };
+        // The video's name: its group and step line say what is happening to it.
         // Where it saves, where its text comes from and which service
         // receives it, on one line; on the workbench, whose video it is.
         let support = if home {
@@ -1258,22 +1247,21 @@ impl TasksPage {
             .items_start()
             .flex_wrap()
             .gap(rem(16.))
-            .map(|head| {
-                // A task that needs the person leads with that, not its video. Only a
-                // failure is red: a paused, partial or uncertain task is a warning.
-                if !home && needs_person(task) {
-                    head.child(tinted_icon(
-                        symbols::warning(),
-                        if task.state == TaskState::NeedsAttention {
-                            Tint::Danger
-                        } else {
-                            Tint::Amber
-                        },
-                        ui::RESOURCE_ICON,
-                    ))
-                } else {
-                    head.child(video_cover(cover, cover_width))
-                }
+            // Every task leads with its video; one that needs the person says so in
+            // the notice under it (red for a failure, amber for a pause or a partial).
+            .child({
+                // The same cover as the video's preview, its duration included.
+                let source = &task.plan.source;
+                let duration = (source.duration.is_finite() && source.duration > 0.)
+                    .then(|| course2md::render::fmt_ts(source.duration));
+                video_cover(cover, cover_width).when_some(duration, |cover, duration| {
+                    cover.child(
+                        media_label(format!("task-duration-{id}"), duration)
+                            .absolute()
+                            .right(rem(8.))
+                            .bottom(rem(8.)),
+                    )
+                })
             })
             .child(
                 v_flex()
@@ -1287,26 +1275,7 @@ impl TasksPage {
                             .min_w_0()
                             .items_start()
                             .gap(rem(8.))
-                            .map(|row| {
-                                if !home && needs_person(task) {
-                                    row.child(
-                                        // It shrinks before the menu beside it, and a long
-                                        // title ends in an ellipsis on its second line.
-                                        TileScale::Regular
-                                            .label(format!("task-title-{id}"), title.clone())
-                                            .flex_1()
-                                            .min_w_0()
-                                            .whitespace_normal()
-                                            .text_ellipsis()
-                                            .line_clamp(2),
-                                    )
-                                } else {
-                                    row.child(
-                                        video_title(format!("task-title-{id}"), title.clone())
-                                            .flex_1(),
-                                    )
-                                }
-                            })
+                            .child(video_title(format!("task-title-{id}"), title.clone()).flex_1())
                             .children(title_chip)
                             .child(more),
                     )
@@ -1630,8 +1599,33 @@ impl TasksPage {
                 )
                 .on_click(action_click(cx.weak_entity(), id.clone(), action.clone()))
         });
-        let mut buttons: Vec<MaterialButton> = buttons.collect();
+        let mut buttons: Vec<Option<MaterialButton>> = buttons.map(Some).collect();
         let home_running = surface == TaskSurface::Home && runs_in_card(task);
+        // Why the task stopped is one notice in its card that holds the way on, the
+        // card's one primary action, as a draft's obstacle is on the workbench.
+        let reasons = task_reasons(task);
+        let notice = (!row && needs_person(task) && !reasons.is_empty()).then(|| {
+            let lead = lead
+                .as_ref()
+                .and_then(|lead| actions.iter().position(|action| action == lead))
+                .and_then(|index| buttons[index].take());
+            notice_banner(
+                SharedString::from(format!("task-reason-{id}")),
+                if task.state == TaskState::NeedsAttention {
+                    NoticeKind::Danger
+                } else {
+                    NoticeKind::Warning
+                },
+                reasons.join("\n"),
+            )
+            .rounded(RADIUS_LARGE)
+            .children(lead)
+        });
+        let reasons = if notice.is_some() {
+            Vec::new()
+        } else {
+            reasons
+        };
         // Stopping stands apart from what goes on; those wrap as one trailing group.
         let leading_cancel = (home_running)
             .then(|| {
@@ -1640,34 +1634,17 @@ impl TasksPage {
                     .position(|action| *action == TaskAction::Cancel)
             })
             .flatten()
-            .map(|index| buttons.remove(index));
-        let buttons = if home_running {
-            h_flex()
-                .w_full()
-                .min_w_0()
-                .gap(rem(8.))
-                .flex_wrap()
-                .children(leading_cancel)
-                .child(
-                    h_flex()
-                        .ml_auto()
-                        .gap(rem(8.))
-                        .flex_wrap()
-                        .justify_end()
-                        .children(buttons),
-                )
-        } else {
-            h_flex()
-                .w_full()
-                .min_w_0()
-                .gap(rem(8.))
-                .flex_wrap()
-                .when(
-                    !needs_person(task) || matches!(place, CardPlace::Home),
-                    |row| row.justify_end(),
-                )
-                .children(buttons)
-        };
+            .and_then(|index| buttons[index].take());
+        let buttons: Vec<MaterialButton> = buttons.into_iter().flatten().collect();
+        // The card's actions are one trailing group, stopping first.
+        let buttons = h_flex()
+            .w_full()
+            .min_w_0()
+            .gap(rem(8.))
+            .flex_wrap()
+            .justify_end()
+            .children(leading_cancel)
+            .children(buttons);
         let details = (self.task_list.expanded.as_ref() == Some(&id)).then(|| {
             let content = v_flex()
                 .w_full()
@@ -1692,30 +1669,19 @@ impl TasksPage {
         let log = task_log_text(task)
             .filter(|_| self.task_list.logs_open.contains(&id))
             .map(|text| ui::log_box(&id, text));
-        // A task that waits for the person keeps its explanation on the text's ruler too.
-        let ruler = if needs_person(task) && !matches!(place, CardPlace::Home) {
-            rem(ui::RESOURCE_ICON_SIZE + 16.)
-        } else {
-            rem(0.)
-        };
         v_flex()
             .w_full()
             .min_w_0()
             .gap(rem(12.))
-            .pl(ruler)
-            .children(
-                task_reasons(task)
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, reason)| {
-                        error_text(
-                            SharedString::from(format!("task-reason-{id}-{index}")),
-                            reason,
-                        )
-                        .text_size(TEXT_BODY)
-                        .whitespace_normal()
-                    }),
-            )
+            .children(notice)
+            .children(reasons.into_iter().enumerate().map(|(index, reason)| {
+                error_text(
+                    SharedString::from(format!("task-reason-{id}-{index}")),
+                    reason,
+                )
+                .text_size(TEXT_BODY)
+                .whitespace_normal()
+            }))
             .children(
                 consequence
                     .map(|text| ("consequence", text))
@@ -1749,6 +1715,21 @@ impl TasksPage {
             .children(self.uncertain_block(task, cx))
             .children(progress)
             .children(chips)
+            // Why 下载并准备模型 cannot start yet, beside it.
+            .when(
+                actions.contains(&TaskAction::PrepareModel) && self.work.read(cx).job.is_some(),
+                |body| {
+                    body.child(
+                        accessible_text(
+                            SharedString::from(format!("task-model-wait-{id}")),
+                            course2md::tr!("其他任务结束后才能下载模型"),
+                        )
+                        .text_size(TEXT_AUX)
+                        .text_color(color(ColorRole::ON_SURFACE_VARIANT))
+                        .whitespace_normal(),
+                    )
+                },
+            )
             .child(buttons)
             .children(details)
             .children(log)

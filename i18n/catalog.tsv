@@ -281,6 +281,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 任务 · {}	任务 · {}	Tasks · {}	任務 · {}	タスク · {}
 任务不存在	任务不存在	Task not found	找不到任務	タスクが見つかりません
 任务与笔记位置必须是绝对路径 / Task paths must be absolute	任务与笔记位置必须是绝对路径	Task paths must be absolute	任務與筆記位置必須是絕對路徑	タスクとノートの場所は絶対パスである必要があります
+任务使用的服务已不在设置中，请调整后重试并选择服务	任务使用的服务已不在设置中，请调整后重试并选择服务	The service this task used is no longer in settings. Adjust and try again with a service selected.	任務使用的服務已不在設定中，請調整後重試並選擇服務	このタスクで使っていたサービスは設定にありません。調整して再試行し、サービスを選択してください
 任务保存位置尚未恢复	任务保存位置尚未恢复	The task save location has not been restored	任務儲存位置尚未恢復	タスクの保存場所が復元されていません
 任务保存位置暂时不可用	任务保存位置暂时不可用	The task save location is temporarily unavailable	任務儲存位置暫時不可用	タスクの保存場所が一時的に利用できなくなりました
 任务保存位置记录缺失	任务保存位置记录缺失	The task save location record is missing	任務儲存位置記錄缺失	タスクの保存場所レコードがありません
@@ -557,8 +558,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 名称尚未恢复：{}	名称尚未恢复：{}	Name not yet restored: {}	名稱尚未恢復：{}	名前はまだ復元されていません: {}
 后台工作中断 / Background work was interrupted	后台工作中断	Background work was interrupted	背景工作中斷	バックグラウンド処理が中断されました
 后续任务记录缺失，请先恢复任务记录	后续任务记录缺失，请先恢复任务记录	Subsequent task records are missing, please restore the task records first	後續任務記錄缺失，請先恢復任務記錄	後続のタスク レコードが欠落しています。最初にタスク レコードを復元してください。
-含 {} 张截图	含 {} 张截图	Contains {} screenshots	含 {} 張截圖	スクリーンショット {} 枚を含む
-含 1 张截图	含 1 张截图	Contains 1 screenshot	含 1 張截圖	スクリーンショット 1 枚を含む
 启动 yt-dlp 失败 / Failed to start yt-dlp	启动 yt-dlp 失败	Failed to start yt-dlp	啟動 yt-dlp 失敗	yt-dlp の起動に失敗しました
 启动 {} 失败	启动 {} 失败	Failed to start {}	啟動 {} 失敗	{} の起動に失敗しました
 呃	呃	Uh	呃	えー
@@ -866,7 +865,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 扫描画面	扫描画面	Scanning frames	掃描畫面	フレームをスキャン中
 扫描画面 / Scanning video frames	扫描画面	Scanning video frames	掃描畫面	フレームをスキャン中
 找不到 course2md 引擎。请将 CLI 放在应用旁，或设置 COURSE2MD_BIN。	找不到 course2md 引擎。请将 CLI 放在应用旁，或设置 COURSE2MD_BIN。	course2md engine not found. Place the CLI next to the app, or set COURSE2MD_BIN.	找不到 course2md 引擎。請將 CLI 放在應用程式旁，或設定 COURSE2MD_BIN。	course2md エンジンが見つかりません。CLI をアプリの隣に配置するか、COURSE2MD_BIN を設定してください。
-找不到任务使用的服务版本，请选择服务后建立新尝试	找不到任务使用的服务版本，请选择服务后建立新尝试	The service version used by the task cannot be found. Please select the service and create a new attempt.	找不到任務使用的服務版本，請選擇服務後建立新嘗試	タスクで使用されているサービスのバージョンが見つかりません。サービスを選択し、新しい試行を作成してください。
 找不到已下载的视频，请允许重新下载 / The downloaded video is missing; allow downloading it again	找不到已下载的视频，请允许重新下载	The downloaded video is missing; allow downloading it again	找不到已下載的影片，請允許重新下載	ダウンロードした動画が見つかりません。再ダウンロードを許可してください
 找不到当前笔记	找不到当前笔记	Current note not found	找不到目前筆記	現在のノートが見つかりません
 找不到此服务	找不到此服务	This service cannot be found	找不到此服務	このサービスは見つかりません
@@ -995,7 +993,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 文字来源	文字来源	Transcript source	文字來源	文字起こしのソース
 文字来源方式	文字来源方式	Text source method	文字來源方式	テキストソース方式
 文字来源：auto 优先字幕，subtitle 仅字幕，asr 语音识别 / Transcript source: auto, subtitle, asr	文字来源：auto 优先字幕，subtitle 仅字幕，asr 语音识别	Transcript source: auto, subtitle, asr	文字來源：auto 優先字幕，subtitle 僅字幕，asr 語音辨識	テキストソース：auto は字幕を優先、subtitle は字幕のみ、asr は音声認識
-文字笔记	文字笔记	Text notes	文字筆記	テキストノート
 文字转写	文字转写	Transcript	文字轉寫	文字起こし
 新建文件夹	新建文件夹	New folder	新增資料夾	新しいフォルダー
 新的视频输入尚未建立：{}	新的视频输入尚未建立：{}	The new video input has not been created yet: {}	新的影片輸入尚未建立：{}	新しい動画入力はまだ作成されていません: {}
@@ -1926,7 +1923,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 重试打开	重试打开	Retry opening	重試開啟	開くのを再試行
 重试补做	重试补做	Retry reprocessing	重試補做	再処理を再試行
 重试转换	重试转换	Retry conversion	重試轉換	変換を再試行する
-重试预览	重试预览	Retry preview	重試預覽	プレビューを再試行する
 钥匙串中找不到此服务的凭据，请重新保存 API Key	钥匙串中找不到此服务的凭据，请重新保存 API Key	The credentials for this service were not found in the keychain. Please save the API key again.	鑰匙圈中找不到此服務的憑證，請重新儲存 API 金鑰	このサービスの認証情報がキーチェーンに見つかりませんでした。API キーを再度保存してください。
 链接无效；请提供完整的视频链接 / Invalid URL; provide a complete video URL	链接无效；请提供完整的视频链接	Invalid URL; provide a complete video URL	連結無效；請提供完整的影片連結	無効なリンクです。完全な動画リンクを提供してください
 链接缺少主机名 / URL is missing a host	链接缺少主机名	URL is missing a host	連結缺少主機名	リンクにホスト名がありません
@@ -2085,10 +2081,6 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 双语翻译	双语翻译	Bilingual translation	雙語翻譯	バイリンガル翻訳
 不翻译	不翻译	Off	不翻譯	翻訳しない
 每段文字下方附上译文；已是该语言的视频不翻译	每段文字下方附上译文；已是该语言的视频不翻译	Each paragraph is followed by its translation; videos already in this language are not translated	每段文字下方附上譯文；已是該語言的影片不翻譯	各段落の下に訳文を添えます。すでにこの言語の動画は翻訳しません
-{} 个正在处理	{} 个正在处理	{} processing	{} 個正在處理	処理中 {} 件
-{} 个排队中	{} 个排队中	{} queued	{} 個排隊中	待機中 {} 件
-{} 个需要处理	{} 个需要处理	{} need attention	{} 個需要處理	対応が必要 {} 件
-1 个需要处理	1 个需要处理	1 needs attention	1 個需要處理	対応が必要 1 件
 全部暂停	全部暂停	Pause all	全部暫停	すべて一時停止
 全部继续	全部继续	Resume all	全部繼續	すべて再開
 任务顺序尚未保存：{}	任务顺序尚未保存：{}	Task order was not saved: {}	任務順序尚未儲存：{}	タスクの順序を保存できませんでした: {}
@@ -2102,7 +2094,6 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 下移	下移	Move down	下移	下へ移動
 移到最后	移到最后	Move to bottom	移到最後	末尾へ移動
 更多操作	更多操作	More actions	更多操作	その他の操作
-保存到 {}	保存到 {}	Saved to {}	儲存到 {}	保存先: {}
 只能调整排队中的任务	只能调整排队中的任务	Only queued tasks can be reordered	只能調整排隊中的任務	並べ替えられるのは待機中のタスクだけです
 第 {} 步 · {}	第 {} 步 · {}	Step {} · {}	第 {} 步 · {}	ステップ {} · {}
 笔记只能移到它所在保存位置里的文件夹	笔记只能移到它所在保存位置里的文件夹	A note can only move to folders in its own storage location	筆記只能移到它所在儲存位置裡的資料夾	ノートは保存場所内のフォルダーにのみ移動できます
@@ -2116,7 +2107,6 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 这里已有同名文件夹	这里已有同名文件夹	A folder with this name already exists here	這裡已有同名資料夾	ここには同じ名前のフォルダーがすでにあります
 不能把文件夹移到它自己里面	不能把文件夹移到它自己里面	A folder cannot move into itself	不能把資料夾移到它自己裡面	フォルダーをそれ自身の中に移動することはできません
 其中的 {} 个子文件夹也会删除；笔记会保留，移到未分类	其中的 {} 个子文件夹也会删除；笔记会保留，移到未分类	Subfolders inside it are deleted too ({}); notes are kept and move to Unfiled	其中的 {} 個子資料夾也會刪除；筆記會保留，移到未分類	中の {} 個のサブフォルダーも削除されます。ノートは残り、未分類に移動します
-{} 个已暂停	{} 个已暂停	{} paused	{} 個已暫停	一時停止中 {} 件
 视频摘要	视频摘要	Video summary	影片摘要	動画の概要
 核心要点	核心要点	Key points	核心要點	要点
 内容大纲	内容大纲	Outline	內容大綱	アウトライン
@@ -2146,7 +2136,6 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 没有匹配的设置	没有匹配的设置	No matching settings	沒有符合的設定	一致する設定はありません
 使用中	使用中	In use	使用中	使用中
 未添加时使用本机识别	未添加时使用本机识别	Without one, speech is recognized on this device	未新增時使用本機辨識	未追加の場合はこのデバイスで認識します
-{} 项检查未通过	{} 项检查未通过	Failed checks: {}	{} 項檢查未通過	{} 件のチェックに合格しませんでした
 应用 / Application	应用	Application	應用程式	アプリ
 找到 1 篇笔记	找到 1 篇笔记	Found 1 note	找到 1 篇筆記	1 件のノートが見つかりました
 1 篇笔记	1 篇笔记	1 note	1 篇筆記	1 件のノート
@@ -2292,7 +2281,6 @@ AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not conf
 笔记暂时无法读取：{}	笔记暂时无法读取：{}	The note cannot be read right now: {}	筆記暫時無法讀取：{}	ノートを現在読み込めません: {}
 重新生成	重新生成	Regenerate	重新產生	再生成
 重新生成笔记	重新生成笔记	Regenerate the note	重新產生筆記	ノートを再生成
-重新生成（覆盖当前笔记）	重新生成（覆盖当前笔记）	Regenerate (replaces the current note)	重新產生（覆寫目前筆記）	再生成（現在のノートを上書き）
 正在更新这份笔记，完成后这里会自动刷新	正在更新这份笔记，完成后这里会自动刷新	Updating this note; this page refreshes when it's done	正在更新這份筆記，完成後這裡會自動重新整理	このノートを更新しています。完了するとここが自動で更新されます
 这份笔记等待更新，完成后这里会自动刷新	这份笔记等待更新，完成后这里会自动刷新	This note is waiting to be updated; this page refreshes when it's done	這份筆記正在等待更新，完成後這裡會自動重新整理	このノートは更新待ちです。完了するとここが自動で更新されます
 这份笔记的更新已暂停	这份笔记的更新已暂停	Updating this note is paused	這份筆記的更新已暫停	このノートの更新は一時停止中です
@@ -2325,3 +2313,9 @@ course2md 不在“应用程序”文件夹中。请先退出 course2md，在访
 没有权限打开这份笔记的保存锁 {}，请检查这个文件夹的权限后重试 / No permission to open the note's save lock {}; check the folder's permissions and try again	没有权限打开这份笔记的保存锁 {}，请检查这个文件夹的权限后重试	No permission to open the note's save lock {}; check the folder's permissions and try again	沒有權限開啟這份筆記的儲存鎖 {}，請檢查這個資料夾的權限後重試	このノートの保存ロック {} を開く権限がありません。フォルダの権限を確認してから、もう一度お試しください
 无法打开这份笔记的保存锁 {} / Could not open the note's save lock {}	无法打开这份笔记的保存锁 {}	Could not open the note's save lock {}	無法開啟這份筆記的儲存鎖 {}	このノートの保存ロック {} を開けませんでした
 这份笔记的保存锁不是普通文件：{}，请移走它后重试 / The note's save lock is not a regular file: {}; move it away and try again	这份笔记的保存锁不是普通文件：{}，请移走它后重试	The note's save lock is not a regular file: {}; move it away and try again	這份筆記的儲存鎖不是一般檔案：{}，請移走它後重試	このノートの保存ロックは通常のファイルではありません：{}。移動してからもう一度お試しください
+填写名称	填写名称	Enter a name	填寫名稱	名前を入力
+保存在「{}」	保存在「{}」	Saved in “{}”	儲存在「{}」	「{}」に保存済み
+将保存到「{}」	将保存到「{}」	Will be saved to “{}”	將儲存到「{}」	「{}」に保存予定
+其他任务结束后才能下载模型	其他任务结束后才能下载模型	The model can be downloaded once the current job finishes	其他任務結束後才能下載模型	現在のジョブが終わるとモデルをダウンロードできます
+所选服务已不在设置中，这次笔记改用默认服务「{}」	所选服务已不在设置中，这次笔记改用默认服务「{}」	The chosen service is no longer in settings; this note uses the default service “{}”	所選服務已不在設定中，這次筆記改用預設服務「{}」	選択したサービスは設定にありません。このノートには既定のサービス「{}」を使います
+缺少读取视频所需的组件	缺少读取视频所需的组件	Components needed to read videos are missing	缺少讀取影片所需的元件	動画の読み込みに必要なコンポーネントがありません

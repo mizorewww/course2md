@@ -25,6 +25,8 @@ const WORKBENCH_WIDTH: Rems = rem(760.);
 const HERO_GAP: Rems = rem(20.);
 /// The link field to the line under it: the drop hint or the source switch (H4).
 const HERO_HINT_GAP: Rems = rem(24.);
+/// The link / local file switch: room for both labels with their icons.
+const SOURCE_KIND_WIDTH: Rems = rem(360.);
 
 fn workbench_column() -> Div {
     div()
@@ -57,6 +59,17 @@ pub(crate) fn cover_width(window: &Window) -> Rems {
     rem(if is_compact(window) { 200. } else { 256. })
 }
 
+/// A cover image cropped to fill its whole slot. It is laid over the slot's own box,
+/// not sized by the slot's flex layout, so a frame of any shape covers the slot edge to
+/// edge; the slot's mark under it shows while the image loads or if it cannot.
+pub(crate) fn cover_fill(cover: PathBuf) -> Img {
+    img(cover)
+        .absolute()
+        .inset_0()
+        .size_full()
+        .object_fit(ObjectFit::Cover)
+}
+
 /// A video's 16:9 cover, or its mark while it has none.
 pub(crate) fn video_cover(cover: Option<PathBuf>, width: Rems) -> Div {
     div()
@@ -71,10 +84,8 @@ pub(crate) fn video_cover(cover: Option<PathBuf>, width: Rems) -> Div {
         .flex()
         .items_center()
         .justify_center()
-        .map(|slot| match cover {
-            Some(cover) => slot.child(img(cover).size_full().object_fit(ObjectFit::Cover)),
-            None => slot.child(cover_placeholder(rem(32.))),
-        })
+        .child(cover_placeholder(rem(32.)))
+        .children(cover.map(cover_fill))
 }
 
 /// A video's title, on the workbench and on a task's card.
@@ -115,6 +126,18 @@ fn details_toggle(id: impl Into<ElementId>, open: bool) -> MaterialButton {
 fn readable_first_line(message: &str) -> Option<&str> {
     let first = message.lines().next().unwrap_or(message);
     (!first.contains("WARNING:") && !first.contains("ERROR:")).then_some(first)
+}
+
+/// What stands between the previewed video and its conversion, placed where it belongs
+/// in the card: facts beside the video, one notice for an obstacle with its repairs, and
+/// the actions that take the start action's place.
+#[derive(Default)]
+struct Recovery {
+    facts: Vec<AnyElement>,
+    notice: Option<Div>,
+    actions: Vec<MaterialButton>,
+    /// An obstacle stands: 开始转换 stays in its place, unavailable, until it is resolved.
+    blocked: bool,
 }
 
 /// What a subtitle read belongs to. Its late result counts only while all of this holds.
@@ -649,19 +672,30 @@ impl Desktop {
                 .min_w_0()
                 .gap(HERO_HINT_GAP)
                 .child(
+                    // The kit's segmented button, bounded so its two segments read as one
+                    // switch under the title rather than a full-width bar.
                     h_flex().w_full().justify_center().child(
-                        ConnectedButtonGroup::new("source-kind", course2md::tr!("视频来源"))
-                            .tone(ButtonTone::Neutral)
-                            .options([
-                                ("online", course2md::tr!("视频链接")),
-                                ("local", course2md::tr!("本地文件")),
-                            ])
-                            .icon("online", symbols::link())
-                            .icon("local", symbols::movie())
-                            .selected("local")
-                            .on_change(cx.listener(|this, value: &SharedString, window, cx| {
-                                this.switch_source_kind(value.as_ref() == "online", window, cx);
-                            })),
+                        div().w(SOURCE_KIND_WIDTH).max_w_full().child(
+                            ConnectedButtonGroup::new("source-kind", course2md::tr!("视频来源"))
+                                .segmented()
+                                .tone(ButtonTone::Neutral)
+                                .options([
+                                    ("online", course2md::tr!("视频链接")),
+                                    ("local", course2md::tr!("本地文件")),
+                                ])
+                                .icon("online", symbols::link())
+                                .icon("local", symbols::movie())
+                                .selected("local")
+                                .on_change(cx.listener(
+                                    |this, value: &SharedString, window, cx| {
+                                        this.switch_source_kind(
+                                            value.as_ref() == "online",
+                                            window,
+                                            cx,
+                                        );
+                                    },
+                                )),
+                        ),
                     ),
                 )
                 .children(local);
@@ -771,7 +805,8 @@ impl Desktop {
                         .w_full()
                         .min_w_0()
                         .bg(color(ColorRole::SURFACE))
-                        .rounded(TILE_RADIUS)
+                        // A panel on its own, as the options panel below it.
+                        .rounded(RADIUS_HERO)
                         .flex()
                         .flex_col()
                         .gap(rem(16.))
@@ -814,6 +849,7 @@ impl Desktop {
                 .gap(rem(8.))
                 .child(
                     tile([true; 4])
+                        .rounded(RADIUS_HERO)
                         .flex()
                         .flex_wrap()
                         .items_center()
@@ -1088,17 +1124,13 @@ impl Desktop {
             .source_candidate_covers
             .get(&candidate.input)
             .cloned();
-        let thumbnail = match cover {
-            Some(cover) => img(cover)
-                .size_full()
-                .object_fit(ObjectFit::Cover)
-                .into_any_element(),
-            None => h_flex()
-                .size_full()
-                .justify_center()
-                .child(cover_placeholder(rem(20.)))
-                .into_any_element(),
-        };
+        let thumbnail = h_flex()
+            .relative()
+            .size_full()
+            .justify_center()
+            .child(cover_placeholder(rem(20.)))
+            .children(cover.map(cover_fill))
+            .into_any_element();
         let row = ListItem::new(("source-candidate", index), title)
             .leading(ListLeading::Video(Some(thumbnail)))
             .supporting(duration.unwrap_or_else(|| candidate.input.clone()));
@@ -1129,7 +1161,14 @@ impl Desktop {
             return Some(supporting("import-source-error", error.clone()).into_any_element());
         }
         let needs_login = source::legacy_login_failure_from_text(error);
-        let message = if needs_login {
+        // A tool the read needs is missing: Settings › 应用程序 checks and repairs them.
+        let components_missing = self.environment.as_ref().is_some_and(|environment| {
+            !environment.ffmpeg || !environment.ffprobe || (self.online(cx) && !environment.ytdlp)
+        });
+        let message = if components_missing {
+            // The action beside it says where to check; the message says what is wrong.
+            course2md::tr!("缺少读取视频所需的组件")
+        } else if needs_login {
             course2md::tr!("视频需要登录后读取，请登录后重试预览")
         } else {
             readable_first_line(error)
@@ -1152,15 +1191,28 @@ impl Desktop {
                         h_flex()
                             .gap(rem(8.))
                             .flex_wrap()
-                            .child(
-                                material_button("retry-source", ButtonVariant::Outlined)
-                                    .tone(ButtonTone::Accent)
-                                    .icon(symbols::refresh())
-                                    .child(course2md::tr!("重试预览"))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.inspect_source(window, cx)
-                                    })),
-                            )
+                            // The field's own 预览视频 tries again; the notice offers only
+                            // what that cannot do.
+                            .when(components_missing, |row| {
+                                row.child(
+                                    material_button(
+                                        "source-components-repair",
+                                        ButtonVariant::Tonal,
+                                    )
+                                    .icon(symbols::settings())
+                                    .child(course2md::tr!("检查所需组件"))
+                                    .on_click(cx.listener(
+                                        |this, _, window, cx| {
+                                            this.open_settings(window, cx);
+                                            this.select_settings_tab(
+                                                crate::settings_ui::SettingsTab::Application,
+                                                window,
+                                                cx,
+                                            );
+                                        },
+                                    )),
+                                )
+                            })
                             .when(
                                 self.online(cx)
                                     && needs_login
@@ -1171,9 +1223,8 @@ impl Desktop {
                                     row.child(
                                         material_button(
                                             "source-login-repair",
-                                            ButtonVariant::Outlined,
+                                            ButtonVariant::Tonal,
                                         )
-                                        .tone(ButtonTone::Accent)
                                         .icon(symbols::bilibili())
                                         .child(course2md::tr!("登录 Bilibili"))
                                         .on_click(
@@ -1194,9 +1245,8 @@ impl Desktop {
                                     row.child(
                                         material_button(
                                             "source-youtube-repair",
-                                            ButtonVariant::Outlined,
+                                            ButtonVariant::Tonal,
                                         )
-                                        .tone(ButtonTone::Accent)
                                         .icon(symbols::smart_display())
                                         .child(course2md::tr!("连接 YouTube"))
                                         .on_click(
@@ -1222,6 +1272,18 @@ impl Desktop {
                     )),
                 )),
         ))
+    }
+
+    /// Opens the processing options for this fix, without changing the saved choice,
+    /// and puts the cursor in the name field.
+    fn fill_in_title(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.import.title_required = true;
+        self.desktop_settings.home_options = true;
+        let input = self.inputs[&Field::Title].clone();
+        window.on_next_frame(move |window, cx| {
+            input.update(cx, |input, cx| input.focus(window, cx));
+        });
+        cx.notify();
     }
 
     fn toggle_preview_details(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -1266,10 +1328,10 @@ impl Desktop {
                     )
                 },
             );
+        // The card's footer: under the cover and the facts, across the card.
         let actions = h_flex()
             .w_full()
             .min_w_0()
-            .mt_auto()
             .gap(rem(8.))
             .items_center()
             .flex_wrap()
@@ -1291,6 +1353,8 @@ impl Desktop {
                     .ml_auto()
                     .gap(rem(8.))
                     .items_center()
+                    .flex_wrap()
+                    .justify_end()
                     .child(
                         material_button("replace-source", ButtonVariant::Outlined)
                             .tone(ButtonTone::Accent)
@@ -1305,6 +1369,7 @@ impl Desktop {
                                 }
                             })),
                     )
+                    .children(recovery.actions)
                     .when(self.can_start_input(cx), |row| {
                         row.child(
                             material_button("start-conversion", ButtonVariant::Filled)
@@ -1313,7 +1378,8 @@ impl Desktop {
                                 .child(course2md::tr!("开始转换"))
                                 .track_focus(&self.import_submit_focus)
                                 .disabled(
-                                    self.import.pending_conversion.is_some()
+                                    recovery.blocked
+                                        || self.import.pending_conversion.is_some()
                                         || self.import.preview_cancel.is_some(),
                                 )
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -1380,7 +1446,7 @@ impl Desktop {
                     )),
             )
             .child(self.text_source_control(&source, window, cx))
-            .child(actions);
+            .children(recovery.facts);
         Some(motion::state_enter(
             "import-selected-source-enter",
             tile([true, true, false, false])
@@ -1394,7 +1460,7 @@ impl Desktop {
                         .w_full()
                         .min_w_0()
                         .flex_wrap()
-                        .items_stretch()
+                        .items_start()
                         .gap(rem(20.))
                         .child(cover)
                         .child(info),
@@ -1404,7 +1470,12 @@ impl Desktop {
                     details_open,
                     details,
                 ))
-                .children(recovery.map(|recovery| recovery.pt(rem(16.)))),
+                .children(
+                    recovery
+                        .notice
+                        .map(|notice| div().w_full().pt(rem(16.)).child(notice)),
+                )
+                .child(div().w_full().pt(rem(16.)).child(actions)),
         ))
     }
 
@@ -2502,6 +2573,7 @@ impl Desktop {
         {
             self.scrolls[Page::New as usize].set_offset(point(px(0.), px(-offset)));
         }
+        self.workbench_notice = None;
         let compact = is_compact(window);
         let opening_result = self.opened(cx).reading && self.import.following_conversion.is_some();
         let linked_task = self.workbench_linked_task(cx).cloned();
@@ -2552,13 +2624,26 @@ impl Desktop {
             .children(candidates)
             .children(self.source_preview_error(cx))
             .child(
-                // The options belong to one input: joined to its video card (the
-                // preview or the task in its place), otherwise on their own.
+                // The options belong to one input: with its video card (the preview or
+                // the task in its place) they are one surface, the card, a hairline,
+                // then the options; otherwise the panel stands alone.
                 v_flex()
                     .w_full()
                     .min_w_0()
-                    .gap(TILE_GAP)
+                    .when(attached, |unit| {
+                        unit.rounded(RADIUS_HERO)
+                            .overflow_hidden()
+                            .bg(color(ColorRole::SURFACE))
+                    })
                     .children(card)
+                    .when(attached, |unit| {
+                        unit.child(
+                            MaterialDivider::new("video-unit-divider")
+                                .variant(DividerVariant::MiddleInset)
+                                .inset_start(ITEM_INSET)
+                                .inset_end(ITEM_INSET),
+                        )
+                    })
                     .child(options),
             )
             .when_some(cancelled, |view, id| {
@@ -2667,6 +2752,12 @@ impl Desktop {
             preferences: self
                 .preferences
                 .revision(crate::preferences::PreferenceGroup::Generation),
+            services: self
+                .preferences
+                .revision(crate::preferences::PreferenceGroup::Services),
+            services_blocked: self
+                .preferences
+                .is_blocked(crate::preferences::PreferenceGroup::Services),
             defaults_pending: self.preference_defaults_pending,
             source: self.import.preview_generation,
             reading: self.import.reading(),
@@ -2692,7 +2783,7 @@ impl Desktop {
 
     /// What stands between this video and a conversion, each obstacle with its one
     /// way forward. Only unresolved choices interrupt a submitted conversion.
-    fn conversion_recovery(&mut self, cx: &mut Context<Self>) -> Option<Div> {
+    fn conversion_recovery(&mut self, cx: &mut Context<Self>) -> Recovery {
         let busy = self.work.read(cx).job.is_some()
             || self.workspace(cx).is_some_and(|workspace| {
                 workspace.state.tasks.iter().any(|task| {
@@ -2731,7 +2822,11 @@ impl Desktop {
         // Waiting for the component or location checks is progress, not a failure.
         let checking = !preferences_blocked && (self.environment.is_none() || plan_pending);
         let mut facts: Vec<AnyElement> = Vec::new();
+        // Repairs belong to the obstacle's notice; the rest take the start action's place
+        // in the card's trailing group, the filled one last.
+        let mut repairs: Vec<MaterialButton> = Vec::new();
         let mut actions: Vec<MaterialButton> = Vec::new();
+        let mut lead: Option<MaterialButton> = None;
         // An outlined action reads as live: its label is primary (G3).
         let button = |id: &'static str, variant, icon, label: &'static str| {
             material_button(id, variant)
@@ -2747,10 +2842,10 @@ impl Desktop {
                 || !environment.ffprobe
                 || (self.online(cx) && !environment.ytdlp)
         }) {
-            actions.push(
+            repairs.push(
                 button(
                     "repair-conversion-components",
-                    ButtonVariant::Outlined,
+                    ButtonVariant::Tonal,
                     symbols::settings(),
                     course2md::tr!("检查所需组件"),
                 )
@@ -2765,10 +2860,10 @@ impl Desktop {
             );
         }
         if let Some(issue) = preferences_issue {
-            actions.push(
+            repairs.push(
                 button(
                     "repair-generation-preferences",
-                    ButtonVariant::Outlined,
+                    ButtonVariant::Tonal,
                     symbols::refresh(),
                     if issue.can_retry {
                         course2md::tr!("重试保存处理选项")
@@ -2792,6 +2887,67 @@ impl Desktop {
                 })),
             );
         }
+        // A service this note chose that is no longer saved gives way to the default;
+        // say so, naming the one it uses now.
+        if let Some(draft) = self
+            .workspace(cx)
+            .and_then(|workspace| workspace.state.draft())
+        {
+            let preferences = &self.preferences;
+            let dropped = !preferences.is_blocked(crate::preferences::PreferenceGroup::Services)
+                && [&draft.asr_service, &draft.ai_service]
+                    .into_iter()
+                    .flatten()
+                    .any(|id| !preferences.usable_in_snapshot(id));
+            let fallback = dropped
+                .then(|| {
+                    let refs = preferences.plan_refs(&crate::preferences::ServiceRefs {
+                        asr: draft.asr_service.clone(),
+                        llm: draft.ai_service.clone(),
+                    });
+                    [
+                        (&draft.ai_service, refs.llm),
+                        (&draft.asr_service, refs.asr),
+                    ]
+                    .into_iter()
+                    .find(|(own, _)| {
+                        own.as_deref()
+                            .is_some_and(|id| !preferences.usable_in_snapshot(id))
+                    })
+                    .and_then(|(_, now)| {
+                        preferences
+                            .version(&now?)
+                            .map(|version| version.config.name.clone())
+                    })
+                })
+                .flatten();
+            if let Some(name) = fallback {
+                facts.push(
+                    supporting_info(
+                        "draft-service-fallback",
+                        course2md::tr!("所选服务已不在设置中，这次笔记改用默认服务「{}」", name),
+                    )
+                    .into_any_element(),
+                );
+            }
+        }
+        // A note needs a name: the field is in the processing options.
+        let title_missing = self.import.source_preview.is_some()
+            && self
+                .workspace(cx)
+                .and_then(|workspace| workspace.state.draft())
+                .is_some_and(|draft| draft.title.trim().is_empty());
+        if title_missing {
+            repairs.push(
+                button(
+                    "fill-in-note-title",
+                    ButtonVariant::Tonal,
+                    symbols::edit(),
+                    course2md::tr!("填写名称"),
+                )
+                .on_click(cx.listener(|this, _, window, cx| this.fill_in_title(window, cx))),
+            );
+        }
         if let Some(library) = self
             .workspace(cx)
             .and_then(|workspace| {
@@ -2805,10 +2961,10 @@ impl Desktop {
             })
         {
             let id = library.id.clone();
-            actions.push(
+            repairs.push(
                 button(
                     "reassociate-import-location",
-                    ButtonVariant::Outlined,
+                    ButtonVariant::Tonal,
                     symbols::database(),
                     course2md::tr!("重新关联此保存位置"),
                 )
@@ -2828,7 +2984,7 @@ impl Desktop {
                 )
                 .into_any_element(),
             );
-            actions.push(
+            lead = Some(
                 button(
                     "show-matching-task",
                     ButtonVariant::Filled,
@@ -2865,7 +3021,7 @@ impl Desktop {
                 );
             }
             let title = self.library(cx).course_display_title(&course);
-            actions.push(
+            lead = Some(
                 button(
                     "open-existing-note",
                     ButtonVariant::Filled,
@@ -2882,7 +3038,7 @@ impl Desktop {
                     "regenerate-note",
                     ButtonVariant::Outlined,
                     symbols::refresh(),
-                    course2md::tr!("重新生成（覆盖当前笔记）"),
+                    course2md::tr!("重新生成"),
                 )
                 .track_focus(&self.import_submit_focus)
                 .disabled(
@@ -2914,10 +3070,10 @@ impl Desktop {
                 })),
             );
         } else if let Some(purpose) = self.missing_import_service(cx) {
-            actions.push(
+            repairs.push(
                 button(
                     "configure-conversion-service",
-                    ButtonVariant::Filled,
+                    ButtonVariant::Tonal,
                     symbols::settings(),
                     match purpose {
                         ServicePurpose::Speech => course2md::tr!("设置语音识别服务"),
@@ -2945,7 +3101,8 @@ impl Desktop {
                     .on_click(cx.listener(|this, _, window, cx| this.start_conversion(window, cx))),
                 );
             }
-            actions.push(
+            actions.insert(
+                0,
                 button(
                     "cancel-pending-conversion",
                     ButtonVariant::Text,
@@ -2959,35 +3116,37 @@ impl Desktop {
                 })),
             );
         }
-        if let Some(message) = submission_error {
-            let status = if checking {
-                ui::AsyncStatus::Busy(message.into())
-            } else {
-                ui::AsyncStatus::Failed(message.into())
-            };
-            facts.extend(
-                ui::async_status("import-submit-status", &status, None, cx)
-                    .map(IntoElement::into_any_element),
-            );
+        // A check still under way is status beside the video; an obstacle is one notice
+        // in the card with the way past it, and the conversion cannot start until then.
+        let mut notice = None;
+        match submission_error {
+            Some(message) if checking => facts.extend(
+                ui::async_status(
+                    "import-submit-status",
+                    &ui::AsyncStatus::Busy(message.into()),
+                    None,
+                    cx,
+                )
+                .map(IntoElement::into_any_element),
+            ),
+            Some(message) => {
+                notice = Some(
+                    notice_banner("import-submit-status", NoticeKind::Danger, message.clone())
+                        .rounded(RADIUS_LARGE)
+                        .children(repairs.drain(..)),
+                );
+                self.workbench_notice = Some(message);
+            }
+            None => {}
         }
-        if facts.is_empty() && actions.is_empty() {
-            return None;
+        // Without an obstacle to explain them, repairs wait with the card's actions.
+        actions.splice(0..0, repairs);
+        Recovery {
+            facts,
+            blocked: notice.is_some(),
+            notice,
+            actions: actions.into_iter().chain(lead).collect(),
         }
-        Some(
-            v_flex()
-                .w_full()
-                .min_w_0()
-                .gap(rem(12.))
-                .children(facts)
-                .child(
-                    h_flex()
-                        .w_full()
-                        .gap(rem(8.))
-                        .flex_wrap()
-                        .justify_end()
-                        .children(actions),
-                ),
-        )
     }
 }
 
