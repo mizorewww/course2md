@@ -492,8 +492,8 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
             };
             let file = settings::load()?;
             let initial = course2md::options::resolve(source.clone(), &cli.opts, &file)?;
-            // 仅为 wizard 前快速失败；pipeline::run 开头的全量 validate 才是入口契约
-            // （桌面端走 run_task 不经这里，两处各自服务自己的调用方）。
+            // Only fails fast before the wizard: `pipeline::run` validates in full, and
+            // then runs the conversion as a task, as `run-task` does.
             initial.validate()?;
             if initial.llm.enabled {
                 llm::validate(&initial.llm)?;

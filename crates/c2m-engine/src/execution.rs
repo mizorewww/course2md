@@ -437,6 +437,7 @@ impl WorkDir {
 pub(crate) fn enter_work_dir(
     work_dir: &Path,
     binding: &serde_json::Value,
+    former: Option<&serde_json::Value>,
     source: crate::dispatch::ControlSource,
 ) -> Result<WorkDir> {
     std::fs::create_dir_all(work_dir)?;
@@ -448,7 +449,7 @@ pub(crate) fn enter_work_dir(
         .with_context(|| {
             crate::tr!("目录正被另一任务使用：{}。请等待任务结束", path.display()).to_string()
         })?;
-    bind_work_dir(work_dir, binding)?;
+    bind_work_dir(work_dir, binding, former)?;
     let control = crate::dispatch::TaskControl::open(work_dir, source)?;
     Ok(WorkDir {
         job: Job {
@@ -460,13 +461,21 @@ pub(crate) fn enter_work_dir(
 }
 
 /// A mismatch is evidence that this is a different task; preserve both old work and error.
-pub(crate) fn bind_work_dir(work_dir: &Path, binding: &serde_json::Value) -> Result<()> {
+/// `former` is the identity the same task bound before, which takes the current one.
+pub(crate) fn bind_work_dir(
+    work_dir: &Path,
+    binding: &serde_json::Value,
+    former: Option<&serde_json::Value>,
+) -> Result<()> {
     std::fs::create_dir_all(work_dir)?;
     let path = work_dir.join("task-identity.json");
     if path.exists() {
         let old: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?).context(
             tr!("任务进度身份损坏，原文件已保留 / Task identity is damaged"),
         )?;
+        if former == Some(&old) {
+            return crate::fsio::atomic_write(&path, &serde_json::to_vec_pretty(binding)?);
+        }
         anyhow::ensure!(
             old == *binding,
             tr!(
@@ -490,7 +499,7 @@ pub(crate) fn bind_work_dir(work_dir: &Path, binding: &serde_json::Value) -> Res
 pub async fn run(request: Request, parent: crate::dispatch::ParentProcess) -> Result<()> {
     let cfg = request.resolve()?;
     // No settings::load, environment credential resolution or wizard on this path.
-    crate::pipeline::run_task(&request, &cfg, parent).await
+    crate::pipeline::run_task(&request, &cfg, crate::pipeline::Caller::Task(parent)).await
 }
 
 /// Call only while all writers are paused and the library copy has been verified.
@@ -582,10 +591,15 @@ mod tests {
     #[test]
     fn immutable_work_rejects_changed_inputs_without_destroying_progress() {
         let dir = tempfile::tempdir().unwrap();
-        bind_work_dir(dir.path(), &serde_json::json!({"title":"A"})).unwrap();
+        bind_work_dir(dir.path(), &serde_json::json!({"title":"A"}), None).unwrap();
         std::fs::write(dir.path().join("asr.jsonl"), "saved result").unwrap();
-        bind_work_dir(dir.path(), &serde_json::json!({"title":"A"})).unwrap();
-        assert!(bind_work_dir(dir.path(), &serde_json::json!({"title":"B"})).is_err());
+        bind_work_dir(dir.path(), &serde_json::json!({"title":"A"}), None).unwrap();
+        assert!(bind_work_dir(dir.path(), &serde_json::json!({"title":"B"}), None).is_err());
+        // The identity the same task bound before gives way to the current one.
+        let former = serde_json::json!({"title":"A"});
+        bind_work_dir(dir.path(), &serde_json::json!({"title":"C"}), Some(&former)).unwrap();
+        bind_work_dir(dir.path(), &serde_json::json!({"title":"C"}), Some(&former)).unwrap();
+        assert!(bind_work_dir(dir.path(), &serde_json::json!({"title":"A"}), None).is_err());
         assert_eq!(
             std::fs::read_to_string(dir.path().join("asr.jsonl")).unwrap(),
             "saved result"

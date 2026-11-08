@@ -181,6 +181,53 @@ pub fn resolve(
     Ok(cfg)
 }
 
+/// The settings that [`resolve`] turns back into `cfg`: a command-line run is sent as a
+/// task, which carries its settings rather than the options that chose them.
+pub fn file_for(cfg: &config::PipelineConfig) -> settings::ConfigFile {
+    settings::ConfigFile {
+        desktop: Default::default(),
+        defaults: settings::Defaults {
+            out: Some(cfg.out_root.clone()),
+            similarity: Some(cfg.similarity),
+            sample_interval: Some(cfg.sample_interval),
+            cooldown: Some(cfg.cooldown),
+            slide_mode: Some(cfg.slide_mode),
+            stable_secs: Some(cfg.stable_secs),
+            max_height: Some(cfg.max_height),
+            roi: cfg.roi.map(|r| {
+                let [x1, y1, x2, y2] = [r.x1, r.y1, r.x2, r.y2].map(percent);
+                format!("{x1}%,{y1}%-{x2}%,{y2}%")
+            }),
+            threads: Some(cfg.threads),
+            provider: Some(cfg.provider),
+            asr_model: cfg.asr_model.clone(),
+            transcript_source: Some(cfg.transcript_source),
+            max_speech: Some(cfg.max_speech),
+            formats: Some(cfg.formats.clone()),
+            model_dir: Some(cfg.model_dir.clone()),
+            keep_video: Some(cfg.keep_video),
+            no_download: Some(cfg.no_download),
+            resume: Some(cfg.resume),
+            gpu_layers: Some(cfg.gpu_layers),
+            mmproj_offload: Some(cfg.mmproj_offload),
+        },
+        llm: cfg.llm.clone(),
+        asr_api: cfg.asr_api.clone(),
+    }
+}
+
+/// The shortest percentage that `Roi::parse` reads back as exactly `fraction`.
+fn percent(fraction: f64) -> String {
+    let value = fraction * 100.;
+    (0..=17)
+        .map(|digits| format!("{value:.digits$}"))
+        .find(|text| {
+            text.parse::<f64>()
+                .is_ok_and(|parsed| parsed / 100. == fraction)
+        })
+        .unwrap_or_else(|| value.to_string())
+}
+
 /// 云端 STT 配置合并：CLI > 配置文件 > 默认（OpenRouter）。
 fn resolve_asr_api(opts: &RunOpts, file: &settings::ConfigFile) -> crate::settings::AsrApi {
     let mut a = file.asr_api.clone();
@@ -589,6 +636,40 @@ mod tests {
         let cfg = resolve("video".into(), &explicit, &file).unwrap();
         assert_eq!(cfg.asr_model.as_deref(), Some("qwen3-1.7b"));
         assert!(cfg.validate_asr_with_auth(true, true).is_err());
+    }
+
+    #[test]
+    fn the_settings_a_command_line_run_sends_resolve_to_what_it_chose() {
+        let mut file = settings::ConfigFile::default();
+        file.defaults.similarity = Some(0.7);
+        file.llm.enabled = true;
+        file.llm.api_key = "key".into();
+        let opts = RunOpts {
+            out: Some("relative/out".into()),
+            roi: Some("10.5%,0%-90%,87.25%".into()),
+            similarity: Some(0.1 + 0.2),
+            provider: Some(config::AsrProvider::Api),
+            asr_api_key: Some("asr".into()),
+            formats: Some(vec![config::OutputFormat::Json]),
+            no_keep_video: true,
+            no_resume: true,
+            translate: Some("en".into()),
+            gpu_layers: Some(3),
+            ..Default::default()
+        };
+        let cfg = resolve("video.mp4".into(), &opts, &file).unwrap();
+        for hundredths in 0..=10_000 {
+            let fraction = format!("{}", f64::from(hundredths) / 100.)
+                .parse::<f64>()
+                .unwrap()
+                / 100.;
+            assert_eq!(percent(fraction).parse::<f64>().unwrap() / 100., fraction);
+        }
+        let sent = resolve("video.mp4".into(), &RunOpts::default(), &file_for(&cfg)).unwrap();
+        assert_eq!(
+            serde_json::to_value(&sent).unwrap(),
+            serde_json::to_value(&cfg).unwrap()
+        );
     }
 
     #[test]
