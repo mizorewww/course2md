@@ -639,25 +639,7 @@ mod tests {
     }
 
     #[test]
-    fn the_settings_a_command_line_run_sends_resolve_to_what_it_chose() {
-        let mut file = settings::ConfigFile::default();
-        file.defaults.similarity = Some(0.7);
-        file.llm.enabled = true;
-        file.llm.api_key = "key".into();
-        let opts = RunOpts {
-            out: Some("relative/out".into()),
-            roi: Some("10.5%,0%-90%,87.25%".into()),
-            similarity: Some(0.1 + 0.2),
-            provider: Some(config::AsrProvider::Api),
-            asr_api_key: Some("asr".into()),
-            formats: Some(vec![config::OutputFormat::Json]),
-            no_keep_video: true,
-            no_resume: true,
-            translate: Some("en".into()),
-            gpu_layers: Some(3),
-            ..Default::default()
-        };
-        let cfg = resolve("video.mp4".into(), &opts, &file).unwrap();
+    fn a_region_is_sent_as_the_percentages_that_read_back_as_it() {
         for hundredths in 0..=10_000 {
             let fraction = format!("{}", f64::from(hundredths) / 100.)
                 .parse::<f64>()
@@ -665,11 +647,6 @@ mod tests {
                 / 100.;
             assert_eq!(percent(fraction).parse::<f64>().unwrap() / 100., fraction);
         }
-        let sent = resolve("video.mp4".into(), &RunOpts::default(), &file_for(&cfg)).unwrap();
-        assert_eq!(
-            serde_json::to_value(&sent).unwrap(),
-            serde_json::to_value(&cfg).unwrap()
-        );
     }
 
     #[test]

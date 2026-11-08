@@ -149,7 +149,7 @@ pub async fn run(cfg: &PipelineConfig, models: ModelDownload<'_>) -> Result<()> 
         service_versions: Default::default(),
     };
     request.validate()?;
-    let cfg = request.resolve()?;
+    let cfg = request.resolve_typed()?;
     let cli = Cli {
         meta,
         probed,
