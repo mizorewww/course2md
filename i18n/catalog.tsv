@@ -2049,6 +2049,7 @@ ChatGPT 账号	ChatGPT 账号	ChatGPT account	ChatGPT 帳號	ChatGPT アカウ�
 所有下载地址均失败 / Every download host failed	所有下载地址均失败	Every download host failed	所有下載網址均失敗	すべてのダウンロード元で失敗しました
 文件校验不符 / Checksum mismatch	文件校验不符	Checksum mismatch	檔案校驗不符	チェックサムが一致しません
 一分钟没有收到数据 / No data for a minute	一分钟没有收到数据	No data for a minute	一分鐘沒有收到資料	1 分間データを受信していません
+下载不完整：应为 {} 字节，收到 {} 字节 / Incomplete download: expected {} bytes, received {}	下载不完整：应为 {} 字节，收到 {} 字节	Incomplete download: expected {} bytes, received {}	下載不完整：應為 {} 位元組，收到 {} 位元組	ダウンロードが不完全です：{} バイトのはずが {} バイトでした
 模型下载失败；可设置 HF_ENDPOINT 指定下载地址 / Model download failed; set HF_ENDPOINT to choose a download host	模型下载失败；可设置 HF_ENDPOINT 指定下载地址	Model download failed; set HF_ENDPOINT to choose a download host	模型下載失敗；可設定 HF_ENDPOINT 指定下載網址	モデルのダウンロードに失敗しました。HF_ENDPOINT でダウンロード元を指定できます
 连接 {} · {}	连接 {} · {}	Connecting to {} · {}	連線 {} · {}	{} に接続中 · {}
 重新连接 {} · {}	重新连接 {} · {}	Reconnecting to {} · {}	重新連線 {} · {}	{} に再接続中 · {}

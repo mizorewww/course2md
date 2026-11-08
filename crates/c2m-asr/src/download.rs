@@ -150,8 +150,11 @@ fn failure_text(failure: &Failure) -> String {
             )
         }
         Failure::Status { code, body } => format!("HTTP {code}: {body}"),
-        Failure::Incomplete { expected, received } => format!(
-            "下载不完整 / Incomplete download (expected {expected} bytes, received {received})"
+        // Also a finished file of the wrong size: more or fewer bytes than announced.
+        Failure::Incomplete { expected, received } => crate::tr!(
+            "下载不完整：应为 {} 字节，收到 {} 字节 / Incomplete download: expected {} bytes, received {}",
+            expected,
+            received
         ),
         Failure::Stalled => crate::tr!("一分钟没有收到数据 / No data for a minute").into(),
         Failure::ChecksumMismatch => crate::tr!("文件校验不符 / Checksum mismatch").into(),
@@ -191,12 +194,16 @@ mod tests {
             }),
             "HTTP 503: busy"
         );
-        assert!(
+        assert_eq!(
             failure_text(&Failure::Incomplete {
                 expected: 5,
                 received: 3
-            })
-            .contains("expected 5 bytes, received 3")
+            }),
+            crate::tr!(
+                "下载不完整：应为 {} 字节，收到 {} 字节 / Incomplete download: expected {} bytes, received {}",
+                5,
+                3
+            )
         );
     }
 
@@ -229,6 +236,97 @@ mod tests {
                 .contains("/test/repo/resolve/main/synthetic.bin")
         );
         assert_eq!(std::fs::read(&dest).unwrap(), b"12345");
+        // The model folder holds the file and its manifest: no partial file, lock
+        // or resume validator is left beside them.
+        assert_eq!(
+            folder(root.path()),
+            ["synthetic.bin", "synthetic.manifest.json"]
+        );
+    }
+
+    fn folder(dir: &Path) -> Vec<String> {
+        let mut names: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn a_resumed_file_that_fails_its_hash_is_fetched_again_from_the_start() {
+        let hash = sha256(b"12345");
+        let remote = Remote {
+            repo: "test/repo",
+            file: "synthetic.bin",
+            size: 5,
+            sha256: &hash,
+        };
+        let root = tempfile::tempdir().unwrap();
+        let dest = root.path().join("synthetic.bin");
+        // Bytes left by an earlier run that are not this file's.
+        std::fs::write(dest.with_extension("part"), b"xx").unwrap();
+        let (base, server) = crate::test_http::serve(vec![
+            "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 2-4/5\r\nContent-Length: 3\r\nConnection: close\r\n\r\n345".into(),
+            "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\n12345".into(),
+        ]);
+        let downloader = Downloader::new();
+        downloader
+            .0
+            .set(mirror_fetch::Downloader::new(vec![Host::Hub(base)], None))
+            .unwrap();
+        downloader
+            .fetch(&remote, &dest, &TaskControl::default())
+            .unwrap();
+        let requests = server.join().unwrap();
+        let range = |head: &str| head.to_ascii_lowercase().contains("range: bytes=");
+        assert!(range(&requests[0].head), "{}", requests[0].head);
+        assert!(!range(&requests[1].head), "{}", requests[1].head);
+        assert_eq!(std::fs::read(&dest).unwrap(), b"12345");
+        assert_eq!(
+            folder(root.path()),
+            ["synthetic.bin", "synthetic.manifest.json"]
+        );
+    }
+
+    #[test]
+    fn a_file_of_the_wrong_size_is_reported_as_incomplete() {
+        let remote = Remote {
+            repo: "test/repo",
+            file: "synthetic.bin",
+            size: 5,
+            sha256: &sha256(b"12345"),
+        };
+        let (base, server) = crate::test_http::serve(vec![
+            "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\n1234".into(),
+        ]);
+        let root = tempfile::tempdir().unwrap();
+        let downloader = Downloader::new();
+        downloader
+            .0
+            .set(mirror_fetch::Downloader::new(vec![Host::Hub(base)], None))
+            .unwrap();
+        let message = downloader
+            .fetch(
+                &remote,
+                &root.path().join("synthetic.bin"),
+                &TaskControl::default(),
+            )
+            .unwrap_err()
+            .to_string();
+        server.join().unwrap();
+        let incomplete = failure_text(&Failure::Incomplete {
+            expected: 5,
+            received: 4,
+        });
+        assert!(message.ends_with(&incomplete), "{message}");
+        assert!(
+            !folder(root.path())
+                .iter()
+                .any(|name| name.ends_with(".lock") || name.ends_with(".meta")),
+            "{:?}",
+            folder(root.path())
+        );
     }
 
     #[test]
