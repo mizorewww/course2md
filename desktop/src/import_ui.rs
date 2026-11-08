@@ -1271,6 +1271,18 @@ impl Desktop {
         ))
     }
 
+    /// Opens the processing options for this fix, without changing the saved choice,
+    /// and puts the cursor in the name field.
+    fn fill_in_title(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.import.title_required = true;
+        self.desktop_settings.home_options = true;
+        let input = self.inputs[&Field::Title].clone();
+        window.on_next_frame(move |window, cx| {
+            input.update(cx, |input, cx| input.focus(window, cx));
+        });
+        cx.notify();
+    }
+
     fn toggle_preview_details(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.import.show_preview_details = !self.import.show_preview_details;
         cx.notify();
@@ -2870,6 +2882,23 @@ impl Desktop {
                         window.defer(cx, move |window, cx| focus.focus(window, cx));
                     }
                 })),
+            );
+        }
+        // A note needs a name: the field is in the processing options.
+        let title_missing = self.import.source_preview.is_some()
+            && self
+                .workspace(cx)
+                .and_then(|workspace| workspace.state.draft())
+                .is_some_and(|draft| draft.title.trim().is_empty());
+        if title_missing {
+            repairs.push(
+                button(
+                    "fill-in-note-title",
+                    ButtonVariant::Tonal,
+                    symbols::edit(),
+                    course2md::tr!("填写名称"),
+                )
+                .on_click(cx.listener(|this, _, window, cx| this.fill_in_title(window, cx))),
             );
         }
         if let Some(library) = self

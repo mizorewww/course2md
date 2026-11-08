@@ -2314,3 +2314,4 @@ course2md 不在“应用程序”文件夹中。请先退出 course2md，在访
 没有权限打开这份笔记的保存锁 {}，请检查这个文件夹的权限后重试 / No permission to open the note's save lock {}; check the folder's permissions and try again	没有权限打开这份笔记的保存锁 {}，请检查这个文件夹的权限后重试	No permission to open the note's save lock {}; check the folder's permissions and try again	沒有權限開啟這份筆記的儲存鎖 {}，請檢查這個資料夾的權限後重試	このノートの保存ロック {} を開く権限がありません。フォルダの権限を確認してから、もう一度お試しください
 无法打开这份笔记的保存锁 {} / Could not open the note's save lock {}	无法打开这份笔记的保存锁 {}	Could not open the note's save lock {}	無法開啟這份筆記的儲存鎖 {}	このノートの保存ロック {} を開けませんでした
 这份笔记的保存锁不是普通文件：{}，请移走它后重试 / The note's save lock is not a regular file: {}; move it away and try again	这份笔记的保存锁不是普通文件：{}，请移走它后重试	The note's save lock is not a regular file: {}; move it away and try again	這份筆記的儲存鎖不是一般檔案：{}，請移走它後重試	このノートの保存ロックは通常のファイルではありません：{}。移動してからもう一度お試しください
+填写名称	填写名称	Enter a name	填寫名稱	名前を入力
