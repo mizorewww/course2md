@@ -309,6 +309,14 @@ const RENAMED_MESSAGES: &[(&str, &str)] = &[
         "The service version used by the task cannot be found. Please select the service and create a new attempt.",
         "任务使用的服务已不在设置中，请调整后重试并选择服务",
     ),
+    (
+        "找不到任務使用的服務版本，請選擇服務後建立新嘗試",
+        "任务使用的服务已不在设置中，请调整后重试并选择服务",
+    ),
+    (
+        "タスクで使用されているサービスのバージョンが見つかりません。サービスを選択し、新しい試行を作成してください。",
+        "任务使用的服务已不在设置中，请调整后重试并选择服务",
+    ),
 ];
 
 fn renamed_message(text: &str) -> &str {
@@ -1298,6 +1306,8 @@ mod tests {
         let now = "任务使用的服务已不在设置中，请调整后重试并选择服务";
         for saved in [
             "找不到任务使用的服务版本，请选择服务后建立新尝试",
+            "找不到任務使用的服務版本，請選擇服務後建立新嘗試",
+            "タスクで使用されているサービスのバージョンが見つかりません。サービスを選択し、新しい試行を作成してください。",
             t_for(now, Lang::En),
             t_for(now, Lang::Ja),
         ] {
