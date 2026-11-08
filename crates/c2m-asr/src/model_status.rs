@@ -292,7 +292,13 @@ pub(crate) fn inspect_at(
 fn cache_part(name: &str, path: PathBuf, missing: Vec<String>) -> Result<CachePart> {
     let mut files = Vec::new();
     for file in files_under(&path)? {
-        let metadata = fs::metadata(&file)?;
+        // A download in progress can rename or remove its working files between
+        // the listing and this read; they are not part of the cache.
+        let metadata = match fs::metadata(&file) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
         let modified = metadata
             .modified()?
             .duration_since(UNIX_EPOCH)
@@ -467,6 +473,14 @@ fn files_under(root: &Path) -> Result<Vec<PathBuf>> {
         let entry = match entry {
             Ok(entry) => entry,
             Err(error) if error.loop_ancestor().is_some() => continue,
+            // Removed while the walk was under way, as a download's working files are.
+            Err(error)
+                if error
+                    .io_error()
+                    .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound) =>
+            {
+                continue;
+            }
             Err(error) => {
                 return Err(error).with_context(|| {
                     format!(
@@ -545,6 +559,22 @@ mod tests {
 
     use super::*;
     use std::io::Write;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_gone_before_it_is_read_is_left_out_of_the_cache() {
+        // A dangling link stands in for a download's working file that is
+        // renamed or removed between the listing and the read.
+        let root = roots();
+        let part = root.path().join("part");
+        fs::create_dir_all(&part).unwrap();
+        fs::write(part.join("model.bin"), b"1234").unwrap();
+        std::os::unix::fs::symlink(part.join("gone.part.meta"), part.join("model.part.meta"))
+            .unwrap();
+
+        let cache = cache_part("model", part, Vec::new()).unwrap();
+        assert_eq!(cache.bytes, 4);
+    }
     fn roots() -> tempfile::TempDir {
         tempfile::tempdir().unwrap()
     }

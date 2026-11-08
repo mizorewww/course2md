@@ -64,5 +64,4 @@ allow-git = [
     # The desktop's UI stack: gpui-kit-material and the upstream it builds on.
     "https://github.com/longbridge/gpui-kit",
     "https://github.com/mizorewww/gpui-kit-material",
-    "https://github.com/mizorewww/gpui-material-symbols",
 ]
