@@ -2235,9 +2235,7 @@ impl ReaderPage {
         if meta.duration > 0. {
             facts.push(course2md::render::fmt_ts(meta.duration));
         }
-        if preview.course.slides > 0 {
-            facts.push(preview.course.content_description());
-        }
+        // How many screenshots it has is the 截图 view's own count.
         v_flex()
             .w_full()
             .min_w_0()

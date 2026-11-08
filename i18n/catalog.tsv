@@ -558,8 +558,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 名称尚未恢复：{}	名称尚未恢复：{}	Name not yet restored: {}	名稱尚未恢復：{}	名前はまだ復元されていません: {}
 后台工作中断 / Background work was interrupted	后台工作中断	Background work was interrupted	背景工作中斷	バックグラウンド処理が中断されました
 后续任务记录缺失，请先恢复任务记录	后续任务记录缺失，请先恢复任务记录	Subsequent task records are missing, please restore the task records first	後續任務記錄缺失，請先恢復任務記錄	後続のタスク レコードが欠落しています。最初にタスク レコードを復元してください。
-含 {} 张截图	含 {} 张截图	Contains {} screenshots	含 {} 張截圖	スクリーンショット {} 枚を含む
-含 1 张截图	含 1 张截图	Contains 1 screenshot	含 1 張截圖	スクリーンショット 1 枚を含む
 启动 yt-dlp 失败 / Failed to start yt-dlp	启动 yt-dlp 失败	Failed to start yt-dlp	啟動 yt-dlp 失敗	yt-dlp の起動に失敗しました
 启动 {} 失败	启动 {} 失败	Failed to start {}	啟動 {} 失敗	{} の起動に失敗しました
 呃	呃	Uh	呃	えー
@@ -995,7 +993,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 文字来源	文字来源	Transcript source	文字來源	文字起こしのソース
 文字来源方式	文字来源方式	Text source method	文字來源方式	テキストソース方式
 文字来源：auto 优先字幕，subtitle 仅字幕，asr 语音识别 / Transcript source: auto, subtitle, asr	文字来源：auto 优先字幕，subtitle 仅字幕，asr 语音识别	Transcript source: auto, subtitle, asr	文字來源：auto 優先字幕，subtitle 僅字幕，asr 語音辨識	テキストソース：auto は字幕を優先、subtitle は字幕のみ、asr は音声認識
-文字笔记	文字笔记	Text notes	文字筆記	テキストノート
 文字转写	文字转写	Transcript	文字轉寫	文字起こし
 新建文件夹	新建文件夹	New folder	新增資料夾	新しいフォルダー
 新的视频输入尚未建立：{}	新的视频输入尚未建立：{}	The new video input has not been created yet: {}	新的影片輸入尚未建立：{}	新しい動画入力はまだ作成されていません: {}
