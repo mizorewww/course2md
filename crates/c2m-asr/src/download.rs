@@ -1,15 +1,15 @@
-//! Model downloads for this application: `model-fetch` does the transfer; this finds
+//! Model downloads for this application: `mirror-fetch` does the transfer; this finds
 //! aria2, drives the progress bar and words what happened.
 
 use anyhow::Result;
-use model_fetch::{Cancel, Error, Event, Failure, Host, Phase, Progress};
+use mirror_fetch::{Cancel, Error, Event, Failure, Host, Phase, Progress};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use crate::dispatch::TaskControl;
 use crate::progress::{self, Bar, Stage, Unit};
 
-pub use model_fetch::Remote;
+pub use mirror_fetch::Remote;
 
 /// Terminal bar for model downloads; Apple model preparation uses it too.
 pub(crate) const MODEL_BAR: &str =
@@ -18,7 +18,7 @@ pub(crate) const MODEL_BAR: &str =
 /// Downloads the files of one model preparation. Nothing is resolved until a file
 /// is actually missing: choosing hosts may announce itself or wait on the network.
 #[derive(Default)]
-pub(crate) struct Downloader(OnceLock<model_fetch::Downloader>);
+pub(crate) struct Downloader(OnceLock<mirror_fetch::Downloader>);
 
 impl Downloader {
     pub fn new() -> Self {
@@ -29,7 +29,7 @@ impl Downloader {
     /// `.part` keeps the bytes received so far, so a later run resumes.
     pub fn fetch(&self, remote: &Remote, dest: &Path, control: &TaskControl) -> Result<()> {
         let downloader = self.0.get_or_init(|| {
-            model_fetch::Downloader::new(crate::hub::endpoints().hosts.clone(), find_aria2())
+            mirror_fetch::Downloader::new(crate::hub::endpoints().hosts.clone(), find_aria2())
         });
         let stage = Stage::ModelFile(remote.file.to_owned());
         progress::start(stage.clone());
@@ -217,7 +217,7 @@ mod tests {
         let downloader = Downloader::new();
         downloader
             .0
-            .set(model_fetch::Downloader::new(vec![Host::Hub(base)], None))
+            .set(mirror_fetch::Downloader::new(vec![Host::Hub(base)], None))
             .unwrap();
         downloader
             .fetch(&remote, &dest, &TaskControl::default())
@@ -246,7 +246,7 @@ mod tests {
         let downloader = Downloader::new();
         downloader
             .0
-            .set(model_fetch::Downloader::new(vec![Host::Hub(base)], None))
+            .set(mirror_fetch::Downloader::new(vec![Host::Hub(base)], None))
             .unwrap();
         let message = downloader
             .fetch(&remote, &root.path().join("f"), &TaskControl::default())
