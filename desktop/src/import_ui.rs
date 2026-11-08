@@ -57,6 +57,17 @@ pub(crate) fn cover_width(window: &Window) -> Rems {
     rem(if is_compact(window) { 200. } else { 256. })
 }
 
+/// A cover image cropped to fill its whole slot. It is laid over the slot's own box,
+/// not sized by the slot's flex layout, so a frame of any shape covers the slot edge to
+/// edge; the slot's mark under it shows while the image loads or if it cannot.
+pub(crate) fn cover_fill(cover: PathBuf) -> Img {
+    img(cover)
+        .absolute()
+        .inset_0()
+        .size_full()
+        .object_fit(ObjectFit::Cover)
+}
+
 /// A video's 16:9 cover, or its mark while it has none.
 pub(crate) fn video_cover(cover: Option<PathBuf>, width: Rems) -> Div {
     div()
@@ -71,10 +82,8 @@ pub(crate) fn video_cover(cover: Option<PathBuf>, width: Rems) -> Div {
         .flex()
         .items_center()
         .justify_center()
-        .map(|slot| match cover {
-            Some(cover) => slot.child(img(cover).size_full().object_fit(ObjectFit::Cover)),
-            None => slot.child(cover_placeholder(rem(32.))),
-        })
+        .child(cover_placeholder(rem(32.)))
+        .children(cover.map(cover_fill))
 }
 
 /// A video's title, on the workbench and on a task's card.
@@ -1088,17 +1097,13 @@ impl Desktop {
             .source_candidate_covers
             .get(&candidate.input)
             .cloned();
-        let thumbnail = match cover {
-            Some(cover) => img(cover)
-                .size_full()
-                .object_fit(ObjectFit::Cover)
-                .into_any_element(),
-            None => h_flex()
-                .size_full()
-                .justify_center()
-                .child(cover_placeholder(rem(20.)))
-                .into_any_element(),
-        };
+        let thumbnail = h_flex()
+            .relative()
+            .size_full()
+            .justify_center()
+            .child(cover_placeholder(rem(20.)))
+            .children(cover.map(cover_fill))
+            .into_any_element();
         let row = ListItem::new(("source-candidate", index), title)
             .leading(ListLeading::Video(Some(thumbnail)))
             .supporting(duration.unwrap_or_else(|| candidate.input.clone()));

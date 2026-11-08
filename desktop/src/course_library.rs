@@ -48,16 +48,12 @@ fn cover(image: Option<PathBuf>, icon: SymbolIcon) -> Div {
         .aspect_ratio(16. / 9.)
         .overflow_hidden()
         .bg(color(ColorRole::SECONDARY_CONTAINER))
-        .child(match image {
-            Some(path) => img(path)
-                .size_full()
-                .object_fit(ObjectFit::Cover)
-                .into_any_element(),
-            None => Icon::from(icon)
+        .child(
+            Icon::from(icon)
                 .size(rem(24.))
-                .color(color(ColorRole::ON_SECONDARY_CONTAINER))
-                .into_any_element(),
-        })
+                .color(color(ColorRole::ON_SECONDARY_CONTAINER)),
+        )
+        .children(image.map(crate::import_ui::cover_fill))
 }
 
 /// The cover of a note or task row.
