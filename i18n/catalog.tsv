@@ -168,6 +168,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {} 张截图 / {} 段文字	{} 张截图 / {} 段文字	Screenshots: {} / text paragraphs: {}	{} 張截圖 / {} 段文字	スクリーンショット {} 枚 / テキスト {} 段落
 {} 暂时无法访问	{} 暂时无法访问	{} is temporarily inaccessible	{} 暫時無法存取	{} は一時的にアクセスできません
 {} 的任务参数仍无法读取，材料已保留	{} 的任务参数仍无法读取，材料已保留	Task parameters for {} still cannot be read; the materials have been kept.	{} 的任務參數仍無法讀取，材料已保留	{} のタスク パラメータをまだ読み取れません。素材は保持されています。
+{} 的任务记录来自 3.0 之前的版本，此版本不再读取，原文件已保留	{} 的任务记录来自 3.0 之前的版本，此版本不再读取，原文件已保留	The task record for {} is from a version before 3.0, which this version no longer reads. The original file has been kept.	{} 的任務記錄來自 3.0 之前的版本，此版本不再讀取，原檔案已保留	{} のタスク記録は 3.0 より前のバージョンのもので、このバージョンでは読み込みません。元のファイルはそのまま保持されています。
 {} 的准备已暂停	{} 的准备已暂停	{} preparation is paused	{} 的準備已暫停	{} の準備は一時停止中です
 {} 的准备未完成：{}	{} 的准备未完成：{}	Preparation for {} is not complete: {}	{} 的準備未完成：{}	{} の準備が完了していません: {}
 {} 的截图	{} 的截图	Screenshot of {}	{} 的截圖	{} のスクリーンショット
@@ -309,6 +310,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 任务记录暂时无法读取	任务记录暂时无法读取	The task record cannot be read temporarily.	任務記錄暫時無法讀取	タスクレコードを一時的に読み取ることができません。
 任务记录版本不受支持，请使用创建这些任务的应用版本	任务记录版本不受支持，请使用创建这些任务的应用版本	Task record version is not supported, please use the app version that created these tasks	任務記錄版本不受支援，請使用建立這些任務的應用版本	タスク レコードのバージョンはサポートされていません。これらのタスクを作成したアプリのバージョンを使用してください
 任务记录由较新版本创建，请使用对应版本打开。原记录和备份均保留，尚未启动任务。	任务记录由较新版本创建，请使用对应版本打开。原记录和备份均保留，尚未启动任务。	The task record was created by a newer version, please use the corresponding version to open it. The original records and backups are retained, and the task has not been started yet.	任務記錄由較新版本建立，請使用對應版本開啟。原記錄和備份均保留，尚未啟動任務。	タスク レコードは新しいバージョンで作成されました。対応するバージョンを使用して開いてください。元のレコードとバックアップは保持されますが、タスクはまだ開始されていません。
+任务记录来自 3.0 之前的版本，此版本不再读取。原记录已原样保留：{}。可以选择「备份并重建任务记录」开始新的记录。	任务记录来自 3.0 之前的版本，此版本不再读取。原记录已原样保留：{}。可以选择「备份并重建任务记录」开始新的记录。	The task records are from a version before 3.0, which this version no longer reads. The original record has been left as it is: {}. Choose “Back up and rebuild task records” to start a new record.	任務記錄來自 3.0 之前的版本，此版本不再讀取。原記錄已原樣保留：{}。可以選擇「備份並重建任務記錄」開始新的記錄。	タスク記録は 3.0 より前のバージョンのもので、このバージョンでは読み込みません。元の記録はそのまま保持されています：{}。「バックアップしてタスク記録を再構築」を選ぶと新しい記録を始められます。
 任务记录缺少保存目录	任务记录缺少保存目录	Task record lacks save directory	任務記錄缺少儲存目錄	タスクレコードに保存ディレクトリがありません
 任务记录读取失败：{}	任务记录读取失败：{}	Task record reading failed: {}	任務記錄讀取失敗：{}	タスク レコードの読み取りに失敗しました: {}
 任务记录超过可读取范围，原文件已保留	任务记录超过可读取范围，原文件已保留	The task record exceeds the readable range and the original file has been retained.	任務記錄超過可讀取範圍，原檔案已保留	タスクレコードが読み取り可能な範囲を超えており、元のファイルが保持されています。
@@ -1397,6 +1399,7 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 正在退出	正在退出	Exiting	正在結束	終了しています
 正在验证登录状态…	正在验证登录状态…	Verifying login status...	正在驗證登入狀態…	ログインステータスを確認しています...
 正文已保存	正文已保存	Text has been saved	正文已儲存	テキストが保存されました
+此任务在旧版本中的进度记录不再读取，原文件保留在 {}	此任务在旧版本中的进度记录不再读取，原文件保留在 {}	This task's progress record from an older version is no longer read; the original file is kept at {}	此任務在舊版本中的進度記錄不再讀取，原檔案保留在 {}	旧バージョンでのこのタスクの進捗記録は読み込まれなくなりました。元のファイルは {} に保持されています
 此任务使用的凭据没有访问该服务或模型的权限。 / The credentials used by this task cannot access that service or model.	此任务使用的凭据没有访问该服务或模型的权限。	The credentials used by this task cannot access that service or model.	此任務使用的憑證沒有存取該服務或模型的權限。	このタスクで使用される資格情報には、サービスまたはモデルにアクセスする権限がありません。
 此任务尚无可补做的笔记正文	此任务尚无可补做的笔记正文	This task has no note text for reprocessing yet	此任務尚無可補做的筆記正文	このタスクには再処理できるノート本文がまだありません
 此任务已有后续处理，请打开对应任务继续	此任务已有后续处理，请打开对应任务继续	This task already has follow-up processing. Open that task to continue.	此任務已有後續處理，請開啟對應任務繼續	このタスクにはすでに追加処理があります。対応するタスクを開いて続行してください。

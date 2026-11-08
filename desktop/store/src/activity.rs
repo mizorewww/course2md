@@ -14,8 +14,7 @@ const QUIET_AFTER: Duration = Duration::from_secs(30);
 /// a landed range (`HuggingFaceDownloader.downloadStallTimeoutSeconds`).
 const BLOCK_STALL_AFTER: Duration = Duration::from_secs(300);
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(from = "SavedStage")]
+#[derive(Clone, Debug)]
 pub struct Activity {
     pub current: u64,
     pub total: u64,
@@ -43,25 +42,6 @@ pub struct Activity {
     baseline: u64,
     updated: Instant,
 }
-/// A stage as task records before `events.jsonl` saved it.
-#[derive(Deserialize)]
-struct SavedStage {
-    status: StageStatus,
-    current: u64,
-    total: u64,
-    #[serde(default)]
-    detail: Option<String>,
-}
-
-impl From<SavedStage> for Activity {
-    fn from(saved: SavedStage) -> Self {
-        let mut activity = Self::new();
-        activity.update(saved.current, saved.total, saved.detail);
-        activity.done = saved.status == StageStatus::Done;
-        activity
-    }
-}
-
 /// A request that stopped a job, as the task card explains it.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct BlockedRequest {
@@ -86,37 +66,36 @@ const LOG_LINES: usize = 200;
 
 /// Everything a job's events say. Only `error` is part of a saved task record, because
 /// the app raises errors of its own: the rest comes back from `events.jsonl`.
-/// Records written before that file existed carry these fields, so they still read.
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct JobEvents {
-    #[serde(default, skip_serializing)]
+    #[serde(skip)]
     pub stages: BTreeMap<Stage, Activity>,
-    #[serde(default, skip_serializing)]
+    #[serde(skip)]
     pub logs: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    #[serde(default, skip_serializing)]
+    #[serde(skip)]
     pub blocked: Vec<BlockedRequest>,
-    #[serde(default, skip_serializing)]
+    #[serde(skip)]
     pub outcomes: Option<c2m_artifact::artifact::Outcomes>,
     /// Files of the note this task replaced that were hand-edited and kept beside
     /// the new note under another name, relative to the note. Read back from the
     /// task's saved result.
-    #[serde(default, skip_serializing)]
+    #[serde(skip)]
     pub kept_edits: Vec<std::path::PathBuf>,
     /// The last error was a speech model that must be prepared first.
-    #[serde(default, skip_serializing)]
+    #[serde(skip)]
     pub model_required: bool,
     /// The last error refused a result and kept the note: the error's message and
     /// the parts it names, so it is shown in the reader's language. Used only
     /// while `error` is still that message.
-    #[serde(default, skip_serializing)]
+    #[serde(skip)]
     pub note_kept: Option<(String, Vec<c2m_core::outcome::KeptPart>)>,
     /// The last error stopped at the note's folder of copies: its replacement was
     /// interrupted and not finishable, or copies kept there reached the limit
     /// (`true`). The error's message and the folder to look at; used only while
     /// `error` is still that message.
-    #[serde(default, skip_serializing)]
+    #[serde(skip)]
     pub recovery_blocked: Option<(String, std::path::PathBuf, bool)>,
     /// The result of the run in progress, until the job exits.
     #[serde(skip)]
@@ -1455,15 +1434,27 @@ mod tests {
     }
 
     #[test]
-    fn a_new_stage_start_clears_a_retained_counter_and_old_records_still_read() {
-        let saved: JobEvents = serde_json::from_value(serde_json::json!({
-            "stages": {"transcribe": {"status": "done", "current": 18, "total": 18, "detail": "old"}},
+    fn a_new_stage_start_clears_a_retained_counter_and_only_the_error_is_saved() {
+        let mut saved = JobEvents {
+            error: Some("kept".into()),
+            logs: vec!["a line".into()],
+            ..Default::default()
+        };
+        saved.apply(&Event::Stage {
+            stage: Stage::Transcribe,
+            status: StageStatus::Start,
+        });
+        saved.stage(&Stage::Transcribe).update(18, 18, None);
+        saved.stage(&Stage::Transcribe).finish();
+        // Fields a record written before `events.jsonl` carried are not read.
+        let old: JobEvents = serde_json::from_value(serde_json::json!({
+            "stages": {"transcribe": {"status": "done", "current": 18, "total": 18}},
             "logs": ["old line"],
             "error": "kept",
         }))
         .unwrap();
-        assert!(saved.stages[&Stage::Transcribe].done);
-        assert_eq!(saved.logs, ["old line"]);
+        assert!(old.stages.is_empty() && old.logs.is_empty());
+        assert_eq!(old.error.as_deref(), Some("kept"));
         let mut continued = saved.clone();
         continued.apply(&Event::Stage {
             stage: Stage::Transcribe,
