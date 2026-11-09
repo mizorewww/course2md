@@ -180,7 +180,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {}。保存位置尚未切换，已复制的内容保留在目标位置。	{}。保存位置尚未切换，已复制的内容保留在目标位置。	{}. The save location has not been switched and the copied content remains at the target location.	{}。儲存位置尚未切換，已複製的內容保留在目標位置。	{}。保存場所はまだ切り替えられていません。コピー済みの内容はコピー先に残っています。
 {}。请备份后删除该文件再重试：{}	{}。请备份后删除该文件再重试：{}	{}. Back up and delete the file, then try again: {}	{}。請備份後刪除該檔案再重試：{}	{}。バックアップ後にファイルを削除して、再試行してください: {}
 {}会发送到 {}	{}会发送到 {}	{} will be sent to {}	{}會傳送到 {}	{}は {} に送信されます
-{}发送到「{}」	{}发送到「{}」	{} is sent to "{}"	{}傳送到「{}」	{}は「{}」に送信されます
+{}发送到「{}」	{}发送到「{}」	{} is sent to “{}”	{}傳送到「{}」	{}は「{}」に送信されます
 {}尚未完成	{}尚未完成	{} has not been completed yet	{}尚未完成	{}はまだ完了していません
 {}未保存：{}	{}未保存：{}	{} not saved: {}	{}未儲存：{}	{}は保存されていません: {}
 {}未完成	{}未完成	{} not completed	{}未完成	{}は完了していません
@@ -203,10 +203,10 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 、	、	, 	、	、
 。修改配置或重新测试后再补做。	。修改配置或重新测试后再补做。	. Change the configuration or retest, then fill in what is missing.	。修改配置或重新測試後再補做。	。設定を変更するか再テストしてから、不足分を処理し直してください。
 《{}》{}	《{}》{}	《{}》{}	《{}》{}	《{}》{}
-《{}》的位置或身份记录不完整，原记录已保留	《{}》的位置或身份记录不完整，原记录已保留	The location or identity record for "{}" is incomplete and the original record has been retained.	《{}》的位置或身份記錄不完整，原記錄已保留	「{}」の場所または識別情報の記録が不完全です。元の記録は保持されています。
-《{}》的笔记操作	《{}》的笔记操作	Note actions for "{}"	《{}》的筆記操作	「{}」のノート操作
+《{}》的位置或身份记录不完整，原记录已保留	《{}》的位置或身份记录不完整，原记录已保留	The location or identity record for “{}” is incomplete and the original record has been retained.	《{}》的位置或身份記錄不完整，原記錄已保留	「{}」の場所または識別情報の記録が不完全です。元の記録は保持されています。
+《{}》的笔记操作	《{}》的笔记操作	Note actions for “{}”	《{}》的筆記操作	「{}」のノート操作
 《{}》：{}	《{}》：{}	“{}”: {}	《{}》：{}	「{}」：{}
-「{}」会重新发送失败部分，可能计费	「{}」会重新发送失败部分，可能计费	"{}" resends the failed parts; charges may apply.	「{}」會重新傳送失敗部分，可能計費	「{}」は失敗した部分を再送信します。料金が発生する場合があります。
+「{}」会重新发送失败部分，可能计费	「{}」会重新发送失败部分，可能计费	“{}” resends the failed parts; charges may apply.	「{}」會重新傳送失敗部分，可能計費	「{}」は失敗した部分を再送信します。料金が発生する場合があります。
 「未分类」已被使用，请换一个文件夹名称	「未分类」已被使用，请换一个文件夹名称	"Uncategorized" is already in use; choose a different folder name	「未分類」已被使用，請換一個資料夾名稱	「未分類」は既に使用されています。別のフォルダー名にしてください
 上一个 Codex 请求尚未完成	上一个 Codex 请求尚未完成	The previous Codex request has not yet completed	上一個 Codex 請求尚未完成	前の Codex リクエストはまだ完了していません
 上一处	上一处	Previous match	上一處	前の一致
@@ -214,7 +214,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 上一张 · ←	上一张 · ←	Previous · ←	上一張 · ←	前へ · ←
 上一步	上一步	Previous step	上一步	前のステップ
 上次结果未确认；重测会再次发送，可能计费	上次结果未确认；重测会再次发送，可能计费	Previous result unconfirmed; retesting sends the request again and may incur charges	上次結果未確認；重測會再次傳送，可能計費	前回の結果は未確認です。再テストするとリクエストが再送信され、料金が発生する場合があります
-上次结果未确认；重测或「{}」都会再次发送请求，可能计费	上次结果未确认；重测或「{}」都会再次发送请求，可能计费	Previous result unconfirmed; retesting or "{}" sends the request again and may incur charges.	上次結果未確認；重測或「{}」都會再次傳送請求，可能計費	前回の結果は未確認です。再テストまたは「{}」でリクエストが再送信され、料金が発生する場合があります。
+上次结果未确认；重测或「{}」都会再次发送请求，可能计费	上次结果未确认；重测或「{}」都会再次发送请求，可能计费	Previous result unconfirmed; retesting or “{}” sends the request again and may incur charges.	上次結果未確認；重測或「{}」都會再次傳送請求，可能計費	前回の結果は未確認です。再テストまたは「{}」でリクエストが再送信され、料金が発生する場合があります。
 下一处	下一处	Next match	下一處	次の一致
 下一张	下一张	Next	下一張	次へ
 下一张 · →	下一张 · →	Next · →	下一張 · →	次へ · →
@@ -485,7 +485,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 创建文件夹	创建文件夹	Create folder	建立資料夾	フォルダーの作成
 创建目录 {} / Failed to create directory {}	创建目录 {}	Failed to create directory {}	建立目錄 {}	ディレクトリ {} の作成に失敗しました
 删除	删除	Delete	刪除	削除
-删除「{}」文件夹？	删除「{}」文件夹？	Delete the "{}" folder?	刪除「{}」資料夾？	「{}」フォルダーを削除しますか？
+删除「{}」文件夹？	删除「{}」文件夹？	Delete the “{}” folder?	刪除「{}」資料夾？	「{}」フォルダーを削除しますか？
 删除文件夹	删除文件夹	Delete folder	刪除資料夾	フォルダーを削除
 删除文件夹…	删除文件夹…	Delete folder…	刪除資料夾…	フォルダーを削除…
 删除服务	删除服务	Delete service	刪除服務	サービスの削除
@@ -493,7 +493,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 刷新二维码	刷新二维码	Refresh QR code	重新整理 QR 碼	QRコードを更新
 刷新模型列表	刷新模型列表	Refresh model list	重新整理模型清單	モデル一覧を更新
 前一步请求结果尚不确定；已保留进度，没有继续发送 / A previous request is unresolved; progress retained	前一步请求结果尚不确定；已保留进度，没有继续发送	A previous request is unresolved; progress retained	前一步請求結果尚不確定；已保留進度，沒有繼續傳送	前回のリクエストの結果はまだ確定していません。進行状況は保持され、送信は続行されません。
-前往「{}」	前往「{}」	Go to "{}"	前往「{}」	「{}」に移動します
+前往「{}」	前往「{}」	Go to “{}”	前往「{}」	「{}」に移動します
 前往笔记库	前往笔记库	Go to note library	前往筆記庫	ノートライブラリに移動
 副本已核验，保存位置尚未切换	副本已核验，保存位置尚未切换	The copy has been verified, but the save location has not been switched.	副本已核驗，儲存位置尚未切換	コピーは確認されましたが、保存場所は切り替えられていません。
 副本已核验，保存位置尚未切换：{}	副本已核验，保存位置尚未切换：{}	The copy has been verified, but the save location has not been switched: {}	副本已核驗，儲存位置尚未切換：{}	コピーは確認されましたが、保存場所は切り替えられていません: {}
@@ -716,7 +716,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 已暂停	已暂停	Paused	已暫停	一時停止中
 已有后续处理任务	已有后续处理任务	There are follow-up processing tasks	已有後續處理任務	フォローアップ処理タスクがあります
 已有摘要的格式不完整，保留原文 / Existing summary markup is incomplete; original text kept	已有摘要的格式不完整，保留原文	Existing summary markup is incomplete; original text kept	已有摘要的格式不完整，保留原文	既存の要約の形式が不完全です。元のテキストを保持します
-已有相同处理任务：《{}》（{}）	已有相同处理任务：《{}》（{}）	The same processing task already exists: "{}" ({})	已有相同處理任務：《{}》（{}）	同じ処理タスクがすでに存在します: "{}" ({})
+已有相同处理任务：《{}》（{}）	已有相同处理任务：《{}》（{}）	The same processing task already exists: “{}” ({})	已有相同處理任務：《{}》（{}）	同じ処理タスクがすでに存在します: "{}" ({})
 已有笔记	已有笔记	Notes already exist	已有筆記	ノートあり
 已有笔记，保存在「{}」	已有笔记，保存在「{}」	Notes already exist, saved in “{}”	已有筆記，儲存在「{}」	すでにノートがあり、「{}」に保存されています
 已检查 {} 张画面	已检查 {} 张画面	{} frames checked	已檢查 {} 張畫面	{} フレームがチェックされました
@@ -2295,7 +2295,7 @@ course2md 不在“应用程序”文件夹中。请先退出 course2md，在访
 其他任务结束后才能下载模型	其他任务结束后才能下载模型	The model can be downloaded once the current job finishes	其他任務結束後才能下載模型	現在のジョブが終わるとモデルをダウンロードできます
 缺少读取视频所需的组件	缺少读取视频所需的组件	Components needed to read videos are missing	缺少讀取影片所需的元件	動画の読み込みに必要なコンポーネントがありません
 macOS 只让有完全磁盘访问权限的应用读取 {} 的数据。course2md 只用它读取 YouTube 登录，不保存 Cookie。这项权限也允许读取其他受保护的文件，可随时在系统设置中关闭。	macOS 只让有完全磁盘访问权限的应用读取 {} 的数据。course2md 只用它读取 YouTube 登录，不保存 Cookie。这项权限也允许读取其他受保护的文件，可随时在系统设置中关闭。	macOS lets only apps with Full Disk Access read {}'s data. course2md uses it only to read the YouTube sign-in and doesn't keep the cookies. The access also covers other protected files; you can turn it off in System Settings at any time.	macOS 只讓有完整磁碟取用權限的應用程式讀取 {} 的資料。course2md 只用它讀取 YouTube 登入，不儲存 Cookie。這項權限也允許讀取其他受保護的檔案，可隨時在系統設定中關閉。	macOS では、フルディスクアクセスを持つアプリだけが {} のデータを読み取れます。course2md はこれを YouTube のログインの読み取りにだけ使い、Cookie は保存しません。この権限は他の保護されたファイルにも及びます。システム設定でいつでもオフにできます。
-下载约 {}	下载约 {}	About {} to download	下載約 {}	ダウンロード約 {}
+下载约 {}	下载约 {}	{} download	下載約 {}	ダウンロード約 {}
 在“隐私与安全性 › 完全磁盘访问权限”中打开 course2md。	在“隐私与安全性 › 完全磁盘访问权限”中打开 course2md。	Turn on course2md in Privacy & Security › Full Disk Access.	在「隱私權與安全性 › 完整磁碟取用權限」中開啟 course2md。	「プライバシーとセキュリティ › フルディスクアクセス」で course2md をオンにしてください。
 多语种	多语种	Multilingual	多語種	多言語
 尚未设置语音服务	尚未设置语音服务	No speech service yet	尚未設定語音服務	音声サービスが未設定です
@@ -2313,8 +2313,8 @@ macOS 只让有完全磁盘访问权限的应用读取 {} 的数据。course2md 
 使用的模型	使用的模型	Model to use	使用的模型	使用するモデル
 稍后设置	稍后设置	Set up later	稍後設定	後で設定
 使用默认服务「{}」	使用默认服务「{}」	Use the default service “{}”	使用預設服務「{}」	既定のサービス「{}」を使う
-任务使用的服务已从设置中删除	任务使用的服务已从设置中删除	The service this task used was deleted from settings	任務使用的服務已從設定中刪除	このタスクで使っていたサービスは設定から削除されました
-识别模型「{}」还没有下载	识别模型「{}」还没有下载	The speech model “{}” isn't downloaded yet	辨識模型「{}」還沒有下載	音声認識モデル「{}」はまだダウンロードされていません
+任务使用的服务已从设置中删除	任务使用的服务已从设置中删除	This task's service was deleted	任務使用的服務已從設定中刪除	このタスクで使っていたサービスは設定から削除されました
+识别模型「{}」还没有下载	识别模型「{}」还没有下载	Speech model “{}” isn’t downloaded	辨識模型「{}」還沒有下載	音声認識モデル「{}」はまだダウンロードされていません
 所选服务已从设置中删除	所选服务已从设置中删除	The chosen service was deleted from settings	所選服務已從設定中刪除	選んだサービスは設定から削除されました
 我已打开开关	我已打开开关	I've turned it on	我已開啟開關	オンにしました
 仍然连接	仍然连接	Try anyway	仍然連接	それでも接続
