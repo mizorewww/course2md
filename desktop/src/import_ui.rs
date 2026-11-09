@@ -3077,11 +3077,9 @@ impl Desktop {
                 button(
                     "configure-conversion-service",
                     ButtonVariant::Tonal,
-                    symbols::settings(),
-                    match purpose {
-                        ServicePurpose::Speech => course2md::tr!("设置语音识别服务"),
-                        ServicePurpose::Ai => course2md::tr!("设置 AI 服务"),
-                    },
+                    symbols::add(),
+                    // The one name the app gives this action, in the panel and Settings.
+                    desktop_prefs::service_binding::add_service_label(purpose),
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.open_task_service_editor(purpose, window, cx);

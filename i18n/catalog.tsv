@@ -1668,7 +1668,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 记录已恢复，请重新扫描笔记库	记录已恢复，请重新扫描笔记库	The record has been restored. Please rescan the note library.	記錄已恢復，請重新掃描筆記庫	記録が復元されました。ノートライブラリをもう一度スキャンしてください
 设备与运行时	设备与运行时	Devices and runtime	裝置與執行環境	デバイスとランタイム
 设置	设置	Settings	設定	設定
-设置 AI 服务	设置 AI 服务	Set up AI service	設定 AI 服務	AI サービスを設定
 设置…	设置…	Settings…	設定…	設定…
 设置位置暂时不可访问	设置位置暂时不可访问	The settings location is temporarily inaccessible	設定位置暫時不可存取	設定の保存場所に一時的にアクセスできません
 设置变更暂时无法保存	设置变更暂时无法保存	Settings changes cannot be saved right now	設定變更暫時無法儲存	設定の変更を現在保存できません
@@ -1678,7 +1677,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 设置目录：{}	设置目录：{}	Settings directory: {}	設定資料夾：{}	設定フォルダー: {}
 设置目录：{}\n{}	设置目录：{}\n{}	Settings directory: {}\n{}	設定資料夾：{}\n{}	設定フォルダー：{}\n{}
 设置记录无法解析	设置记录无法解析	Settings record cannot be parsed	設定記錄無法解析	設定レコードを解析できません
-设置语音识别服务	设置语音识别服务	Set up speech recognition	設定語音辨識服務	音声認識を設定
 识别模型 {} 尚未下载，请先下载并准备模型，再继续 / The speech model {} is not downloaded yet; prepare it, then continue	识别模型 {} 尚未下载，请先下载并准备模型，再继续	The speech model {} is not downloaded yet; prepare it, then continue	辨識模型 {} 尚未下載，請先下載並準備模型，再繼續	音声認識モデル {} はまだダウンロードされていません。準備してから続けてください
 识别方式	识别方式	Recognition method	辨識方式	認識方式
 识别方式 / Speech backend	识别方式	Speech backend	辨識方式	認識方式
