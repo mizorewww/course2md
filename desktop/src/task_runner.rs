@@ -246,10 +246,18 @@ impl Desktop {
                 })
         });
         self.import.subtitle_loading = false;
+        let local_unread = !draft.online
+            && draft.source.is_none()
+            && std::path::Path::new(draft.input.trim()).is_file();
         self.inputs[&Field::Source].update(cx, |s, cx| s.set_value(draft.input, window, cx));
         self.inputs[&Field::Title].update(cx, |s, cx| s.set_value(draft.title, window, cx));
         self.scrolls[Page::New as usize].set_offset(point(px(0.), px(draft.scroll)));
         self.work.update(cx, |work, _| work.draft_saved());
+        // A local file chosen but not read yet is read now: reading it is local
+        // and quick, and only previews; nothing is submitted.
+        if local_unread {
+            self.inspect_source(window, cx);
+        }
         cx.notify();
     }
 
@@ -314,6 +322,12 @@ impl Desktop {
     /// Queue the selected candidates at once, reusing per-candidate deduplication (an identical task in
     /// progress is not created again), in one transaction; then select the first task and start the queue.
     pub fn enqueue_selected_candidates(&mut self, cx: &mut Context<Self>) {
+        // The batch would send every video to the default in a deleted service's
+        // place: the person chooses first, in the list's notice.
+        if self.dropped_draft_service(cx).is_some() {
+            cx.notify();
+            return;
+        }
         let selected: Vec<(usize, source::SourceCandidate)> = self
             .import
             .source_candidates
@@ -420,6 +434,13 @@ impl Desktop {
 
     pub fn enqueue_current(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.save_current_draft(cx) {
+            return;
+        }
+        // Every way a single draft is queued passes here: a deleted service is
+        // replaced only when the person says so, in the card's notice.
+        if self.dropped_draft_service(cx).is_some() {
+            self.import.pending_conversion = None;
+            cx.notify();
             return;
         }
         self.message = None;

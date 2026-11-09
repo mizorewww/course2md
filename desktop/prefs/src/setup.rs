@@ -56,7 +56,26 @@ pub fn apply_provider_choice(
 pub struct ModelChoice {
     pub id: String,
     pub label: String,
-    pub description: &'static str,
+    /// What the model is good for and what it costs to download, from the registry.
+    pub description: String,
+}
+
+/// What choosing a model means: its trade-off, then its download size, when known.
+pub fn model_tradeoff(provider: AsrProvider, model: &str) -> String {
+    let tradeoff = match model {
+        c2m_config::config::DEFAULT_ASR_MODEL => c2m_i18n::tr!("默认 · 更准确，占内存较多"),
+        "qwen3-0.6b" => c2m_i18n::tr!("更快，占内存较少"),
+        "whisper" => c2m_i18n::tr!("多语种"),
+        _ => "",
+    };
+    let size = c2m_asr::models::download_size(provider, model)
+        .map(|bytes| c2m_i18n::tr!("下载约 {}", c2m_asr::models::size_text(bytes)));
+    match (tradeoff.is_empty(), size) {
+        (true, None) => String::new(),
+        (true, Some(size)) => size,
+        (false, None) => tradeoff.to_owned(),
+        (false, Some(size)) => format!("{tradeoff} · {size}"),
+    }
 }
 
 /// The engine's models, plus a saved alias or repository as its own visible choice.
@@ -66,11 +85,7 @@ pub fn local_model_choices(provider: AsrProvider, current: &str) -> Vec<ModelCho
         .map(|model| ModelChoice {
             id: model.id.into(),
             label: model.label.into(),
-            description: match model.id {
-                c2m_config::config::DEFAULT_ASR_MODEL => c2m_i18n::tr!("默认 · 更准确，占内存较多"),
-                "qwen3-0.6b" => c2m_i18n::tr!("更快，占内存较少"),
-                _ => "",
-            },
+            description: model_tradeoff(provider, model.id),
         })
         .collect();
     if !choices.iter().any(|choice| choice.id == current) {
@@ -81,7 +96,8 @@ pub fn local_model_choices(provider: AsrProvider, current: &str) -> Vec<ModelCho
                 c2m_i18n::tr!("当前配置")
             } else {
                 unsupported_model()
-            },
+            }
+            .into(),
         });
     }
     choices

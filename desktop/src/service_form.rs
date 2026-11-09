@@ -434,6 +434,7 @@ impl Desktop {
         owner: FormOwner,
         id: impl Into<ElementId>,
         disabled: bool,
+        icon_size: Pixels,
         cx: &mut Context<Self>,
     ) -> ChoiceGroup {
         let current = self
@@ -457,7 +458,15 @@ impl Desktop {
                         protocol.choice_label(),
                         *protocol == current,
                     )
-                    .icon(Icon::from(protocol_icon(*protocol)).size(rem(24.)))
+                    // Resources lead with their family's circle: AI purple, speech teal.
+                    .tinted_icon(
+                        Icon::from(protocol_icon(*protocol)),
+                        match current.purpose() {
+                            ServicePurpose::Ai => Tint::Purple,
+                            ServicePurpose::Speech => Tint::Teal,
+                        },
+                        icon_size,
+                    )
                     .description(detail)
                     .enabled(!disabled),
                 )

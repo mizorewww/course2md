@@ -29,6 +29,8 @@ use std::sync::{
 /// The guide's content column.
 const COLUMN: Rems = rem(760.);
 const STEPS: usize = 4;
+/// Room beside the column for its scrollbar, inside the page's side inset.
+const SCROLLBAR_GUTTER: f32 = 16.;
 /// Wide enough for a choice and the line saying what it means.
 const SETUP_MENU_WIDTH: f32 = 320.;
 
@@ -237,7 +239,10 @@ impl Desktop {
     #[cfg(feature = "capture")]
     pub(crate) fn capture_setup_step(&mut self, step: &str, cx: &mut Context<Self>) {
         match step {
-            "cloud" => self.apply_setup_provider_choice(ProviderChoice::Online, cx),
+            "cloud" => {
+                self.setup_step(Step::Engine, cx);
+                self.apply_setup_provider_choice(ProviderChoice::Online, cx);
+            }
             "ai" => self.setup_step(Step::Ai, cx),
             "account" => self.setup_step(Step::Account, cx),
             "model" => self.setup_step(Step::Model, cx),
@@ -755,6 +760,8 @@ impl Desktop {
                 .set_offset(point(px(0.), px(-offset)));
         }
         let step = self.onboarding.step;
+        let model_request = self.setup_model_request();
+        let model_state = self.model_cache_state(&model_request);
         let (number, title, description): (usize, _, _) = match step {
             Step::Engine => (
                 1,
@@ -763,8 +770,27 @@ impl Desktop {
             ),
             Step::Ai => (2, course2md::tr!("连接 AI 服务"), None),
             Step::Account => (3, course2md::tr!("连接来源账号"), None),
+            // The title says where setup stands, not where it hoped to be.
             Step::Model if self.onboarding.provider == Some(AsrProvider::Api) => {
-                (4, course2md::tr!("准备就绪"), None)
+                if self.setup_speech_service().is_some() {
+                    (4, course2md::tr!("准备就绪"), None)
+                } else {
+                    (4, course2md::tr!("尚未设置语音服务"), None)
+                }
+            }
+            Step::Model if self.is_preparing(&model_request, cx) => {
+                (4, course2md::tr!("正在准备识别模型"), None)
+            }
+            Step::Model
+                if matches!(
+                    model_state,
+                    Some(
+                        course2md::models::status::CacheState::Cached
+                            | course2md::models::status::CacheState::Loaded
+                    )
+                ) =>
+            {
+                (4, course2md::tr!("识别模型已就绪"), None)
             }
             Step::Model => (4, course2md::tr!("准备识别模型"), None),
         };
@@ -812,7 +838,8 @@ impl Desktop {
                         course2md::tr!("识别方式"),
                         course2md::tr!("AI 服务"),
                         course2md::tr!("来源账号"),
-                        course2md::tr!("模型准备"),
+                        // Named by what it readies: a local model or the speech service.
+                        course2md::tr!("识别准备"),
                     ])
                     .current(number - 1),
             )
@@ -821,7 +848,31 @@ impl Desktop {
                     .w_full()
                     .min_w_0()
                     .gap(rem(4.))
-                    .child(ui::page_title("setup-title", title))
+                    // Skipping is offered in one place on every step that has not
+                    // already made finishing its forward action.
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .min_w_0()
+                            .gap(rem(12.))
+                            .items_center()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(ui::page_title("setup-title", title)),
+                            )
+                            .when(self.setup_skip_offered(cx), |row| {
+                                row.child(
+                                    material_button("setup-later", ButtonVariant::Text)
+                                        .tone(ButtonTone::Neutral)
+                                        .child(course2md::tr!("跳过设置"))
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.skip_setup(window, cx)
+                                        })),
+                                )
+                            }),
+                    )
                     .when_some(description, |view, description| {
                         view.child(TileScale::Regular.support("setup-description", description))
                     }),
@@ -856,7 +907,19 @@ impl Desktop {
                             .pb(rem(4.))
                             .child(motion::state_enter(("setup-step", number), content)),
                     )
-                    .child(Scrollbar::vertical(&self.onboarding.scroll)),
+                    // The scrollbar sits in the gutter beside the column, clear of the
+                    // tiles' trailing radios and chips.
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .right(rem(-SCROLLBAR_GUTTER))
+                            .w(rem(SCROLLBAR_GUTTER))
+                            .child(
+                                Scrollbar::vertical(&self.onboarding.scroll).viewport_from_layout(),
+                            ),
+                    ),
             )
             // A hairline parts the actions from a step that scrolls under them.
             .when(scrollable, |column| {
@@ -937,17 +1000,10 @@ impl Desktop {
         } else {
             course2md::tr!("目前使用 {}", provider_label(Some(recommended)))
         };
-        // An engine's own obstacle that something here can repair is stated below
-        // the group, after the shared one; hardware this Mac lacks is only its status.
-        let mut issues: Vec<_> = obstacle.into_iter().collect();
-        for issue in engines
-            .iter()
-            .filter_map(|engine| self.engine_issue(*engine))
-        {
-            if issue.installable() && !issues.contains(&issue) {
-                issues.push(issue);
-            }
-        }
+        // Only what stops the chosen route gets its repair here, under the engines; an
+        // engine the person need not use says what it lacks in its own row's chip, and
+        // Settings › 生成笔记 repairs it.
+        let issues: Vec<_> = obstacle.into_iter().collect();
         // Engines are local resources: tinted circles like the routes above, one family so
         // they read as one group. The first tile is automatic choice; the group's index
         // counts it.
@@ -973,7 +1029,13 @@ impl Desktop {
                 selected == Some(*engine),
             )
             .tinted_icon(engine_icon(Some(*engine)).into(), Tint::Blue, icon_size)
-            .status(issue.map(|issue| status_chip(StatusKind::Warning).child(issue.short())))
+            // An obstacle stated with its repair below the engines is not said
+            // again on each row it dims.
+            .status(
+                issue
+                    .filter(|issue| !issues.contains(issue))
+                    .map(|issue| status_chip(StatusKind::Warning).child(issue.short())),
+            )
             .enabled(issue.is_none());
             if !detected {
                 tile = tile.description(course2md::tr!("正在检测"));
@@ -1017,33 +1079,43 @@ impl Desktop {
                 },
             ));
         let (_, model_status) = self.model_reading(&self.setup_model_request(), cx);
+        // What the chosen model is for and what it downloads, beside its state.
+        let tradeoff = model_tradeoff(provider, &self.onboarding.model);
+        let model_status = if tradeoff.is_empty() {
+            model_status.to_owned()
+        } else {
+            format!("{model_status} · {tradeoff}")
+        };
         let fields = ui::field_table(
             "setup-local-engine",
             course2md::tr!("识别模型"),
+            // The section names the model; the row names the choice.
             [ui::Field::menu(
                 "setup-model",
-                course2md::tr!("识别模型"),
+                course2md::tr!("使用的模型"),
                 current_model,
                 model_menu,
             )
             .hint(model_status)],
         );
-        body.child(self.setup_reveal("setup-engine-choice-reveal", engine_group))
-            .child(
-                v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .gap(rem(8.))
-                    .child(self.setup_reveal("setup-engine-reveal", fields))
-                    .children(issues.into_iter().map(|issue| {
-                        div().px(ITEM_INSET).child(self.engine_obstacle(
-                            &format!("setup-engine-obstacle-{issue:?}"),
-                            issue,
-                            true,
-                            cx,
-                        ))
-                    })),
-            )
+        // An engine's obstacle and its repair sit with the engines it is about.
+        body.child(
+            v_flex()
+                .w_full()
+                .min_w_0()
+                .gap(rem(8.))
+                .child(self.setup_reveal("setup-engine-choice-reveal", engine_group))
+                // Attached under the engines, on the same surface as their rows.
+                .children(issues.into_iter().map(|issue| {
+                    setup_tile().child(self.engine_obstacle(
+                        &format!("setup-engine-obstacle-{issue:?}"),
+                        issue,
+                        true,
+                        cx,
+                    ))
+                })),
+        )
+        .child(self.setup_reveal("setup-engine-reveal", fields))
     }
 
     /// One labeled input of a service form, with its error or kept-key note below.
@@ -1066,7 +1138,7 @@ impl Desktop {
     fn setup_service_content(
         &self,
         purpose: ServicePurpose,
-        _window: &Window,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let owner = FormOwner::Setup(purpose);
@@ -1076,17 +1148,20 @@ impl Desktop {
         let suffix = purpose as usize;
         let codex = draft.protocol == ServiceProtocol::CodexResponses;
         let keyless = draft.protocol.keyless();
+        // The service type is a choice on the page ground with its title above it, as
+        // step 1's routes are; the connection's fields are one tile below it.
+        let types = self.setup_reveal(
+            SharedString::from(format!("setup-protocol-reveal-{suffix}")),
+            self.service_type_field(
+                owner,
+                SharedString::from(format!("setup-protocol-{suffix}")),
+                busy,
+                rem(40.).to_pixels(window.rem_size()),
+                cx,
+            ),
+        );
         let form = setup_tile()
             .gap(rem(20.))
-            .child(self.setup_reveal(
-                SharedString::from(format!("setup-protocol-reveal-{suffix}")),
-                self.service_type_field(
-                    owner,
-                    SharedString::from(format!("setup-protocol-{suffix}")),
-                    busy,
-                    cx,
-                ),
-            ))
             .when(!codex, |form| {
                 form.children(self.setup_field(
                     purpose,
@@ -1163,6 +1238,7 @@ impl Desktop {
             .w_full()
             .min_w_0()
             .gap(rem(24.))
+            .child(types)
             .child(form)
             .children(uses)
             .children(self.setup_check_status(purpose, cx))
@@ -1272,29 +1348,53 @@ impl Desktop {
         Some(view)
     }
 
+    /// The default speech service the online route saved, if it still exists.
+    fn setup_speech_service(&self) -> Option<ServiceVersion> {
+        self.preferences
+            .default_refs()
+            .asr
+            .and_then(|id| self.preferences.version(&id))
+            .cloned()
+    }
+
+    /// Whether the guide offers 跳过设置: on every step before the last, whose
+    /// forward action already finishes; not while reviewing a model or after a failed finish.
+    fn setup_skip_offered(&self, _cx: &App) -> bool {
+        self.onboarding.step != Step::Model
+            && self.onboarding.model_return_page.is_none()
+            && !self.onboarding.finish_failed
+    }
+
     fn setup_model_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let request = self.setup_model_request();
         if request.provider == AsrProvider::Api {
-            let version = self
-                .preferences
-                .default_refs()
-                .asr
-                .and_then(|id| self.preferences.version(&id))
-                .cloned();
-            return setup_tile().child(tile_info(
-                "setup-cloud-model-description",
-                version
-                    .map(|version| {
-                        course2md::tr!(
-                            "识别时使用 {} · {}",
-                            version.config.name,
-                            version.config.model
-                        )
-                    })
-                    .unwrap_or_else(|| {
-                        course2md::tr!("当前没有默认语音服务，请返回第一步完成配置。").into()
-                    }),
-            ));
+            return match self.setup_speech_service() {
+                Some(version) => setup_tile().child(tile_info(
+                    "setup-cloud-model-description",
+                    course2md::tr!(
+                        "识别时使用 {} · {}",
+                        version.config.name,
+                        version.config.model
+                    ),
+                )),
+                // Online recognition without a service: say what that means and
+                // lead straight back to where one is set up.
+                None => setup_tile()
+                    .child(tile_info(
+                        "setup-cloud-model-missing",
+                        course2md::tr!("没有字幕的视频需要语音服务才能转换"),
+                    ))
+                    .child(
+                        h_flex().child(
+                            material_button("setup-cloud-model-fix", ButtonVariant::Filled)
+                                .icon(symbols::settings())
+                                .child(course2md::tr!("设置语音服务"))
+                                .on_click(
+                                    cx.listener(|this, _, _, cx| this.setup_step(Step::Engine, cx)),
+                                ),
+                        ),
+                    ),
+            };
         }
         setup_tile().child(self.model_surface(&request, true, window, cx))
     }
@@ -1391,6 +1491,11 @@ impl Desktop {
             let service = self.onboarding.service(purpose);
             service.running.is_some() || service.form.vault_busy
         });
+        // Online recognition with no service: setting one up is the step's main
+        // action, and finishing without it is outlined.
+        let speech_missing = step == Step::Model
+            && self.onboarding.provider == Some(AsrProvider::Api)
+            && self.setup_speech_service().is_none();
         let label = match (service_action, step) {
             (Some(action), _) => action.label(),
             (_, Step::Account)
@@ -1399,14 +1504,19 @@ impl Desktop {
             {
                 course2md::tr!("继续")
             }
-            (_, Step::Account) => course2md::tr!("跳过登录"),
+            (_, Step::Account) => course2md::tr!("稍后设置"),
             (_, Step::Model) if model_review => course2md::tr!("返回应用"),
+            (_, Step::Model) if speech_missing => course2md::tr!("稍后设置"),
             (_, Step::Model) if model_running => course2md::tr!("继续使用"),
-            (_, Step::Model) if prepare_first => course2md::tr!("稍后准备"),
+            (_, Step::Model) if prepare_first => course2md::tr!("稍后设置"),
             (_, Step::Model) => course2md::tr!("开始使用"),
             _ => course2md::tr!("保存并继续"),
         };
-        let variant = if prepare_first {
+        // Going on without what a step offers is outlined, as 稍后准备 is.
+        let account_skipped = step == Step::Account
+            && !self.accounts.read(cx).account_connected()
+            && self.accounts.read(cx).youtube.choice.is_none();
+        let variant = if prepare_first || account_skipped || speech_missing {
             ButtonVariant::Outlined
         } else {
             ButtonVariant::Filled
@@ -1424,16 +1534,6 @@ impl Desktop {
             )
             .child(
                 row()
-                    .when(step == Step::Engine, |row| {
-                        // Skipping is not the way forward, so it carries no arrow.
-                        row.child(
-                            material_button("setup-later", ButtonVariant::Text)
-                                .child(course2md::tr!("跳过设置"))
-                                .on_click(
-                                    cx.listener(|this, _, window, cx| this.skip_setup(window, cx)),
-                                ),
-                        )
-                    })
                     .when(step != Step::Engine && !model_review, |row| {
                         row.child(
                             material_button("setup-back", ButtonVariant::Text)
@@ -1453,11 +1553,33 @@ impl Desktop {
                         )
                     })
                     .child(div().flex_1())
+                    // The online route can wait too, as the AI step can: on to the
+                    // next step without saving the service or sending a sample.
+                    .when(
+                        step == Step::Engine && self.onboarding.provider == Some(AsrProvider::Api),
+                        |row| {
+                            row.child(
+                                material_button("setup-skip-speech", ButtonVariant::Outlined)
+                                    .tone(ButtonTone::Accent)
+                                    .child(course2md::tr!("稍后设置"))
+                                    .disabled(busy)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.onboarding.speech.cancel();
+                                        // Later means the saved route stands until then,
+                                        // so the last step prepares that one, not this.
+                                        let saved = this.preferences.generation().options.provider;
+                                        this.onboarding.provider = saved;
+                                        this.ensure_setup_model(cx);
+                                        this.setup_step(Step::Ai, cx);
+                                    })),
+                            )
+                        },
+                    )
                     .when(step == Step::Ai, |row| {
                         row.child(
                             material_button("setup-skip-ai", ButtonVariant::Outlined)
                                 .tone(ButtonTone::Accent)
-                                .child(course2md::tr!("稍后配置 AI"))
+                                .child(course2md::tr!("稍后设置"))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     // Keep this private edit valid when the person returns
                                     // within the guide; finishing it discards the draft.

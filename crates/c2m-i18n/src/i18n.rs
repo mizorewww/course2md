@@ -581,7 +581,7 @@ mod tests {
     /// reads in the language shown now.
     #[test]
     fn a_message_saved_in_another_interface_language_reads_in_this_one() {
-        let source = "任务使用的服务已不在设置中，请调整后重试并选择服务";
+        let source = "任务使用的服务已从设置中删除";
         let english = t_for(source, Lang::En);
         assert_ne!(english, source);
         assert_eq!(engine_message_for(english, Lang::ZhHans), source);

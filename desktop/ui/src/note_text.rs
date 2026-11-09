@@ -428,7 +428,13 @@ impl MarkdownPlugin for ReaderBlock {
 
 /// `[▶ 00:00](url)` as a section's heading, or `[▶](url)` after one: the control that
 /// plays the source from there, one tonal pill with the time it starts at.
-struct SourceLink;
+struct SourceLink {
+    open: OpenLink,
+}
+
+/// What a 从此处观看 pill does with its address: a web page opens in the browser, a
+/// local video in the reader's own way.
+pub type OpenLink = Arc<dyn Fn(&str, &mut Window, &mut App) + Send + Sync>;
 
 impl MarkdownPlugin for SourceLink {
     fn name(&self) -> &str {
@@ -457,6 +463,7 @@ impl MarkdownPlugin for SourceLink {
         _: &mut App,
     ) -> Option<InlineElement> {
         let (url, time) = node.data::<(String, String)>()?.clone();
+        let open = self.open.clone();
         let at = node.source_range().map_or(0, |range| range.start);
         let label = c2m_i18n::tr!("从此处观看");
         let label: SharedString = if time.is_empty() {
@@ -473,7 +480,7 @@ impl MarkdownPlugin for SourceLink {
                     .button_size(ButtonSize::ExtraSmall)
                     .icon(crate::symbols::play_arrow())
                     .child(label)
-                    .on_click(move |_, _, cx| cx.open_url(&url)),
+                    .on_click(move |_, window, cx| open(&url, window, cx)),
             )
             .with_baseline(middle),
         )
@@ -536,11 +543,15 @@ fn summary_panel(window: &mut Window, _: &mut App) -> Div {
 }
 
 /// [`extensions`], plus what only a whole note holds.
-pub fn note_extensions(line_width: Arc<AtomicU32>, render: RenderBlock) -> MarkdownExtensions {
+pub fn note_extensions(
+    line_width: Arc<AtomicU32>,
+    render: RenderBlock,
+    open: OpenLink,
+) -> MarkdownExtensions {
     extensions(line_width)
         .parser_revision(5)
         .plugin(ReaderBlock { render })
-        .plugin(SourceLink)
+        .plugin(SourceLink { open })
         .block_surface(SUMMARY_SURFACE, summary_panel)
 }
 
@@ -560,10 +571,17 @@ pub fn note_style(cx: &App) -> TextViewStyle {
                 _ => TypeRole::TitleSmall,
             };
             let scale = role.scale();
-            StyleRefinement::default()
+            let style = StyleRefinement::default()
                 .text_size(scale.font_size)
                 .line_height(scale.line_height)
-                .font_weight(FontWeight(scale.font_weight as f32))
+                .font_weight(FontWeight(scale.font_weight as f32));
+            // A section's 从此处观看 pill heads its paragraphs with room to breathe,
+            // not sitting on their first line.
+            if level >= 3 {
+                style.pb(rems(0.5))
+            } else {
+                style
+            }
         })
 }
 

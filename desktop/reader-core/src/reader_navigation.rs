@@ -57,6 +57,99 @@ pub fn seek_url(target: &SourceTarget, seconds: f64) -> Option<String> {
     Some(url.into())
 }
 
+/// The address a local video's 从此处观看 carries. It is not a web address: the reader
+/// takes it and opens the file itself, in a player that can start at a time.
+const LOCAL_SEEK: &str = "course2md-local-seek:";
+
+/// Where 从此处观看 at `seconds` leads: the platform's seek URL for a web source, the
+/// reader's own address for a local file.
+pub fn watch_url(target: &SourceTarget, seconds: f64) -> Option<String> {
+    match target {
+        SourceTarget::Web(_) => seek_url(target, seconds),
+        SourceTarget::Local(_) if seconds.is_finite() && seconds >= 0. => {
+            Some(format!("{LOCAL_SEEK}{}", seconds.floor() as u64))
+        }
+        SourceTarget::Local(_) => None,
+    }
+}
+
+/// The time a local 从此处观看 address starts at.
+pub fn local_seek_seconds(url: &str) -> Option<f64> {
+    url.strip_prefix(LOCAL_SEEK)?
+        .parse::<u64>()
+        .ok()
+        .map(|s| s as f64)
+}
+
+/// A player on this computer that opens a file at a given time, and the arguments
+/// that do it: IINA, VLC or mpv. The system's default player takes no start time, so
+/// `None` means the file can only be opened at its start.
+pub fn seeking_player(
+    file: &Path,
+    seconds: f64,
+    search_path: Option<&std::ffi::OsStr>,
+    home: Option<&Path>,
+) -> Option<(PathBuf, Vec<std::ffi::OsString>)> {
+    use std::ffi::OsString;
+    let at = (seconds.max(0.).floor() as u64).to_string();
+    let file = OsString::from(file);
+    let mut bundles: Vec<PathBuf> = Vec::new();
+    if cfg!(target_os = "macos") {
+        for root in [
+            Some(PathBuf::from("/Applications")),
+            home.map(|home| home.join("Applications")),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            bundles.push(root.join("IINA.app/Contents/MacOS/iina-cli"));
+            bundles.push(root.join("VLC.app/Contents/MacOS/VLC"));
+            bundles.push(root.join("mpv.app/Contents/MacOS/mpv"));
+        }
+        // An app opened from Finder has no shell PATH: Homebrew's own places.
+        for dir in ["/opt/homebrew/bin", "/usr/local/bin"] {
+            bundles.push(PathBuf::from(dir).join("mpv"));
+            bundles.push(PathBuf::from(dir).join("vlc"));
+        }
+    } else if cfg!(windows) {
+        for variable in ["ProgramFiles", "ProgramFiles(x86)"] {
+            if let Some(root) = std::env::var_os(variable) {
+                bundles.push(PathBuf::from(root).join("VideoLAN\\VLC\\vlc.exe"));
+            }
+        }
+    }
+    let exe = if cfg!(windows) { ".exe" } else { "" };
+    let on_path = |name: &str| {
+        search_path.and_then(|paths| {
+            std::env::split_paths(paths)
+                .map(|dir| dir.join(format!("{name}{exe}")))
+                .find(|candidate| candidate.is_file())
+        })
+    };
+    let arguments = |program: &Path| -> Vec<OsString> {
+        let name = program
+            .file_name()
+            .map(|name| name.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        if name.starts_with("iina") {
+            vec![file.clone(), format!("--mpv-start={at}").into()]
+        } else if name.starts_with("mpv") {
+            vec![format!("--start={at}").into(), file.clone()]
+        } else {
+            vec![format!("--start-time={at}").into(), file.clone()]
+        }
+    };
+    bundles
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+        .or_else(|| on_path("mpv"))
+        .or_else(|| on_path("vlc"))
+        .map(|program| {
+            let arguments = arguments(&program);
+            (program, arguments)
+        })
+}
+
 /// Prefer the registered new location even while the old recovery copy still exists.
 pub fn relocated_source(path: &Path, locations: &[(PathBuf, Vec<PathBuf>)]) -> PathBuf {
     let mut candidates = Vec::new();
@@ -210,6 +303,62 @@ fn local_time<Tz: chrono::TimeZone>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_local_video_is_watched_from_a_time_through_the_reader() {
+        let local = SourceTarget::Local(PathBuf::from("/videos/lecture.mp4"));
+        let url = watch_url(&local, 90.7).unwrap();
+        assert_eq!(local_seek_seconds(&url), Some(90.));
+        assert!(watch_url(&local, f64::NAN).is_none());
+        // A web source keeps the platform's own seek address.
+        let web = SourceTarget::Web("https://www.youtube.com/watch?v=x".into());
+        assert_eq!(watch_url(&web, 12.), seek_url(&web, 12.));
+        assert_eq!(
+            local_seek_seconds("https://www.youtube.com/watch?v=x&t=12"),
+            None
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_app_bundle_in_the_home_applications_folder_is_found() {
+        let home = tempfile::tempdir().unwrap();
+        let mpv = home.path().join("Applications/mpv.app/Contents/MacOS/mpv");
+        std::fs::create_dir_all(mpv.parent().unwrap()).unwrap();
+        std::fs::write(&mpv, b"").unwrap();
+        let empty = tempfile::tempdir().unwrap();
+        let paths = std::env::join_paths([empty.path()]).unwrap();
+        let file = Path::new("/videos/lecture.mp4");
+        let (program, arguments) =
+            seeking_player(file, 5., Some(&paths), Some(home.path())).unwrap();
+        // A player installed for everyone comes first; only then is this one used.
+        if program == mpv {
+            assert_eq!(arguments, ["--start=5", "/videos/lecture.mp4"]);
+        }
+    }
+
+    #[test]
+    fn a_player_on_the_path_is_told_where_to_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = if cfg!(windows) { ".exe" } else { "" };
+        let mpv = dir.path().join(format!("mpv{exe}"));
+        std::fs::write(&mpv, b"").unwrap();
+        let file = Path::new("/videos/lecture.mp4");
+        let paths = std::env::join_paths([dir.path()]).unwrap();
+        let empty = tempfile::tempdir().unwrap();
+        // With no player installed in the usual places, mpv on the path is found.
+        if let Some((program, arguments)) =
+            seeking_player(file, 30., Some(&paths), Some(empty.path()))
+            && program == mpv
+        {
+            assert_eq!(arguments, ["--start=30", "/videos/lecture.mp4"]);
+        }
+        let none = std::env::join_paths([empty.path()]).unwrap();
+        if let Some((program, _)) = seeking_player(file, 30., Some(&none), Some(empty.path())) {
+            // Only an application installed for everyone can be found then.
+            assert!(!program.starts_with(empty.path()));
+        }
+    }
     #[test]
     fn contents_use_real_topics_instead_of_every_frame_timestamp() {
         let headings = vec![

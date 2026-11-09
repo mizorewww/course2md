@@ -318,6 +318,20 @@ impl AccessGuide {
         }
     }
 
+    /// The person says they turned course2md on, with the app's own look now: open,
+    /// access is given; still closed, macOS applies the switch only once the app
+    /// reopens, which is the next step.
+    pub fn switched_on(&mut self, access: Access, now: Instant) {
+        match access {
+            Access::Open => *self = Self::new(self.browser, AccessStep::Granted, now),
+            Access::Blocked if self.step == AccessStep::Waiting => {
+                self.step = AccessStep::Restart;
+                self.since = now;
+            }
+            _ => {}
+        }
+    }
+
     /// The person opened System Settings from the guide.
     pub fn opened_settings(&mut self, now: Instant) {
         if self.step != AccessStep::Granted {
@@ -486,6 +500,18 @@ pub fn resume_due(marker: &Path, now: std::time::SystemTime) -> Option<Resume> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saying_the_switch_is_on_moves_the_guide_on() {
+        let now = Instant::now();
+        let mut guide = AccessGuide::new(Browser::Safari, AccessStep::Blocked, now);
+        guide.opened_settings(now);
+        let mut still_closed = guide.clone();
+        still_closed.switched_on(Access::Blocked, now);
+        assert_eq!(still_closed.step, AccessStep::Restart);
+        guide.switched_on(Access::Open, now);
+        assert_eq!(guide.step, AccessStep::Granted);
+    }
 
     fn guide_dialog() -> YoutubeDialog {
         YoutubeDialog {

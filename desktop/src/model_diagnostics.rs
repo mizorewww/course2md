@@ -465,6 +465,24 @@ impl Desktop {
 
     /// The one report of a model. `full` adds its name, engine and details, for a
     /// surface where the model is the subject; the workbench shows the rest.
+    /// The engine, and before a download what the model is for and how much it downloads.
+    fn model_subtitle(
+        &self,
+        request: &Request,
+        status: Option<&course2md::models::status::LocalModelStatus>,
+    ) -> SharedString {
+        let engine = provider_label(Some(request.provider));
+        let tradeoff = desktop_prefs::setup::model_tradeoff(request.provider, &request.model);
+        let missing = status.is_some_and(|status| {
+            matches!(status.state, CacheState::Missing | CacheState::Partial)
+        });
+        if missing && !tradeoff.is_empty() {
+            format!("{engine} · {tradeoff}").into()
+        } else {
+            engine.into()
+        }
+    }
+
     pub(crate) fn model_surface(
         &self,
         request: &Request,
@@ -500,7 +518,7 @@ impl Desktop {
                 .child(scale.text(
                     id("name"),
                     model_label(&request.model),
-                    Some(provider_label(Some(request.provider)).into()),
+                    Some(self.model_subtitle(request, status)),
                 ))
                 .child(chip)
         } else {
@@ -602,7 +620,9 @@ impl Desktop {
         // An engine obstacle shown above carries its own 重新检查; one is enough.
         let obstacle_rechecks = full
             && issue.is_some_and(|issue| issue.installable() && issue != DeviceIssue::AppleRuntime);
-        actions = actions.when(!preparing && !obstacle_rechecks, |row| {
+        // A model not on disk has nothing to check again: its download is the action.
+        let not_downloaded = matches!(status.map(|status| status.state), Some(CacheState::Missing));
+        actions = actions.when(!preparing && !obstacle_rechecks && !not_downloaded, |row| {
             row.child(
                 material_button(id("recheck"), ButtonVariant::Text)
                     .icon(symbols::refresh())
@@ -1010,7 +1030,8 @@ impl Desktop {
                     (true, cache_state_label(state).1.into())
                 }
                 CacheState::Missing | CacheState::Partial => {
-                    (true, course2md::tr!("首次识别时会自动下载所选模型").into())
+                    // A task never downloads on the way: it asks first.
+                    (true, course2md::tr!("需要语音识别时会先请你下载").into())
                 }
                 CacheState::Unsupported => (
                     false,

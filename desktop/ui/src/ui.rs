@@ -211,8 +211,49 @@ pub const DIALOG_WIDTH_ROOMY: f32 = 448.;
 pub const RESOURCE_ICON: Rems = rem(RESOURCE_ICON_SIZE);
 pub const RESOURCE_ICON_SIZE: f32 = 48.;
 
-/// A row's dropdown, in design px: wide enough for a model's name and its state.
+/// A row's dropdown, in design px: at least this wide, so a column of rows lines up.
 const DROPDOWN_WIDTH: f32 = 260.;
+/// The widest a row's dropdown grows for a long value, in design px; it still fits
+/// the narrowest settings pane, and wraps under its label before it would collide.
+const DROPDOWN_MAX_WIDTH: f32 = 400.;
+/// An outlined compact dropdown's own room around its value: the leading inset,
+/// the trailing arrow and its insets, in design px.
+const DROPDOWN_CHROME: f32 = 16. + 12. + 24. + 16.;
+
+/// The width of `text` as the window would shape it, in px at `size` px.
+pub fn shaped_width(text: &str, size: f32, weight: FontWeight, window: &Window) -> f32 {
+    let mut style = window.text_style();
+    style.font_weight = weight;
+    let text = SharedString::from(text.to_owned());
+    f32::from(
+        window
+            .text_system()
+            .shape_line(text.clone(), px(size), &[style.to_run(text.len())], None)
+            .width,
+    )
+}
+
+/// Whether a small segmented group of `labels`, each with an icon when `icons`, fits
+/// `room` (100%-scale px) at the current text scale: then it is as wide as its
+/// options; otherwise its options stack, whole, rather than wrap or cut.
+pub fn segmented_fits(labels: &[&str], icons: bool, room: f32, window: &Window) -> bool {
+    let scale = f32::from(window.rem_size()) / gpui_kit_material::tokens::typography::BASE_PX;
+    // An option: 16 either side of its label, an 18 icon and its 8 gap, 2 between.
+    let chrome = 32. + if icons { 26. } else { 0. } + 2.;
+    let needed: f32 = labels
+        .iter()
+        .map(|label| shaped_width(label, 14. * scale, FontWeight::MEDIUM, window) / scale + chrome)
+        .sum();
+    needed <= room
+}
+
+/// A row dropdown wide enough to show `value` whole, measured with the field's
+/// body-large text at the current text scale, in design px.
+fn dropdown_width(value: &str, window: &Window) -> f32 {
+    let scale = f32::from(window.rem_size()) / gpui_kit_material::tokens::typography::BASE_PX;
+    let text = shaped_width(value, 16. * scale, FontWeight::NORMAL, window) / scale;
+    (text.ceil() + DROPDOWN_CHROME).clamp(DROPDOWN_WIDTH, DROPDOWN_MAX_WIDTH)
+}
 
 /// One row of a [`field_table`].
 pub struct Field {
@@ -386,6 +427,7 @@ impl Field {
             Control::Menu(value, items) => {
                 let popup = ElementId::Name(format!("{id}-menu").into());
                 let (open, set_open) = keyed_open(&popup, window, cx);
+                let width = dropdown_width(&value, window);
                 Self::inline_row(
                     outer,
                     scale.text(text_id, label.clone(), hint),
@@ -394,7 +436,7 @@ impl Field {
                         .variant(TextFieldVariant::Outlined)
                         .shape(TextFieldShape::Rounded)
                         .density(TextFieldDensity::Compact)
-                        .width(DROPDOWN_WIDTH)
+                        .width(width)
                         .menu(items)
                         .value(value)
                         .disabled(disabled)
@@ -834,13 +876,15 @@ impl Resource {
                 .child(scale.label(child("title"), self.title))
                 .when(self.busy, |row| {
                     row.child(spinner(child("busy"), c2m_i18n::tr!("正在检查"), cx))
-                })
-                .children(
-                    self.status
-                        .into_iter()
-                        .map(|(kind, label)| status_chip(kind).child(label)),
-                ),
+                }),
         );
+        // The row's state sits at its end, with its commands (design: a status chip
+        // at the row's end), not beside the name.
+        let chips: Vec<AnyElement> = self
+            .status
+            .into_iter()
+            .map(|(kind, label)| status_chip(kind).child(label).into_any_element())
+            .collect();
         for (index, (line, failed)) in self.lines.into_iter().enumerate() {
             let line_id = ElementId::NamedChild(Arc::new(child("line")), index.to_string().into());
             text = text.child(if failed {
@@ -868,7 +912,7 @@ impl Resource {
                     .child(tinted_icon(self.icon, self.tint, RESOURCE_ICON))
                     .child(text),
             )
-            .when(!self.actions.is_empty(), |row| {
+            .when(!self.actions.is_empty() || !chips.is_empty(), |row| {
                 row.child(
                     h_flex()
                         .flex_shrink_0()
@@ -880,6 +924,7 @@ impl Resource {
                         // A command in a row that opens something does only its command.
                         .id(child("actions"))
                         .on_click(|_, _, cx| cx.stop_propagation())
+                        .children(chips)
                         .children(self.actions),
                 )
             })

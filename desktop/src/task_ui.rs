@@ -122,8 +122,9 @@ pub(crate) enum CardPlace {
 
 /// Queued rows shown before the rest of the queue folds.
 const QUEUE_PREVIEW: usize = 5;
-/// The task page's content column, inside the shell's gutters.
-const TASK_COLUMN: Rems = rem(832.);
+/// The task page's content column, inside the shell's gutters: home's column, so a
+/// task reads at the same width in both places.
+const TASK_COLUMN: Rems = rem(760.);
 /// Between the page heading and each section.
 const TASK_SECTION_GAP: Rems = rem(28.);
 
@@ -160,6 +161,9 @@ pub(crate) struct TasksPage {
     facts: ShellFacts,
     /// Details already shown once; a virtualized row remounts without replaying them.
     entered: HashSet<String>,
+    /// The workbench's running card: its actions, taken from its text column to run
+    /// across the card's foot as one group, as the draft card's do.
+    home_footer: Option<Div>,
 }
 
 /// What the cards show that neither the records nor the work hold. The window sets it
@@ -226,6 +230,15 @@ pub(crate) fn action_click(
 }
 
 /// Where a task's plan goes and what it does: a card's second line.
+/// Whether a task's way on repairs what stopped it: a missing model, a deleted or
+/// refused service, an adjustment. Such a stop is an obstacle, not a failure.
+pub(crate) fn recoverable(lead: Option<&TaskAction>) -> bool {
+    matches!(
+        lead,
+        Some(TaskAction::PrepareModel | TaskAction::Repair | TaskAction::Adjust)
+    )
+}
+
 fn task_support_line(id: &str, support: String) -> Stateful<Div> {
     accessible_text(SharedString::from(format!("task-support-{id}")), support)
         .text_size(TEXT_AUX)
@@ -309,6 +322,7 @@ impl TasksPage {
             task_list: TaskListUi::new(),
             facts: ShellFacts::default(),
             entered: HashSet::new(),
+            home_footer: None,
         }
     }
 
@@ -1050,6 +1064,7 @@ impl TasksPage {
             }
         };
         let body = body.then(|| self.task_body(task, place, window, cx));
+        let footer = self.home_footer.take();
         tile(outer)
             .map(|card| match place {
                 CardPlace::Home => card.rounded_t(RADIUS_HERO),
@@ -1071,7 +1086,12 @@ impl TasksPage {
                     .children(body.map(|body| div().px(rem(16.)).pb(rem(16.)).child(body))),
                 // A card of its own on Tasks is roomy, as its large corners are (T6).
                 CardPlace::Open { .. } => card.p(rem(20.)).gap(rem(16.)).child(head).children(body),
-                _ => card.p(rem(16.)).gap(rem(16.)).child(head).children(body),
+                _ => card
+                    .p(rem(16.))
+                    .gap(rem(16.))
+                    .child(head)
+                    .children(body)
+                    .children(footer),
             })
             .into_any_element()
     }
@@ -1280,9 +1300,12 @@ impl TasksPage {
                             .child(more),
                     )
                     // Whose video first on the workbench, where the step belongs to the bar.
+                    // On the workbench it reads as the draft's line did before the
+                    // task started: body size, under the title.
                     .when(home, |column| {
                         column.when(!support.is_empty(), |column| {
-                            column.child(task_support_line(id, support.clone()))
+                            column
+                                .child(task_support_line(id, support.clone()).text_size(TEXT_BODY))
                         })
                     })
                     .when_some(step, |column, (step, side_by_side)| {
@@ -1562,9 +1585,15 @@ impl TasksPage {
                     .child(stage.title.clone())
                 }))
         });
+        // A repair inside the notice that states its obstacle is tonal, as every
+        // notice's repair is; the card's filled action is one that finishes it.
+        let lead_in_notice = !row && needs_person(task) && !task_reasons(task).is_empty();
+        let recoverable_stop = recoverable(lead.as_ref());
         let buttons = actions.iter().map(|action| {
             let (label, icon, disabled) = self.present(action, task, cx);
-            let variant = if lead.as_ref() == Some(action) {
+            let variant = if lead.as_ref() == Some(action) && lead_in_notice {
+                ButtonVariant::Tonal
+            } else if lead.as_ref() == Some(action) {
                 ButtonVariant::Filled
             } else {
                 match action {
@@ -1611,7 +1640,9 @@ impl TasksPage {
                 .and_then(|index| buttons[index].take());
             notice_banner(
                 SharedString::from(format!("task-reason-{id}")),
-                if task.state == TaskState::NeedsAttention {
+                // An obstacle with its repair is amber, as the workbench says it; red is
+                // for a failure with nothing to repair.
+                if task.state == TaskState::NeedsAttention && !recoverable_stop {
                     NoticeKind::Danger
                 } else {
                     NoticeKind::Warning
@@ -1730,7 +1761,14 @@ impl TasksPage {
                     )
                 },
             )
-            .child(buttons)
+            .map(|body| {
+                if home_running {
+                    self.home_footer = Some(buttons);
+                    body
+                } else {
+                    body.child(buttons)
+                }
+            })
             .children(details)
             .children(log)
     }

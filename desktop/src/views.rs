@@ -17,8 +17,6 @@ use gpui_kit_material::{
 
 const SHELL_GUTTER: f32 = 24.;
 const SETTINGS_SHELL_WIDTH: f32 = 1108.;
-/// The reading column of a page without a wider one of its own.
-const COLUMN: f32 = 920.;
 
 /// The height the window opens for: the traffic lights sit centred on it.
 pub(crate) const APP_BAR_HEIGHT: Pixels = px(56.);
@@ -129,18 +127,7 @@ fn nav_destination(
     }
 }
 
-/// The width of `text` as the window would shape it.
-pub(crate) fn shaped_width(text: &str, size: f32, weight: FontWeight, window: &Window) -> f32 {
-    let mut style = window.text_style();
-    style.font_weight = weight;
-    let text = SharedString::from(text.to_owned());
-    f32::from(
-        window
-            .text_system()
-            .shape_line(text.clone(), px(size), &[style.to_run(text.len())], None)
-            .width,
-    )
-}
+pub(crate) use crate::ui::shaped_width;
 
 /// The height of the app bar at the current text scale.
 pub(crate) fn title_bar_height(window: &Window) -> Pixels {
@@ -172,9 +159,10 @@ fn shell_column_width(page: Page) -> AbsoluteLength {
         Page::Settings => rems(SETTINGS_SHELL_WIDTH / 14.).into(),
         Page::Library => rems(1280. / 14.).into(),
         Page::New => rems(1200. / 14.).into(),
+        // Tasks read at home's column, centred on the same axis.
+        Page::Task => rems((760. + SHELL_GUTTER * 2.) / 14.).into(),
         // Sections set the screenshot beside the text, as on the canvas.
         Page::Result => rems(1180. / 14.).into(),
-        _ => rem(COLUMN).into(),
     }
 }
 

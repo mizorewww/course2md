@@ -56,6 +56,8 @@ pub struct Course {
     pub thumbnail: Option<PathBuf>,
     pub manifest: Option<artifact::Manifest>,
     pub warning: Option<String>,
+    /// The video's length as the note recorded it, for its cover.
+    pub duration: Option<f64>,
 }
 impl Course {
     /// A just-published note. `read_preview` reads its manifest on open and
@@ -69,6 +71,7 @@ impl Course {
             thumbnail: None,
             manifest: None,
             warning: None,
+            duration: None,
         }
     }
     pub fn incomplete(&self) -> bool {
@@ -108,7 +111,22 @@ fn note_course(dir: &Path) -> Result<Course> {
         thumbnail: images.into_iter().next(),
         manifest: Some(manifest),
         warning: None,
+        duration: note_duration(dir),
     })
+}
+
+/// The video's length from the note's `meta.json`, when it says one. Only the one
+/// field is read; an unreadable file leaves the cover without it.
+pub fn note_duration(dir: &Path) -> Option<f64> {
+    #[derive(serde::Deserialize)]
+    struct Length {
+        duration: Option<f64>,
+    }
+    let file = std::fs::File::open(dir.join("meta.json")).ok()?;
+    let length: Length = serde_json::from_reader(std::io::BufReader::new(file)).ok()?;
+    length
+        .duration
+        .filter(|seconds| seconds.is_finite() && *seconds > 0.)
 }
 
 /// Completes the replacements a crash interrupted anywhere in the library at
@@ -525,6 +543,7 @@ pub mod fixtures {
             thumbnail: None,
             manifest: Some(manifest),
             warning: None,
+            duration: None,
         }
     }
 

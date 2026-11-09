@@ -535,7 +535,7 @@ mod tests {
         let error = needed_credentials(&preferences, &task).unwrap_err();
         assert_eq!(
             error.to_string(),
-            c2m_i18n::tr!("任务使用的服务已不在设置中，请调整后重试并选择服务")
+            c2m_i18n::tr!("任务使用的服务已从设置中删除")
         );
         assert!(services_missing(&preferences, &task));
         fail_before_start(&mut workspace, &id, &error).unwrap();

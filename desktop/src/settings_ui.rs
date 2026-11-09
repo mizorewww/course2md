@@ -209,14 +209,37 @@ pub(crate) fn dialog_body_height(window: &Window) -> Pixels {
 enum SettingsLayout {
     /// The navigation pane beside the content.
     Pane,
-    /// A narrow window: the categories in a rail of short names beside the content.
+    /// A narrow window: the categories by name alone, in a rail beside the content.
     Rail,
     /// No room for anything beside the content: one column, the categories in a menu.
     Single,
 }
 
-/// The rail and its gap, in 100%-scale px.
-const SETTINGS_RAIL: f32 = 184. + 16.;
+/// The rail's narrowest width and its gap, in 100%-scale px.
+const SETTINGS_RAIL_MIN: f32 = 184.;
+const SETTINGS_RAIL_GAP: f32 = 16.;
+/// The widest the rail grows to hold a category's whole name, in 100%-scale px.
+const SETTINGS_RAIL_MAX: f32 = 240.;
+
+/// The rail's width in 100%-scale px: wide enough for every category's whole name
+/// beside its circle (a list item's 16 inset, 40 circle, 16 gap and 16 trailing
+/// inset), measured at the current text scale. A name longer than the widest rail
+/// wraps in its row.
+fn settings_rail_width(window: &Window) -> f32 {
+    let scale = f32::from(window.rem_size()) / gpui_kit_material::tokens::typography::BASE_PX;
+    SettingsTab::ALL
+        .iter()
+        .map(|tab| {
+            crate::views::shaped_width(tab.label(), 16. * scale, FontWeight::NORMAL, window) / scale
+                + 16.
+                + 40.
+                + 16.
+                + 16.
+        })
+        .fold(SETTINGS_RAIL_MIN, f32::max)
+        .ceil()
+        .min(SETTINGS_RAIL_MAX)
+}
 /// The narrowest content beside the rail that holds a resource row (its circle, name,
 /// status and action) and a label beside its control, in 100%-scale px.
 const SETTINGS_CONTENT_MIN: f32 = 400.;
@@ -230,16 +253,34 @@ impl SettingsLayout {
         }
         let unit = f32::from(rem(1.).to_pixels(window.rem_size()));
         let width = crate::views::shell_content_width(Page::Settings, window) / unit;
-        Self::for_width(width)
+        Self::for_width(width, settings_rail_width(window))
     }
 
-    fn for_width(width: f32) -> Self {
-        if width >= SETTINGS_RAIL + SETTINGS_CONTENT_MIN {
+    fn for_width(width: f32, rail: f32) -> Self {
+        if width >= rail + SETTINGS_RAIL_GAP + SETTINGS_CONTENT_MIN {
             Self::Rail
         } else {
             Self::Single
         }
     }
+}
+
+/// The width a settings row gives its control, in 100%-scale px: the content pane
+/// for the current layout, less the scrollbar's gutter and the row's insets.
+fn settings_row_width(window: &Window) -> f32 {
+    let unit = f32::from(rem(1.).to_pixels(window.rem_size()));
+    let shell = crate::views::shell_content_width(Page::Settings, window) / unit;
+    let pane = match SettingsLayout::of(window) {
+        SettingsLayout::Pane => (shell - 320. - 40.).min(760.),
+        SettingsLayout::Rail => shell - settings_rail_width(window) - SETTINGS_RAIL_GAP,
+        SettingsLayout::Single => shell.min(760.),
+    };
+    pane - 12. - 2. * 20.
+}
+
+/// Whether a small segmented group of `labels` fits one settings row.
+pub(super) fn segmented_fits(labels: &[&str], icons: bool, window: &Window) -> bool {
+    ui::segmented_fits(labels, icons, settings_row_width(window), window)
 }
 
 /// Settings categories in navigation order.
@@ -271,14 +312,6 @@ impl SettingsTab {
             Self::Services => course2md::tr!("服务与账号"),
             Self::Storage => course2md::tr!("存储"),
             Self::Application => course2md::tr!("应用 / Application"),
-        }
-    }
-    /// The narrow rail has room for two characters.
-    fn short_label(self) -> &'static str {
-        match self {
-            Self::Generation => course2md::tr!("笔记"),
-            Self::Services => course2md::tr!("服务"),
-            other => other.label(),
         }
     }
     fn icon(self) -> SymbolIcon {
@@ -642,8 +675,7 @@ impl Desktop {
                 .iter()
                 .filter(|tab| visible.contains(tab))
                 .map(|&tab| {
-                    let label = if rail { tab.short_label() } else { tab.label() };
-                    ListItem::new(("settings-tab", tab.index()), label)
+                    ListItem::new(("settings-tab", tab.index()), tab.label())
                         .when(!rail, |item| item.supporting(tab.subtitle()))
                         .leading(ListLeading::Tinted(tab.icon().into(), tab.tint(), 40.))
                         .selected(self.settings_tab == tab)
@@ -921,8 +953,12 @@ impl Desktop {
             .gap(rem(if compact { 16. } else { 40. }))
             .child(
                 div()
-                    // Narrow, the list keeps its circles and short names.
-                    .w(rem(if compact { 184. } else { 320. }))
+                    // Narrow, the list keeps its circles and whole names.
+                    .w(rem(if compact {
+                        settings_rail_width(window)
+                    } else {
+                        320.
+                    }))
                     .flex_shrink_0()
                     .h_full()
                     .min_h_0()
@@ -1806,7 +1842,7 @@ impl Desktop {
             (
                 symbols::check_circle(),
                 Tint::Green,
-                course2md::tr!("一切正常"),
+                SharedString::from(course2md::tr!("一切正常")),
                 Some(if checked == 1 {
                     course2md::tr!("1 项检查已通过").to_owned()
                 } else {
@@ -1814,11 +1850,16 @@ impl Desktop {
                 }),
             )
         } else {
-            // The chips below mark which check needs repair; a count would say it again.
+            // The conclusion names what does not work; the chips below say the rest.
+            let broken: Vec<&str> = capabilities
+                .iter()
+                .filter(|(_, ready, unused)| !ready && !unused)
+                .map(|(label, _, _)| *label)
+                .collect();
             (
                 symbols::warning(),
                 Tint::Amber,
-                course2md::tr!("需要修复"),
+                SharedString::from(course2md::tr!("{}不可用", broken.join("、"))),
                 None,
             )
         };
@@ -1860,7 +1901,8 @@ impl Desktop {
                             .min_w_0()
                             .min_h(ui::RESOURCE_ICON)
                             .items_center()
-                            .flex_wrap()
+                            // The recheck stays at the conclusion's end; a long
+                            // conclusion wraps in its own column.
                             .gap(rem(16.))
                             .child(
                                 TileScale::Regular
@@ -1872,7 +1914,7 @@ impl Desktop {
                                     .flex_1()
                                     .flex_basis(rem(200.)),
                             )
-                            .child(recheck),
+                            .child(div().flex_shrink_0().child(recheck)),
                     )
                     .child(
                         h_flex()
@@ -1893,6 +1935,50 @@ impl Desktop {
             fields.push(ui::Field::content(
                 "diagnostic-engine-obstacle-row",
                 self.engine_obstacle("diagnostic-engine-obstacle", issue, false, cx),
+            ));
+        }
+        // A missing media program: its repair beside the check, not inside the details.
+        let missing_tools: Vec<&str> = [
+            ("ffmpeg", e.ffmpeg),
+            ("ffprobe", e.ffprobe),
+            ("yt-dlp", e.ytdlp),
+        ]
+        .into_iter()
+        .filter_map(|(name, found)| (!found).then_some(name))
+        .collect();
+        if e.engine && !missing_tools.is_empty() {
+            let command = media_install_command();
+            let actions = h_flex()
+                .min_w_0()
+                .flex_wrap()
+                .items_center()
+                .child(
+                    material_button("repair-media-download-app", ButtonVariant::Text)
+                        .icon(symbols::download())
+                        .child(course2md::tr!("下载完整应用"))
+                        .on_click(|_, _, cx| {
+                            cx.open_url("https://github.com/mizorewww/course2md/releases")
+                        }),
+                )
+                .child(
+                    material_button("repair-media-copy-command", ButtonVariant::Text)
+                        .icon(symbols::content_copy())
+                        .child(course2md::tr!("复制安装命令"))
+                        .on_click(move |_, _, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(command.into()))
+                        }),
+                )
+                .into_any_element();
+            fields.push(ui::Field::content(
+                "repair-media-tools",
+                div().children(ui::async_status(
+                    "repair-media-tools-status",
+                    &ui::AsyncStatus::Warning(
+                        course2md::tr!("缺少 {}", missing_tools.join("、")).into(),
+                    ),
+                    Some(actions),
+                    cx,
+                )),
             ));
         }
         if !e.engine {
@@ -1955,18 +2041,13 @@ impl Desktop {
         });
         let repair =
             (!environment.ffmpeg || !environment.ffprobe || !environment.ytdlp).then(|| {
-                let (help, command) = if cfg!(target_os = "macos") {
-                    (course2md::tr!("在终端运行"), "brew install ffmpeg yt-dlp")
+                let command = media_install_command();
+                let help = if cfg!(target_os = "macos") {
+                    course2md::tr!("在终端运行")
                 } else if cfg!(target_os = "windows") {
-                    (
-                        course2md::tr!("在 PowerShell 运行"),
-                        "winget install Gyan.FFmpeg; winget install yt-dlp.yt-dlp",
-                    )
+                    course2md::tr!("在 PowerShell 运行")
                 } else {
-                    (
-                        course2md::tr!("用系统包管理器安装 ffmpeg，再运行"),
-                        "pipx install yt-dlp",
-                    )
+                    course2md::tr!("用系统包管理器安装 ffmpeg，再运行")
                 };
                 v_flex()
                     .w_full()
@@ -2210,6 +2291,17 @@ fn search_placeholder() -> &'static str {
     course2md::tr!("搜索设置")
 }
 
+/// The command that installs the media programs on this system.
+fn media_install_command() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "brew install ffmpeg yt-dlp"
+    } else if cfg!(target_os = "windows") {
+        "winget install Gyan.FFmpeg; winget install yt-dlp.yt-dlp"
+    } else {
+        "pipx install yt-dlp"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::pending_after_save;
@@ -2224,9 +2316,13 @@ mod tests {
     fn settings_leave_the_rail_when_text_leaves_the_content_no_room() {
         use super::SettingsLayout;
         // 720 points wide less the narrow gutters, at 100% and at 150% text.
-        assert_eq!(SettingsLayout::for_width(720. - 32.), SettingsLayout::Rail);
+        // A rail wide enough for English names still leaves the content its room.
         assert_eq!(
-            SettingsLayout::for_width((720. - 32.) / 1.5),
+            SettingsLayout::for_width(720. - 32., super::SETTINGS_RAIL_MAX),
+            SettingsLayout::Rail
+        );
+        assert_eq!(
+            SettingsLayout::for_width((720. - 32.) / 1.5, super::SETTINGS_RAIL_MIN),
             SettingsLayout::Single
         );
     }

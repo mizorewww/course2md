@@ -150,7 +150,7 @@ impl Desktop {
             }))
     }
 
-    fn has_services(&self, purpose: ServicePurpose) -> bool {
+    pub(crate) fn has_services(&self, purpose: ServicePurpose) -> bool {
         self.preferences.latest_versions().values().any(|version| {
             version.config.protocol.purpose() == purpose
                 && !self
@@ -308,7 +308,7 @@ impl Desktop {
             self.open_settings(window, cx);
         }
     }
-    fn bind_service(
+    pub(crate) fn bind_service(
         &mut self,
         purpose: ServicePurpose,
         id: Option<String>,
@@ -674,8 +674,14 @@ impl Desktop {
         };
         let mut parts = vec![reveal(
             "service-protocol-reveal",
-            self.service_type_field(FormOwner::Editor, "service-protocol", awaiting_binding, cx)
-                .into_any_element(),
+            self.service_type_field(
+                FormOwner::Editor,
+                "service-protocol",
+                awaiting_binding,
+                rem(40.).to_pixels(window.rem_size()),
+                cx,
+            )
+            .into_any_element(),
         )];
         // Codex account connection: the login decides the model catalog and availability.
         if protocol == ServiceProtocol::CodexResponses {

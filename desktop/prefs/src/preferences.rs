@@ -1066,6 +1066,31 @@ impl Store {
             llm: pick(&chosen.llm, &self.services.defaults.llm),
         }
     }
+    /// The first service an input chose, among those its configuration needs, that is
+    /// no longer saved or was deleted, and the version that would take its place: the
+    /// AI service, then speech. A purpose the input does not use never counts, and
+    /// nothing is known to be gone while the services record cannot be read.
+    pub fn dropped_choice(
+        &self,
+        chosen: &ServiceRefs,
+        config: &ConfigFile,
+    ) -> Option<(ServicePurpose, ServiceVersion)> {
+        if self.is_blocked(PreferenceGroup::Services) {
+            return None;
+        }
+        let needed = chosen.required_for(config);
+        let planned = self.plan_refs(chosen);
+        [
+            (ServicePurpose::Ai, needed.llm, planned.llm),
+            (ServicePurpose::Speech, needed.asr, planned.asr),
+        ]
+        .into_iter()
+        .filter_map(|(purpose, own, now)| {
+            own.filter(|id| !self.usable_in_snapshot(id))?;
+            Some((purpose, self.version(&now?)?.clone()))
+        })
+        .next()
+    }
     /// Whether a planned task names a service its configuration needs that is no longer
     /// saved or was deleted: continuing it can only stop again, and only a new attempt
     /// with another service goes on. Unreadable service records are another obstacle.
@@ -1472,11 +1497,9 @@ impl Store {
         if self.is_blocked(PreferenceGroup::Services) {
             bail!(c2m_i18n::tr!("服务记录暂时不可用，已保留原文件"));
         }
-        let version = self.version(reference).ok_or_else(|| {
-            anyhow!(c2m_i18n::tr!(
-                "任务使用的服务已不在设置中，请调整后重试并选择服务"
-            ))
-        })?;
+        let version = self
+            .version(reference)
+            .ok_or_else(|| anyhow!(c2m_i18n::tr!("任务使用的服务已从设置中删除")))?;
         // Single stat of the marker: the match keeps the two error classes
         // ("retired" vs "cannot confirm"), and the in-memory stopped map is
         // checked above, so is_service_retired's second stat is not repeated.
@@ -1526,9 +1549,9 @@ impl Store {
                 !self.is_blocked(PreferenceGroup::Services),
                 c2m_i18n::tr!("服务记录暂时不可用，已保留原文件")
             );
-            let version = self.version(id).context(c2m_i18n::tr!(
-                "任务使用的服务已不在设置中，请调整后重试并选择服务"
-            ))?;
+            let version = self
+                .version(id)
+                .context(c2m_i18n::tr!("任务使用的服务已从设置中删除"))?;
             ensure!(
                 !self.services.stopped.contains_key(&version.service_id),
                 c2m_i18n::tr!("此服务已删除，尚未发送新的请求")
@@ -1544,7 +1567,7 @@ impl Store {
             let id = required
                 .asr
                 .as_deref()
-                .ok_or_else(|| anyhow!(c2m_i18n::tr!("请为这次笔记设置语音识别服务")))?;
+                .ok_or_else(|| anyhow!(c2m_i18n::tr!("这次笔记还没有可用的语音识别服务")))?;
             let version = check(id)?;
             if version.config.protocol.purpose() != ServicePurpose::Speech {
                 bail!(c2m_i18n::tr!("所选服务不支持语音识别"));
@@ -1560,7 +1583,7 @@ impl Store {
             let id = required
                 .llm
                 .as_deref()
-                .ok_or_else(|| anyhow!(c2m_i18n::tr!("请为这次笔记设置 AI 服务")))?;
+                .ok_or_else(|| anyhow!(c2m_i18n::tr!("这次笔记还没有可用的 AI 服务")))?;
             let version = check(id)?;
             if version.config.protocol.purpose() != ServicePurpose::Ai {
                 bail!(c2m_i18n::tr!("所选服务不支持 AI 校对或摘要"));
@@ -1610,9 +1633,9 @@ impl Store {
                 // config_for_refs above already ran check_dispatch for exactly
                 // these required ids; same synchronous call chain, so reuse the
                 // validated lookup instead of statting the marker a second time.
-                let version = self.version(&id).context(c2m_i18n::tr!(
-                    "任务使用的服务已不在设置中，请调整后重试并选择服务"
-                ))?;
+                let version = self
+                    .version(&id)
+                    .context(c2m_i18n::tr!("任务使用的服务已从设置中删除"))?;
                 if let Some(reference) = &version.config.credential {
                     let secret = secrets.get(reference).cloned().context(c2m_i18n::tr!(
                         "服务凭据尚未就绪，请重新打开服务设置保存一次"
@@ -1938,6 +1961,74 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let store = open(directory.path(), Arc::new(MemoryCredentialVault::new()));
         (directory, store)
+    }
+
+    #[test]
+    fn a_deleted_choice_counts_only_where_the_input_uses_it() {
+        let (_directory, mut store) = isolated();
+        let chosen = complete_draft(&mut store, "chosen");
+        let chosen = store
+            .publish_service(&chosen.id, BindingScope::CurrentTask)
+            .unwrap();
+        let default = complete_draft(&mut store, "default");
+        let default = store
+            .publish_service(&default.id, BindingScope::Defaults)
+            .unwrap();
+        let refs = ServiceRefs {
+            asr: None,
+            llm: Some(chosen.id.clone()),
+        };
+        let mut config = ConfigFile::default();
+        config.llm.enabled = true;
+        assert!(store.dropped_choice(&refs, &config).is_none());
+        store.delete_service(&chosen.service_id).unwrap();
+        // Used: the default that would take its place is named, to be chosen.
+        let (purpose, replacement) = store.dropped_choice(&refs, &config).unwrap();
+        assert_eq!(purpose, ServicePurpose::Ai);
+        assert_eq!(replacement.id, default.id);
+        // Not used: nothing stands in the way.
+        config.llm.enabled = false;
+        config.llm.summarize = false;
+        config.llm.translate = None;
+        assert!(store.dropped_choice(&refs, &config).is_none());
+    }
+
+    #[test]
+    fn a_deleted_speech_choice_counts_with_ai_off() {
+        let (_directory, mut store) = isolated();
+        let mut speech = ServiceDraft::new(ServicePurpose::Speech);
+        speech.address = "https://example.test/v1".into();
+        speech.model = "speech".into();
+        let speech = store
+            .save_service_draft(speech, Some(Secret::new("test-only-secret")))
+            .unwrap();
+        let speech = store
+            .publish_service(&speech.id, BindingScope::CurrentTask)
+            .unwrap();
+        let mut fallback = ServiceDraft::new(ServicePurpose::Speech);
+        fallback.address = "https://example.test/v1".into();
+        fallback.model = "fallback".into();
+        let fallback = store
+            .save_service_draft(fallback, Some(Secret::new("test-only-secret")))
+            .unwrap();
+        let fallback = store
+            .publish_service(&fallback.id, BindingScope::Defaults)
+            .unwrap();
+        store.delete_service(&speech.service_id).unwrap();
+        let refs = ServiceRefs {
+            asr: Some(speech.id.clone()),
+            llm: None,
+        };
+        let mut config = ConfigFile::default();
+        config.llm.enabled = false;
+        config.llm.summarize = false;
+        config.defaults.provider = Some(AsrProvider::Api);
+        let (purpose, replacement) = store.dropped_choice(&refs, &config).unwrap();
+        assert_eq!(purpose, ServicePurpose::Speech);
+        assert_eq!(replacement.id, fallback.id);
+        // Subtitles only: speech is not used, so its deletion does not stand in the way.
+        config.defaults.transcript_source = Some(TranscriptSource::Subtitle);
+        assert!(store.dropped_choice(&refs, &config).is_none());
     }
 
     fn complete_draft(store: &mut Store, model: &str) -> ServiceDraft {
@@ -2682,7 +2773,7 @@ mod tests {
         let error = store.config_for_preview(&config, &held).unwrap_err();
         assert_eq!(
             error.to_string(),
-            c2m_i18n::tr!("任务使用的服务已不在设置中，请调整后重试并选择服务")
+            c2m_i18n::tr!("任务使用的服务已从设置中删除")
         );
         assert_eq!(store.plan_refs(&held).llm, Some(default.id.clone()));
         let preview = store
@@ -2768,7 +2859,7 @@ mod tests {
                 .config_for_preview(&config, &store.plan_refs(&held))
                 .unwrap_err()
                 .to_string(),
-            c2m_i18n::tr!("请为这次笔记设置 AI 服务")
+            c2m_i18n::tr!("这次笔记还没有可用的 AI 服务")
         );
     }
 

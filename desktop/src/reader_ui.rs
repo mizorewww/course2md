@@ -336,6 +336,11 @@ impl ReaderPage {
                 .update(cx, |this, cx| this.note_block(address, window, cx))
                 .unwrap_or_else(|_| div().into_any_element())
         });
+        let watcher = cx.weak_entity();
+        let open_link: note_text::OpenLink = Arc::new(move |url, _, cx| {
+            let url = url.to_owned();
+            let _ = watcher.update(cx, |this, cx| this.open_watch_link(&url, cx));
+        });
         let line_width = Arc::new(AtomicU32::new(0));
         let viewer_line = Arc::new(AtomicU32::new(0));
         let gallery_line = Arc::new(AtomicU32::new(0));
@@ -349,7 +354,7 @@ impl ReaderPage {
             note: NoteState {
                 view: note,
                 list: note_list,
-                extensions: note_text::note_extensions(line_width.clone(), render_block),
+                extensions: note_text::note_extensions(line_width.clone(), render_block, open_link),
                 line_width,
                 document: NoteDocument::default(),
                 figure_size: Size::thumbnail(1.),
@@ -410,6 +415,9 @@ impl ReaderPage {
 const HEAD_BLOCK: &str = "reader:head";
 /// The address of the space after the note's last block.
 const END_BLOCK: &str = "reader:end";
+/// The card's inset above the title, inside the scrolled document, so text scrolls
+/// on to the card's edge instead of being cut inside it.
+const START_BLOCK: &str = "reader:start";
 const FIGURE_BLOCK: &str = "figure:";
 
 /// A note as Markdown, with what each top-level block of it shows.
@@ -428,6 +436,7 @@ impl NoteDocument {
         seek: impl Fn(f64) -> Option<String>,
     ) -> Self {
         let mut parts: Vec<(String, Option<usize>)> = vec![
+            (format!("![]({START_BLOCK})"), None),
             (
                 format!("# {}", note_text::plain_inline_markdown(title)),
                 None,
@@ -996,7 +1005,7 @@ impl ReaderPage {
         let source = self.unmapped_reader_source(cx);
         let chapters = chapter_starts(&preview.blocks, &summary_outline(preview));
         let document = NoteDocument::new(&preview.course.title, &preview.blocks, &chapters, |at| {
-            nav::seek_url(source.as_ref()?, at)
+            nav::watch_url(source.as_ref()?, at)
         });
         self.outline = Rc::new(reader_outline(preview));
         self.note.view.update(cx, |view, cx| {
@@ -1226,6 +1235,65 @@ impl ReaderPage {
         let meta = &self.opened.preview.as_ref()?.document.meta;
         nav::source_target(&meta.webpage_url, meta.is_local())
     }
+    /// Follows a 从此处观看 address: a web page in the browser, a local video from its time.
+    fn open_watch_link(&mut self, url: &str, cx: &mut Context<Self>) {
+        match nav::local_seek_seconds(url) {
+            Some(seconds) => self.watch_local_from(seconds, cx),
+            None => cx.open_url(url),
+        }
+    }
+
+    /// Opens the note's local video at `seconds`: in a player installed here that can
+    /// start at a time, or else the system's player, saying where to go.
+    fn watch_local_from(&mut self, seconds: f64, cx: &mut Context<Self>) {
+        let Some(nav::SourceTarget::Local(path)) = self.source.clone() else {
+            return;
+        };
+        if !path.is_file() {
+            self.open_reader_source(cx);
+            return;
+        }
+        let time = course2md::render::fmt_ts(seconds);
+        let player = nav::seeking_player(
+            &path,
+            seconds,
+            std::env::var_os("PATH").as_deref(),
+            std::env::home_dir().as_deref(),
+        );
+        // Capture runs log what they would open, and open nothing.
+        if cfg!(feature = "capture") {
+            eprintln!(
+                "capture: watch {} from {time} with {player:?}",
+                path.display()
+            );
+            return;
+        }
+        let started = player.is_some_and(|(program, arguments)| {
+            std::process::Command::new(program)
+                .args(arguments)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                // The player outlives the call; a thread waits on it so its exit
+                // is reaped instead of left as a zombie.
+                .map(|mut child| {
+                    std::thread::spawn(move || {
+                        let _ = child.wait();
+                    });
+                })
+                .is_ok()
+        });
+        if !started {
+            cx.open_with_system(&path);
+            cx.emit(ReaderEvent::Message(course2md::tr!(
+                "已用默认播放器打开原视频，请跳到 {}",
+                time
+            )));
+            cx.notify();
+        }
+    }
+
     fn open_reader_source(&mut self, cx: &mut Context<Self>) {
         match self.source.clone() {
             Some(nav::SourceTarget::Web(url)) => cx.open_url(&url),
@@ -1941,8 +2009,8 @@ impl ReaderPage {
                 .h_full()
                 .max_w(ARTICLE_MAX)
                 .mx_auto()
-                .pt(rem(24.))
                 .rounded(RADIUS_HERO)
+                .overflow_hidden()
                 .bg(color(SURFACE))
                 // Copying from the note leaves its figures behind.
                 .capture_action(|_: &CopyText, window, cx| {
@@ -2110,11 +2178,13 @@ impl ReaderPage {
             return self.note_figure(preview, block, cx);
         }
         match &preview {
-            Some(preview) if address == HEAD_BLOCK => {
-                self.reader_head(preview, window, cx).into_any_element()
-            }
+            Some(preview) if address == HEAD_BLOCK => self
+                .reader_head(preview, true, window, cx)
+                .into_any_element(),
             // As far below the last block as the note's opening is below the card's top.
             _ if address == END_BLOCK => div().h(rem(24.)).into_any_element(),
+            // With the paragraph gap after it, the title starts the inset down.
+            _ if address == START_BLOCK => div().h(rem(8.)).into_any_element(),
             _ => div().into_any_element(),
         }
     }
@@ -2205,6 +2275,7 @@ impl ReaderPage {
     fn reader_head(
         &mut self,
         preview: &Rc<notes::Preview>,
+        facts_shown: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -2240,21 +2311,23 @@ impl ReaderPage {
             .w_full()
             .min_w_0()
             .gap(rem(12.))
-            .child(
-                h_flex()
-                    .w_full()
-                    .min_w_0()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_x(rem(12.))
-                    .gap_y(rem(8.))
-                    .children(origin)
-                    .children(
-                        facts
-                            .into_iter()
-                            .map(|fact| status_chip(StatusKind::Neutral).child(fact)),
-                    ),
-            )
+            .when(facts_shown, |head| {
+                head.child(
+                    h_flex()
+                        .w_full()
+                        .min_w_0()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_x(rem(12.))
+                        .gap_y(rem(8.))
+                        .children(origin)
+                        .children(
+                            facts
+                                .into_iter()
+                                .map(|fact| status_chip(StatusKind::Neutral).child(fact)),
+                        ),
+                )
+            })
             .children(self.reader_obstacles(cx))
             .children(self.reader_details(preview, cx))
             .children(self.reader_notices(preview, cx))
@@ -2340,7 +2413,16 @@ impl ReaderPage {
             details.push((
                 course2md::tr!("生成日期"),
                 symbols::schedule(),
-                nav::date_local(manifest.created_at_ms),
+                // The app's one date format.
+                i64::try_from(manifest.created_at_ms)
+                    .ok()
+                    .and_then(chrono::DateTime::from_timestamp_millis)
+                    .map(|instant| {
+                        crate::i18n::calendar_date(
+                            instant.with_timezone(&chrono::Local).date_naive(),
+                        )
+                    })
+                    .unwrap_or_else(|| nav::date_local(manifest.created_at_ms)),
             ));
         }
         if let Some(path) = &local_source {
@@ -2679,7 +2761,14 @@ impl ReaderPage {
         } else {
             None
         };
-        let find = reading_note.then(|| {
+        // Search stays on the bar in both views: the note's find, or the screenshots'
+        // own search field.
+        let find_label = if reading_note {
+            find_label
+        } else {
+            course2md::tr!("搜索截图对应文字")
+        };
+        let find = Some(()).map(|_| {
             MaterialTooltip::plain("reader-open-find-tip", format!("{find_label} {shortcut}"))
                 .trigger(
                     // A tool on the reader's bar sits in the neutral circle the back button has.
@@ -2687,9 +2776,12 @@ impl ReaderPage {
                         .variant(IconButtonVariant::Tonal)
                         .tone(ButtonTone::Neutral)
                         .toggle(true)
-                        .selected(self.find.open)
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            if this.find.open {
+                        .selected(reading_note && self.find.open)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            if !reading_note {
+                                let input = this.gallery.find.clone();
+                                input.update(cx, |state, cx| state.focus(window, cx));
+                            } else if this.find.open {
                                 this.close_reader_find(window, cx);
                             } else {
                                 this.open_reader_find(window, cx);
@@ -3028,7 +3120,9 @@ impl ReaderPage {
                         .flex_1()
                         .flex_basis(rem(200.))
                         .min_w_0()
-                        .max_w(SEARCH_MAX_WIDTH)
+                        // The screenshots' search spans their grid; the note's find
+                        // stays a bar's width.
+                        .when(reading_note, |field| field.max_w(SEARCH_MAX_WIDTH))
                         .child(
                             SearchField::new(&input)
                                 .field_style(SearchFieldStyle::Tonal)
@@ -3110,7 +3204,7 @@ impl ReaderPage {
             .floor()
             .clamp(1., 6.)
             .min(shown) as usize;
-        let width = width.min(columns as f32 * (column * 2. + gap) - gap);
+        // The note's width, as the search above it is, so the views share their edges.
         if columns != self.gallery.columns {
             self.set_gallery_items(columns);
         }
@@ -3169,10 +3263,15 @@ impl ReaderPage {
             .min_w_0()
             .w_full()
             .child(gallery.size_full())
+            // The scrollbar sits in the gutter beside the column, clear of a notice's
+            // trailing action.
             .child(
                 div()
                     .absolute()
-                    .inset_0()
+                    .top_0()
+                    .bottom_0()
+                    .right(rem(-16.))
+                    .w(rem(16.))
                     .child(Scrollbar::vertical(&self.gallery.list).viewport_from_layout()),
             )
             .into_any_element()
@@ -3186,7 +3285,8 @@ impl ReaderPage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
-        let head = self.reader_head(preview, window, cx);
+        // The screenshots repeat none of the note's facts; what needs attention stays.
+        let head = self.reader_head(preview, false, window, cx);
         let panel = || {
             v_flex()
                 .w_full()
@@ -3351,8 +3451,10 @@ impl ReaderPage {
                             TextView::markdown(("frame-excerpt", index), excerpt)
                                 .markdown_extensions(self.gallery.extensions.clone())
                                 .style(note_text::note_style(cx))
-                                .selectable(false)
-                                .max_lines(3),
+                                // The excerpt is already bounded and ends in an
+                                // ellipsis when cut; clamping lines would cut it
+                                // again mid-sentence with none.
+                                .selectable(false),
                         ),
                 ),
         );
@@ -3721,7 +3823,8 @@ impl ReaderPage {
         let source_available = self.source_available;
         let source_link = source
             .as_ref()
-            .and_then(|source| nav::seek_url(source, frame.seconds));
+            .filter(|source| source_available || matches!(source, nav::SourceTarget::Web(_)))
+            .and_then(|source| nav::watch_url(source, frame.seconds));
         let group = || h_flex().flex_shrink_0().gap(rem(4.)).items_center();
         let stepping = group()
             .child(viewer_tool(
@@ -3806,7 +3909,7 @@ impl ReaderPage {
                     symbols::play_arrow(),
                     course2md::tr!("从此处观看"),
                 )
-                .on_click(move |_, _, cx| cx.open_url(&url)),
+                .on_click(cx.listener(move |this, _, _, cx| this.open_watch_link(&url, cx))),
             ),
             (None, Some(source)) => Some(
                 action(
@@ -4070,6 +4173,13 @@ impl ReaderPage {
         };
         // So short a window keeps the bar for its tools; the note opens with its title.
         let short = ReaderMetrics::new(window, false).short;
+        // The title is said once: while the note's own headline is in view, the bar
+        // names only where the note lives; scrolled past it, or on the screenshots,
+        // the bar carries the title.
+        let headline_in_view = self.opened.result_tab == 0
+            && self.viewer.is_none()
+            // The document's first item is the inset above the title.
+            && self.note.list.logical_scroll_top().item_ix <= 1;
         bar.gap(rem(12.))
             .child(title_bar_control(div().flex_shrink_0().child(
                 ui::tip_button("reader-back", symbols::arrow_back(), back, |button| {
@@ -4093,16 +4203,18 @@ impl ReaderPage {
                             .line_height(TypeRole::BodySmall.scale().line_height)
                             .text_color(color(ON_SURFACE_VARIANT)),
                     )
-                    .child(
-                        // Both lines on their roles' line heights, so the pair centres
-                        // on the back button as its ink does (U20).
-                        accessible_text("reader-crumb-title", title)
-                            .role(Role::Heading)
-                            .truncate()
-                            .text_size(TEXT_TITLE)
-                            .line_height(TypeRole::TitleLarge.scale().line_height)
-                            .text_color(color(ON_SURFACE)),
-                    ),
+                    .when(!headline_in_view, |bar| {
+                        bar.child(
+                            // Both lines on their roles' line heights, so the pair centres
+                            // on the back button as its ink does (U20).
+                            accessible_text("reader-crumb-title", title)
+                                .role(Role::Heading)
+                                .truncate()
+                                .text_size(TEXT_TITLE)
+                                .line_height(TypeRole::TitleLarge.scale().line_height)
+                                .text_color(color(ON_SURFACE)),
+                        )
+                    }),
             )
             .child(tools)
     }
@@ -4263,7 +4375,7 @@ mod tests {
         assert!(
             document
                 .markdown
-                .starts_with("# 标题 *\n\n![](reader:head)")
+                .starts_with("![](reader:start)\n\n# 标题 *\n\n![](reader:head)")
         );
         assert!(
             document
@@ -4289,6 +4401,7 @@ mod tests {
             [
                 None,
                 None,
+                None,
                 Some(0),
                 Some(4),
                 Some(4),
@@ -4305,10 +4418,10 @@ mod tests {
         // The card's inset below the last block scrolls with the note.
         assert!(document.markdown.ends_with("![](reader:end)"));
         // The overview and every key point are in the summary's panel.
-        assert_eq!(document.item_of(1), Some(2));
-        assert_eq!(document.item_of(3), Some(2));
+        assert_eq!(document.item_of(1), Some(3));
+        assert_eq!(document.item_of(3), Some(3));
         assert_eq!(document.block_at(0), Some(0));
-        assert_eq!(document.block_at(10), Some(5));
+        assert_eq!(document.block_at(11), Some(5));
         assert_eq!(document.block_at(99), None);
     }
 
@@ -4338,7 +4451,8 @@ mod tests {
         let document = NoteDocument::new("标题", &note(), &HashMap::new(), |_| None);
         let render: crate::note_text::RenderBlock =
             std::sync::Arc::new(|_, _, _| gpui::IntoElement::into_any_element(gpui::div()));
-        let extensions = crate::note_text::note_extensions(Default::default(), render);
+        let open: crate::note_text::OpenLink = std::sync::Arc::new(|_, _, _| {});
+        let extensions = crate::note_text::note_extensions(Default::default(), render, open);
         let markdown = document.markdown.clone();
         let (view, cx) = cx.add_window_view(move |_, cx| {
             Note(

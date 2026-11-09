@@ -15,7 +15,6 @@ Bilibili 返回的登录密钥无效，请重试	Bilibili 返回的登录密钥�
 GPU 和 CPU 识别需要 Microsoft Visual C++ 运行库，安装后重新检查	GPU 和 CPU 识别需要 Microsoft Visual C++ 运行库，安装后重新检查	GPU and CPU transcription need the Microsoft Visual C++ runtime. Install it, then check again.	GPU 和 CPU 辨識需要 Microsoft Visual C++ 執行階段，安裝後重新檢查	GPU と CPU の音声認識には Microsoft Visual C++ ランタイムが必要です。インストール後に再確認してください。
 Microsoft Visual C++ 运行库	Microsoft Visual C++ 运行库	Microsoft Visual C++ runtime	Microsoft Visual C++ 執行階段	Microsoft Visual C++ ランタイム
 Windows 上的新版 Chrome 和 Edge 可能不允许读取登录信息；如果失败，请改用 Firefox。读取前请先退出该浏览器。	Windows 上的新版 Chrome 和 Edge 可能不允许读取登录信息；如果失败，请改用 Firefox。读取前请先退出该浏览器。	Recent Chrome and Edge on Windows may not allow reading their sign-in; if it fails, use Firefox. Quit the browser before reading.	Windows 上的新版 Chrome 和 Edge 可能不允許讀取登入資訊；如果失敗，請改用 Firefox。讀取前請先結束該瀏覽器。	Windows の新しい Chrome と Edge はログイン情報の読み取りを許可しない場合があります。失敗したら Firefox を使ってください。読み取る前にブラウザを終了してください。
-YouTube 不允许在其他应用中用密码登录。course2md 会让 yt-dlp 读取所选浏览器中的 YouTube 登录（Cookie），只在打开 YouTube 视频时使用，不保存这些 Cookie。连接时的检查会让 yt-dlp 把浏览器的 Cookie 短暂写入本机的私有临时文件，检查结束即删除。	YouTube 不允许在其他应用中用密码登录。course2md 会让 yt-dlp 读取所选浏览器中的 YouTube 登录（Cookie），只在打开 YouTube 视频时使用，不保存这些 Cookie。连接时的检查会让 yt-dlp 把浏览器的 Cookie 短暂写入本机的私有临时文件，检查结束即删除。	YouTube does not allow signing in with a password in other apps. course2md has yt-dlp read the YouTube sign-in (cookies) of the browser you choose, only when it opens a YouTube video, and does not keep them. To check the connection, yt-dlp briefly writes the browser's cookies to a private temporary file on this computer, deleted as soon as the check ends.	YouTube 不允許在其他應用程式中用密碼登入。course2md 會讓 yt-dlp 讀取所選瀏覽器中的 YouTube 登入（Cookie），只在開啟 YouTube 影片時使用，不儲存這些 Cookie。連接時的檢查會讓 yt-dlp 把瀏覽器的 Cookie 短暫寫入本機的私有暫存檔，檢查結束即刪除。	YouTube は他のアプリでのパスワードによるログインを許可していません。course2md は、選んだブラウザの YouTube ログイン（Cookie）を YouTube の動画を開くときだけ yt-dlp に読み取らせ、保存はしません。接続の確認では、yt-dlp がブラウザの Cookie をこのコンピュータ上の非公開の一時ファイルに短時間書き込み、確認が終わるとすぐに削除します。
 YouTube 使用哪个浏览器的登录，如 chrome 或 "chrome:Profile 1" / Browser whose YouTube session to use, e.g. chrome or "chrome:Profile 1"	YouTube 使用哪个浏览器的登录，如 chrome 或 "chrome:Profile 1"	Browser whose YouTube session to use, e.g. chrome or "chrome:Profile 1"	YouTube 使用哪個瀏覽器的登入，如 chrome 或 "chrome:Profile 1"	YouTube で使うログインのブラウザ（例：chrome、"chrome:Profile 1"）
 YouTube 登录设置已损坏，请重新连接浏览器	YouTube 登录设置已损坏，请重新连接浏览器	The YouTube login setting is damaged; connect the browser again	YouTube 登入設定已損毀，請重新連接瀏覽器	YouTube のログイン設定が壊れています。ブラウザをもう一度接続してください
 YouTube 要求登录时，可使用浏览器中的 YouTube 登录	YouTube 要求登录时，可使用浏览器中的 YouTube 登录	When YouTube asks you to sign in, use your browser’s YouTube sign-in	YouTube 要求登入時，可使用瀏覽器中的 YouTube 登入	YouTube にログインを求められたら、ブラウザの YouTube ログインを使えます
@@ -181,7 +180,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {}。保存位置尚未切换，已复制的内容保留在目标位置。	{}。保存位置尚未切换，已复制的内容保留在目标位置。	{}. The save location has not been switched and the copied content remains at the target location.	{}。儲存位置尚未切換，已複製的內容保留在目標位置。	{}。保存場所はまだ切り替えられていません。コピー済みの内容はコピー先に残っています。
 {}。请备份后删除该文件再重试：{}	{}。请备份后删除该文件再重试：{}	{}. Back up and delete the file, then try again: {}	{}。請備份後刪除該檔案再重試：{}	{}。バックアップ後にファイルを削除して、再試行してください: {}
 {}会发送到 {}	{}会发送到 {}	{} will be sent to {}	{}會傳送到 {}	{}は {} に送信されます
-{}发送到「{}」	{}发送到「{}」	{} is sent to "{}"	{}傳送到「{}」	{}は「{}」に送信されます
+{}发送到「{}」	{}发送到「{}」	{} is sent to “{}”	{}傳送到「{}」	{}は「{}」に送信されます
 {}尚未完成	{}尚未完成	{} has not been completed yet	{}尚未完成	{}はまだ完了していません
 {}未保存：{}	{}未保存：{}	{} not saved: {}	{}未儲存：{}	{}は保存されていません: {}
 {}未完成	{}未完成	{} not completed	{}未完成	{}は完了していません
@@ -204,10 +203,10 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 、	、	, 	、	、
 。修改配置或重新测试后再补做。	。修改配置或重新测试后再补做。	. Change the configuration or retest, then fill in what is missing.	。修改配置或重新測試後再補做。	。設定を変更するか再テストしてから、不足分を処理し直してください。
 《{}》{}	《{}》{}	《{}》{}	《{}》{}	《{}》{}
-《{}》的位置或身份记录不完整，原记录已保留	《{}》的位置或身份记录不完整，原记录已保留	The location or identity record for "{}" is incomplete and the original record has been retained.	《{}》的位置或身份記錄不完整，原記錄已保留	「{}」の場所または識別情報の記録が不完全です。元の記録は保持されています。
-《{}》的笔记操作	《{}》的笔记操作	Note actions for "{}"	《{}》的筆記操作	「{}」のノート操作
+《{}》的位置或身份记录不完整，原记录已保留	《{}》的位置或身份记录不完整，原记录已保留	The location or identity record for “{}” is incomplete and the original record has been retained.	《{}》的位置或身份記錄不完整，原記錄已保留	「{}」の場所または識別情報の記録が不完全です。元の記録は保持されています。
+《{}》的笔记操作	《{}》的笔记操作	Note actions for “{}”	《{}》的筆記操作	「{}」のノート操作
 《{}》：{}	《{}》：{}	“{}”: {}	《{}》：{}	「{}」：{}
-「{}」会重新发送失败部分，可能计费	「{}」会重新发送失败部分，可能计费	"{}" resends the failed parts; charges may apply.	「{}」會重新傳送失敗部分，可能計費	「{}」は失敗した部分を再送信します。料金が発生する場合があります。
+「{}」会重新发送失败部分，可能计费	「{}」会重新发送失败部分，可能计费	“{}” resends the failed parts; charges may apply.	「{}」會重新傳送失敗部分，可能計費	「{}」は失敗した部分を再送信します。料金が発生する場合があります。
 「未分类」已被使用，请换一个文件夹名称	「未分类」已被使用，请换一个文件夹名称	"Uncategorized" is already in use; choose a different folder name	「未分類」已被使用，請換一個資料夾名稱	「未分類」は既に使用されています。別のフォルダー名にしてください
 上一个 Codex 请求尚未完成	上一个 Codex 请求尚未完成	The previous Codex request has not yet completed	上一個 Codex 請求尚未完成	前の Codex リクエストはまだ完了していません
 上一处	上一处	Previous match	上一處	前の一致
@@ -215,7 +214,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 上一张 · ←	上一张 · ←	Previous · ←	上一張 · ←	前へ · ←
 上一步	上一步	Previous step	上一步	前のステップ
 上次结果未确认；重测会再次发送，可能计费	上次结果未确认；重测会再次发送，可能计费	Previous result unconfirmed; retesting sends the request again and may incur charges	上次結果未確認；重測會再次傳送，可能計費	前回の結果は未確認です。再テストするとリクエストが再送信され、料金が発生する場合があります
-上次结果未确认；重测或「{}」都会再次发送请求，可能计费	上次结果未确认；重测或「{}」都会再次发送请求，可能计费	Previous result unconfirmed; retesting or "{}" sends the request again and may incur charges.	上次結果未確認；重測或「{}」都會再次傳送請求，可能計費	前回の結果は未確認です。再テストまたは「{}」でリクエストが再送信され、料金が発生する場合があります。
+上次结果未确认；重测或「{}」都会再次发送请求，可能计费	上次结果未确认；重测或「{}」都会再次发送请求，可能计费	Previous result unconfirmed; retesting or “{}” sends the request again and may incur charges.	上次結果未確認；重測或「{}」都會再次傳送請求，可能計費	前回の結果は未確認です。再テストまたは「{}」でリクエストが再送信され、料金が発生する場合があります。
 下一处	下一处	Next match	下一處	次の一致
 下一张	下一张	Next	下一張	次へ
 下一张 · →	下一张 · →	Next · →	下一張 · →	次へ · →
@@ -281,7 +280,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 任务 · {}	任务 · {}	Tasks · {}	任務 · {}	タスク · {}
 任务不存在	任务不存在	Task not found	找不到任務	タスクが見つかりません
 任务与笔记位置必须是绝对路径 / Task paths must be absolute	任务与笔记位置必须是绝对路径	Task paths must be absolute	任務與筆記位置必須是絕對路徑	タスクとノートの場所は絶対パスである必要があります
-任务使用的服务已不在设置中，请调整后重试并选择服务	任务使用的服务已不在设置中，请调整后重试并选择服务	The service this task used is no longer in settings. Adjust and try again with a service selected.	任務使用的服務已不在設定中，請調整後重試並選擇服務	このタスクで使っていたサービスは設定にありません。調整して再試行し、サービスを選択してください
 任务保存位置尚未恢复	任务保存位置尚未恢复	The task save location has not been restored	任務儲存位置尚未恢復	タスクの保存場所が復元されていません
 任务保存位置暂时不可用	任务保存位置暂时不可用	The task save location is temporarily unavailable	任務儲存位置暫時不可用	タスクの保存場所が一時的に利用できなくなりました
 任务保存位置记录缺失	任务保存位置记录缺失	The task save location record is missing	任務儲存位置記錄缺失	タスクの保存場所レコードがありません
@@ -425,7 +423,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 浏览器个人资料	浏览器个人资料	Browser profile	瀏覽器設定檔	ブラウザのプロファイル
 浏览器未登录	浏览器未登录	Browser signed out	瀏覽器未登入	ブラウザ未ログイン
 清除 YouTube 登录设置失败	清除 YouTube 登录设置失败	Could not remove the YouTube login setting	清除 YouTube 登入設定失敗	YouTube のログイン設定を削除できませんでした
-用账号下载可能让 YouTube 限制或封禁这个账号。请适度使用，或使用不常用的账号。	用账号下载可能让 YouTube 限制或封禁这个账号。请适度使用，或使用不常用的账号。	Downloading with an account may lead YouTube to restrict or ban it. Use it sparingly, or use an account you rarely need.	用帳號下載可能讓 YouTube 限制或封鎖這個帳號。請適度使用，或使用不常用的帳號。	アカウントでダウンロードすると、YouTube がそのアカウントを制限または停止するおそれがあります。控えめに使うか、普段使わないアカウントを使ってください。
 登录	登录	Sign in	登入	ログイン
 登录密钥已过期，请重新登录	登录密钥已过期，请重新登录	The login key expired; sign in again	登入金鑰已過期，請重新登入	ログインキーの期限が切れました。もう一度ログインしてください
 登录方式	登录方式	Sign-in method	登入方式	ログイン方法
@@ -488,7 +485,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 创建文件夹	创建文件夹	Create folder	建立資料夾	フォルダーの作成
 创建目录 {} / Failed to create directory {}	创建目录 {}	Failed to create directory {}	建立目錄 {}	ディレクトリ {} の作成に失敗しました
 删除	删除	Delete	刪除	削除
-删除「{}」文件夹？	删除「{}」文件夹？	Delete the "{}" folder?	刪除「{}」資料夾？	「{}」フォルダーを削除しますか？
+删除「{}」文件夹？	删除「{}」文件夹？	Delete the “{}” folder?	刪除「{}」資料夾？	「{}」フォルダーを削除しますか？
 删除文件夹	删除文件夹	Delete folder	刪除資料夾	フォルダーを削除
 删除文件夹…	删除文件夹…	Delete folder…	刪除資料夾…	フォルダーを削除…
 删除服务	删除服务	Delete service	刪除服務	サービスの削除
@@ -496,7 +493,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 刷新二维码	刷新二维码	Refresh QR code	重新整理 QR 碼	QRコードを更新
 刷新模型列表	刷新模型列表	Refresh model list	重新整理模型清單	モデル一覧を更新
 前一步请求结果尚不确定；已保留进度，没有继续发送 / A previous request is unresolved; progress retained	前一步请求结果尚不确定；已保留进度，没有继续发送	A previous request is unresolved; progress retained	前一步請求結果尚不確定；已保留進度，沒有繼續傳送	前回のリクエストの結果はまだ確定していません。進行状況は保持され、送信は続行されません。
-前往「{}」	前往「{}」	Go to "{}"	前往「{}」	「{}」に移動します
+前往「{}」	前往「{}」	Go to “{}”	前往「{}」	「{}」に移動します
 前往笔记库	前往笔记库	Go to note library	前往筆記庫	ノートライブラリに移動
 副本已核验，保存位置尚未切换	副本已核验，保存位置尚未切换	The copy has been verified, but the save location has not been switched.	副本已核驗，儲存位置尚未切換	コピーは確認されましたが、保存場所は切り替えられていません。
 副本已核验，保存位置尚未切换：{}	副本已核验，保存位置尚未切换：{}	The copy has been verified, but the save location has not been switched: {}	副本已核驗，儲存位置尚未切換：{}	コピーは確認されましたが、保存場所は切り替えられていません: {}
@@ -719,9 +716,9 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 已暂停	已暂停	Paused	已暫停	一時停止中
 已有后续处理任务	已有后续处理任务	There are follow-up processing tasks	已有後續處理任務	フォローアップ処理タスクがあります
 已有摘要的格式不完整，保留原文 / Existing summary markup is incomplete; original text kept	已有摘要的格式不完整，保留原文	Existing summary markup is incomplete; original text kept	已有摘要的格式不完整，保留原文	既存の要約の形式が不完全です。元のテキストを保持します
-已有相同处理任务：《{}》（{}）	已有相同处理任务：《{}》（{}）	The same processing task already exists: "{}" ({})	已有相同處理任務：《{}》（{}）	同じ処理タスクがすでに存在します: "{}" ({})
+已有相同处理任务：《{}》（{}）	已有相同处理任务：《{}》（{}）	The same processing task already exists: “{}” ({})	已有相同處理任務：《{}》（{}）	同じ処理タスクがすでに存在します: "{}" ({})
 已有笔记	已有笔记	Notes already exist	已有筆記	ノートあり
-已有笔记，保存在「{}」	已有笔记，保存在「{}」	Notes already exist, saved in "{}"	已有筆記，儲存在「{}」	すでにノートがあり、「{}」に保存されています
+已有笔记，保存在「{}」	已有笔记，保存在「{}」	Notes already exist, saved in “{}”	已有筆記，儲存在「{}」	すでにノートがあり、「{}」に保存されています
 已检查 {} 张画面	已检查 {} 张画面	{} frames checked	已檢查 {} 張畫面	{} フレームがチェックされました
 已检查 1 张画面	已检查 1 张画面	1 frame checked	已檢查 1 張畫面	1 フレームがチェックされました
 已检测到	已检测到	Detected	已偵測到	検出されました
@@ -780,7 +777,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 当前服务暂不可用：{}	当前服务暂不可用：{}	The current service is temporarily unavailable: {}	目前服務暫不可用：{}	現在のサービスは一時的に利用できません: {}
 当前服务编辑已结束，请重新打开服务后再试	当前服务编辑已结束，请重新打开服务后再试	The current service editing has ended, please reopen the service and try again	目前服務編輯已結束，請重新開啟服務後再試	現在のサービスの編集は終了しました。サービスを再度開いて、もう一度お試しください。
 当前未使用	当前未使用	Not currently in use	目前未使用	現在は使用されていません
-当前没有默认语音服务，请返回第一步完成配置。	当前没有默认语音服务，请返回第一步完成配置。	No default speech service is set. Go back to step one to finish setup.	目前沒有預設語音服務，請返回第一步完成設定。	現在デフォルトの音声サービスはありません。最初のステップに戻って設定を完了してください。
 当前笔记信息暂时不可用	当前笔记信息暂时不可用	The current note information is temporarily unavailable	目前筆記資訊暫時不可用	現在のノート情報は一時的に利用できません
 当前系统不支持 Apple 芯片识别，请改用其他方式	当前系统不支持 Apple 芯片识别，请改用其他方式	This system does not support recognition on Apple silicon. Please use another method.	目前系統不支援 Apple 晶片辨識，請改用其他方式	このシステムは Apple シリコンでの認識に対応していません。別の方法を使用してください。
 当前视频输入暂时不可用	当前视频输入暂时不可用	The current video input is temporarily unavailable	目前影片輸入暫時不可用	現在の動画入力は一時的に利用できません
@@ -856,7 +852,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 打开备份位置	打开备份位置	Open backup location	開啟備份位置	バックアップ場所を開く
 打开导出位置	打开导出位置	Open export location	開啟匯出位置	書き出し先を開く
 打开导出文件夹	打开导出文件夹	Open export folder	開啟匯出資料夾	書き出しフォルダーを開く
-打开已有笔记	打开已有笔记	Open an existing note	開啟已有筆記	既存のノートを開く
 打开时意外中断，请重试	打开时意外中断，请重试	Unexpected interruption while opening, please try again	開啟時意外中斷，請重試	開いているときに予期しない中断が発生しました。もう一度お試しください。
 打开模型文件夹	打开模型文件夹	Open model folder	開啟模型資料夾	モデルフォルダーを開く
 打开目标副本	打开目标副本	Open target copy	開啟目標副本	ターゲットコピーを開く
@@ -916,7 +911,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 正在等待第一块数据	正在等待第一块数据	Waiting for the first block	正在等待第一塊資料	最初のブロックを待っています
 由环境变量指定	由环境变量指定	Set by environment variable	由環境變數指定	環境変数で指定
 系统安装	系统安装	Installed on the system	系統安裝	システムにインストール済み
-这个浏览器中没有登录 YouTube。请先在浏览器中登录 YouTube，再重新检查。	这个浏览器中没有登录 YouTube。请先在浏览器中登录 YouTube，再重新检查。	This browser is not signed in to YouTube. Sign in to YouTube there first, then check again.	這個瀏覽器中沒有登入 YouTube。請先在瀏覽器中登入 YouTube，再重新檢查。	このブラウザでは YouTube にログインしていません。先にブラウザで YouTube にログインしてから、もう一度確認してください。
 连接 YouTube	连接 YouTube	Connect YouTube	連接 YouTube	YouTube を接続
 选择已登录 YouTube 的浏览器 / Choose the browser where you are signed in to YouTube	选择已登录 YouTube 的浏览器	Choose the browser where you are signed in to YouTube	選擇已登入 YouTube 的瀏覽器	YouTube にログインしているブラウザを選んでください
 重新打开	重新打开	Reopen	重新開啟	もう一度開く
@@ -1214,7 +1208,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 未检测到设备	未检测到设备	Device not detected	未偵測到裝置	デバイスが検出されません
 未检测到语音，将仅保留截图 / No speech detected; keeping slides without a transcript	未检测到语音，将仅保留截图	No speech detected; keeping slides without a transcript	未偵測到語音，將僅保留截圖	音声は検出されず、スクリーンショットのみが保存されます
 未生成可读笔记	未生成可读笔记	No readable notes generated	未生成可讀筆記	読み取り可能なノートが生成されませんでした
-未登录	未登录	Not signed in	未登入	未ログイン
 未知的语言：{}。可用：auto、en、zh-Hans、zh-Hant、ja	未知的语言：{}。可用：auto、en、zh-Hans、zh-Hant、ja	Unknown language: {}. Available: auto, en, zh-Hans, zh-Hant, ja	未知的語言：{}。可用：auto、en、zh-Hans、zh-Hant、ja	不明な言語: {}。利用可能: auto、en、zh-Hans、zh-Hant、ja
 未能识别服务返回的模型列表	未能识别服务返回的模型列表	The list of models returned by the service was not recognized	無法辨識服務傳回的模型列表	サービスによって返されたモデルのリストが認識されませんでした
 未设置 / not set	未设置	not set	未設定	設定されていません
@@ -1310,8 +1303,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 模型会继续在后台准备	模型会继续在后台准备	The model will continue to be prepared in the background	模型會繼續在背景準備	モデルはバックグラウンドで引き続き準備されます
 模型位置尚未更新，修改已保留，可重试保存：{}	模型位置尚未更新，修改已保留，可重试保存：{}	The model location has not been updated. Your changes were kept; you can try saving again: {}	模型位置尚未更新，修改已保留，可重試儲存：{}	モデルの場所はまだ更新されていません。変更は保持されています。もう一度保存できます: {}
 一切正常	一切正常	All good	一切正常	すべて正常
-需要修复	需要修复	Needs repair	需要修復	修復が必要
-模型准备	模型准备	Model setup	模型準備	モデル準備
 模型准备完成 / Model preparation finished.	模型准备完成	Model preparation finished.	模型準備完成	モデルの準備ができました
 模型准备已暂停	模型准备已暂停	Model preparation is paused	模型準備已暫停	モデルの準備が一時停止されています
 模型准备未完成 / Model preparation did not complete	模型准备未完成	Model preparation did not complete	模型準備未完成	モデルの準備が完了していません
@@ -1529,8 +1520,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 移动记录无法读取	移动记录无法读取	The move record cannot be read	移動記錄無法讀取	移動記録を読み取れません
 移除预览	移除预览	Remove preview	移除預覽	プレビューを削除
 稍后下载模型，再重新运行视频命令： / Download the model, then rerun your video command: course2md models download	稍后下载模型，再重新运行视频命令：	Download the model, then rerun your video command: course2md models download	稍後下載模型，再重新執行影片命令：	後でモデルをダウンロードしてから、動画コマンドを再実行してください:
-稍后准备	稍后准备	Prepare later	稍後準備	後で準備する
-稍后配置 AI	稍后配置 AI	Configure AI later	稍後設定 AI	後で AI を設定する
 稳定画面时长	稳定画面时长	Stable frame duration	穩定畫面時長	画面の安定時間
 端点不支持 response_format，降级重试成功	端点不支持 response_format，降级重试成功	The endpoint does not support response_format; retrying without it succeeded.	端點不支援 response_format，降級重試成功	エンドポイントが response_format をサポートしていないため、フォールバックして再試行し成功しました。
 笔记	笔记	Note	筆記	ノート
@@ -1673,7 +1662,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 记录已恢复，请重新扫描笔记库	记录已恢复，请重新扫描笔记库	The record has been restored. Please rescan the note library.	記錄已恢復，請重新掃描筆記庫	記録が復元されました。ノートライブラリをもう一度スキャンしてください
 设备与运行时	设备与运行时	Devices and runtime	裝置與執行環境	デバイスとランタイム
 设置	设置	Settings	設定	設定
-设置 AI 服务	设置 AI 服务	Set up AI service	設定 AI 服務	AI サービスを設定
 设置…	设置…	Settings…	設定…	設定…
 设置位置暂时不可访问	设置位置暂时不可访问	The settings location is temporarily inaccessible	設定位置暫時不可存取	設定の保存場所に一時的にアクセスできません
 设置变更暂时无法保存	设置变更暂时无法保存	Settings changes cannot be saved right now	設定變更暫時無法儲存	設定の変更を現在保存できません
@@ -1683,7 +1671,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 设置目录：{}	设置目录：{}	Settings directory: {}	設定資料夾：{}	設定フォルダー: {}
 设置目录：{}\n{}	设置目录：{}\n{}	Settings directory: {}\n{}	設定資料夾：{}\n{}	設定フォルダー：{}\n{}
 设置记录无法解析	设置记录无法解析	Settings record cannot be parsed	設定記錄無法解析	設定レコードを解析できません
-设置语音识别服务	设置语音识别服务	Set up speech recognition	設定語音辨識服務	音声認識を設定
 识别模型 {} 尚未下载，请先下载并准备模型，再继续 / The speech model {} is not downloaded yet; prepare it, then continue	识别模型 {} 尚未下载，请先下载并准备模型，再继续	The speech model {} is not downloaded yet; prepare it, then continue	辨識模型 {} 尚未下載，請先下載並準備模型，再繼續	音声認識モデル {} はまだダウンロードされていません。準備してから続けてください
 识别方式	识别方式	Recognition method	辨識方式	認識方式
 识别方式 / Speech backend	识别方式	Speech backend	辨識方式	認識方式
@@ -1717,8 +1704,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 语音转写方式 / Transcription	语音转写方式	Transcription	語音轉寫方式	文字起こし方式
 诶	诶	Hey	誒	ねえ
 请为浅色和深色外观分别选择对应的主题	请为浅色和深色外观分别选择对应的主题	Choose separate themes for the light and dark appearances	請為淺色和深色外觀分別選擇對應的主題	明るい外観と暗い外観に別々のテーマを選択してください
-请为这次笔记设置 AI 服务	请为这次笔记设置 AI 服务	Please set up AI service for this note	請為這次筆記設定 AI 服務	このノートに AI サービスを設定してください
-请为这次笔记设置语音识别服务	请为这次笔记设置语音识别服务	Set up speech recognition for this note	請為這次筆記設定語音辨識服務	このノートの音声認識を設定してください
 请使用 Bilibili App 扫码	请使用 Bilibili App 扫码	Scan the QR code with the Bilibili app	請使用 Bilibili App 掃描 QR 碼	Bilibili アプリで QR コードをスキャンしてください
 请先填写 API Key，再获取模型	请先填写 API Key，再获取模型	Enter the API key first, then fetch models	請先填寫 API 金鑰，再取得模型	先に API キーを入力してから、モデルを取得してください
 请先填写有效的服务地址和模型 ID，尚未发送请求	请先填写有效的服务地址和模型 ID，尚未发送请求	Enter a valid service URL and model ID first. The request has not been sent yet.	請先填寫有效的服務網址和模型 ID，尚未傳送請求	先に有効なサービスURLとモデル ID を入力してください。リクエストはまだ送信されていません
@@ -1729,7 +1714,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 请在浏览器中完成授权（约 3 分钟内）	请在浏览器中完成授权（约 3 分钟内）	Please complete the authorization in the browser (within about 3 minutes)	請在瀏覽器中完成授權（約 3 分鐘內）	ブラウザ上で認証を完了してください（3分程度以内）
 请在约 {} 秒内确认	请在约 {} 秒内确认	Please confirm within about {} seconds	請在約 {} 秒內確認	約 {} 秒以内に確認してください
 请在约 1 秒内确认	请在约 1 秒内确认	Please confirm within about 1 second	請在約 1 秒內確認	約 1 秒以内に確認してください
-请填写笔记名称	请填写笔记名称	Please fill in the note name	請填寫筆記名稱	ノート名を入力してください
 请安装支持显卡的 llama.cpp 和驱动，或改用 CPU 识别。 / Install a GPU-capable llama.cpp and driver, or use CPU transcription.	请安装支持显卡的 llama.cpp 和驱动，或改用 CPU 识别。	Install a GPU-capable llama.cpp and driver, or use CPU transcription.	請安裝支援顯示卡的 llama.cpp 和驅動程式，或改用 CPU 辨識。	GPU に対応した llama.cpp とドライバーをインストールするか、CPU での認識に切り替えてください。
 请检查路径；含空格的路径需加引号	请检查路径；含空格的路径需加引号	Check the path and quote paths containing spaces.	請檢查路徑；包含空格的路徑需加上引號	パスを確認してください。スペースを含むパスは引用符で囲む必要があります。
 请求已发送，结果未确认	请求已发送，结果未确认	Request sent, result not confirmed	請求已傳送，結果未確認	リクエストは送信されましたが、結果は未確認です
@@ -1776,7 +1760,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 账号状态响应不完整，请稍后重试 / Account status response is incomplete; retry later	账号状态响应不完整，请稍后重试	Account status response is incomplete; retry later	帳號狀態回應不完整，請稍後重試	アカウントステータスの応答が不完全です。後でもう一度試してください。
 资源位置超出此笔记 / Asset escapes note directory	资源位置超出此笔记	Asset escapes note directory	資源位置超出此筆記	リソースの場所がこのノートの外にあります
 跟随系统	跟随系统	Follow system	跟隨系統	システムに合わせる
-跳过登录	跳过登录	Skip login	跳過登入	ログインをスキップする
 转写为空，无法摘要 / Transcript is empty; cannot summarize	转写为空，无法摘要	Transcript is empty; cannot summarize	轉寫為空，無法摘要	文字起こしが空のため要約できません
 转换未完成	转换未完成	Conversion not completed	轉換未完成	変換が完了していません
 转换程序	转换程序	Conversion program	轉換程式	変換プログラム
@@ -1960,7 +1943,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 预计剩余 {}	预计剩余 {}	{} remaining	預計剩餘 {}	推定残り時間 {}
 额	额	Um	額	えーっと
 首次设置	首次设置	First-time setup	首次設定	初回設定
-首次识别时会自动下载所选模型	首次识别时会自动下载所选模型	The selected model is automatically downloaded upon first recognition	首次辨識時會自動下載所選模型	選択したモデルは最初の認識時に自動的にダウンロードされます
 首次识别时选择并下载 Apple 模型（约 1–2.3 GB）。 / Choose and download an Apple model at first transcription (about 1–2.3 GB).	首次识别时选择并下载 Apple 模型（约 1–2.3 GB）。	Choose and download an Apple model at first transcription (about 1–2.3 GB).	首次辨識時選擇並下載 Apple 模型（約 1–2.3 GB）。	初回認識時に Apple モデル (約 1 ～ 2.3 GB) を選択してダウンロードします。
 验证中	验证中	Verifying	驗證中	検証中
 验证完成，可以关闭此页面并回到 course2md。	验证完成，可以关闭此页面并回到 course2md。	Check complete. You can close this page and return to course2md.	驗證完成，可以關閉此頁面並回到 course2md。	確認が完了しました。このページを閉じて course2md に戻れます。
@@ -2217,10 +2199,7 @@ Apple 模型从镜像下载失败，改用 Hugging Face / Apple model download f
 提示：macOS 不允许读取所连接浏览器的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中允许你使用的终端应用（在 course2md 应用中则允许 course2md），退出并重新打开它后重试。可运行 open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" 打开该设置。 / Hint: macOS does not allow reading the connected browser's data. Allow the terminal app you use (in the course2md app, course2md itself) in System Settings › Privacy & Security › Full Disk Access, quit and reopen it, then retry. Run open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" to open that setting.	提示：macOS 不允许读取所连接浏览器的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中允许你使用的终端应用（在 course2md 应用中则允许 course2md），退出并重新打开它后重试。可运行 open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" 打开该设置。	Hint: macOS does not allow reading the connected browser's data. Allow the terminal app you use (in the course2md app, course2md itself) in System Settings › Privacy & Security › Full Disk Access, quit and reopen it, then retry. Run open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" to open that setting.	提示：macOS 不允許讀取所連接瀏覽器的資料。請在「系統設定 › 隱私權與安全性 › 完整磁碟取用權限」中允許你使用的終端機 App（在 course2md App 中則允許 course2md），結束並重新開啟它後重試。可執行 open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" 開啟該設定。	ヒント：macOS が接続したブラウザのデータの読み取りを許可していません。「システム設定 › プライバシーとセキュリティ › フルディスクアクセス」で使用中のターミナル App（course2md App では course2md）を許可し、終了して開き直してから再試行してください。この設定は open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" を実行すると開けます。
 允许 course2md	允许 course2md	Allow course2md	允許 course2md	course2md を許可
 允许 course2md 读取浏览器数据的步骤	允许 course2md 读取浏览器数据的步骤	Steps to let course2md read browser data	允許 course2md 讀取瀏覽器資料的步驟	course2md にブラウザのデータの読み取りを許可する手順
-在列表中打开 course2md 的开关。如果列表中没有 course2md，点按列表下方的“+”添加它，或把它从访达拖进列表。	在列表中打开 course2md 的开关。如果列表中没有 course2md，点按列表下方的“+”添加它，或把它从访达拖进列表。	Turn on the switch for course2md in the list. If course2md is not listed, click “+” below the list to add it, or drag it from Finder into the list.	在列表中開啟 course2md 的開關。如果列表中沒有 course2md，按一下列表下方的「+」加入它，或把它從 Finder 拖進列表。	リストで course2md のスイッチをオンにしてください。course2md がリストにない場合は、リストの下の「+」をクリックして追加するか、Finder からリストへドラッグしてください。
 在访达中显示 course2md	在访达中显示 course2md	Show course2md in Finder	在 Finder 中顯示 course2md	Finder で course2md を表示
-正在等待权限，打开开关后这里会自动更新	正在等待权限，打开开关后这里会自动更新	Waiting for access. This updates by itself once the switch is on	正在等待權限，開啟開關後這裡會自動更新	アクセス許可を待っています。スイッチをオンにすると自動的に更新されます
-点按“打开系统设置”，前往“隐私与安全性 › 完全磁盘访问权限”，在列表中打开 course2md。	点按“打开系统设置”，前往“隐私与安全性 › 完全磁盘访问权限”，在列表中打开 course2md。	Click “Open System Settings” to go to Privacy & Security › Full Disk Access, and turn on course2md in the list.	按一下「打開系統設定」，前往「隱私權與安全性 › 完整磁碟取用權限」，在列表中開啟 course2md。	「システム設定を開く」をクリックして「プライバシーとセキュリティ › フルディスクアクセス」に移動し、リストで course2md をオンにしてください。
 设置权限	设置权限	Set up access	設定權限	アクセスを設定
 重新打开 course2md	重新打开 course2md	Reopen course2md	重新開啟 course2md	course2md を開き直す
 需要完全磁盘访问权限	需要完全磁盘访问权限	Needs Full Disk Access	需要完整磁碟取用權限	フルディスクアクセスが必要
@@ -2234,9 +2213,6 @@ course2md 获得完全磁盘访问权限前，YouTube 视频无法使用这个�
 终端	终端	Terminal	終端機	ターミナル
 macOS 不允许 {} 读取 {} 的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开 {}，然后退出并重新打开它，再试一次。可运行 open "{}" 打开该设置。	macOS 不允许 {} 读取 {} 的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开 {}，然后退出并重新打开它，再试一次。可运行 open "{}" 打开该设置。	macOS does not allow {} to read {}’s data. Turn on {} in System Settings › Privacy & Security › Full Disk Access, quit and reopen it, then try again. Run open "{}" to open that setting.	macOS 不允許 {} 讀取 {} 的資料。請在「系統設定 › 隱私權與安全性 › 完整磁碟取用權限」中開啟 {}，然後結束並重新開啟它，再試一次。可執行 open "{}" 開啟該設定。	macOS が {} による {} のデータの読み取りを許可していません。「システム設定 › プライバシーとセキュリティ › フルディスクアクセス」で {} をオンにし、終了して開き直してから、もう一度お試しください。この設定は open "{}" を実行すると開けます。
 提示：macOS 不允许 {} 读取所连接浏览器的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开 {}（在 course2md 应用中则打开 course2md），退出并重新打开它后重试。可运行 open "{}" 打开该设置。	提示：macOS 不允许 {} 读取所连接浏览器的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开 {}（在 course2md 应用中则打开 course2md），退出并重新打开它后重试。可运行 open "{}" 打开该设置。	Hint: macOS does not allow {} to read the connected browser’s data. Turn on {} (in the course2md app, course2md itself) in System Settings › Privacy & Security › Full Disk Access, quit and reopen it, then retry. Run open "{}" to open that setting.	提示：macOS 不允許 {} 讀取所連接瀏覽器的資料。請在「系統設定 › 隱私權與安全性 › 完整磁碟取用權限」中開啟 {}（在 course2md App 中則開啟 course2md），結束並重新開啟它後重試。可執行 open "{}" 開啟該設定。	ヒント：macOS が {} による接続したブラウザのデータの読み取りを許可していません。「システム設定 › プライバシーとセキュリティ › フルディスクアクセス」で {}（course2md App では course2md）をオンにし、終了して開き直してから再試行してください。この設定は open "{}" を実行すると開けます。
-macOS 只允许有“完全磁盘访问权限”的应用读取 {} 的数据，course2md 需要这项权限才能读取其中的 YouTube 登录。	macOS 只允许有“完全磁盘访问权限”的应用读取 {} 的数据，course2md 需要这项权限才能读取其中的 YouTube 登录。	macOS lets only apps with Full Disk Access read {}’s data, so course2md needs it to read the YouTube sign-in there.	macOS 只允許具有「完整磁碟取用權限」的 App 讀取 {} 的資料，course2md 需要這項權限才能讀取其中的 YouTube 登入。	macOS では「フルディスクアクセス」を持つ App だけが {} のデータを読み取れるため、そこにある YouTube のログインを読み取るには course2md にこの権限が必要です。
-获得权限后，yt-dlp 会在这台 Mac 上读取所选浏览器的 Cookie，只在打开 YouTube 视频时用来访问 YouTube；course2md 不保存它们（连接时的检查会把它们短暂写入私有临时文件，检查结束即删除）。完全磁盘访问权限也让 course2md 能读取其他受保护的文件，你可以随时在系统设置中关闭。	获得权限后，yt-dlp 会在这台 Mac 上读取所选浏览器的 Cookie，只在打开 YouTube 视频时用来访问 YouTube；course2md 不保存它们（连接时的检查会把它们短暂写入私有临时文件，检查结束即删除）。完全磁盘访问权限也让 course2md 能读取其他受保护的文件，你可以随时在系统设置中关闭。	With access, yt-dlp reads the chosen browser’s cookies on this Mac and uses them only to reach YouTube when you open a YouTube video; course2md does not keep them (the check while connecting writes them briefly to a private temporary file, deleted when the check ends). Full Disk Access also lets course2md read other protected files; you can turn it off in System Settings at any time.	取得權限後，yt-dlp 會在這台 Mac 上讀取所選瀏覽器的 Cookie，只在開啟 YouTube 影片時用來存取 YouTube；course2md 不儲存它們（連接時的檢查會把它們短暫寫入私有暫存檔，檢查結束即刪除）。完整磁碟取用權限也讓 course2md 能讀取其他受保護的檔案，你可以隨時在系統設定中關閉。	許可すると、yt-dlp がこの Mac 上で選んだブラウザの Cookie を読み取り、YouTube 動画を開くときに YouTube へのアクセスにだけ使います。course2md はそれを保存しません（接続時の確認では非公開の一時ファイルに短時間書き込み、確認が終わると削除します）。フルディスクアクセスがあると course2md はほかの保護されたファイルも読み取れます。システム設定でいつでもオフにできます。
-仍然尝试连接	仍然尝试连接	Try connecting anyway	仍然嘗試連接	それでも接続を試す
 course2md 正从一份临时副本运行（macOS 对刚下载、尚未移动的应用会这样做），给它的权限在下次打开时不会保留。请先退出 course2md，在访达中把它从“下载”等位置拖到“应用程序”文件夹，再从“应用程序”打开，然后回到这里。	course2md 正从一份临时副本运行（macOS 对刚下载、尚未移动的应用会这样做），给它的权限在下次打开时不会保留。请先退出 course2md，在访达中把它从“下载”等位置拖到“应用程序”文件夹，再从“应用程序”打开，然后回到这里。	course2md is running from a temporary copy (macOS does this for an app just downloaded and not yet moved), and access given to it will not last to the next launch. Quit course2md, drag it in Finder from Downloads (or wherever it is) into the Applications folder, open it from Applications, then come back here.	course2md 正從一份暫時副本執行（macOS 對剛下載、尚未移動的 App 會這樣做），給它的權限在下次開啟時不會保留。請先結束 course2md，在 Finder 中把它從「下載項目」等位置拖到「應用程式」檔案夾，再從「應用程式」開啟，然後回到這裡。	course2md は一時的なコピーから実行されています（ダウンロード直後でまだ移動していない App に macOS がこうします）。このコピーに与えた権限は次回起動時に残りません。course2md を終了し、Finder で「ダウンロード」などから「アプリケーション」フォルダへドラッグしてから「アプリケーション」で開き、ここに戻ってください。
 course2md 正从磁盘映像运行，还没有安装。请先退出 course2md，在访达中把它拖到“应用程序”文件夹，再从“应用程序”打开，然后回到这里。	course2md 正从磁盘映像运行，还没有安装。请先退出 course2md，在访达中把它拖到“应用程序”文件夹，再从“应用程序”打开，然后回到这里。	course2md is running from a disk image and is not installed yet. Quit course2md, drag it in Finder into the Applications folder, open it from Applications, then come back here.	course2md 正從磁碟映像檔執行，還沒有安裝。請先結束 course2md，在 Finder 中把它拖到「應用程式」檔案夾，再從「應用程式」開啟，然後回到這裡。	course2md はディスクイメージから実行されていて、まだインストールされていません。course2md を終了し、Finder で「アプリケーション」フォルダへドラッグしてから「アプリケーション」で開き、ここに戻ってください。
 待确认请求所属的部分已经完成，无需重新发送	待确认请求所属的部分已经完成，无需重新发送	The part these unconfirmed requests belong to is already complete; nothing needs to be resent	待確認請求所屬的部分已經完成，無需重新傳送	未確認のリクエストが属する部分はすでに完了しているため、再送信の必要はありません
@@ -2317,5 +2293,33 @@ course2md 不在“应用程序”文件夹中。请先退出 course2md，在访
 保存在「{}」	保存在「{}」	Saved in “{}”	儲存在「{}」	「{}」に保存済み
 将保存到「{}」	将保存到「{}」	Will be saved to “{}”	將儲存到「{}」	「{}」に保存予定
 其他任务结束后才能下载模型	其他任务结束后才能下载模型	The model can be downloaded once the current job finishes	其他任務結束後才能下載模型	現在のジョブが終わるとモデルをダウンロードできます
-所选服务已不在设置中，这次笔记改用默认服务「{}」	所选服务已不在设置中，这次笔记改用默认服务「{}」	The chosen service is no longer in settings; this note uses the default service “{}”	所選服務已不在設定中，這次筆記改用預設服務「{}」	選択したサービスは設定にありません。このノートには既定のサービス「{}」を使います
 缺少读取视频所需的组件	缺少读取视频所需的组件	Components needed to read videos are missing	缺少讀取影片所需的元件	動画の読み込みに必要なコンポーネントがありません
+macOS 只让有完全磁盘访问权限的应用读取 {} 的数据。course2md 只用它读取 YouTube 登录，不保存 Cookie。这项权限也允许读取其他受保护的文件，可随时在系统设置中关闭。	macOS 只让有完全磁盘访问权限的应用读取 {} 的数据。course2md 只用它读取 YouTube 登录，不保存 Cookie。这项权限也允许读取其他受保护的文件，可随时在系统设置中关闭。	macOS lets only apps with Full Disk Access read {}'s data. course2md uses it only to read the YouTube sign-in and doesn't keep the cookies. The access also covers other protected files; you can turn it off in System Settings at any time.	macOS 只讓有完整磁碟取用權限的應用程式讀取 {} 的資料。course2md 只用它讀取 YouTube 登入，不儲存 Cookie。這項權限也允許讀取其他受保護的檔案，可隨時在系統設定中關閉。	macOS では、フルディスクアクセスを持つアプリだけが {} のデータを読み取れます。course2md はこれを YouTube のログインの読み取りにだけ使い、Cookie は保存しません。この権限は他の保護されたファイルにも及びます。システム設定でいつでもオフにできます。
+下载约 {}	下载约 {}	{} download	下載約 {}	ダウンロード約 {}
+在“隐私与安全性 › 完全磁盘访问权限”中打开 course2md。	在“隐私与安全性 › 完全磁盘访问权限”中打开 course2md。	Turn on course2md in Privacy & Security › Full Disk Access.	在「隱私權與安全性 › 完整磁碟取用權限」中開啟 course2md。	「プライバシーとセキュリティ › フルディスクアクセス」で course2md をオンにしてください。
+多语种	多语种	Multilingual	多語種	多言語
+尚未设置语音服务	尚未设置语音服务	No speech service yet	尚未設定語音服務	音声サービスが未設定です
+已用默认播放器打开原视频，请跳到 {}	已用默认播放器打开原视频，请跳到 {}	Opened the video in your default player; skip to {}	已用預設播放器開啟原影片，請跳到 {}	既定のプレーヤーで元の動画を開きました。{} に移動してください
+打开 course2md 的开关。列表中没有它时，点按“+”添加，或从访达拖进列表。	打开 course2md 的开关。列表中没有它时，点按“+”添加，或从访达拖进列表。	Turn on the switch for course2md. If it isn't in the list, click “+” to add it, or drag it in from Finder.	開啟 course2md 的開關。列表中沒有它時，按一下「+」加入，或從 Finder 拖進列表。	course2md のスイッチをオンにしてください。一覧にない場合は「+」をクリックして追加するか、Finder から一覧にドラッグしてください。
+没有字幕的视频需要语音服务才能转换	没有字幕的视频需要语音服务才能转换	Videos without subtitles need a speech service to convert	沒有字幕的影片需要語音服務才能轉換	字幕のない動画を変換するには音声サービスが必要です
+设置语音服务	设置语音服务	Set up a speech service	設定語音服務	音声サービスを設定
+识别模型已就绪	识别模型已就绪	Speech model ready	辨識模型已就緒	音声認識モデルの準備ができました
+这个浏览器中没有登录 YouTube。在浏览器中登录后再检查。	这个浏览器中没有登录 YouTube。在浏览器中登录后再检查。	This browser isn't signed in to YouTube. Sign in there, then check again.	這個瀏覽器中沒有登入 YouTube。在瀏覽器中登入後再檢查。	このブラウザーでは YouTube にログインしていません。ブラウザーでログインしてから、もう一度確認してください。
+缺少 {}	缺少 {}	{} is missing	缺少 {}	{} がありません
+需要语音识别时会先请你下载	需要语音识别时会先请你下载	You'll be asked to download it when speech recognition is needed	需要語音辨識時會先請你下載	音声認識が必要になったときにダウンロードを確認します
+这次笔记还没有可用的语音识别服务	这次笔记还没有可用的语音识别服务	No speech recognition service is available for this note	這次筆記還沒有可用的語音辨識服務	このノートで使える音声認識サービスがありません
+这次笔记还没有可用的 AI 服务	这次笔记还没有可用的 AI 服务	No AI service is available for this note	這次筆記還沒有可用的 AI 服務	このノートで使える AI サービスがありません
+笔记还没有名称	笔记还没有名称	The note has no name yet	筆記還沒有名稱	ノートにまだ名前がありません
+使用的模型	使用的模型	Model to use	使用的模型	使用するモデル
+稍后设置	稍后设置	Set up later	稍後設定	後で設定
+使用默认服务「{}」	使用默认服务「{}」	Use the default service “{}”	使用預設服務「{}」	既定のサービス「{}」を使う
+任务使用的服务已从设置中删除	任务使用的服务已从设置中删除	This task's service was deleted	任務使用的服務已從設定中刪除	このタスクで使っていたサービスは設定から削除されました
+识别模型「{}」还没有下载	识别模型「{}」还没有下载	Speech model “{}” isn’t downloaded	辨識模型「{}」還沒有下載	音声認識モデル「{}」はまだダウンロードされていません
+所选服务已从设置中删除	所选服务已从设置中删除	The chosen service was deleted from settings	所選服務已從設定中刪除	選んだサービスは設定から削除されました
+我已打开开关	我已打开开关	I've turned it on	我已開啟開關	オンにしました
+仍然连接	仍然连接	Try anyway	仍然連接	それでも接続
+正在等待权限	正在等待权限	Waiting for access	正在等待權限	アクセスを待っています
+识别准备	识别准备	Speech setup	辨識準備	音声認識の準備
+打开笔记	打开笔记	Open note	開啟筆記	ノートを開く
+{}不可用	{}不可用	{} unavailable	{}不可用	{}は使用できません
+course2md 会读取所选浏览器中的 YouTube 登录，只在打开 YouTube 视频时使用，不会保存（检查时的临时副本随即删除）。用账号下载可能让 YouTube 限制或封禁这个账号，请适度使用或用不常用的账号。	course2md 会读取所选浏览器中的 YouTube 登录，只在打开 YouTube 视频时使用，不会保存（检查时的临时副本随即删除）。用账号下载可能让 YouTube 限制或封禁这个账号，请适度使用或用不常用的账号。	course2md reads the YouTube sign-in from the browser you choose and uses it only to open YouTube videos, without keeping it (the check's temporary copy is deleted right away). Downloading with an account may lead YouTube to limit or ban it; use it sparingly, or use an account you rarely use.	course2md 會讀取所選瀏覽器中的 YouTube 登入，只在開啟 YouTube 影片時使用，不會儲存（檢查時的暫存副本隨即刪除）。用帳號下載可能讓 YouTube 限制或停用這個帳號，請適度使用或用不常用的帳號。	course2md は選んだブラウザーの YouTube ログインを読み取り、YouTube 動画を開くときだけ使い、保存しません（確認時の一時コピーはすぐに削除されます）。アカウントでダウンロードすると YouTube がそのアカウントを制限または停止することがあります。使いすぎないようにするか、あまり使わないアカウントを使ってください。

@@ -126,7 +126,7 @@ impl AccountsView {
                     (StatusKind::Success, course2md::tr!("已登录"))
                 }
                 _ if saved => (StatusKind::Neutral, course2md::tr!("已保存登录信息")),
-                _ => (StatusKind::Neutral, course2md::tr!("未登录")),
+                _ => (StatusKind::Neutral, course2md::tr!("未连接")),
             }
         };
         let policy = if saved {
@@ -242,11 +242,11 @@ impl AccountsView {
             }
             Some(AccountStatus::Connected(_)) => course2md::tr!("已登录").into(),
             Some(AccountStatus::Expired) => course2md::tr!("登录已失效").into(),
-            Some(AccountStatus::Disconnected) => course2md::tr!("未登录").into(),
+            Some(AccountStatus::Disconnected) => course2md::tr!("未连接").into(),
             None if self.account.has_saved_login => {
                 course2md::tr!("已保存登录信息，尚未验证").into()
             }
-            None => course2md::tr!("未登录").into(),
+            None => course2md::tr!("未连接").into(),
         }
     }
 

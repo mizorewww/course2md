@@ -56,6 +56,12 @@ fn cover(image: Option<PathBuf>, icon: SymbolIcon) -> Div {
         .children(image.map(crate::import_ui::cover_fill))
 }
 
+/// A task's video length as its cover shows it, when known.
+fn task_duration(task: &crate::workspace::TaskRecord) -> Option<String> {
+    let seconds = task.plan.source.duration;
+    (seconds.is_finite() && seconds > 0.).then(|| course2md::render::fmt_ts(seconds))
+}
+
 /// The cover of a note or task row.
 pub(crate) fn row_cover(image: Option<PathBuf>, icon: SymbolIcon) -> Div {
     cover(image, icon)
@@ -1431,7 +1437,8 @@ impl Desktop {
         let group_on = self.desktop_settings.library_group_folders;
         let can_group = self.library(cx).folder_filter.is_all() && self.library(cx).error.is_none();
         let desktop = cx.weak_entity();
-        let places = self.library_place(cx).0;
+        // The page title already names the place; the button names where it leads.
+        let places = course2md::tr!("文件夹");
         let view = ConnectedButtonGroup::new("library-view", course2md::tr!("显示"))
             .tone(ButtonTone::Neutral)
             .options([
@@ -1440,6 +1447,9 @@ impl Desktop {
             ])
             .icon("cards", symbols::grid_view())
             .icon("list", symbols::list())
+            // The views are icons, named for assistive technology, so the toolbar's
+            // only colour is the one selected view.
+            .labels(gpui_kit_material::components::GroupLabels::Never)
             .selected(if self.desktop_settings.library_cards {
                 "cards"
             } else {
@@ -1492,7 +1502,8 @@ impl Desktop {
                     .when(!sidebar, |row| {
                         row.child(
                             material_button("library-places", ButtonVariant::Tonal)
-                                .icon(symbols::folder())
+                                .tone(ButtonTone::Neutral)
+                                .icon(symbols::folder_open())
                                 .child(places)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.library_ui.places_open = true;
@@ -1500,49 +1511,51 @@ impl Desktop {
                                 })),
                         )
                     })
-                    .child(self.sort_menu(!sidebar, cx))
+                    // The sort keeps its label at every width: the order in force is
+                    // worth reading, not only finding under a tooltip.
+                    .child(self.sort_menu(cx))
                     .child(
-                        material_button(
-                            "library-group-folders",
-                            if group_on && can_group {
-                                ButtonVariant::Tonal
+                        // A toggle among the view controls: neutral like them, a check
+                        // and the secondary container while on.
+                        material_button("library-group-folders", ButtonVariant::Tonal)
+                            .tone(if group_on && can_group {
+                                ButtonTone::Standard
                             } else {
-                                ButtonVariant::Outlined
-                            },
-                        )
-                        // On, it is tonal in the secondary container; off, an outlined
-                        // action with a primary label (L6).
-                        .tone(if group_on && can_group {
-                            ButtonTone::Standard
-                        } else {
-                            ButtonTone::Accent
-                        })
-                        .icon(if group_on && can_group {
-                            symbols::check()
-                        } else {
-                            symbols::folder()
-                        })
-                        .child(course2md::tr!("按文件夹分组"))
-                        .disabled(!can_group)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.desktop_settings.library_group_folders = !group_on;
-                            this.save_library_presentation(cx);
-                        })),
+                                ButtonTone::Neutral
+                            })
+                            // A tree, not a folder: unlike 文件夹 beside it, it arranges
+                            // the notes rather than going to a place.
+                            .icon(if group_on && can_group {
+                                symbols::check()
+                            } else {
+                                symbols::account_tree()
+                            })
+                            .child(course2md::tr!("按文件夹分组"))
+                            .disabled(!can_group)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.desktop_settings.library_group_folders = !group_on;
+                                this.save_library_presentation(cx);
+                            })),
                     )
-                    .child(view)
+                    // How the notes are shown and reading them again: one group of
+                    // icon actions at the toolbar's end.
                     .child(
-                        MaterialTooltip::plain(
-                            "library-rescan-tip",
-                            course2md::tr!("重新扫描笔记库"),
-                        )
-                        .trigger(
-                            IconButton::new(
-                                "library-rescan",
-                                symbols::refresh(),
+                        h_flex().gap(rem(4.)).items_center().child(view).child(
+                            MaterialTooltip::plain(
+                                "library-rescan-tip",
                                 course2md::tr!("重新扫描笔记库"),
                             )
-                            .disabled(self.library(cx).loading)
-                            .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx))),
+                            .trigger(
+                                IconButton::new(
+                                    "library-rescan",
+                                    symbols::refresh(),
+                                    course2md::tr!("重新扫描笔记库"),
+                                )
+                                .variant(IconButtonVariant::Tonal)
+                                .tone(ButtonTone::Neutral)
+                                .disabled(self.library(cx).loading)
+                                .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx))),
+                            ),
                         ),
                     ),
             )
@@ -1552,7 +1565,6 @@ impl Desktop {
     /// where it came from. Its folder is named only where the place does not already
     /// say it; source identity helps recognize a note.
     fn note_line(&self, course: &Course, card: bool, cx: &App) -> String {
-        use chrono::Datelike;
         let ms = course
             .manifest
             .as_ref()
@@ -1609,15 +1621,15 @@ impl Desktop {
                 .map(|instant| instant.with_timezone(&chrono::Local).date_naive())
                 .or(date)
         };
+        // One date format across the app, the published date included.
         match published {
-            Some(published) => parts.push(course2md::tr!("发布于 {}", published)),
-            None => parts.extend(date.map(|date| {
-                if home {
-                    crate::i18n::month_day(date.month(), date.day())
-                } else {
-                    date.format("%Y-%m-%d").to_string()
-                }
-            })),
+            Some(published) => parts.push(course2md::tr!(
+                "发布于 {}",
+                chrono::NaiveDate::parse_from_str(&published, "%Y-%m-%d")
+                    .map(crate::i18n::calendar_date)
+                    .unwrap_or(published)
+            )),
+            None => parts.extend(date.map(crate::i18n::calendar_date)),
         }
         parts.join(" · ")
     }
@@ -1855,7 +1867,9 @@ impl Desktop {
             .library(cx)
             .note_source(course)
             .and_then(|source| source.duration)
-            .filter(|_| home)
+            // A note whose task is gone keeps the length its own record says; every
+            // note row's cover carries it, in the library as on home.
+            .or(course.duration)
             .map(course2md::render::fmt_ts);
         let row =
             scale
@@ -1976,14 +1990,30 @@ impl Desktop {
                 .child(
                     scale
                         .row()
-                        .child(row_cover(
-                            task.plan.source.cover.clone().filter(|_| !queued),
-                            if queued {
-                                symbols::schedule()
-                            } else {
-                                symbols::movie()
-                            },
-                        ))
+                        .child(
+                            row_cover(
+                                task.plan.source.cover.clone().filter(|_| !queued),
+                                if queued {
+                                    symbols::schedule()
+                                } else {
+                                    symbols::movie()
+                                },
+                            )
+                            .children(task_duration(task).map(
+                                |duration| {
+                                    media_label(
+                                        SharedString::from(format!(
+                                            "workbench-task-duration-{}",
+                                            task.id
+                                        )),
+                                        duration,
+                                    )
+                                    .absolute()
+                                    .right(rem(4.))
+                                    .bottom(rem(4.))
+                                },
+                            )),
+                        )
                         .child(
                             v_flex()
                                 .flex_1()
@@ -2036,13 +2066,11 @@ impl Desktop {
                     .child(row),
             );
         }
+        // The design names this section 正在处理 whatever its tasks wait for; each
+        // card's own chip says which one needs the person.
         Some(home_section(
             "workbench-active-title",
-            if waiting > 0 {
-                course2md::tr!("任务")
-            } else {
-                course2md::tr!("正在处理")
-            },
+            course2md::tr!("正在处理"),
             None,
             list,
         ))
@@ -2222,6 +2250,7 @@ impl Desktop {
                 })
                 .cloned()
         };
+        let recoverable_stop = crate::task_ui::recoverable(lead.as_ref());
         let next =
             if lead.is_none() && !requires_repair && !uncertain && !partial_components.is_empty() {
                 let labels = partial_components
@@ -2261,6 +2290,7 @@ impl Desktop {
         let summary = (summary != task.state.label()
             && self.workbench_notice.as_deref() != Some(summary.as_str()))
         .then_some(summary);
+        let has_notice = summary.is_some();
         let cover = task.plan.source.cover.clone().or_else(|| {
             self.library(cx)
                 .cover_by_source
@@ -2275,14 +2305,26 @@ impl Desktop {
                 .py(rem(16.))
                 .gap(rem(16.))
                 .items_start()
-                .child(row_cover(
-                    cover,
-                    if task.state == TaskState::Paused {
-                        symbols::pause()
-                    } else {
-                        symbols::movie()
-                    },
-                ))
+                .child(
+                    row_cover(
+                        cover,
+                        if task.state == TaskState::Paused {
+                            symbols::pause()
+                        } else {
+                            symbols::movie()
+                        },
+                    )
+                    // The cover carries the video's length, as a note's does.
+                    .children(task_duration(&task).map(|duration| {
+                        media_label(
+                            SharedString::from(format!("attention-duration-{id}")),
+                            duration,
+                        )
+                        .absolute()
+                        .right(rem(4.))
+                        .bottom(rem(4.))
+                    })),
+                )
                 .child(
                     v_flex()
                         .flex_1()
@@ -2307,17 +2349,21 @@ impl Desktop {
                                         .flex_basis(rem(240.)),
                                 )
                                 // The same colour as on Tasks: a failure is red, a pause amber.
-                                .child(
-                                    status_chip(crate::task_ui::task_status_kind(task.state))
-                                        .child(task.state.label()),
-                                ),
+                                // A notice below that says why already says it waits.
+                                .when(!has_notice, |row| {
+                                    row.child(
+                                        status_chip(crate::task_ui::task_status_kind(task.state))
+                                            .child(task.state.label()),
+                                    )
+                                }),
                         )
                         // Why it waits, with the way on inside the same notice as on
                         // Tasks; the action never stands above its cause.
                         .child(match summary {
                             Some(summary) => notice_banner(
                                 SharedString::from(format!("recent-summary-{id}")),
-                                if task.state == TaskState::NeedsAttention {
+                                // As on Tasks: an obstacle with its repair is amber.
+                                if task.state == TaskState::NeedsAttention && !recoverable_stop {
                                     NoticeKind::Danger
                                 } else {
                                     NoticeKind::Warning
@@ -2436,8 +2482,6 @@ impl Desktop {
 struct SortMenu {
     sort: Sort,
     enabled: bool,
-    /// An icon button that its tooltip names, where the toolbar is short of room.
-    compact: bool,
     desktop: WeakEntity<Desktop>,
 }
 
@@ -2476,7 +2520,6 @@ impl RenderOnce for SortMenu {
         let Self {
             sort,
             enabled,
-            compact,
             desktop,
         } = self;
         let pick = move |sort: Sort| {
@@ -2536,26 +2579,14 @@ impl RenderOnce for SortMenu {
             (true, true) => symbols::arrow_downward(),
             (true, false) => symbols::arrow_upward(),
         };
-        let trigger = if compact {
-            MaterialTooltip::plain("library-sort-tip", spoken.clone())
-                .trigger(
-                    IconButton::new("library-sort-button", icon, spoken)
-                        .variant(IconButtonVariant::Tonal)
-                        .tone(ButtonTone::Neutral)
-                        .disabled(!enabled)
-                        .on_click(key_toggle),
-                )
-                .into_any_element()
-        } else {
-            material_button("library-sort-button", ButtonVariant::Tonal)
-                .tone(ButtonTone::Neutral)
-                .icon(icon)
-                .child(label)
-                .accessibility_label(spoken)
-                .disabled(!enabled)
-                .on_click(key_toggle)
-                .into_any_element()
-        };
+        let trigger = material_button("library-sort-button", ButtonVariant::Tonal)
+            .tone(ButtonTone::Neutral)
+            .icon(icon)
+            .child(label)
+            .accessibility_label(spoken)
+            .disabled(!enabled)
+            .on_click(key_toggle)
+            .into_any_element();
         ui::menu(
             id,
             trigger,
@@ -2757,12 +2788,11 @@ impl Desktop {
     }
 
     /// The sort menu of the place in view.
-    fn sort_menu(&self, compact: bool, cx: &mut Context<Self>) -> SortMenu {
+    fn sort_menu(&self, cx: &mut Context<Self>) -> SortMenu {
         let (_, _, sort, read) = self.place_sort(cx);
         SortMenu {
             sort,
             enabled: read && self.library(cx).error.is_none(),
-            compact,
             desktop: cx.weak_entity(),
         }
     }
@@ -3531,6 +3561,7 @@ mod tests {
             thumbnail: None,
             manifest: None,
             warning: None,
+            duration: None,
         }
     }
 

@@ -49,8 +49,8 @@ sys-locale = "0.3"
 # the features they use.
 gpui-kit = { git = "https://github.com/longbridge/gpui-kit", rev = "8da4e005258ac0aac9a6a332cce746eeaafa08a8", features = ["gpui-fast"] }
 gpui-base = { git = "https://github.com/longbridge/gpui-kit", rev = "8da4e005258ac0aac9a6a332cce746eeaafa08a8" }
-gpui-kit-material = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "579f16374daac4a27b02de45de8d91e636bda860", default-features = false, features = ["serde", "gpui-fast"] }
-gpui-kit-material-color = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "579f16374daac4a27b02de45de8d91e636bda860", features = ["serde"] }
+gpui-kit-material = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "e9dc6eb8bb543080c91137c6286f8a15fa54b39e", default-features = false, features = ["serde", "gpui-fast"] }
+gpui-kit-material-color = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "e9dc6eb8bb543080c91137c6286f8a15fa54b39e", features = ["serde"] }
 # The release gpui-kit-material depends on.
 gpui-material-symbols = { version = "0.1", default-features = false }
 smol = "2"
@@ -85,15 +85,15 @@ strip = true
 [patch.crates-io]
 # gpui-kit-material's consumer patch set (its README's quick start), at the dependency's
 # revision. gpui-material-symbols depends on crates.io `gpui-kit`: the same Kit as the Git one.
-gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "579f16374daac4a27b02de45de8d91e636bda860" }
+gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "e9dc6eb8bb543080c91137c6286f8a15fa54b39e" }
 # Base is Kit main's, unmodified; crates.io 0.9.0 lacks what Material calls.
 gpui-base = { git = "https://github.com/longbridge/gpui-kit", rev = "8da4e005258ac0aac9a6a332cce746eeaafa08a8" }
-gpui-pre = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "579f16374daac4a27b02de45de8d91e636bda860" }
-gpui-pre-apple = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "579f16374daac4a27b02de45de8d91e636bda860" }
-gpui-pre-web = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "579f16374daac4a27b02de45de8d91e636bda860" }
-gpui-fast = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "579f16374daac4a27b02de45de8d91e636bda860" }
-gpui-fast-apple = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "579f16374daac4a27b02de45de8d91e636bda860" }
-gpui-fast-web = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "579f16374daac4a27b02de45de8d91e636bda860" }
+gpui-pre = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "e9dc6eb8bb543080c91137c6286f8a15fa54b39e" }
+gpui-pre-apple = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "e9dc6eb8bb543080c91137c6286f8a15fa54b39e" }
+gpui-pre-web = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "e9dc6eb8bb543080c91137c6286f8a15fa54b39e" }
+gpui-fast = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "e9dc6eb8bb543080c91137c6286f8a15fa54b39e" }
+gpui-fast-apple = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "e9dc6eb8bb543080c91137c6286f8a15fa54b39e" }
+gpui-fast-web = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "e9dc6eb8bb543080c91137c6286f8a15fa54b39e" }
 
 [patch."https://github.com/longbridge/gpui-kit"]
-gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "579f16374daac4a27b02de45de8d91e636bda860" }
+gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "e9dc6eb8bb543080c91137c6286f8a15fa54b39e" }

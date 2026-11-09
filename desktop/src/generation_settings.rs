@@ -38,12 +38,20 @@ impl Desktop {
         )
     }
 
-    fn subtitle_fields(&self, cx: &mut Context<Self>) -> Vec<ui::Field> {
+    fn subtitle_fields(&self, window: &Window, cx: &mut Context<Self>) -> Vec<ui::Field> {
         let value = self.preferences.generation();
         let source = value.options.transcript_source;
+        let labels: Vec<&str> = text_source_choices()
+            .iter()
+            .map(|(_, label)| *label)
+            .collect();
+        let fits = super::segmented_fits(&labels, true, window);
         let group = ConnectedButtonGroup::new("default-text-source", course2md::tr!("文字来源"))
             .tone(ButtonTone::Neutral)
             .segmented()
+            // As wide as its options while they fit the row; else they stack whole.
+            .when(fits, |group| group.fit_content())
+            .vertical(!fits)
             .button_size(ButtonSize::Small)
             .options(text_source_choices().map(|(mode, label)| (text_source_id(mode), label)))
             .icon("auto", symbols::auto_fix_high())
@@ -93,8 +101,17 @@ impl Desktop {
             }),
         );
         let mut fields = vec![
-            ui::Field::below("default-text-source-row", course2md::tr!("文字来源"), group)
-                .hint(source_hint),
+            // The group, then what its choice means, as on home's options.
+            ui::Field::below(
+                "default-text-source-row",
+                course2md::tr!("文字来源"),
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(rem(8.))
+                    .child(div().when(fits, |row| row.flex()).child(group))
+                    .child(supporting_info("default-text-source-hint", source_hint)),
+            ),
             ui::Field::menu(
                 "default-subtitle-language",
                 course2md::tr!("字幕语言"),
@@ -170,26 +187,34 @@ impl Desktop {
         let preferences = self.preferences.generation();
         let selected_provider = preferences.options.provider;
         let online = selected_provider == Some(AsrProvider::Api);
+        let methods = [course2md::tr!("本机识别"), course2md::tr!("在线语音服务")];
+        let fits = super::segmented_fits(&methods, true, window);
         let group = ConnectedButtonGroup::new("default-asr-device", course2md::tr!("识别方式"))
             .tone(ButtonTone::Neutral)
             .segmented()
+            .when(fits, |group| group.fit_content())
+            .vertical(!fits)
             .button_size(ButtonSize::Small)
-            .options([
-                ("local", course2md::tr!("本机识别")),
-                ("online", course2md::tr!("在线语音服务")),
-            ])
+            .options([("local", methods[0]), ("online", methods[1])])
+            // The same icons the choice has in first use.
+            .icon("local", symbols::computer())
+            .icon("online", symbols::cloud())
             .selected(if online { "online" } else { "local" })
             .on_change(cx.listener(|this, selected: &SharedString, _, cx| {
                 let mut next = this.generation_edit_base();
                 next.select_recognition_location(selected.as_ref() == "online");
                 this.commit_generation(next, cx);
             }));
-        let method = ui::Field::below("default-asr-method", course2md::tr!("识别方式"), group)
-            .hint(if online {
-                course2md::tr!("音频会发送到所选服务")
-            } else {
-                ""
-            });
+        let method = ui::Field::below(
+            "default-asr-method",
+            course2md::tr!("识别方式"),
+            div().when(fits, |row| row.flex()).child(group),
+        )
+        .hint(if online {
+            course2md::tr!("音频会发送到所选服务")
+        } else {
+            ""
+        });
         if online {
             return vec![method, self.service_field(ServicePurpose::Speech, cx)];
         }
@@ -216,10 +241,19 @@ impl Desktop {
             Some(course2md::models::status::CacheState::Loaded)
                 | Some(course2md::models::status::CacheState::Cached)
         );
-        let model_value: SharedString = if state_label.is_empty() {
-            model_name
+        // The value is the model; its state is the row's supporting text, so the
+        // field shows the name whole.
+        let model_value = model_name;
+        // A model not on disk says, with its state, what happens when it is needed.
+        let missing = matches!(
+            state,
+            Some(course2md::models::status::CacheState::Missing)
+                | Some(course2md::models::status::CacheState::Partial)
+        );
+        let model_hint: SharedString = if missing && engine_issue.is_none() && settled {
+            format!("{state_label} · {conclusion}").into()
         } else {
-            format!("{model_name} · {state_label}").into()
+            state_label.into()
         };
         let current_model = models
             .iter()
@@ -234,20 +268,34 @@ impl Desktop {
                 model_value,
                 MaterialMenu::new("local-model-items")
                     .width(MENU_WIDTH)
-                    .items(ui::choice_items(
-                        models.iter().map(|model| (model.id, model.label)),
-                        &current_model,
-                        cx.listener(|this, id: &&'static str, window, cx| {
-                            this.select_local_model(id, window, cx)
+                    .items(
+                        ui::choice_items(
+                            models.iter().map(|model| (model.id, model.label)),
+                            &current_model,
+                            cx.listener(|this, id: &&'static str, window, cx| {
+                                this.select_local_model(id, window, cx)
+                            }),
+                        )
+                        .zip(models.iter())
+                        // Each model says what it is good for and what it downloads.
+                        .map(|(item, model)| {
+                            let tradeoff = desktop_prefs::setup::model_tradeoff(provider, model.id);
+                            if tradeoff.is_empty() {
+                                item
+                            } else {
+                                item.supporting_text(tradeoff)
+                            }
                         }),
-                    )),
+                    ),
             )
+            .hint(model_hint.clone())
         } else {
             ui::Field::inline(
                 "default-local-model",
                 course2md::tr!("识别模型"),
                 TileScale::Regular.support("default-local-model-name", model_value),
             )
+            .hint(model_hint)
         });
         // An engine that cannot run here says why with its repair; otherwise an unsettled
         // check says what is still open. A finished check on a ready model says nothing.
@@ -256,7 +304,7 @@ impl Desktop {
                 "generation-engine-obstacle",
                 self.engine_obstacle("generation-engine-obstacle-detail", issue, true, cx),
             ));
-        } else if !(settled && ready) {
+        } else if !(settled && (ready || missing)) {
             let status = if settled {
                 ui::AsyncStatus::Success(conclusion.into())
             } else {
@@ -300,16 +348,6 @@ impl Desktop {
                 ),
             ));
         }
-        fields.push(ui::Field::disclosure(
-            "toggle-model-details",
-            course2md::tr!("管理模型与下载"),
-            self.settings_ui.model_details_open,
-            cx.listener(|this, _, _, cx| {
-                this.settings_ui.model_details_open = !this.settings_ui.model_details_open;
-                cx.notify();
-            }),
-            div().child(self.model_management_panel(window, cx)),
-        ));
         let engines: Vec<_> = std::iter::once(None)
             .chain(
                 LOCAL_ENGINES
@@ -338,6 +376,17 @@ impl Desktop {
             MaterialMenu::new("asr-hardware-items")
                 .width(MENU_WIDTH)
                 .items(engine_items),
+        ));
+        // The model and its engine read together; managing downloads closes the group.
+        fields.push(ui::Field::disclosure(
+            "toggle-model-details",
+            course2md::tr!("管理模型与下载"),
+            self.settings_ui.model_details_open,
+            cx.listener(|this, _, _, cx| {
+                this.settings_ui.model_details_open = !this.settings_ui.model_details_open;
+                cx.notify();
+            }),
+            div().child(self.model_management_panel(window, cx)),
         ));
         fields
     }
@@ -575,7 +624,7 @@ impl Desktop {
             .child(self.settings_fields(
                 "language-settings",
                 course2md::tr!("字幕与识别"),
-                self.subtitle_fields(cx),
+                self.subtitle_fields(window, cx),
             ))
             .child(self.settings_fields(
                 "asr-default-settings",

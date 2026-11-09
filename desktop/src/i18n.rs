@@ -13,11 +13,27 @@ pub(crate) fn apply(language: InterfaceLanguage) {
     gpui_kit::component::set_locale(component_locale(lang));
 }
 
-/// Short calendar date in the interface language: "Sep 27" or "9月27日".
-pub(crate) fn month_day(month: u32, day: u32) -> String {
-    month_day_for(i18n::lang(), month, day)
+/// The app's one calendar date: "Sep 27" / "9月27日" this year, with the year
+/// otherwise ("Sep 27, 2024" / "2024年9月27日").
+pub(crate) fn calendar_date(date: chrono::NaiveDate) -> String {
+    use chrono::Datelike;
+    let this_year = chrono::Local::now().year();
+    calendar_date_for(i18n::lang(), date, this_year)
 }
 
+fn calendar_date_for(lang: Lang, date: chrono::NaiveDate, this_year: i32) -> String {
+    use chrono::Datelike;
+    let short = month_day_for(lang, date.month(), date.day());
+    if date.year() == this_year {
+        short
+    } else if lang == Lang::En {
+        format!("{short}, {}", date.year())
+    } else {
+        format!("{}年{short}", date.year())
+    }
+}
+
+/// Short calendar date in a language: "Sep 27" or "9月27日".
 fn month_day_for(lang: Lang, month: u32, day: u32) -> String {
     match lang {
         Lang::En => {
@@ -73,6 +89,10 @@ mod tests {
     #[test]
     fn short_dates_follow_the_interface_language() {
         assert_eq!(month_day_for(Lang::En, 9, 27), "Sep 27");
+        let date = chrono::NaiveDate::from_ymd_opt(2024, 9, 27).unwrap();
+        assert_eq!(calendar_date_for(Lang::En, date, 2024), "Sep 27");
+        assert_eq!(calendar_date_for(Lang::En, date, 2026), "Sep 27, 2024");
+        assert_eq!(calendar_date_for(Lang::ZhHans, date, 2026), "2024年9月27日");
         assert_eq!(month_day_for(Lang::ZhHans, 9, 27), "9月27日");
         assert_eq!(month_day_for(Lang::ZhHant, 9, 27), "9月27日");
         assert_eq!(month_day_for(Lang::Ja, 9, 27), "9月27日");
