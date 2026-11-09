@@ -1020,6 +1020,12 @@ impl Desktop {
             .iter()
             .any(|candidate| candidate.identity.is_some());
         let selected_count = self.import.selected_candidates.len();
+        // Every selected video would use the draft's services: a deleted one is asked
+        // about here, before any of them is queued.
+        let dropped = batch.then(|| self.dropped_draft_service(cx)).flatten();
+        let dropped_notice = dropped
+            .as_ref()
+            .map(|(purpose, replacement)| self.dropped_service_notice(*purpose, replacement, cx));
         let all_selected = selectable > 0 && selectable_selected == selectable;
         let rows = self
             .import
@@ -1046,6 +1052,7 @@ impl Desktop {
                     .child(section_title("import-collection-title", title.to_owned())),
             )
             .child(list)
+            .children(dropped_notice.filter(|_| any_batchable))
             .when(batch && any_batchable, |view| {
                 view.child(
                     h_flex()
@@ -1098,8 +1105,13 @@ impl Desktop {
                                 } else {
                                     course2md::tr!("整理选中的视频").to_owned()
                                 })
-                                // The component check decides whether these can run at all.
-                                .disabled(selected_count == 0 || self.environment.is_none())
+                                // The component check decides whether these can run at all,
+                                // and a deleted service waits for the person's choice.
+                                .disabled(
+                                    selected_count == 0
+                                        || self.environment.is_none()
+                                        || dropped.is_some(),
+                                )
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.enqueue_selected_candidates(cx)
                                 })),
@@ -2483,6 +2495,53 @@ impl Desktop {
         self.library(cx).preferred_note(&source.identity, preferred)
     }
 
+    /// A deleted service the draft chose, and its two ways on: use the default it
+    /// names, or choose another. The card and the candidate list show the same one.
+    fn dropped_service_notice(
+        &self,
+        purpose: ServicePurpose,
+        replacement: &crate::preferences::ServiceVersion,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let name = replacement.config.name.clone();
+        let id = replacement.id.clone();
+        notice_banner(
+            "draft-service-dropped",
+            NoticeKind::Warning,
+            course2md::tr!("所选服务已从设置中删除"),
+        )
+        .rounded(RADIUS_LARGE)
+        // Two choices: on their own line under the message, so neither squeezes it
+        // at any width.
+        .child(
+            h_flex()
+                .w_full()
+                .justify_end()
+                .gap(rem(8.))
+                .flex_wrap()
+                .child(
+                    material_button("use-default-service", ButtonVariant::Tonal)
+                        .icon(symbols::check())
+                        .child(course2md::tr!("使用默认服务「{}」", name))
+                        // Binds the version it names, not whatever the default is by
+                        // the time the task runs.
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.bind_service(purpose, Some(id.clone()), true, cx);
+                        })),
+                )
+                .child(
+                    material_button("choose-task-service", ButtonVariant::Text)
+                        .icon(symbols::tune())
+                        .child(course2md::tr!("选择服务"))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            // The choice is in the processing options.
+                            this.desktop_settings.home_options = true;
+                            cx.notify();
+                        })),
+                ),
+        )
+    }
+
     /// A service the current draft chose, among those its options use, that is no
     /// longer saved, with the version that would take its place (the AI service
     /// first). Nothing while the services cannot be read: then nothing is known gone.
@@ -3185,45 +3244,7 @@ impl Desktop {
         if notice.is_none()
             && let Some((purpose, replacement)) = dropped_service
         {
-            let name = replacement.config.name.clone();
-            let id = replacement.id.clone();
-            notice = Some(
-                notice_banner(
-                    "draft-service-dropped",
-                    NoticeKind::Warning,
-                    course2md::tr!("所选服务已从设置中删除"),
-                )
-                .rounded(RADIUS_LARGE)
-                // Two choices: on their own line under the message, so neither
-                // squeezes it at any width.
-                .child(
-                    h_flex()
-                        .w_full()
-                        .justify_end()
-                        .gap(rem(8.))
-                        .flex_wrap()
-                        .child(
-                            material_button("use-default-service", ButtonVariant::Tonal)
-                                .icon(symbols::check())
-                                .child(course2md::tr!("使用默认服务「{}」", name))
-                                // Binds the version it names, not whatever the
-                                // default is by the time the task runs.
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.bind_service(purpose, Some(id.clone()), true, cx);
-                                })),
-                        )
-                        .child(
-                            material_button("choose-task-service", ButtonVariant::Text)
-                                .icon(symbols::tune())
-                                .child(course2md::tr!("选择服务"))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    // The choice is in the processing options.
-                                    this.desktop_settings.home_options = true;
-                                    cx.notify();
-                                })),
-                        ),
-                ),
-            );
+            notice = Some(self.dropped_service_notice(purpose, &replacement, cx));
         }
         // Without an obstacle to explain them, repairs wait with the card's actions.
         actions.splice(0..0, repairs);

@@ -322,6 +322,12 @@ impl Desktop {
     /// Queue the selected candidates at once, reusing per-candidate deduplication (an identical task in
     /// progress is not created again), in one transaction; then select the first task and start the queue.
     pub fn enqueue_selected_candidates(&mut self, cx: &mut Context<Self>) {
+        // The batch would send every video to the default in a deleted service's
+        // place: the person chooses first, in the list's notice.
+        if self.dropped_draft_service(cx).is_some() {
+            cx.notify();
+            return;
+        }
         let selected: Vec<(usize, source::SourceCandidate)> = self
             .import
             .source_candidates

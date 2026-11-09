@@ -2,7 +2,7 @@
 //! so native layout can be reviewed without screen-recording permission.
 //!
 //! `COURSE2MD_CAPTURE` lists `page=path.png` pairs separated by `;`. Pages are
-//! `onboarding[:<ai|account|model|cloud>]`, `home[:<state>]`, `size:<w>x<h>` (resizes the window, in points), `library`, `tasks`, `settings:<category>` (appearance, generation,
+//! `onboarding[:<ai|account|model|cloud>]`, `home[:<state>]` (states `options-hidden`, `options-shown`, `submit`, `next`, `candidates`), `size:<w>x<h>` (resizes the window, in points), `library`, `tasks`, `settings:<category>` (appearance, generation,
 //! services, storage, application) and `reader[:<title text>][~shots][~shot:<n>][~end]`
 //! (the newest note, or the first whose title contains the text; it opens at
 //! the top, ignoring saved reading positions; `~shots` opens the screenshot
@@ -590,6 +590,27 @@ impl Desktop {
                 "options-shown" => self.desktop_settings.home_options = true,
                 "submit" => self.start_conversion(window, cx),
                 "next" => self.set_up_next_video(window, cx),
+                // An online collection's list, with fixture videos all selected; no
+                // request is made.
+                "candidates" => {
+                    self.import.source_collection_title = Some("Fixture playlist".into());
+                    self.import.source_candidates = (1..=3)
+                        .map(|n| course2md::fetch::SourceCandidate {
+                            input: format!("https://www.bilibili.com/video/BV1fixture{n}"),
+                            title: format!("Fixture lecture {n}"),
+                            identity: Some(format!("bilibili:BV1fixture{n}")),
+                            duration: Some(600.),
+                            thumbnail: None,
+                        })
+                        .collect();
+                    self.import.selected_candidates = self
+                        .import
+                        .source_candidates
+                        .iter()
+                        .map(|candidate| candidate.input.clone())
+                        .collect();
+                    cx.notify();
+                }
                 _ => {}
             }
         }
