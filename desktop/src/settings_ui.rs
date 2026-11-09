@@ -1842,7 +1842,7 @@ impl Desktop {
             (
                 symbols::check_circle(),
                 Tint::Green,
-                course2md::tr!("一切正常"),
+                SharedString::from(course2md::tr!("一切正常")),
                 Some(if checked == 1 {
                     course2md::tr!("1 项检查已通过").to_owned()
                 } else {
@@ -1850,11 +1850,16 @@ impl Desktop {
                 }),
             )
         } else {
-            // The chips below mark which check needs repair; a count would say it again.
+            // The conclusion names what does not work; the chips below say the rest.
+            let broken: Vec<&str> = capabilities
+                .iter()
+                .filter(|(_, ready, unused)| !ready && !unused)
+                .map(|(label, _, _)| *label)
+                .collect();
             (
                 symbols::warning(),
                 Tint::Amber,
-                course2md::tr!("需要修复"),
+                SharedString::from(course2md::tr!("{}不可用", broken.join("、"))),
                 None,
             )
         };

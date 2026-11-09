@@ -1303,7 +1303,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 模型会继续在后台准备	模型会继续在后台准备	The model will continue to be prepared in the background	模型會繼續在背景準備	モデルはバックグラウンドで引き続き準備されます
 模型位置尚未更新，修改已保留，可重试保存：{}	模型位置尚未更新，修改已保留，可重试保存：{}	The model location has not been updated. Your changes were kept; you can try saving again: {}	模型位置尚未更新，修改已保留，可重試儲存：{}	モデルの場所はまだ更新されていません。変更は保持されています。もう一度保存できます: {}
 一切正常	一切正常	All good	一切正常	すべて正常
-需要修复	需要修复	Needs repair	需要修復	修復が必要
 模型准备完成 / Model preparation finished.	模型准备完成	Model preparation finished.	模型準備完成	モデルの準備ができました
 模型准备已暂停	模型准备已暂停	Model preparation is paused	模型準備已暫停	モデルの準備が一時停止されています
 模型准备未完成 / Model preparation did not complete	模型准备未完成	Model preparation did not complete	模型準備未完成	モデルの準備が完了していません
@@ -2324,3 +2323,4 @@ macOS 只让有完全磁盘访问权限的应用读取 {} 的数据。course2md 
 正在等待权限	正在等待权限	Waiting for access	正在等待權限	アクセスを待っています
 识别准备	识别准备	Speech setup	辨識準備	音声認識の準備
 打开笔记	打开笔记	Open note	開啟筆記	ノートを開く
+{}不可用	{}不可用	{} unavailable	{}不可用	{}は使用できません
