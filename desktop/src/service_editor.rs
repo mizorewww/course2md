@@ -308,7 +308,7 @@ impl Desktop {
             self.open_settings(window, cx);
         }
     }
-    fn bind_service(
+    pub(crate) fn bind_service(
         &mut self,
         purpose: ServicePurpose,
         id: Option<String>,

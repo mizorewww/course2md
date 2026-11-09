@@ -189,6 +189,11 @@ impl Desktop {
             self.inspect_source(window, cx);
             return;
         }
+        // A deleted service is replaced only when the person says so.
+        if self.dropped_draft_service(cx).is_some() {
+            cx.notify();
+            return;
+        }
         self.import.pending_conversion = Some(self.import.preview_generation);
         self.import.following_conversion = (self.page == Page::New)
             .then_some(ConversionFollow::Preparing(self.import.preview_generation));
@@ -2451,6 +2456,35 @@ impl Desktop {
         self.library(cx).preferred_note(&source.identity, preferred)
     }
 
+    /// A service the current draft chose that is no longer saved, with the default
+    /// that would take its place: the AI service first. Nothing while the services
+    /// cannot be read, since then nothing is known to be gone.
+    pub(crate) fn dropped_draft_service(&self, cx: &App) -> Option<(ServicePurpose, String)> {
+        let draft = self.workspace(cx)?.state.draft()?;
+        let preferences = &self.preferences;
+        if preferences.is_blocked(crate::preferences::PreferenceGroup::Services) {
+            return None;
+        }
+        let refs = preferences.plan_refs(&crate::preferences::ServiceRefs {
+            asr: draft.asr_service.clone(),
+            llm: draft.ai_service.clone(),
+        });
+        [
+            (ServicePurpose::Ai, &draft.ai_service, refs.llm),
+            (ServicePurpose::Speech, &draft.asr_service, refs.asr),
+        ]
+        .into_iter()
+        .find(|(_, own, _)| {
+            own.as_deref()
+                .is_some_and(|id| !preferences.usable_in_snapshot(id))
+        })
+        .and_then(|(purpose, _, now)| {
+            preferences
+                .version(&now?)
+                .map(|version| (purpose, version.config.name.clone()))
+        })
+    }
+
     fn can_start_input(&self, cx: &App) -> bool {
         // While candidates show, batch and single actions live in the list's own action area; the input row's
         // 「开始转换」 would always fail for a collection link, so two primary actions never share the screen.
@@ -2909,56 +2943,15 @@ impl Desktop {
                 })),
             );
         }
-        // A service this note chose that is no longer saved gives way to the default;
-        // say so, naming the one it uses now.
-        if let Some(draft) = self
-            .workspace(cx)
-            .and_then(|workspace| workspace.state.draft())
-        {
-            let preferences = &self.preferences;
-            let dropped = !preferences.is_blocked(crate::preferences::PreferenceGroup::Services)
-                && [&draft.asr_service, &draft.ai_service]
-                    .into_iter()
-                    .flatten()
-                    .any(|id| !preferences.usable_in_snapshot(id));
-            let fallback = dropped
-                .then(|| {
-                    let refs = preferences.plan_refs(&crate::preferences::ServiceRefs {
-                        asr: draft.asr_service.clone(),
-                        llm: draft.ai_service.clone(),
-                    });
-                    [
-                        (&draft.ai_service, refs.llm),
-                        (&draft.asr_service, refs.asr),
-                    ]
-                    .into_iter()
-                    .find(|(own, _)| {
-                        own.as_deref()
-                            .is_some_and(|id| !preferences.usable_in_snapshot(id))
-                    })
-                    .and_then(|(_, now)| {
-                        preferences
-                            .version(&now?)
-                            .map(|version| version.config.name.clone())
-                    })
-                })
-                .flatten();
-            if let Some(name) = fallback {
-                facts.push(
-                    supporting_info(
-                        "draft-service-fallback",
-                        course2md::tr!("所选服务已不在设置中，这次笔记改用默认服务「{}」", name),
-                    )
-                    .into_any_element(),
-                );
-            }
-        }
+        // A service this note chose that is no longer saved: the person decides
+        // whether the default takes its place, before anything is sent to it.
+        let dropped_service = self.dropped_draft_service(cx);
         // A note needs a name: the field is in the processing options.
         let title_missing = self.import.source_preview.is_some()
             && self
                 .workspace(cx)
                 .and_then(|workspace| workspace.state.draft())
-                .is_some_and(|draft| draft.title.trim().is_empty());
+                .is_some_and(|draft| desktop_tasks::plan::note_title(draft).is_none());
         if title_missing {
             repairs.push(
                 button(
@@ -3160,6 +3153,41 @@ impl Desktop {
                 self.workbench_notice = Some(message);
             }
             None => {}
+        }
+        if notice.is_none()
+            && let Some((purpose, name)) = dropped_service
+        {
+            notice = Some(
+                notice_banner(
+                    "draft-service-dropped",
+                    NoticeKind::Warning,
+                    course2md::tr!("这次笔记所选的服务已从设置中删除"),
+                )
+                .rounded(RADIUS_LARGE)
+                .child(
+                    h_flex()
+                        .gap(rem(8.))
+                        .flex_wrap()
+                        .child(
+                            material_button("use-default-service", ButtonVariant::Tonal)
+                                .icon(symbols::check())
+                                .child(course2md::tr!("使用默认服务「{}」", name))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.bind_service(purpose, None, true, cx);
+                                })),
+                        )
+                        .child(
+                            material_button("choose-task-service", ButtonVariant::Text)
+                                .icon(symbols::tune())
+                                .child(course2md::tr!("选择服务"))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    // The choice is in the processing options.
+                                    this.desktop_settings.home_options = true;
+                                    cx.notify();
+                                })),
+                        ),
+                ),
+            );
         }
         // Without an obstacle to explain them, repairs wait with the card's actions.
         actions.splice(0..0, repairs);

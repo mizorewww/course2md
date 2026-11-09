@@ -2305,7 +2305,6 @@ course2md 不在“应用程序”文件夹中。请先退出 course2md，在访
 保存在「{}」	保存在「{}」	Saved in “{}”	儲存在「{}」	「{}」に保存済み
 将保存到「{}」	将保存到「{}」	Will be saved to “{}”	將儲存到「{}」	「{}」に保存予定
 其他任务结束后才能下载模型	其他任务结束后才能下载模型	The model can be downloaded once the current job finishes	其他任務結束後才能下載模型	現在のジョブが終わるとモデルをダウンロードできます
-所选服务已不在设置中，这次笔记改用默认服务「{}」	所选服务已不在设置中，这次笔记改用默认服务「{}」	The chosen service is no longer in settings; this note uses the default service “{}”	所選服務已不在設定中，這次筆記改用預設服務「{}」	選択したサービスは設定にありません。このノートには既定のサービス「{}」を使います
 缺少读取视频所需的组件	缺少读取视频所需的组件	Components needed to read videos are missing	缺少讀取影片所需的元件	動画の読み込みに必要なコンポーネントがありません
 YouTube 不支持在其他应用中用密码登录。course2md 让 yt-dlp 读取所选浏览器中的 YouTube 登录，只在打开 YouTube 视频时使用，不会保存；检查时的临时副本随即删除。	YouTube 不支持在其他应用中用密码登录。course2md 让 yt-dlp 读取所选浏览器中的 YouTube 登录，只在打开 YouTube 视频时使用，不会保存；检查时的临时副本随即删除。	YouTube doesn't allow signing in with a password in other apps. course2md has yt-dlp read the YouTube sign-in from the browser you choose and uses it only to open YouTube videos, without keeping it; the check's temporary copy is deleted right away.	YouTube 不支援在其他應用程式中用密碼登入。course2md 讓 yt-dlp 讀取所選瀏覽器中的 YouTube 登入，只在開啟 YouTube 影片時使用，不會儲存；檢查時的暫存副本隨即刪除。	YouTube は他のアプリでのパスワードによるログインを許可していません。course2md は選んだブラウザーの YouTube ログインを yt-dlp に読み取らせ、YouTube 動画を開くときだけ使い、保存しません。確認時の一時コピーはすぐに削除されます。
 macOS 只让有完全磁盘访问权限的应用读取 {} 的数据。course2md 只用它读取 YouTube 登录，不保存 Cookie。这项权限也允许读取其他受保护的文件，可随时在系统设置中关闭。	macOS 只让有完全磁盘访问权限的应用读取 {} 的数据。course2md 只用它读取 YouTube 登录，不保存 Cookie。这项权限也允许读取其他受保护的文件，可随时在系统设置中关闭。	macOS lets only apps with Full Disk Access read {}'s data. course2md uses it only to read the YouTube sign-in and doesn't keep the cookies. The access also covers other protected files; you can turn it off in System Settings at any time.	macOS 只讓有完整磁碟取用權限的應用程式讀取 {} 的資料。course2md 只用它讀取 YouTube 登入，不儲存 Cookie。這項權限也允許讀取其他受保護的檔案，可隨時在系統設定中關閉。	macOS では、フルディスクアクセスを持つアプリだけが {} のデータを読み取れます。course2md はこれを YouTube のログインの読み取りにだけ使い、Cookie は保存しません。この権限は他の保護されたファイルにも及びます。システム設定でいつでもオフにできます。
@@ -2327,3 +2326,5 @@ macOS 只让有完全磁盘访问权限的应用读取 {} 的数据。course2md 
 笔记还没有名称	笔记还没有名称	The note has no name yet	筆記還沒有名稱	ノートにまだ名前がありません
 使用的模型	使用的模型	Model to use	使用的模型	使用するモデル
 稍后设置	稍后设置	Set up later	稍後設定	後で設定
+这次笔记所选的服务已从设置中删除	这次笔记所选的服务已从设置中删除	The service chosen for this note was deleted from settings	這次筆記所選的服務已從設定中刪除	このノートで選んだサービスは設定から削除されました
+使用默认服务「{}」	使用默认服务「{}」	Use the default service “{}”	使用預設服務「{}」	既定のサービス「{}」を使う
