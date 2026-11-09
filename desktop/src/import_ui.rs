@@ -1803,12 +1803,27 @@ impl Desktop {
                 course2md::tr!("有字幕时直接用字幕，没有字幕时使用语音识别")
             }
         };
+        // The home column, inside its narrow gutters, less the panel's insets.
+        let unit = f32::from(rem(1.).to_pixels(window.rem_size()));
+        let room = (crate::views::shell_content_width(Page::New, window) / unit).min(760.) - 40.;
+        let labels: Vec<&str> = text_source_choices()
+            .iter()
+            .map(|(_, label)| *label)
+            .collect();
+        let fits = ui::segmented_fits(&labels, true, room, window);
         let selector =
+            // The same control as Settings › 生成笔记's 文字来源: icons, as wide as its
+            // options while they fit, stacked whole when they do not.
             ConnectedButtonGroup::new("conversion-text-mode", course2md::tr!("文字来源方式"))
                 .tone(ButtonTone::Neutral)
-                .button_size(ButtonSize::Medium)
-                .full_width()
+                .segmented()
+                .when(fits, |group| group.fit_content())
+                .vertical(!fits)
+                .button_size(ButtonSize::Small)
                 .options(text_source_choices().map(|(mode, label)| (text_source_id(mode), label)))
+                .icon("auto", symbols::auto_fix_high())
+                .icon("subtitle", symbols::subtitles())
+                .icon("asr", symbols::mic())
                 .selected(text_source_id(mode))
                 .on_change(cx.listener(|this, value: &SharedString, _, cx| {
                     let Some(mode) = text_source_choices()
@@ -1837,7 +1852,7 @@ impl Desktop {
                 .w_full()
                 .min_w_0()
                 .gap(rem(8.))
-                .child(selector)
+                .child(div().when(fits, |row| row.flex()).child(selector))
                 .child(supporting_info("conversion-text-mode-hint", hint)),
         )];
         if speech_relevant {

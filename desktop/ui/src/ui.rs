@@ -233,6 +233,20 @@ pub fn shaped_width(text: &str, size: f32, weight: FontWeight, window: &Window) 
     )
 }
 
+/// Whether a small segmented group of `labels`, each with an icon when `icons`, fits
+/// `room` (100%-scale px) at the current text scale: then it is as wide as its
+/// options; otherwise its options stack, whole, rather than wrap or cut.
+pub fn segmented_fits(labels: &[&str], icons: bool, room: f32, window: &Window) -> bool {
+    let scale = f32::from(window.rem_size()) / gpui_kit_material::tokens::typography::BASE_PX;
+    // An option: 16 either side of its label, an 18 icon and its 8 gap, 2 between.
+    let chrome = 32. + if icons { 26. } else { 0. } + 2.;
+    let needed: f32 = labels
+        .iter()
+        .map(|label| shaped_width(label, 14. * scale, FontWeight::MEDIUM, window) / scale + chrome)
+        .sum();
+    needed <= room
+}
+
 /// A row dropdown wide enough to show `value` whole, measured with the field's
 /// body-large text at the current text scale, in design px.
 fn dropdown_width(value: &str, window: &Window) -> f32 {

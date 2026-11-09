@@ -278,21 +278,9 @@ fn settings_row_width(window: &Window) -> f32 {
     pane - 12. - 2. * 20.
 }
 
-/// Whether a small segmented group of `labels`, each with an icon when `icons`,
-/// fits one settings row at the current text scale: then it is as wide as its
-/// options; otherwise its options stack, whole, rather than wrap or cut.
+/// Whether a small segmented group of `labels` fits one settings row.
 pub(super) fn segmented_fits(labels: &[&str], icons: bool, window: &Window) -> bool {
-    let scale = f32::from(window.rem_size()) / gpui_kit_material::tokens::typography::BASE_PX;
-    // An option: 16 either side of its label, an 18 icon and its 8 gap, 2 between.
-    let chrome = 32. + if icons { 26. } else { 0. } + 2.;
-    let needed: f32 = labels
-        .iter()
-        .map(|label| {
-            crate::views::shaped_width(label, 14. * scale, FontWeight::MEDIUM, window) / scale
-                + chrome
-        })
-        .sum();
-    needed <= settings_row_width(window)
+    ui::segmented_fits(labels, icons, settings_row_width(window), window)
 }
 
 /// Settings categories in navigation order.
