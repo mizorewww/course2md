@@ -1440,6 +1440,9 @@ impl Desktop {
             ])
             .icon("cards", symbols::grid_view())
             .icon("list", symbols::list())
+            // The views are icons, named for assistive technology, so the toolbar's
+            // only colour is the one selected view.
+            .labels(gpui_kit_material::components::GroupLabels::Never)
             .selected(if self.desktop_settings.library_cards {
                 "cards"
             } else {
@@ -1492,6 +1495,7 @@ impl Desktop {
                     .when(!sidebar, |row| {
                         row.child(
                             material_button("library-places", ButtonVariant::Tonal)
+                                .tone(ButtonTone::Neutral)
                                 .icon(symbols::folder())
                                 .child(places)
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -1502,47 +1506,45 @@ impl Desktop {
                     })
                     .child(self.sort_menu(!sidebar, cx))
                     .child(
-                        material_button(
-                            "library-group-folders",
-                            if group_on && can_group {
-                                ButtonVariant::Tonal
+                        // A toggle among the view controls: neutral like them, a check
+                        // and the secondary container while on.
+                        material_button("library-group-folders", ButtonVariant::Tonal)
+                            .tone(if group_on && can_group {
+                                ButtonTone::Standard
                             } else {
-                                ButtonVariant::Outlined
-                            },
-                        )
-                        // On, it is tonal in the secondary container; off, an outlined
-                        // action with a primary label (L6).
-                        .tone(if group_on && can_group {
-                            ButtonTone::Standard
-                        } else {
-                            ButtonTone::Accent
-                        })
-                        .icon(if group_on && can_group {
-                            symbols::check()
-                        } else {
-                            symbols::folder()
-                        })
-                        .child(course2md::tr!("按文件夹分组"))
-                        .disabled(!can_group)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.desktop_settings.library_group_folders = !group_on;
-                            this.save_library_presentation(cx);
-                        })),
+                                ButtonTone::Neutral
+                            })
+                            .icon(if group_on && can_group {
+                                symbols::check()
+                            } else {
+                                symbols::folder()
+                            })
+                            .child(course2md::tr!("按文件夹分组"))
+                            .disabled(!can_group)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.desktop_settings.library_group_folders = !group_on;
+                                this.save_library_presentation(cx);
+                            })),
                     )
-                    .child(view)
+                    // How the notes are shown and reading them again: one group of
+                    // icon actions at the toolbar's end.
                     .child(
-                        MaterialTooltip::plain(
-                            "library-rescan-tip",
-                            course2md::tr!("重新扫描笔记库"),
-                        )
-                        .trigger(
-                            IconButton::new(
-                                "library-rescan",
-                                symbols::refresh(),
+                        h_flex().gap(rem(4.)).items_center().child(view).child(
+                            MaterialTooltip::plain(
+                                "library-rescan-tip",
                                 course2md::tr!("重新扫描笔记库"),
                             )
-                            .disabled(self.library(cx).loading)
-                            .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx))),
+                            .trigger(
+                                IconButton::new(
+                                    "library-rescan",
+                                    symbols::refresh(),
+                                    course2md::tr!("重新扫描笔记库"),
+                                )
+                                .variant(IconButtonVariant::Tonal)
+                                .tone(ButtonTone::Neutral)
+                                .disabled(self.library(cx).loading)
+                                .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx))),
+                            ),
                         ),
                     ),
             )
