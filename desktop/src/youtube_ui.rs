@@ -641,6 +641,17 @@ impl AccountsView {
             // While macOS keeps the folder closed, the browser comes first, since it
             // decides whether the access is needed; then where the person stands,
             // the step's instruction and why, then a check anyway.
+            // What connecting does and the standing risk of it are one notice
+            // before the choice, so the flow reads: notice, browser, result.
+            let about = || {
+                notice_banner(
+                    "youtube-about",
+                    NoticeKind::Warning,
+                    course2md::tr!(
+                        "course2md 会读取所选浏览器中的 YouTube 登录，只在打开 YouTube 视频时使用，不会保存（检查时的临时副本随即删除）。用账号下载可能让 YouTube 限制或封禁这个账号，请适度使用或用不常用的账号。"
+                    ),
+                )
+            };
             let lead = match (&guide, guiding) {
                 (Some(guide), true) => v_flex()
                     .w_full()
@@ -660,18 +671,8 @@ impl AccountsView {
                     .min_w_0()
                     .gap(rem(16.))
                     .child(self.access_guide(guide, compact, cx))
-                    .child(supporting_info(
-                        "youtube-explain",
-                        course2md::tr!(
-                            "YouTube 不支持在其他应用中用密码登录。course2md 让 yt-dlp 读取所选浏览器中的 YouTube 登录，只在打开 YouTube 视频时使用，不会保存；检查时的临时副本随即删除。"
-                        ),
-                    )),
-                _ => supporting_info(
-                    "youtube-explain",
-                    course2md::tr!(
-                        "YouTube 不支持在其他应用中用密码登录。course2md 让 yt-dlp 读取所选浏览器中的 YouTube 登录，只在打开 YouTube 视频时使用，不会保存；检查时的临时副本随即删除。"
-                    ),
-                ),
+                    .child(about()),
+                _ => about(),
             };
             let mut guide_after_choice = None;
             if guiding {
@@ -679,19 +680,6 @@ impl AccountsView {
             } else {
                 body = body.child(lead);
             }
-            // The standing risk comes before the choice, so it stays in view above
-            // a long check result and beside the action it is about. While the
-            // guide stands in the way there is no connecting to warn about, and
-            // its steps keep the room.
-            body = body.when(!guiding, |body| {
-                body.child(notice_banner(
-                    "youtube-risk",
-                    NoticeKind::Warning,
-                    course2md::tr!(
-                        "用账号下载可能让 YouTube 限制或封禁这个账号，请适度使用或用不常用的账号。"
-                    ),
-                ))
-            });
             if names.is_empty() {
                 body = body.child(notice_banner(
                     "youtube-no-browser",
