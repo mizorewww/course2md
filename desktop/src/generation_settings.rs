@@ -38,12 +38,20 @@ impl Desktop {
         )
     }
 
-    fn subtitle_fields(&self, cx: &mut Context<Self>) -> Vec<ui::Field> {
+    fn subtitle_fields(&self, window: &Window, cx: &mut Context<Self>) -> Vec<ui::Field> {
         let value = self.preferences.generation();
         let source = value.options.transcript_source;
+        let labels: Vec<&str> = text_source_choices()
+            .iter()
+            .map(|(_, label)| *label)
+            .collect();
+        let fits = super::segmented_fits(&labels, true, window);
         let group = ConnectedButtonGroup::new("default-text-source", course2md::tr!("文字来源"))
             .tone(ButtonTone::Neutral)
             .segmented()
+            // As wide as its options while they fit the row; else they stack whole.
+            .when(fits, |group| group.fit_content())
+            .vertical(!fits)
             .button_size(ButtonSize::Small)
             .options(text_source_choices().map(|(mode, label)| (text_source_id(mode), label)))
             .icon("auto", symbols::auto_fix_high())
@@ -93,8 +101,12 @@ impl Desktop {
             }),
         );
         let mut fields = vec![
-            ui::Field::below("default-text-source-row", course2md::tr!("文字来源"), group)
-                .hint(source_hint),
+            ui::Field::below(
+                "default-text-source-row",
+                course2md::tr!("文字来源"),
+                div().when(fits, |row| row.flex()).child(group),
+            )
+            .hint(source_hint),
             ui::Field::menu(
                 "default-subtitle-language",
                 course2md::tr!("字幕语言"),
@@ -170,26 +182,31 @@ impl Desktop {
         let preferences = self.preferences.generation();
         let selected_provider = preferences.options.provider;
         let online = selected_provider == Some(AsrProvider::Api);
+        let methods = [course2md::tr!("本机识别"), course2md::tr!("在线语音服务")];
+        let fits = super::segmented_fits(&methods, false, window);
         let group = ConnectedButtonGroup::new("default-asr-device", course2md::tr!("识别方式"))
             .tone(ButtonTone::Neutral)
             .segmented()
+            .when(fits, |group| group.fit_content())
+            .vertical(!fits)
             .button_size(ButtonSize::Small)
-            .options([
-                ("local", course2md::tr!("本机识别")),
-                ("online", course2md::tr!("在线语音服务")),
-            ])
+            .options([("local", methods[0]), ("online", methods[1])])
             .selected(if online { "online" } else { "local" })
             .on_change(cx.listener(|this, selected: &SharedString, _, cx| {
                 let mut next = this.generation_edit_base();
                 next.select_recognition_location(selected.as_ref() == "online");
                 this.commit_generation(next, cx);
             }));
-        let method = ui::Field::below("default-asr-method", course2md::tr!("识别方式"), group)
-            .hint(if online {
-                course2md::tr!("音频会发送到所选服务")
-            } else {
-                ""
-            });
+        let method = ui::Field::below(
+            "default-asr-method",
+            course2md::tr!("识别方式"),
+            div().when(fits, |row| row.flex()).child(group),
+        )
+        .hint(if online {
+            course2md::tr!("音频会发送到所选服务")
+        } else {
+            ""
+        });
         if online {
             return vec![method, self.service_field(ServicePurpose::Speech, cx)];
         }
@@ -598,7 +615,7 @@ impl Desktop {
             .child(self.settings_fields(
                 "language-settings",
                 course2md::tr!("字幕与识别"),
-                self.subtitle_fields(cx),
+                self.subtitle_fields(window, cx),
             ))
             .child(self.settings_fields(
                 "asr-default-settings",

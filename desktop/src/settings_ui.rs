@@ -265,6 +265,36 @@ impl SettingsLayout {
     }
 }
 
+/// The width a settings row gives its control, in 100%-scale px: the content pane
+/// for the current layout, less the scrollbar's gutter and the row's insets.
+fn settings_row_width(window: &Window) -> f32 {
+    let unit = f32::from(rem(1.).to_pixels(window.rem_size()));
+    let shell = crate::views::shell_content_width(Page::Settings, window) / unit;
+    let pane = match SettingsLayout::of(window) {
+        SettingsLayout::Pane => (shell - 320. - 40.).min(760.),
+        SettingsLayout::Rail => shell - settings_rail_width(window) - SETTINGS_RAIL_GAP,
+        SettingsLayout::Single => shell.min(760.),
+    };
+    pane - 12. - 2. * 20.
+}
+
+/// Whether a small segmented group of `labels`, each with an icon when `icons`,
+/// fits one settings row at the current text scale: then it is as wide as its
+/// options; otherwise its options stack, whole, rather than wrap or cut.
+pub(super) fn segmented_fits(labels: &[&str], icons: bool, window: &Window) -> bool {
+    let scale = f32::from(window.rem_size()) / gpui_kit_material::tokens::typography::BASE_PX;
+    // An option: 16 either side of its label, an 18 icon and its 8 gap, 2 between.
+    let chrome = 32. + if icons { 26. } else { 0. } + 2.;
+    let needed: f32 = labels
+        .iter()
+        .map(|label| {
+            crate::views::shaped_width(label, 14. * scale, FontWeight::MEDIUM, window) / scale
+                + chrome
+        })
+        .sum();
+    needed <= settings_row_width(window)
+}
+
 /// Settings categories in navigation order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SettingsTab {
