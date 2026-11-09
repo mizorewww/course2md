@@ -1035,7 +1035,13 @@ impl Desktop {
                 selected == Some(*engine),
             )
             .tinted_icon(engine_icon(Some(*engine)).into(), Tint::Blue, icon_size)
-            .status(issue.map(|issue| status_chip(StatusKind::Warning).child(issue.short())))
+            // An obstacle stated with its repair below the engines is not said
+            // again on each row it dims.
+            .status(
+                issue
+                    .filter(|issue| !issues.contains(issue))
+                    .map(|issue| status_chip(StatusKind::Warning).child(issue.short())),
+            )
             .enabled(issue.is_none());
             if !detected {
                 tile = tile.description(course2md::tr!("正在检测"));
@@ -1105,8 +1111,9 @@ impl Desktop {
                 .min_w_0()
                 .gap(rem(8.))
                 .child(self.setup_reveal("setup-engine-choice-reveal", engine_group))
+                // Attached under the engines, on the same surface as their rows.
                 .children(issues.into_iter().map(|issue| {
-                    div().px(ITEM_INSET).child(self.engine_obstacle(
+                    setup_tile().child(self.engine_obstacle(
                         &format!("setup-engine-obstacle-{issue:?}"),
                         issue,
                         true,
