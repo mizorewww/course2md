@@ -105,9 +105,14 @@ jobs:
 
       # One notice file for every CLI binary. Only this build has the Swift checkouts.
       - uses: taiki-e/install-action@v2
+        id: cargo-about
         if: matrix.target == 'aarch64-apple-darwin'
+        continue-on-error: true
         with:
           tool: cargo-about@0.9.3
+      - name: cargo-about from source
+        if: matrix.target == 'aarch64-apple-darwin' && steps.cargo-about.outcome == 'failure'
+        run: cargo install cargo-about --locked --features cli --version 0.9.3
       - name: Dependency licenses
         if: matrix.target == 'aarch64-apple-darwin'
         run: python3 desktop/scripts/licenses.py --swift course2md-third-party-licenses.txt

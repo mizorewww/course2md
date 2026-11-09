@@ -6,8 +6,16 @@ runs:
     - uses: ./.github/actions/rust-toolchain
     - uses: Swatinem/rust-cache@v2
     - uses: taiki-e/install-action@v2
+      id: cargo-about
+      continue-on-error: true
       with:
         tool: cargo-about@0.9.3
+    # A release asset can be unavailable for a while (GitHub has served 504 for the
+    # aarch64-apple-darwin one); build the same version from crates.io instead.
+    - name: cargo-about from source
+      if: steps.cargo-about.outcome == 'failure'
+      shell: bash
+      run: cargo install cargo-about --locked --features cli --version 0.9.3
     - uses: actions/setup-python@v5
       with:
         python-version: '3.12'
