@@ -3080,7 +3080,8 @@ impl Desktop {
                     reading
                         || checking
                         || self.records.read(cx).workspace.is_none()
-                        || preferences_blocked,
+                        || preferences_blocked
+                        || self.dropped_draft_service(cx).is_some(),
                 )
                 .on_click(cx.listener(move |_, _, window, cx| {
                     // The note is replaced, not kept beside the new one: ask first.

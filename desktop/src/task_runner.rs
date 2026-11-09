@@ -430,6 +430,13 @@ impl Desktop {
         if !self.save_current_draft(cx) {
             return;
         }
+        // Every way a single draft is queued passes here: a deleted service is
+        // replaced only when the person says so, in the card's notice.
+        if self.dropped_draft_service(cx).is_some() {
+            self.import.pending_conversion = None;
+            cx.notify();
+            return;
+        }
         self.message = None;
         let plan = match self.build_plan(PlanValidation::Submission, cx) {
             Ok(plan) => plan,
