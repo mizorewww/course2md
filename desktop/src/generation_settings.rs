@@ -340,16 +340,6 @@ impl Desktop {
                 ),
             ));
         }
-        fields.push(ui::Field::disclosure(
-            "toggle-model-details",
-            course2md::tr!("管理模型与下载"),
-            self.settings_ui.model_details_open,
-            cx.listener(|this, _, _, cx| {
-                this.settings_ui.model_details_open = !this.settings_ui.model_details_open;
-                cx.notify();
-            }),
-            div().child(self.model_management_panel(window, cx)),
-        ));
         let engines: Vec<_> = std::iter::once(None)
             .chain(
                 LOCAL_ENGINES
@@ -378,6 +368,17 @@ impl Desktop {
             MaterialMenu::new("asr-hardware-items")
                 .width(MENU_WIDTH)
                 .items(engine_items),
+        ));
+        // The model and its engine read together; managing downloads closes the group.
+        fields.push(ui::Field::disclosure(
+            "toggle-model-details",
+            course2md::tr!("管理模型与下载"),
+            self.settings_ui.model_details_open,
+            cx.listener(|this, _, _, cx| {
+                this.settings_ui.model_details_open = !this.settings_ui.model_details_open;
+                cx.notify();
+            }),
+            div().child(self.model_management_panel(window, cx)),
         ));
         fields
     }
