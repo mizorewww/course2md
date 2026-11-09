@@ -1865,9 +1865,9 @@ impl Desktop {
             .library(cx)
             .note_source(course)
             .and_then(|source| source.duration)
-            // A note whose task is gone keeps the length its own record says.
+            // A note whose task is gone keeps the length its own record says; every
+            // note row's cover carries it, in the library as on home.
             .or(course.duration)
-            .filter(|_| home)
             .map(course2md::render::fmt_ts);
         let row =
             scale
