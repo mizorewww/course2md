@@ -3170,7 +3170,9 @@ impl ReaderPage {
             .floor()
             .clamp(1., 6.)
             .min(shown) as usize;
-        let width = width.min(columns as f32 * (column * 2. + gap) - gap);
+        // Never narrower than the search above it, so the two share a right edge.
+        let search = f32::from(SEARCH_MAX_WIDTH.to_pixels(rem_size));
+        let width = width.min((columns as f32 * (column * 2. + gap) - gap).max(search));
         if columns != self.gallery.columns {
             self.set_gallery_items(columns);
         }
@@ -3417,8 +3419,10 @@ impl ReaderPage {
                             TextView::markdown(("frame-excerpt", index), excerpt)
                                 .markdown_extensions(self.gallery.extensions.clone())
                                 .style(note_text::note_style(cx))
-                                .selectable(false)
-                                .max_lines(3),
+                                // The excerpt is already bounded and ends in an
+                                // ellipsis when cut; clamping lines would cut it
+                                // again mid-sentence with none.
+                                .selectable(false),
                         ),
                 ),
         );
