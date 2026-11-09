@@ -246,10 +246,18 @@ impl Desktop {
                 })
         });
         self.import.subtitle_loading = false;
+        let local_unread = !draft.online
+            && draft.source.is_none()
+            && std::path::Path::new(draft.input.trim()).is_file();
         self.inputs[&Field::Source].update(cx, |s, cx| s.set_value(draft.input, window, cx));
         self.inputs[&Field::Title].update(cx, |s, cx| s.set_value(draft.title, window, cx));
         self.scrolls[Page::New as usize].set_offset(point(px(0.), px(draft.scroll)));
         self.work.update(cx, |work, _| work.draft_saved());
+        // A local file chosen but not read yet is read now: reading it is local
+        // and quick, and only previews; nothing is submitted.
+        if local_unread {
+            self.inspect_source(window, cx);
+        }
         cx.notify();
     }
 
