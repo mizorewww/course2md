@@ -571,10 +571,17 @@ pub fn note_style(cx: &App) -> TextViewStyle {
                 _ => TypeRole::TitleSmall,
             };
             let scale = role.scale();
-            StyleRefinement::default()
+            let style = StyleRefinement::default()
                 .text_size(scale.font_size)
                 .line_height(scale.line_height)
-                .font_weight(FontWeight(scale.font_weight as f32))
+                .font_weight(FontWeight(scale.font_weight as f32));
+            // A section's 从此处观看 pill heads its paragraphs with room to breathe,
+            // not sitting on their first line.
+            if level >= 3 {
+                style.pb(rems(0.5))
+            } else {
+                style
+            }
         })
 }
 
