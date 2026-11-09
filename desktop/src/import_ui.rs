@@ -3161,11 +3161,15 @@ impl Desktop {
                 notice_banner(
                     "draft-service-dropped",
                     NoticeKind::Warning,
-                    course2md::tr!("这次笔记所选的服务已从设置中删除"),
+                    course2md::tr!("所选服务已从设置中删除"),
                 )
                 .rounded(RADIUS_LARGE)
+                // Two choices: on their own line under the message, so neither
+                // squeezes it at any width.
                 .child(
                     h_flex()
+                        .w_full()
+                        .justify_end()
                         .gap(rem(8.))
                         .flex_wrap()
                         .child(
