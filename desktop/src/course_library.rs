@@ -57,6 +57,12 @@ fn cover(image: Option<PathBuf>, icon: SymbolIcon) -> Div {
 }
 
 /// The cover of a note or task row.
+/// A task's video length as its cover shows it, when known.
+fn task_duration(task: &crate::workspace::TaskRecord) -> Option<String> {
+    let seconds = task.plan.source.duration;
+    (seconds.is_finite() && seconds > 0.).then(|| course2md::render::fmt_ts(seconds))
+}
+
 pub(crate) fn row_cover(image: Option<PathBuf>, icon: SymbolIcon) -> Div {
     cover(image, icon)
         .w(rem(ROW_COVER))
@@ -1981,14 +1987,30 @@ impl Desktop {
                 .child(
                     scale
                         .row()
-                        .child(row_cover(
-                            task.plan.source.cover.clone().filter(|_| !queued),
-                            if queued {
-                                symbols::schedule()
-                            } else {
-                                symbols::movie()
-                            },
-                        ))
+                        .child(
+                            row_cover(
+                                task.plan.source.cover.clone().filter(|_| !queued),
+                                if queued {
+                                    symbols::schedule()
+                                } else {
+                                    symbols::movie()
+                                },
+                            )
+                            .children(task_duration(task).map(
+                                |duration| {
+                                    media_label(
+                                        SharedString::from(format!(
+                                            "workbench-task-duration-{}",
+                                            task.id
+                                        )),
+                                        duration,
+                                    )
+                                    .absolute()
+                                    .right(rem(4.))
+                                    .bottom(rem(4.))
+                                },
+                            )),
+                        )
                         .child(
                             v_flex()
                                 .flex_1()
@@ -2278,14 +2300,26 @@ impl Desktop {
                 .py(rem(16.))
                 .gap(rem(16.))
                 .items_start()
-                .child(row_cover(
-                    cover,
-                    if task.state == TaskState::Paused {
-                        symbols::pause()
-                    } else {
-                        symbols::movie()
-                    },
-                ))
+                .child(
+                    row_cover(
+                        cover,
+                        if task.state == TaskState::Paused {
+                            symbols::pause()
+                        } else {
+                            symbols::movie()
+                        },
+                    )
+                    // The cover carries the video's length, as a note's does.
+                    .children(task_duration(&task).map(|duration| {
+                        media_label(
+                            SharedString::from(format!("attention-duration-{id}")),
+                            duration,
+                        )
+                        .absolute()
+                        .right(rem(4.))
+                        .bottom(rem(4.))
+                    })),
+                )
                 .child(
                     v_flex()
                         .flex_1()
