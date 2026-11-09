@@ -61,7 +61,6 @@ allow-wildcard-paths = true
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-git = [
-    # The desktop's UI stack: gpui-kit-material and the upstream it builds on.
-    "https://github.com/longbridge/gpui-kit",
+    # gpui-kit-material's optional engine patch set (the root Cargo.toml's [patch]).
     "https://github.com/mizorewww/gpui-kit-material",
 ]
