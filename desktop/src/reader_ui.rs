@@ -2754,7 +2754,14 @@ impl ReaderPage {
         } else {
             None
         };
-        let find = reading_note.then(|| {
+        // Search stays on the bar in both views: the note's find, or the screenshots'
+        // own search field.
+        let find_label = if reading_note {
+            find_label
+        } else {
+            course2md::tr!("搜索截图对应文字")
+        };
+        let find = Some(()).map(|_| {
             MaterialTooltip::plain("reader-open-find-tip", format!("{find_label} {shortcut}"))
                 .trigger(
                     // A tool on the reader's bar sits in the neutral circle the back button has.
@@ -2762,9 +2769,12 @@ impl ReaderPage {
                         .variant(IconButtonVariant::Tonal)
                         .tone(ButtonTone::Neutral)
                         .toggle(true)
-                        .selected(self.find.open)
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            if this.find.open {
+                        .selected(reading_note && self.find.open)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            if !reading_note {
+                                let input = this.gallery.find.clone();
+                                input.update(cx, |state, cx| state.focus(window, cx));
+                            } else if this.find.open {
                                 this.close_reader_find(window, cx);
                             } else {
                                 this.open_reader_find(window, cx);
@@ -3103,7 +3113,9 @@ impl ReaderPage {
                         .flex_1()
                         .flex_basis(rem(200.))
                         .min_w_0()
-                        .max_w(SEARCH_MAX_WIDTH)
+                        // The screenshots' search spans their grid; the note's find
+                        // stays a bar's width.
+                        .when(reading_note, |field| field.max_w(SEARCH_MAX_WIDTH))
                         .child(
                             SearchField::new(&input)
                                 .field_style(SearchFieldStyle::Tonal)
@@ -3185,9 +3197,7 @@ impl ReaderPage {
             .floor()
             .clamp(1., 6.)
             .min(shown) as usize;
-        // Never narrower than the search above it, so the two share a right edge.
-        let search = f32::from(SEARCH_MAX_WIDTH.to_pixels(rem_size));
-        let width = width.min((columns as f32 * (column * 2. + gap) - gap).max(search));
+        // The note's width, as the search above it is, so the views share their edges.
         if columns != self.gallery.columns {
             self.set_gallery_items(columns);
         }
