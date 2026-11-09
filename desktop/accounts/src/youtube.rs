@@ -499,6 +499,7 @@ pub fn resume_due(marker: &Path, now: std::time::SystemTime) -> Option<Resume> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     #[test]
     fn saying_the_switch_is_on_moves_the_guide_on() {
@@ -511,7 +512,6 @@ mod tests {
         guide.switched_on(Access::Open, now);
         assert_eq!(guide.step, AccessStep::Granted);
     }
-    use super::*;
 
     fn guide_dialog() -> YoutubeDialog {
         YoutubeDialog {

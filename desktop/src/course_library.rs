@@ -56,13 +56,13 @@ fn cover(image: Option<PathBuf>, icon: SymbolIcon) -> Div {
         .children(image.map(crate::import_ui::cover_fill))
 }
 
-/// The cover of a note or task row.
 /// A task's video length as its cover shows it, when known.
 fn task_duration(task: &crate::workspace::TaskRecord) -> Option<String> {
     let seconds = task.plan.source.duration;
     (seconds.is_finite() && seconds > 0.).then(|| course2md::render::fmt_ts(seconds))
 }
 
+/// The cover of a note or task row.
 pub(crate) fn row_cover(image: Option<PathBuf>, icon: SymbolIcon) -> Div {
     cover(image, icon)
         .w(rem(ROW_COVER))

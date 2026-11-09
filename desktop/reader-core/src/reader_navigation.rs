@@ -302,6 +302,7 @@ fn local_time<Tz: chrono::TimeZone>(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     #[test]
     fn a_local_video_is_watched_from_a_time_through_the_reader() {
@@ -358,7 +359,6 @@ mod tests {
             assert!(!program.starts_with(empty.path()));
         }
     }
-    use super::*;
     #[test]
     fn contents_use_real_topics_instead_of_every_frame_timestamp() {
         let headings = vec![
