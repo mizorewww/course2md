@@ -1089,30 +1089,32 @@ impl Desktop {
         let fields = ui::field_table(
             "setup-local-engine",
             course2md::tr!("识别模型"),
+            // The section names the model; the row names the choice.
             [ui::Field::menu(
                 "setup-model",
-                course2md::tr!("识别模型"),
+                course2md::tr!("使用的模型"),
                 current_model,
                 model_menu,
             )
             .hint(model_status)],
         );
-        body.child(self.setup_reveal("setup-engine-choice-reveal", engine_group))
-            .child(
-                v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .gap(rem(8.))
-                    .child(self.setup_reveal("setup-engine-reveal", fields))
-                    .children(issues.into_iter().map(|issue| {
-                        div().px(ITEM_INSET).child(self.engine_obstacle(
-                            &format!("setup-engine-obstacle-{issue:?}"),
-                            issue,
-                            true,
-                            cx,
-                        ))
-                    })),
-            )
+        // An engine's obstacle and its repair sit with the engines it is about.
+        body.child(
+            v_flex()
+                .w_full()
+                .min_w_0()
+                .gap(rem(8.))
+                .child(self.setup_reveal("setup-engine-choice-reveal", engine_group))
+                .children(issues.into_iter().map(|issue| {
+                    div().px(ITEM_INSET).child(self.engine_obstacle(
+                        &format!("setup-engine-obstacle-{issue:?}"),
+                        issue,
+                        true,
+                        cx,
+                    ))
+                })),
+        )
+        .child(self.setup_reveal("setup-engine-reveal", fields))
     }
 
     /// One labeled input of a service form, with its error or kept-key note below.
@@ -1380,7 +1382,7 @@ impl Desktop {
                     .child(
                         h_flex().child(
                             material_button("setup-cloud-model-fix", ButtonVariant::Tonal)
-                                .icon(symbols::arrow_back())
+                                .icon(symbols::settings())
                                 .child(course2md::tr!("设置语音服务"))
                                 .on_click(
                                     cx.listener(|this, _, _, cx| this.setup_step(Step::Engine, cx)),
@@ -1499,7 +1501,11 @@ impl Desktop {
             (_, Step::Model) => course2md::tr!("开始使用"),
             _ => course2md::tr!("保存并继续"),
         };
-        let variant = if prepare_first {
+        // Going on without what a step offers is outlined, as 稍后准备 is.
+        let account_skipped = step == Step::Account
+            && !self.accounts.read(cx).account_connected()
+            && self.accounts.read(cx).youtube.choice.is_none();
+        let variant = if prepare_first || account_skipped {
             ButtonVariant::Outlined
         } else {
             ButtonVariant::Filled
