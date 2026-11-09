@@ -2143,7 +2143,14 @@ impl Desktop {
                 format!("{} · {}", library.label(), library.root.display()),
             )
         });
-        let mut fields = vec![
+        // One library is a fact, not a choice: its name, not a dropdown that cannot open.
+        let mut fields = vec![if libraries.len() < 2 {
+            ui::Field::inline(
+                "import-library",
+                course2md::tr!("笔记库"),
+                TileScale::Regular.support("import-library-name", library_name),
+            )
+        } else {
             ui::Field::menu(
                 "import-library",
                 course2md::tr!("笔记库"),
@@ -2158,8 +2165,7 @@ impl Desktop {
                     }),
                 )),
             )
-            .disabled(libraries.len() < 2),
-        ];
+        }];
         if self.import.source_preview.is_some() {
             fields.push(ui::Field::below(
                 "import-title",
@@ -2248,7 +2254,7 @@ impl Desktop {
                 .hint(course2md::tr!("供离线播放，会占用更多磁盘空间")),
             );
         }
-        ui::field_table("import-save-label", course2md::tr!("保存"), fields)
+        ui::field_table("import-save-label", course2md::tr!("保存位置"), fields)
     }
 
     fn set_import_library(&mut self, id: String, cx: &mut Context<Self>) {
