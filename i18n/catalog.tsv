@@ -1956,7 +1956,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 预计剩余 {}	预计剩余 {}	{} remaining	預計剩餘 {}	推定残り時間 {}
 额	额	Um	額	えーっと
 首次设置	首次设置	First-time setup	首次設定	初回設定
-首次识别时会自动下载所选模型	首次识别时会自动下载所选模型	The selected model is automatically downloaded upon first recognition	首次辨識時會自動下載所選模型	選択したモデルは最初の認識時に自動的にダウンロードされます
 首次识别时选择并下载 Apple 模型（约 1–2.3 GB）。 / Choose and download an Apple model at first transcription (about 1–2.3 GB).	首次识别时选择并下载 Apple 模型（约 1–2.3 GB）。	Choose and download an Apple model at first transcription (about 1–2.3 GB).	首次辨識時選擇並下載 Apple 模型（約 1–2.3 GB）。	初回認識時に Apple モデル (約 1 ～ 2.3 GB) を選択してダウンロードします。
 验证中	验证中	Verifying	驗證中	検証中
 验证完成，可以关闭此页面并回到 course2md。	验证完成，可以关闭此页面并回到 course2md。	Check complete. You can close this page and return to course2md.	驗證完成，可以關閉此頁面並回到 course2md。	確認が完了しました。このページを閉じて course2md に戻れます。
@@ -2325,3 +2324,4 @@ macOS 只让有完全磁盘访问权限的应用读取 {} 的数据。course2md 
 识别模型已就绪	识别模型已就绪	Speech model ready	辨識模型已就緒	音声認識モデルの準備ができました
 这个浏览器中没有登录 YouTube。在浏览器中登录后再检查。	这个浏览器中没有登录 YouTube。在浏览器中登录后再检查。	This browser isn't signed in to YouTube. Sign in there, then check again.	這個瀏覽器中沒有登入 YouTube。在瀏覽器中登入後再檢查。	このブラウザーでは YouTube にログインしていません。ブラウザーでログインしてから、もう一度確認してください。
 缺少 {}	缺少 {}	{} is missing	缺少 {}	{} がありません
+需要语音识别时会先请你下载	需要语音识别时会先请你下载	You'll be asked to download it when speech recognition is needed	需要語音辨識時會先請你下載	音声認識が必要になったときにダウンロードを確認します

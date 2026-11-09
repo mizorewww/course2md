@@ -219,6 +219,17 @@ impl Desktop {
         // The value is the model; its state is the row's supporting text, so the
         // field shows the name whole.
         let model_value = model_name;
+        // A model not on disk says, with its state, what happens when it is needed.
+        let missing = matches!(
+            state,
+            Some(course2md::models::status::CacheState::Missing)
+                | Some(course2md::models::status::CacheState::Partial)
+        );
+        let model_hint: SharedString = if missing && engine_issue.is_none() && settled {
+            format!("{state_label} · {conclusion}").into()
+        } else {
+            state_label.into()
+        };
         let current_model = models
             .iter()
             .map(|model| model.id)
@@ -252,14 +263,14 @@ impl Desktop {
                         }),
                     ),
             )
-            .hint(state_label)
+            .hint(model_hint.clone())
         } else {
             ui::Field::inline(
                 "default-local-model",
                 course2md::tr!("识别模型"),
                 TileScale::Regular.support("default-local-model-name", model_value),
             )
-            .hint(state_label)
+            .hint(model_hint)
         });
         // An engine that cannot run here says why with its repair; otherwise an unsettled
         // check says what is still open. A finished check on a ready model says nothing.
@@ -268,7 +279,7 @@ impl Desktop {
                 "generation-engine-obstacle",
                 self.engine_obstacle("generation-engine-obstacle-detail", issue, true, cx),
             ));
-        } else if !(settled && ready) {
+        } else if !(settled && (ready || missing)) {
             let status = if settled {
                 ui::AsyncStatus::Success(conclusion.into())
             } else {

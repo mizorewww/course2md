@@ -1028,7 +1028,8 @@ impl Desktop {
                     (true, cache_state_label(state).1.into())
                 }
                 CacheState::Missing | CacheState::Partial => {
-                    (true, course2md::tr!("首次识别时会自动下载所选模型").into())
+                    // A task never downloads on the way: it asks first.
+                    (true, course2md::tr!("需要语音识别时会先请你下载").into())
                 }
                 CacheState::Unsupported => (
                     false,
