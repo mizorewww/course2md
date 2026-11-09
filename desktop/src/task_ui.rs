@@ -122,8 +122,9 @@ pub(crate) enum CardPlace {
 
 /// Queued rows shown before the rest of the queue folds.
 const QUEUE_PREVIEW: usize = 5;
-/// The task page's content column, inside the shell's gutters.
-const TASK_COLUMN: Rems = rem(832.);
+/// The task page's content column, inside the shell's gutters: home's column, so a
+/// task reads at the same width in both places.
+const TASK_COLUMN: Rems = rem(760.);
 /// Between the page heading and each section.
 const TASK_SECTION_GAP: Rems = rem(28.);
 
