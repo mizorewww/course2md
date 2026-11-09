@@ -626,11 +626,10 @@ impl AccountsView {
                     ),
             );
         } else {
-            // While macOS keeps the folder closed, the guide comes first: where
-            // the person stands, the current step's instruction and its actions,
-            // so they show before anything scrolls; why, the choice and what
-            // course2md does with the cookies follow.
-            body = body.child(match (&guide, guiding) {
+            // While macOS keeps the folder closed, the browser comes first, since it
+            // decides whether the access is needed; then where the person stands,
+            // the step's instruction and why, then a check anyway.
+            let lead = match (&guide, guiding) {
                 (Some(guide), true) => v_flex()
                     .w_full()
                     .min_w_0()
@@ -661,7 +660,13 @@ impl AccountsView {
                         "YouTube 不支持在其他应用中用密码登录。course2md 让 yt-dlp 读取所选浏览器中的 YouTube 登录，只在打开 YouTube 视频时使用，不会保存；检查时的临时副本随即删除。"
                     ),
                 ),
-            });
+            };
+            let mut guide_after_choice = None;
+            if guiding {
+                guide_after_choice = Some(lead);
+            } else {
+                body = body.child(lead);
+            }
             // The standing risk comes before the choice, so it stays in view above
             // a long check result and beside the action it is about. While the
             // guide stands in the way there is no connecting to warn about, and
@@ -745,9 +750,10 @@ impl AccountsView {
             }
             // While the guide stands in the way, a check anyway follows the browser it
             // checks, so a folder the look got wrong never traps the person.
+            body = body.children(guide_after_choice);
             if guiding && let Some(choice) = dialog.choice() {
                 body = body.child(
-                    div().child(
+                    h_flex().w_full().child(
                         material_button("youtube-check-anyway", ButtonVariant::Text)
                             .tone(ButtonTone::Neutral)
                             .icon(symbols::login())
