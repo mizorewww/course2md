@@ -1431,7 +1431,8 @@ impl Desktop {
         let group_on = self.desktop_settings.library_group_folders;
         let can_group = self.library(cx).folder_filter.is_all() && self.library(cx).error.is_none();
         let desktop = cx.weak_entity();
-        let places = self.library_place(cx).0;
+        // The page title already names the place; the button names where it leads.
+        let places = course2md::tr!("文件夹");
         let view = ConnectedButtonGroup::new("library-view", course2md::tr!("显示"))
             .tone(ButtonTone::Neutral)
             .options([
@@ -1496,7 +1497,7 @@ impl Desktop {
                         row.child(
                             material_button("library-places", ButtonVariant::Tonal)
                                 .tone(ButtonTone::Neutral)
-                                .icon(symbols::folder())
+                                .icon(symbols::folder_open())
                                 .child(places)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.library_ui.places_open = true;
