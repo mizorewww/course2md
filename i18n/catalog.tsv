@@ -718,7 +718,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 已有摘要的格式不完整，保留原文 / Existing summary markup is incomplete; original text kept	已有摘要的格式不完整，保留原文	Existing summary markup is incomplete; original text kept	已有摘要的格式不完整，保留原文	既存の要約の形式が不完全です。元のテキストを保持します
 已有相同处理任务：《{}》（{}）	已有相同处理任务：《{}》（{}）	The same processing task already exists: "{}" ({})	已有相同處理任務：《{}》（{}）	同じ処理タスクがすでに存在します: "{}" ({})
 已有笔记	已有笔记	Notes already exist	已有筆記	ノートあり
-已有笔记，保存在「{}」	已有笔记，保存在「{}」	Notes already exist, saved in "{}"	已有筆記，儲存在「{}」	すでにノートがあり、「{}」に保存されています
+已有笔记，保存在「{}」	已有笔记，保存在「{}」	Notes already exist, saved in “{}”	已有筆記，儲存在「{}」	すでにノートがあり、「{}」に保存されています
 已检查 {} 张画面	已检查 {} 张画面	{} frames checked	已檢查 {} 張畫面	{} フレームがチェックされました
 已检查 1 张画面	已检查 1 张画面	1 frame checked	已檢查 1 張畫面	1 フレームがチェックされました
 已检测到	已检测到	Detected	已偵測到	検出されました
@@ -852,7 +852,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 打开备份位置	打开备份位置	Open backup location	開啟備份位置	バックアップ場所を開く
 打开导出位置	打开导出位置	Open export location	開啟匯出位置	書き出し先を開く
 打开导出文件夹	打开导出文件夹	Open export folder	開啟匯出資料夾	書き出しフォルダーを開く
-打开已有笔记	打开已有笔记	Open an existing note	開啟已有筆記	既存のノートを開く
 打开时意外中断，请重试	打开时意外中断，请重试	Unexpected interruption while opening, please try again	開啟時意外中斷，請重試	開いているときに予期しない中断が発生しました。もう一度お試しください。
 打开模型文件夹	打开模型文件夹	Open model folder	開啟模型資料夾	モデルフォルダーを開く
 打开目标副本	打开目标副本	Open target copy	開啟目標副本	ターゲットコピーを開く
@@ -2324,3 +2323,4 @@ macOS 只让有完全磁盘访问权限的应用读取 {} 的数据。course2md 
 仍然连接	仍然连接	Try anyway	仍然連接	それでも接続
 正在等待权限	正在等待权限	Waiting for access	正在等待權限	アクセスを待っています
 识别准备	识别准备	Speech setup	辨識準備	音声認識の準備
+打开笔记	打开笔记	Open note	開啟筆記	ノートを開く

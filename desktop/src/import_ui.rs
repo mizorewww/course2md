@@ -3068,7 +3068,7 @@ impl Desktop {
                     "open-existing-note",
                     ButtonVariant::Filled,
                     symbols::menu_book(),
-                    course2md::tr!("打开已有笔记"),
+                    course2md::tr!("打开笔记"),
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.save_current_draft(cx);
