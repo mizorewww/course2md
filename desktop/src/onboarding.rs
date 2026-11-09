@@ -1559,6 +1559,23 @@ impl Desktop {
                         )
                     })
                     .child(div().flex_1())
+                    // The online route can wait too, as the AI step can: on to the
+                    // next step without saving the service or sending a sample.
+                    .when(
+                        step == Step::Engine && self.onboarding.provider == Some(AsrProvider::Api),
+                        |row| {
+                            row.child(
+                                material_button("setup-skip-speech", ButtonVariant::Outlined)
+                                    .tone(ButtonTone::Accent)
+                                    .child(course2md::tr!("稍后设置"))
+                                    .disabled(busy)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.onboarding.speech.cancel();
+                                        this.setup_step(Step::Ai, cx);
+                                    })),
+                            )
+                        },
+                    )
                     .when(step == Step::Ai, |row| {
                         row.child(
                             material_button("setup-skip-ai", ButtonVariant::Outlined)
