@@ -876,13 +876,15 @@ impl Resource {
                 .child(scale.label(child("title"), self.title))
                 .when(self.busy, |row| {
                     row.child(spinner(child("busy"), c2m_i18n::tr!("正在检查"), cx))
-                })
-                .children(
-                    self.status
-                        .into_iter()
-                        .map(|(kind, label)| status_chip(kind).child(label)),
-                ),
+                }),
         );
+        // The row's state sits at its end, with its commands (design: a status chip
+        // at the row's end), not beside the name.
+        let chips: Vec<AnyElement> = self
+            .status
+            .into_iter()
+            .map(|(kind, label)| status_chip(kind).child(label).into_any_element())
+            .collect();
         for (index, (line, failed)) in self.lines.into_iter().enumerate() {
             let line_id = ElementId::NamedChild(Arc::new(child("line")), index.to_string().into());
             text = text.child(if failed {
@@ -910,7 +912,7 @@ impl Resource {
                     .child(tinted_icon(self.icon, self.tint, RESOURCE_ICON))
                     .child(text),
             )
-            .when(!self.actions.is_empty(), |row| {
+            .when(!self.actions.is_empty() || !chips.is_empty(), |row| {
                 row.child(
                     h_flex()
                         .flex_shrink_0()
@@ -922,6 +924,7 @@ impl Resource {
                         // A command in a row that opens something does only its command.
                         .id(child("actions"))
                         .on_click(|_, _, cx| cx.stop_propagation())
+                        .children(chips)
                         .children(self.actions),
                 )
             })

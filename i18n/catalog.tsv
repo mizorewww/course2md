@@ -1209,7 +1209,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 未检测到设备	未检测到设备	Device not detected	未偵測到裝置	デバイスが検出されません
 未检测到语音，将仅保留截图 / No speech detected; keeping slides without a transcript	未检测到语音，将仅保留截图	No speech detected; keeping slides without a transcript	未偵測到語音，將僅保留截圖	音声は検出されず、スクリーンショットのみが保存されます
 未生成可读笔记	未生成可读笔记	No readable notes generated	未生成可讀筆記	読み取り可能なノートが生成されませんでした
-未登录	未登录	Not signed in	未登入	未ログイン
 未知的语言：{}。可用：auto、en、zh-Hans、zh-Hant、ja	未知的语言：{}。可用：auto、en、zh-Hans、zh-Hant、ja	Unknown language: {}. Available: auto, en, zh-Hans, zh-Hant, ja	未知的語言：{}。可用：auto、en、zh-Hans、zh-Hant、ja	不明な言語: {}。利用可能: auto、en、zh-Hans、zh-Hant、ja
 未能识别服务返回的模型列表	未能识别服务返回的模型列表	The list of models returned by the service was not recognized	無法辨識服務傳回的模型列表	サービスによって返されたモデルのリストが認識されませんでした
 未设置 / not set	未设置	not set	未設定	設定されていません
