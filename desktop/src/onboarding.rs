@@ -838,7 +838,8 @@ impl Desktop {
                         course2md::tr!("识别方式"),
                         course2md::tr!("AI 服务"),
                         course2md::tr!("来源账号"),
-                        course2md::tr!("模型准备"),
+                        // Named by what it readies: a local model or the speech service.
+                        course2md::tr!("识别准备"),
                     ])
                     .current(number - 1),
             )
