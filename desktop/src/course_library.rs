@@ -2248,6 +2248,7 @@ impl Desktop {
                 })
                 .cloned()
         };
+        let recoverable_stop = crate::task_ui::recoverable(lead.as_ref());
         let next =
             if lead.is_none() && !requires_repair && !uncertain && !partial_components.is_empty() {
                 let labels = partial_components
@@ -2359,7 +2360,8 @@ impl Desktop {
                         .child(match summary {
                             Some(summary) => notice_banner(
                                 SharedString::from(format!("recent-summary-{id}")),
-                                if task.state == TaskState::NeedsAttention {
+                                // As on Tasks: an obstacle with its repair is amber.
+                                if task.state == TaskState::NeedsAttention && !recoverable_stop {
                                     NoticeKind::Danger
                                 } else {
                                     NoticeKind::Warning

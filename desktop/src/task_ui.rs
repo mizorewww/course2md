@@ -230,6 +230,15 @@ pub(crate) fn action_click(
 }
 
 /// Where a task's plan goes and what it does: a card's second line.
+/// Whether a task's way on repairs what stopped it: a missing model, a deleted or
+/// refused service, an adjustment. Such a stop is an obstacle, not a failure.
+pub(crate) fn recoverable(lead: Option<&TaskAction>) -> bool {
+    matches!(
+        lead,
+        Some(TaskAction::PrepareModel | TaskAction::Repair | TaskAction::Adjust)
+    )
+}
+
 fn task_support_line(id: &str, support: String) -> Stateful<Div> {
     accessible_text(SharedString::from(format!("task-support-{id}")), support)
         .text_size(TEXT_AUX)
@@ -1576,9 +1585,15 @@ impl TasksPage {
                     .child(stage.title.clone())
                 }))
         });
+        // A repair inside the notice that states its obstacle is tonal, as every
+        // notice's repair is; the card's filled action is one that finishes it.
+        let lead_in_notice = !row && needs_person(task) && !task_reasons(task).is_empty();
+        let recoverable_stop = recoverable(lead.as_ref());
         let buttons = actions.iter().map(|action| {
             let (label, icon, disabled) = self.present(action, task, cx);
-            let variant = if lead.as_ref() == Some(action) {
+            let variant = if lead.as_ref() == Some(action) && lead_in_notice {
+                ButtonVariant::Tonal
+            } else if lead.as_ref() == Some(action) {
                 ButtonVariant::Filled
             } else {
                 match action {
@@ -1625,7 +1640,9 @@ impl TasksPage {
                 .and_then(|index| buttons[index].take());
             notice_banner(
                 SharedString::from(format!("task-reason-{id}")),
-                if task.state == TaskState::NeedsAttention {
+                // An obstacle with its repair is amber, as the workbench says it; red is
+                // for a failure with nothing to repair.
+                if task.state == TaskState::NeedsAttention && !recoverable_stop {
                     NoticeKind::Danger
                 } else {
                     NoticeKind::Warning

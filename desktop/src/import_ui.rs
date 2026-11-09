@@ -3155,9 +3155,18 @@ impl Desktop {
             ),
             Some(message) => {
                 notice = Some(
-                    notice_banner("import-submit-status", NoticeKind::Danger, message.clone())
-                        .rounded(RADIUS_LARGE)
-                        .children(repairs.drain(..)),
+                    // An obstacle the notice can repair is amber; one it cannot is red.
+                    notice_banner(
+                        "import-submit-status",
+                        if repairs.is_empty() {
+                            NoticeKind::Danger
+                        } else {
+                            NoticeKind::Warning
+                        },
+                        message.clone(),
+                    )
+                    .rounded(RADIUS_LARGE)
+                    .children(repairs.drain(..)),
                 );
                 self.workbench_notice = Some(message);
             }
