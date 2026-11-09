@@ -209,14 +209,37 @@ pub(crate) fn dialog_body_height(window: &Window) -> Pixels {
 enum SettingsLayout {
     /// The navigation pane beside the content.
     Pane,
-    /// A narrow window: the categories in a rail of short names beside the content.
+    /// A narrow window: the categories by name alone, in a rail beside the content.
     Rail,
     /// No room for anything beside the content: one column, the categories in a menu.
     Single,
 }
 
-/// The rail and its gap, in 100%-scale px.
-const SETTINGS_RAIL: f32 = 184. + 16.;
+/// The rail's narrowest width and its gap, in 100%-scale px.
+const SETTINGS_RAIL_MIN: f32 = 184.;
+const SETTINGS_RAIL_GAP: f32 = 16.;
+/// The widest the rail grows to hold a category's whole name, in 100%-scale px.
+const SETTINGS_RAIL_MAX: f32 = 240.;
+
+/// The rail's width in 100%-scale px: wide enough for every category's whole name
+/// beside its circle (a list item's 16 inset, 40 circle, 16 gap and 16 trailing
+/// inset), measured at the current text scale. A name longer than the widest rail
+/// wraps in its row.
+fn settings_rail_width(window: &Window) -> f32 {
+    let scale = f32::from(window.rem_size()) / gpui_kit_material::tokens::typography::BASE_PX;
+    SettingsTab::ALL
+        .iter()
+        .map(|tab| {
+            crate::views::shaped_width(tab.label(), 16. * scale, FontWeight::NORMAL, window) / scale
+                + 16.
+                + 40.
+                + 16.
+                + 16.
+        })
+        .fold(SETTINGS_RAIL_MIN, f32::max)
+        .ceil()
+        .min(SETTINGS_RAIL_MAX)
+}
 /// The narrowest content beside the rail that holds a resource row (its circle, name,
 /// status and action) and a label beside its control, in 100%-scale px.
 const SETTINGS_CONTENT_MIN: f32 = 400.;
@@ -230,11 +253,11 @@ impl SettingsLayout {
         }
         let unit = f32::from(rem(1.).to_pixels(window.rem_size()));
         let width = crate::views::shell_content_width(Page::Settings, window) / unit;
-        Self::for_width(width)
+        Self::for_width(width, settings_rail_width(window))
     }
 
-    fn for_width(width: f32) -> Self {
-        if width >= SETTINGS_RAIL + SETTINGS_CONTENT_MIN {
+    fn for_width(width: f32, rail: f32) -> Self {
+        if width >= rail + SETTINGS_RAIL_GAP + SETTINGS_CONTENT_MIN {
             Self::Rail
         } else {
             Self::Single
@@ -271,14 +294,6 @@ impl SettingsTab {
             Self::Services => course2md::tr!("服务与账号"),
             Self::Storage => course2md::tr!("存储"),
             Self::Application => course2md::tr!("应用 / Application"),
-        }
-    }
-    /// The narrow rail has room for two characters.
-    fn short_label(self) -> &'static str {
-        match self {
-            Self::Generation => course2md::tr!("笔记"),
-            Self::Services => course2md::tr!("服务"),
-            other => other.label(),
         }
     }
     fn icon(self) -> SymbolIcon {
@@ -642,8 +657,7 @@ impl Desktop {
                 .iter()
                 .filter(|tab| visible.contains(tab))
                 .map(|&tab| {
-                    let label = if rail { tab.short_label() } else { tab.label() };
-                    ListItem::new(("settings-tab", tab.index()), label)
+                    ListItem::new(("settings-tab", tab.index()), tab.label())
                         .when(!rail, |item| item.supporting(tab.subtitle()))
                         .leading(ListLeading::Tinted(tab.icon().into(), tab.tint(), 40.))
                         .selected(self.settings_tab == tab)
@@ -921,8 +935,12 @@ impl Desktop {
             .gap(rem(if compact { 16. } else { 40. }))
             .child(
                 div()
-                    // Narrow, the list keeps its circles and short names.
-                    .w(rem(if compact { 184. } else { 320. }))
+                    // Narrow, the list keeps its circles and whole names.
+                    .w(rem(if compact {
+                        settings_rail_width(window)
+                    } else {
+                        320.
+                    }))
                     .flex_shrink_0()
                     .h_full()
                     .min_h_0()
@@ -2224,9 +2242,13 @@ mod tests {
     fn settings_leave_the_rail_when_text_leaves_the_content_no_room() {
         use super::SettingsLayout;
         // 720 points wide less the narrow gutters, at 100% and at 150% text.
-        assert_eq!(SettingsLayout::for_width(720. - 32.), SettingsLayout::Rail);
+        // A rail wide enough for English names still leaves the content its room.
         assert_eq!(
-            SettingsLayout::for_width((720. - 32.) / 1.5),
+            SettingsLayout::for_width(720. - 32., super::SETTINGS_RAIL_MAX),
+            SettingsLayout::Rail
+        );
+        assert_eq!(
+            SettingsLayout::for_width((720. - 32.) / 1.5, super::SETTINGS_RAIL_MIN),
             SettingsLayout::Single
         );
     }
