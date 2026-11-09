@@ -6,7 +6,7 @@
 //! `COURSE2MD_DOWNLOAD_MODELS=1` allows it. `models prepare` and `models download` are
 //! the explicit commands and never ask. Desktop tasks (`run-task`) never download.
 
-use crate::models::ModelOffer;
+use crate::models::{ModelOffer, size_text};
 use crate::tr;
 use std::io::{BufRead, Write};
 
@@ -86,16 +86,6 @@ pub fn question(offer: &ModelOffer) -> String {
         size,
         location
     )
-}
-
-fn size_text(bytes: u64) -> String {
-    const GB: u64 = 1 << 30;
-    const MB: u64 = 1 << 20;
-    if bytes >= GB {
-        format!("{:.1} GB", bytes as f64 / GB as f64)
-    } else {
-        format!("{} MB", bytes.div_ceil(MB))
-    }
 }
 
 /// Asks the question on `output` and reads one line of `input`.

@@ -465,6 +465,24 @@ impl Desktop {
 
     /// The one report of a model. `full` adds its name, engine and details, for a
     /// surface where the model is the subject; the workbench shows the rest.
+    /// The engine, and before a download what the model is for and how much it downloads.
+    fn model_subtitle(
+        &self,
+        request: &Request,
+        status: Option<&course2md::models::status::LocalModelStatus>,
+    ) -> SharedString {
+        let engine = provider_label(Some(request.provider));
+        let tradeoff = desktop_prefs::setup::model_tradeoff(request.provider, &request.model);
+        let missing = status.is_some_and(|status| {
+            matches!(status.state, CacheState::Missing | CacheState::Partial)
+        });
+        if missing && !tradeoff.is_empty() {
+            format!("{engine} · {tradeoff}").into()
+        } else {
+            engine.into()
+        }
+    }
+
     pub(crate) fn model_surface(
         &self,
         request: &Request,
@@ -500,7 +518,7 @@ impl Desktop {
                 .child(scale.text(
                     id("name"),
                     model_label(&request.model),
-                    Some(provider_label(Some(request.provider)).into()),
+                    Some(self.model_subtitle(request, status)),
                 ))
                 .child(chip)
         } else {

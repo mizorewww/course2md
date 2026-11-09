@@ -234,20 +234,34 @@ impl Desktop {
                 model_value,
                 MaterialMenu::new("local-model-items")
                     .width(MENU_WIDTH)
-                    .items(ui::choice_items(
-                        models.iter().map(|model| (model.id, model.label)),
-                        &current_model,
-                        cx.listener(|this, id: &&'static str, window, cx| {
-                            this.select_local_model(id, window, cx)
+                    .items(
+                        ui::choice_items(
+                            models.iter().map(|model| (model.id, model.label)),
+                            &current_model,
+                            cx.listener(|this, id: &&'static str, window, cx| {
+                                this.select_local_model(id, window, cx)
+                            }),
+                        )
+                        .zip(models.iter())
+                        // Each model says what it is good for and what it downloads.
+                        .map(|(item, model)| {
+                            let tradeoff = desktop_prefs::setup::model_tradeoff(provider, model.id);
+                            if tradeoff.is_empty() {
+                                item
+                            } else {
+                                item.supporting_text(tradeoff)
+                            }
                         }),
-                    )),
+                    ),
             )
+            .hint(state_label)
         } else {
             ui::Field::inline(
                 "default-local-model",
                 course2md::tr!("识别模型"),
                 TileScale::Regular.support("default-local-model-name", model_value),
             )
+            .hint(state_label)
         });
         // An engine that cannot run here says why with its repair; otherwise an unsettled
         // check says what is still open. A finished check on a ready model says nothing.

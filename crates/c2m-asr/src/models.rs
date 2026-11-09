@@ -148,7 +148,7 @@ pub fn missing(
 }
 
 /// About how much a model's download is, when this application knows.
-fn download_size(provider: crate::config::AsrProvider, model: &str) -> Option<u64> {
+pub fn download_size(provider: crate::config::AsrProvider, model: &str) -> Option<u64> {
     use crate::config::AsrProvider;
     const GB: f64 = (1u64 << 30) as f64;
     match (provider, model) {
@@ -157,6 +157,17 @@ fn download_size(provider: crate::config::AsrProvider, model: &str) -> Option<u6
         (AsrProvider::Coreml, "qwen3-1.7b") => Some((2.3 * GB) as u64),
         (AsrProvider::Coreml, "qwen3-0.6b") => Some((1.0 * GB) as u64),
         _ => None,
+    }
+}
+
+/// A download size as people read it: `2.3 GB`, `340 MB`.
+pub fn size_text(bytes: u64) -> String {
+    const GB: u64 = 1 << 30;
+    const MB: u64 = 1 << 20;
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else {
+        format!("{} MB", bytes.div_ceil(MB))
     }
 }
 

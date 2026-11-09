@@ -1017,6 +1017,13 @@ impl Desktop {
                 },
             ));
         let (_, model_status) = self.model_reading(&self.setup_model_request(), cx);
+        // What the chosen model is for and what it downloads, beside its state.
+        let tradeoff = model_tradeoff(provider, &self.onboarding.model);
+        let model_status = if tradeoff.is_empty() {
+            model_status.to_owned()
+        } else {
+            format!("{model_status} · {tradeoff}")
+        };
         let fields = ui::field_table(
             "setup-local-engine",
             course2md::tr!("识别模型"),

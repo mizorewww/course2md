@@ -2319,3 +2319,5 @@ course2md 不在“应用程序”文件夹中。请先退出 course2md，在访
 其他任务结束后才能下载模型	其他任务结束后才能下载模型	The model can be downloaded once the current job finishes	其他任務結束後才能下載模型	現在のジョブが終わるとモデルをダウンロードできます
 所选服务已不在设置中，这次笔记改用默认服务「{}」	所选服务已不在设置中，这次笔记改用默认服务「{}」	The chosen service is no longer in settings; this note uses the default service “{}”	所選服務已不在設定中，這次筆記改用預設服務「{}」	選択したサービスは設定にありません。このノートには既定のサービス「{}」を使います
 缺少读取视频所需的组件	缺少读取视频所需的组件	Components needed to read videos are missing	缺少讀取影片所需的元件	動画の読み込みに必要なコンポーネントがありません
+下载约 {}	下载约 {}	About {} to download	下載約 {}	ダウンロード約 {}
+多语种	多语种	Multilingual	多語種	多言語
