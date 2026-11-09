@@ -1952,20 +1952,29 @@ impl Desktop {
                         selected.config.host()
                     )
                 });
-            fields.push(
+            // With none saved, adding one is an add row, as in Settings.
+            fields.push(if self.has_services(ServicePurpose::Ai) {
                 ui::Field::below(
                     "import-ai-service",
                     course2md::tr!("AI 服务"),
                     self.task_service_picker(ServicePurpose::Ai, window, cx),
                 )
-                .hint(consequence.unwrap_or_default()),
-            );
+                .hint(consequence.unwrap_or_default())
+            } else {
+                ui::Field::add(
+                    "import-ai-service",
+                    desktop_prefs::service_binding::add_service_label(ServicePurpose::Ai),
+                    cx.listener(|this, _, window, cx| {
+                        this.open_task_service_editor(ServicePurpose::Ai, window, cx)
+                    }),
+                )
+            });
         }
         // A quiet reset that names itself once: ink, not the primary of the panel's
         // actions (G4), at the group's foot.
         fields.push(ui::Field::content(
             "reset-task-overrides-field",
-            h_flex().w_full().justify_end().child(
+            h_flex().w_full().child(
                 material_button("reset-task-overrides", ButtonVariant::Text)
                     .tone(ButtonTone::Neutral)
                     .icon(symbols::restart_alt())
@@ -2165,7 +2174,14 @@ impl Desktop {
             ui::Field::inline(
                 "import-library",
                 course2md::tr!("笔记库"),
-                TileScale::Regular.support("import-library-name", library_name),
+                TileScale::Regular.support(
+                    "import-library-name",
+                    // The name and where it is: the name alone may repeat the label.
+                    libraries
+                        .first()
+                        .map(|library| format!("{} · {}", library.label(), library.root.display()))
+                        .unwrap_or(library_name),
+                ),
             )
         } else {
             ui::Field::menu(

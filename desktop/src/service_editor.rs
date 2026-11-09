@@ -150,7 +150,7 @@ impl Desktop {
             }))
     }
 
-    fn has_services(&self, purpose: ServicePurpose) -> bool {
+    pub(crate) fn has_services(&self, purpose: ServicePurpose) -> bool {
         self.preferences.latest_versions().values().any(|version| {
             version.config.protocol.purpose() == purpose
                 && !self
