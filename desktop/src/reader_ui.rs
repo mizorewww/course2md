@@ -1275,6 +1275,13 @@ impl ReaderPage {
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn()
+                // The player outlives the call; a thread waits on it so its exit
+                // is reaped instead of left as a zombie.
+                .map(|mut child| {
+                    std::thread::spawn(move || {
+                        let _ = child.wait();
+                    });
+                })
                 .is_ok()
         });
         if !started {
