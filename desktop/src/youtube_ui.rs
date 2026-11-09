@@ -276,20 +276,45 @@ impl AccountsView {
         .detach();
     }
 
-    /// Step 1: System Settings › Privacy & Security › Full Disk Access. A note
-    /// left for the next launch brings the person back here if macOS reopens the app.
-    /// The person says they turned course2md on: look again, and either connect
-    /// or go on to reopening the app, which macOS needs to apply the switch.
+    /// The person says they turned course2md on: look again off the UI thread, and
+    /// either connect or go on to reopening the app, which macOS needs to apply the
+    /// switch. What the look finds is recorded as the poll records it.
     fn access_switched_on(&mut self, cx: &mut Context<Self>) {
-        if let Some(dialog) = &mut self.youtube.dialog
-            && let Some(guide) = dialog.guide.as_mut()
-        {
-            let access = look(guide.browser);
-            guide.switched_on(access, Instant::now());
-        }
-        cx.notify();
+        let Some(browser) = self
+            .youtube
+            .dialog
+            .as_ref()
+            .and_then(|dialog| dialog.guide.as_ref())
+            .map(|guide| guide.browser)
+        else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let Some(access) = crate::spawn_blocking_io(move || look(browser)).await else {
+                return;
+            };
+            let _ = this.update(cx, |this, cx| {
+                if let Some(dialog) = &mut this.youtube.dialog
+                    && let Some(guide) = dialog.guide.as_mut()
+                    && guide.browser == browser
+                {
+                    guide.switched_on(access, Instant::now());
+                    // Access given in this run: no reopen to come back from.
+                    if guide.step == AccessStep::Granted {
+                        let _ = std::fs::remove_file(resume_marker_path());
+                    }
+                }
+                if this.youtube.choice.as_ref().map(|choice| choice.browser) == Some(browser) {
+                    this.youtube.access = Some(access);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
+    /// Step 1: System Settings › Privacy & Security › Full Disk Access. A note
+    /// left for the next launch brings the person back here if macOS reopens the app.
     fn open_access_settings(&mut self, cx: &mut Context<Self>) {
         if !stubbed(&format!("open {}", youtube::FULL_DISK_ACCESS_SETTINGS)) {
             cx.open_url(youtube::FULL_DISK_ACCESS_SETTINGS);
