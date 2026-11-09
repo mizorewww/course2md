@@ -160,6 +160,9 @@ pub(crate) struct TasksPage {
     facts: ShellFacts,
     /// Details already shown once; a virtualized row remounts without replaying them.
     entered: HashSet<String>,
+    /// The workbench's running card: its actions, taken from its text column to run
+    /// across the card's foot as one group, as the draft card's do.
+    home_footer: Option<Div>,
 }
 
 /// What the cards show that neither the records nor the work hold. The window sets it
@@ -309,6 +312,7 @@ impl TasksPage {
             task_list: TaskListUi::new(),
             facts: ShellFacts::default(),
             entered: HashSet::new(),
+            home_footer: None,
         }
     }
 
@@ -1050,6 +1054,7 @@ impl TasksPage {
             }
         };
         let body = body.then(|| self.task_body(task, place, window, cx));
+        let footer = self.home_footer.take();
         tile(outer)
             .map(|card| match place {
                 CardPlace::Home => card.rounded_t(RADIUS_HERO),
@@ -1071,7 +1076,12 @@ impl TasksPage {
                     .children(body.map(|body| div().px(rem(16.)).pb(rem(16.)).child(body))),
                 // A card of its own on Tasks is roomy, as its large corners are (T6).
                 CardPlace::Open { .. } => card.p(rem(20.)).gap(rem(16.)).child(head).children(body),
-                _ => card.p(rem(16.)).gap(rem(16.)).child(head).children(body),
+                _ => card
+                    .p(rem(16.))
+                    .gap(rem(16.))
+                    .child(head)
+                    .children(body)
+                    .children(footer),
             })
             .into_any_element()
     }
@@ -1730,7 +1740,14 @@ impl TasksPage {
                     )
                 },
             )
-            .child(buttons)
+            .map(|body| {
+                if home_running {
+                    self.home_footer = Some(buttons);
+                    body
+                } else {
+                    body.child(buttons)
+                }
+            })
             .children(details)
             .children(log)
     }
