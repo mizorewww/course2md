@@ -639,7 +639,7 @@ impl AccountsView {
                     .child(supporting_info(
                         "youtube-access-why",
                         course2md::tr!(
-                            "macOS 只允许有“完全磁盘访问权限”的应用读取 {} 的数据，course2md 需要这项权限才能读取其中的 YouTube 登录。",
+                            "macOS 只让有完全磁盘访问权限的应用读取 {} 的数据。course2md 只用它读取 YouTube 登录，不保存 Cookie。这项权限也允许读取其他受保护的文件，可随时在系统设置中关闭。",
                             guide.browser.name()
                         ),
                     )),
@@ -652,13 +652,13 @@ impl AccountsView {
                     .child(supporting_info(
                         "youtube-explain",
                         course2md::tr!(
-                            "YouTube 不允许在其他应用中用密码登录。course2md 会让 yt-dlp 读取所选浏览器中的 YouTube 登录（Cookie），只在打开 YouTube 视频时使用，不保存这些 Cookie。连接时的检查会让 yt-dlp 把浏览器的 Cookie 短暂写入本机的私有临时文件，检查结束即删除。"
+                            "YouTube 不支持在其他应用中用密码登录。course2md 让 yt-dlp 读取所选浏览器中的 YouTube 登录，只在打开 YouTube 视频时使用，不会保存；检查时的临时副本随即删除。"
                         ),
                     )),
                 _ => supporting_info(
                     "youtube-explain",
                     course2md::tr!(
-                        "YouTube 不允许在其他应用中用密码登录。course2md 会让 yt-dlp 读取所选浏览器中的 YouTube 登录（Cookie），只在打开 YouTube 视频时使用，不保存这些 Cookie。连接时的检查会让 yt-dlp 把浏览器的 Cookie 短暂写入本机的私有临时文件，检查结束即删除。"
+                        "YouTube 不支持在其他应用中用密码登录。course2md 让 yt-dlp 读取所选浏览器中的 YouTube 登录，只在打开 YouTube 视频时使用，不会保存；检查时的临时副本随即删除。"
                     ),
                 ),
             });
@@ -671,7 +671,7 @@ impl AccountsView {
                     "youtube-risk",
                     NoticeKind::Warning,
                     course2md::tr!(
-                        "用账号下载可能让 YouTube 限制或封禁这个账号。请适度使用，或使用不常用的账号。"
+                        "用账号下载可能让 YouTube 限制或封禁这个账号，请适度使用或用不常用的账号。"
                     ),
                 ))
             });
@@ -743,18 +743,21 @@ impl AccountsView {
                     body = body.child(supporting_info("youtube-browser-note", note));
                 }
             }
-            match &guide {
-                Some(_) if guiding => {
-                    body = body.child(supporting_info(
-                        "youtube-access-privacy",
-                        course2md::tr!(
-                            "获得权限后，yt-dlp 会在这台 Mac 上读取所选浏览器的 Cookie，只在打开 YouTube 视频时用来访问 YouTube；course2md 不保存它们（连接时的检查会把它们短暂写入私有临时文件，检查结束即删除）。完全磁盘访问权限也让 course2md 能读取其他受保护的文件，你可以随时在系统设置中关闭。"
-                        ),
-                    ));
-                }
-                // Granted: shown first, above.
-                Some(_) => {}
-                None => {}
+            // While the guide stands in the way, a check anyway follows the browser it
+            // checks, so a folder the look got wrong never traps the person.
+            if guiding && let Some(choice) = dialog.choice() {
+                body = body.child(
+                    div().child(
+                        material_button("youtube-check-anyway", ButtonVariant::Text)
+                            .tone(ButtonTone::Neutral)
+                            .icon(symbols::login())
+                            .child(course2md::tr!("仍然尝试连接"))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                // The guide keeps its step: a refusal comes back to it.
+                                this.check_youtube(choice.clone(), true, true, cx);
+                            })),
+                    ),
+                );
             }
             // The check's result sits under the choice it is about, next to the action.
             match &dialog.step {
@@ -778,9 +781,7 @@ impl AccountsView {
                     body = body.child(notice_banner(
                         "youtube-signed-out",
                         NoticeKind::Danger,
-                        course2md::tr!(
-                            "这个浏览器中没有登录 YouTube。请先在浏览器中登录 YouTube，再重新检查。"
-                        ),
+                        course2md::tr!("这个浏览器中没有登录 YouTube。在浏览器中登录后再检查。"),
                     ));
                 }
                 YoutubeStep::Failed {
@@ -896,7 +897,6 @@ impl AccountsView {
         let name = guide.browser.name();
         let bundle = app_bundle().is_some();
         let translocated = must_move();
-        let choice = self.youtube.dialog.as_ref().and_then(YoutubeDialog::choice);
         let steps = [
             course2md::tr!("系统设置"),
             course2md::tr!("允许 course2md"),
@@ -934,9 +934,9 @@ impl AccountsView {
                 .whitespace_normal()
                 .min_w_0()
         };
-        // The step's helpers, always in this order: back to System Settings,
-        // then the app in Finder, to drag into the list, then a check anyway, so
-        // a folder the look got wrong never traps the person.
+        // The step's helpers, always in this order: back to System Settings, then
+        // the app in Finder, to drag into the list. The check anyway follows the
+        // browser choice, below.
         let helpers = |settings: bool, reveal: bool| {
             h_flex()
                 .w_full()
@@ -957,18 +957,6 @@ impl AccountsView {
                             .icon(symbols::folder_open())
                             .child(course2md::tr!("在访达中显示 course2md"))
                             .on_click(cx.listener(|this, _, _, cx| this.reveal_app(cx))),
-                    )
-                })
-                .when_some(choice.clone(), |row, choice| {
-                    row.child(
-                        material_button("youtube-check-anyway", ButtonVariant::Text)
-                            .tone(ButtonTone::Neutral)
-                            .icon(symbols::login())
-                            .child(course2md::tr!("仍然尝试连接"))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                // The guide keeps its step: a refusal comes back to it.
-                                this.check_youtube(choice.clone(), true, true, cx);
-                            })),
                     )
                 })
         };
@@ -994,8 +982,7 @@ impl AccountsView {
                             "course2md 正从一份临时副本运行（macOS 对刚下载、尚未移动的应用会这样做），给它的权限在下次打开时不会保留。请先退出 course2md，在访达中把它从“下载”等位置拖到“应用程序”文件夹，再从“应用程序”打开，然后回到这里。"
                         )
                     },
-                ))
-                .child(helpers(false, false)),
+                )),
             // Reopened for the access and still closed: the switch is off, or on
             // for another copy of the app than this one.
             AccessStep::Blocked if guide.reopened => content
@@ -1011,16 +998,15 @@ impl AccountsView {
                 .child(text(
                     "youtube-access-step",
                     course2md::tr!(
-                        "点按“打开系统设置”，前往“隐私与安全性 › 完全磁盘访问权限”，在列表中打开 course2md。"
+                        "在“隐私与安全性 › 完全磁盘访问权限”中打开 course2md。"
                     )
                     .into(),
-                ))
-                .child(helpers(false, false)),
+                )),
             AccessStep::Waiting => content
                 .child(text(
                     "youtube-access-step",
                     course2md::tr!(
-                        "在列表中打开 course2md 的开关。如果列表中没有 course2md，点按列表下方的“+”添加它，或把它从访达拖进列表。"
+                        "打开 course2md 的开关。列表中没有它时，点按“+”添加，或从访达拖进列表。"
                     )
                     .into(),
                 ))
