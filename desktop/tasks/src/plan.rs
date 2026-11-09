@@ -30,6 +30,21 @@ impl std::fmt::Display for TitleRequired {
 
 impl std::error::Error for TitleRequired {}
 
+/// The name a draft's note is saved under: the one typed, or the video's own when the
+/// field is empty. `None` only when both are empty.
+pub fn note_title(draft: &workspace::Draft) -> Option<String> {
+    let typed = draft.title.trim();
+    if !typed.is_empty() {
+        return Some(typed.to_owned());
+    }
+    draft
+        .source
+        .as_ref()
+        .map(|source| source.title.trim())
+        .filter(|title| !title.is_empty())
+        .map(str::to_owned)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PlanValidation {
     Preview,
@@ -584,9 +599,9 @@ impl PlanInputs<'_> {
             !source.identity.is_empty(),
             c2m_i18n::tr!("无法识别这个视频，请重新预览")
         );
-        if draft.title.trim().is_empty() {
+        let Some(title) = note_title(draft) else {
             return Err(TitleRequired.into());
-        }
+        };
         let mut config = self.plan_storage_and_config(workspace, draft, validation)?;
         let using_subtitle = draft.options.source_mode != TranscriptSource::Asr
             && (source.selected_subtitle.is_some() || draft.subtitle.is_some());
@@ -614,7 +629,7 @@ impl PlanInputs<'_> {
             config.defaults.transcript_source = Some(TranscriptSource::Asr);
             self.plan_asr(&mut config, environment, None)?;
         }
-        let plan = self.finish_plan(draft, config, validation, source, draft.title.clone())?;
+        let plan = self.finish_plan(draft, config, validation, source, title)?;
         Ok(TaskPlan {
             subtitle: draft.subtitle.clone(),
             ..plan

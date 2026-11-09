@@ -1411,9 +1411,12 @@ impl Desktop {
                             .flex_1()
                             .min_w_0()
                             .gap(rem(4.))
+                            // The name the note is saved under, as 处理选项 sets it.
                             .child(video_title(
                                 "import-selected-title".to_owned(),
-                                source.title.clone(),
+                                self.draft(cx)
+                                    .and_then(desktop_tasks::plan::note_title)
+                                    .unwrap_or_else(|| source.title.clone()),
                             ))
                             .child(
                                 h_flex()
@@ -2174,6 +2177,14 @@ impl Desktop {
                         .w_full()
                         .outlined()
                         .shape(TextFieldShape::Rounded)
+                        // Empty, the note takes the video's own name, shown here.
+                        .when_some(
+                            self.import
+                                .source_preview
+                                .as_ref()
+                                .map(|source| source.title.clone()),
+                            |field, title| field.placeholder(title),
+                        )
                         .error(self.import.title_required)
                         .when_some(
                             self.import
@@ -2325,7 +2336,11 @@ impl Desktop {
         let applies_to: SharedString = match (&owner, &self.import.source_preview) {
             (Some(_), _) => course2md::tr!("提交时已确定，不能再更改").into(),
             (None, Some(source)) if attached => {
-                course2md::tr!("仅对「{}」生效", source.title).into()
+                let title = self
+                    .draft(cx)
+                    .and_then(desktop_tasks::plan::note_title)
+                    .unwrap_or_else(|| source.title.clone());
+                course2md::tr!("仅对「{}」生效", title).into()
             }
             _ => course2md::tr!("仅对下一个视频生效").into(),
         };
