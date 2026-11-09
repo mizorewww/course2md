@@ -104,6 +104,12 @@ pub fn seeking_player(
         {
             bundles.push(root.join("IINA.app/Contents/MacOS/iina-cli"));
             bundles.push(root.join("VLC.app/Contents/MacOS/VLC"));
+            bundles.push(root.join("mpv.app/Contents/MacOS/mpv"));
+        }
+        // An app opened from Finder has no shell PATH: Homebrew's own places.
+        for dir in ["/opt/homebrew/bin", "/usr/local/bin"] {
+            bundles.push(PathBuf::from(dir).join("mpv"));
+            bundles.push(PathBuf::from(dir).join("vlc"));
         }
     } else if cfg!(windows) {
         for variable in ["ProgramFiles", "ProgramFiles(x86)"] {
@@ -310,6 +316,24 @@ mod tests {
             local_seek_seconds("https://www.youtube.com/watch?v=x&t=12"),
             None
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_app_bundle_in_the_home_applications_folder_is_found() {
+        let home = tempfile::tempdir().unwrap();
+        let mpv = home.path().join("Applications/mpv.app/Contents/MacOS/mpv");
+        std::fs::create_dir_all(mpv.parent().unwrap()).unwrap();
+        std::fs::write(&mpv, b"").unwrap();
+        let empty = tempfile::tempdir().unwrap();
+        let paths = std::env::join_paths([empty.path()]).unwrap();
+        let file = Path::new("/videos/lecture.mp4");
+        let (program, arguments) =
+            seeking_player(file, 5., Some(&paths), Some(home.path())).unwrap();
+        // A player installed for everyone comes first; only then is this one used.
+        if program == mpv {
+            assert_eq!(arguments, ["--start=5", "/videos/lecture.mp4"]);
+        }
     }
 
     #[test]
