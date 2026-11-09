@@ -3229,10 +3229,15 @@ impl ReaderPage {
             .min_w_0()
             .w_full()
             .child(gallery.size_full())
+            // The scrollbar sits in the gutter beside the column, clear of a notice's
+            // trailing action.
             .child(
                 div()
                     .absolute()
-                    .inset_0()
+                    .top_0()
+                    .bottom_0()
+                    .right(rem(-16.))
+                    .w(rem(16.))
                     .child(Scrollbar::vertical(&self.gallery.list).viewport_from_layout()),
             )
             .into_any_element()
