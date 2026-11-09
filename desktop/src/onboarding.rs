@@ -1572,6 +1572,11 @@ impl Desktop {
                                     .disabled(busy)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.onboarding.speech.cancel();
+                                        // Later means the saved route stands until then,
+                                        // so the last step prepares that one, not this.
+                                        let saved = this.preferences.generation().options.provider;
+                                        this.onboarding.provider = saved;
+                                        this.ensure_setup_model(cx);
                                         this.setup_step(Step::Ai, cx);
                                     })),
                             )
