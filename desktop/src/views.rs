@@ -17,8 +17,6 @@ use gpui_kit_material::{
 
 const SHELL_GUTTER: f32 = 24.;
 const SETTINGS_SHELL_WIDTH: f32 = 1108.;
-/// The reading column of a page without a wider one of its own.
-const COLUMN: f32 = 920.;
 
 /// The height the window opens for: the traffic lights sit centred on it.
 pub(crate) const APP_BAR_HEIGHT: Pixels = px(56.);
@@ -161,9 +159,10 @@ fn shell_column_width(page: Page) -> AbsoluteLength {
         Page::Settings => rems(SETTINGS_SHELL_WIDTH / 14.).into(),
         Page::Library => rems(1280. / 14.).into(),
         Page::New => rems(1200. / 14.).into(),
+        // Tasks read at home's column, centred on the same axis.
+        Page::Task => rems((760. + SHELL_GUTTER * 2.) / 14.).into(),
         // Sections set the screenshot beside the text, as on the canvas.
         Page::Result => rems(1180. / 14.).into(),
-        _ => rem(COLUMN).into(),
     }
 }
 
