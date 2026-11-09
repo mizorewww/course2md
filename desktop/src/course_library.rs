@@ -1858,6 +1858,8 @@ impl Desktop {
             .library(cx)
             .note_source(course)
             .and_then(|source| source.duration)
+            // A note whose task is gone keeps the length its own record says.
+            .or(course.duration)
             .filter(|_| home)
             .map(course2md::render::fmt_ts);
         let row =
@@ -3532,6 +3534,7 @@ mod tests {
             thumbnail: None,
             manifest: None,
             warning: None,
+            duration: None,
         }
     }
 

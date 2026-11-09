@@ -366,6 +366,7 @@ pub fn update_published_course(
         thumbnail,
         manifest: Some(manifest.clone()),
         warning: None,
+        duration: desktop_store::notes::note_duration(&done.out_dir),
     };
     if let Some(previous) = library
         .courses
@@ -865,6 +866,7 @@ pub mod tests {
             thumbnail: Some("/old-cover.jpg".into()),
             manifest: Some(old_manifest.clone()),
             warning: None,
+            duration: None,
         };
         let mut other_library = old.clone();
         other_library.dir = "/other-library/course".into();

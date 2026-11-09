@@ -598,6 +598,7 @@ mod tests {
             thumbnail: None,
             manifest: Some(manifest),
             warning: None,
+            duration: None,
         })
         .unwrap();
         assert!(preview.outputs.is_empty());
@@ -676,6 +677,7 @@ mod tests {
             thumbnail: None,
             manifest: None,
             warning: None,
+            duration: None,
         })
         .unwrap();
         assert_eq!(
