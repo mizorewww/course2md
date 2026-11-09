@@ -278,6 +278,18 @@ impl AccountsView {
 
     /// Step 1: System Settings › Privacy & Security › Full Disk Access. A note
     /// left for the next launch brings the person back here if macOS reopens the app.
+    /// The person says they turned course2md on: look again, and either connect
+    /// or go on to reopening the app, which macOS needs to apply the switch.
+    fn access_switched_on(&mut self, cx: &mut Context<Self>) {
+        if let Some(dialog) = &mut self.youtube.dialog
+            && let Some(guide) = dialog.guide.as_mut()
+        {
+            let access = look(guide.browser);
+            guide.switched_on(access, Instant::now());
+        }
+        cx.notify();
+    }
+
     fn open_access_settings(&mut self, cx: &mut Context<Self>) {
         if !stubbed(&format!("open {}", youtube::FULL_DISK_ACCESS_SETTINGS)) {
             cx.open_url(youtube::FULL_DISK_ACCESS_SETTINGS);
@@ -748,23 +760,7 @@ impl AccountsView {
                     body = body.child(supporting_info("youtube-browser-note", note));
                 }
             }
-            // While the guide stands in the way, a check anyway follows the browser it
-            // checks, so a folder the look got wrong never traps the person.
             body = body.children(guide_after_choice);
-            if guiding && let Some(choice) = dialog.choice() {
-                body = body.child(
-                    h_flex().w_full().child(
-                        material_button("youtube-check-anyway", ButtonVariant::Text)
-                            .tone(ButtonTone::Neutral)
-                            .icon(symbols::login())
-                            .child(course2md::tr!("仍然尝试连接"))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                // The guide keeps its step: a refusal comes back to it.
-                                this.check_youtube(choice.clone(), true, true, cx);
-                            })),
-                    ),
-                );
-            }
             // The check's result sits under the choice it is about, next to the action.
             match &dialog.step {
                 YoutubeStep::Checking => {
@@ -852,7 +848,14 @@ impl AccountsView {
             // A copy that must be moved first has no step to take here; the
             // guide says so above anything else.
             Some(step) if step != AccessStep::Granted && must_move() => None,
-            Some(AccessStep::Blocked | AccessStep::Waiting) => Some(settings()),
+            Some(AccessStep::Blocked) => Some(settings()),
+            // System Settings is open: the way on is saying the switch is on.
+            Some(AccessStep::Waiting) => Some(
+                material_button("youtube-switched-on", ButtonVariant::Filled)
+                    .icon(symbols::check())
+                    .child(course2md::tr!("我已打开开关"))
+                    .on_click(cx.listener(|this, _, _, cx| this.access_switched_on(cx))),
+            ),
             Some(AccessStep::Restart) if app_bundle().is_some() => Some(
                 material_button("youtube-relaunch", ButtonVariant::Filled)
                     .icon(symbols::restart_alt())
@@ -877,6 +880,21 @@ impl AccountsView {
         if self.youtube_scroll_step.replace(step_key) != step_key {
             self.youtube_scroll.set_offset(point(px(0.), px(0.)));
         }
+        // While the guide stands in the way, a check anyway is a secondary action
+        // beside the step's main one, so a folder the look got wrong never traps
+        // the person.
+        let check_anyway = guiding
+            .then(|| dialog.choice())
+            .flatten()
+            .filter(|_| primary.is_some())
+            .map(|choice| {
+                material_button("youtube-check-anyway", ButtonVariant::Text)
+                    .child(course2md::tr!("仍然尝试连接"))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        // The guide keeps its step: a refusal comes back to it.
+                        this.check_youtube(choice.clone(), true, true, cx);
+                    }))
+            });
         MaterialDialog::new("youtube-dialog")
             .track_body_scroll(&self.youtube_scroll)
             .container(ColorRole::SURFACE)
@@ -884,6 +902,7 @@ impl AccountsView {
             .width(YOUTUBE_DIALOG_WIDTH)
             .content(body)
             .action(close)
+            .when_some(check_anyway, |dialog, action| dialog.action(action))
             .when_some(primary, |dialog, primary| dialog.action(primary))
             .dismiss_on_scrim(false)
             .modal(open)
@@ -1024,7 +1043,7 @@ impl AccountsView {
                     None,
                     cx,
                 ))
-                .child(helpers(false, true)),
+                .child(helpers(true, true)),
             AccessStep::Restart => content
                 .child(text(
                     "youtube-access-step",

@@ -2329,3 +2329,4 @@ macOS 只让有完全磁盘访问权限的应用读取 {} 的数据。course2md 
 任务使用的服务已从设置中删除	任务使用的服务已从设置中删除	The service this task used was deleted from settings	任務使用的服務已從設定中刪除	このタスクで使っていたサービスは設定から削除されました
 识别模型「{}」还没有下载	识别模型「{}」还没有下载	The speech model “{}” isn't downloaded yet	辨識模型「{}」還沒有下載	音声認識モデル「{}」はまだダウンロードされていません
 所选服务已从设置中删除	所选服务已从设置中删除	The chosen service was deleted from settings	所選服務已從設定中刪除	選んだサービスは設定から削除されました
+我已打开开关	我已打开开关	I've turned it on	我已開啟開關	オンにしました
