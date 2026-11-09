@@ -216,11 +216,9 @@ impl Desktop {
             Some(course2md::models::status::CacheState::Loaded)
                 | Some(course2md::models::status::CacheState::Cached)
         );
-        let model_value: SharedString = if state_label.is_empty() {
-            model_name
-        } else {
-            format!("{model_name} · {state_label}").into()
-        };
+        // The value is the model; its state is the row's supporting text, so the
+        // field shows the name whole.
+        let model_value = model_name;
         let current_model = models
             .iter()
             .map(|model| model.id)

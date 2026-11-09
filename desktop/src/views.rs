@@ -129,18 +129,7 @@ fn nav_destination(
     }
 }
 
-/// The width of `text` as the window would shape it.
-pub(crate) fn shaped_width(text: &str, size: f32, weight: FontWeight, window: &Window) -> f32 {
-    let mut style = window.text_style();
-    style.font_weight = weight;
-    let text = SharedString::from(text.to_owned());
-    f32::from(
-        window
-            .text_system()
-            .shape_line(text.clone(), px(size), &[style.to_run(text.len())], None)
-            .width,
-    )
-}
+pub(crate) use crate::ui::shaped_width;
 
 /// The height of the app bar at the current text scale.
 pub(crate) fn title_bar_height(window: &Window) -> Pixels {

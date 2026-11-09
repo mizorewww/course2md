@@ -211,8 +211,35 @@ pub const DIALOG_WIDTH_ROOMY: f32 = 448.;
 pub const RESOURCE_ICON: Rems = rem(RESOURCE_ICON_SIZE);
 pub const RESOURCE_ICON_SIZE: f32 = 48.;
 
-/// A row's dropdown, in design px: wide enough for a model's name and its state.
+/// A row's dropdown, in design px: at least this wide, so a column of rows lines up.
 const DROPDOWN_WIDTH: f32 = 260.;
+/// The widest a row's dropdown grows for a long value, in design px; it still fits
+/// the narrowest settings pane, and wraps under its label before it would collide.
+const DROPDOWN_MAX_WIDTH: f32 = 400.;
+/// An outlined compact dropdown's own room around its value: the leading inset,
+/// the trailing arrow and its insets, in design px.
+const DROPDOWN_CHROME: f32 = 16. + 12. + 24. + 16.;
+
+/// The width of `text` as the window would shape it, in px at `size` px.
+pub fn shaped_width(text: &str, size: f32, weight: FontWeight, window: &Window) -> f32 {
+    let mut style = window.text_style();
+    style.font_weight = weight;
+    let text = SharedString::from(text.to_owned());
+    f32::from(
+        window
+            .text_system()
+            .shape_line(text.clone(), px(size), &[style.to_run(text.len())], None)
+            .width,
+    )
+}
+
+/// A row dropdown wide enough to show `value` whole, measured with the field's
+/// body-large text at the current text scale, in design px.
+fn dropdown_width(value: &str, window: &Window) -> f32 {
+    let scale = f32::from(window.rem_size()) / gpui_kit_material::tokens::typography::BASE_PX;
+    let text = shaped_width(value, 16. * scale, FontWeight::NORMAL, window) / scale;
+    (text.ceil() + DROPDOWN_CHROME).clamp(DROPDOWN_WIDTH, DROPDOWN_MAX_WIDTH)
+}
 
 /// One row of a [`field_table`].
 pub struct Field {
@@ -386,6 +413,7 @@ impl Field {
             Control::Menu(value, items) => {
                 let popup = ElementId::Name(format!("{id}-menu").into());
                 let (open, set_open) = keyed_open(&popup, window, cx);
+                let width = dropdown_width(&value, window);
                 Self::inline_row(
                     outer,
                     scale.text(text_id, label.clone(), hint),
@@ -394,7 +422,7 @@ impl Field {
                         .variant(TextFieldVariant::Outlined)
                         .shape(TextFieldShape::Rounded)
                         .density(TextFieldDensity::Compact)
-                        .width(DROPDOWN_WIDTH)
+                        .width(width)
                         .menu(items)
                         .value(value)
                         .disabled(disabled)
