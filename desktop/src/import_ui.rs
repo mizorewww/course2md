@@ -1185,104 +1185,92 @@ impl Desktop {
         let open = self.import.show_preview_details;
         Some(motion::state_enter(
             "source-error",
-            v_flex()
-                .w_full()
-                .min_w_0()
-                .gap(rem(8.))
+            v_flex().w_full().min_w_0().gap(rem(8.)).child(
+                notice_banner(
+                    "import-source-failure",
+                    // A missing component is an obstacle with a repair, amber as
+                    // Settings' run check says it; a failed read is red.
+                    if components_missing {
+                        NoticeKind::Warning
+                    } else {
+                        NoticeKind::Danger
+                    },
+                    message.to_owned(),
+                )
                 .child(
-                    notice_banner(
-                        "import-source-failure",
-                        NoticeKind::Danger,
-                        message.to_owned(),
-                    )
-                    .child(
-                        h_flex()
-                            .gap(rem(8.))
-                            .flex_wrap()
-                            // The field's own 预览视频 tries again; the notice offers only
-                            // what that cannot do.
-                            .when(components_missing, |row| {
-                                row.child(
-                                    material_button(
-                                        "source-components-repair",
-                                        ButtonVariant::Tonal,
-                                    )
+                    h_flex()
+                        .gap(rem(8.))
+                        .flex_wrap()
+                        // The field's own 预览视频 tries again; the notice offers only
+                        // what that cannot do.
+                        .when(components_missing, |row| {
+                            row.child(
+                                material_button("source-components-repair", ButtonVariant::Tonal)
                                     .icon(symbols::settings())
                                     .child(course2md::tr!("检查所需组件"))
-                                    .on_click(cx.listener(
-                                        |this, _, window, cx| {
-                                            this.open_settings(window, cx);
-                                            this.select_settings_tab(
-                                                crate::settings_ui::SettingsTab::Application,
-                                                window,
-                                                cx,
-                                            );
-                                        },
-                                    )),
-                                )
-                            })
-                            .when(
-                                self.online(cx)
-                                    && needs_login
-                                    && course2md::auth::is_bilibili_url(
-                                        &self.value(Field::Source, cx),
-                                    ),
-                                |row| {
-                                    row.child(
-                                        material_button(
-                                            "source-login-repair",
-                                            ButtonVariant::Tonal,
-                                        )
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.open_settings(window, cx);
+                                        this.select_settings_tab(
+                                            crate::settings_ui::SettingsTab::Application,
+                                            window,
+                                            cx,
+                                        );
+                                    })),
+                            )
+                        })
+                        .when(
+                            self.online(cx)
+                                && needs_login
+                                && course2md::auth::is_bilibili_url(&self.value(Field::Source, cx)),
+                            |row| {
+                                row.child(
+                                    material_button("source-login-repair", ButtonVariant::Tonal)
                                         .icon(symbols::bilibili())
                                         .child(course2md::tr!("登录 Bilibili"))
-                                        .on_click(
-                                            cx.listener(|this, _, window, cx| {
-                                                this.open_account_dialog(window, cx)
-                                            }),
-                                        ),
-                                    )
-                                },
-                            )
-                            .when(
-                                self.online(cx)
-                                    && needs_login
-                                    && course2md::auth::is_youtube_url(
-                                        &self.value(Field::Source, cx),
-                                    ),
-                                |row| {
-                                    row.child(
-                                        material_button(
-                                            "source-youtube-repair",
-                                            ButtonVariant::Tonal,
-                                        )
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.open_account_dialog(window, cx)
+                                        })),
+                                )
+                            },
+                        )
+                        .when(
+                            self.online(cx)
+                                && needs_login
+                                && course2md::auth::is_youtube_url(&self.value(Field::Source, cx)),
+                            |row| {
+                                row.child(
+                                    material_button("source-youtube-repair", ButtonVariant::Tonal)
                                         .icon(symbols::smart_display())
                                         .child(course2md::tr!("连接 YouTube"))
-                                        .on_click(
-                                            cx.listener(|this, _, window, cx| {
-                                                this.open_youtube_dialog(window, cx)
-                                            }),
-                                        ),
-                                    )
-                                },
-                            ),
-                    ),
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.open_youtube_dialog(window, cx)
+                                        })),
+                                )
+                            },
+                        ),
                 )
-                // The details are a quiet link under the notice, not a second action
-                // beside its repair.
+                // The details are a quiet link inside the notice, on their own
+                // line under its message, not a second action beside its repair.
                 .child(
-                    h_flex().w_full().child(
-                        details_toggle("source-error-details", open)
-                            .on_click(cx.listener(Self::toggle_preview_details)),
-                    ),
-                )
-                .child(motion::disclosure(
-                    "source-error-disclosure",
-                    open,
-                    v_flex().child(supporting_info(
-                        "import-source-error-details",
-                        error.clone(),
-                    )),
-                )),
+                    v_flex()
+                        .w_full()
+                        .min_w_0()
+                        .child(
+                            h_flex().w_full().child(
+                                details_toggle("source-error-details", open)
+                                    .on_click(cx.listener(Self::toggle_preview_details)),
+                            ),
+                        )
+                        .child(motion::disclosure(
+                            "source-error-disclosure",
+                            open,
+                            v_flex().child(supporting_info(
+                                "import-source-error-details",
+                                error.clone(),
+                            )),
+                        )),
+                ),
+            ),
         ))
     }
 
