@@ -1523,10 +1523,12 @@ impl Desktop {
                             } else {
                                 ButtonTone::Neutral
                             })
+                            // A tree, not a folder: unlike 文件夹 beside it, it arranges
+                            // the notes rather than going to a place.
                             .icon(if group_on && can_group {
                                 symbols::check()
                             } else {
-                                symbols::folder()
+                                symbols::account_tree()
                             })
                             .child(course2md::tr!("按文件夹分组"))
                             .disabled(!can_group)

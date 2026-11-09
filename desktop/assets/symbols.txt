@@ -6,6 +6,7 @@
 
 # The app
 add
+account_tree
 arrow_back
 arrow_downward
 arrow_forward
