@@ -1472,11 +1472,9 @@ impl Store {
         if self.is_blocked(PreferenceGroup::Services) {
             bail!(c2m_i18n::tr!("服务记录暂时不可用，已保留原文件"));
         }
-        let version = self.version(reference).ok_or_else(|| {
-            anyhow!(c2m_i18n::tr!(
-                "任务使用的服务已不在设置中，请调整后重试并选择服务"
-            ))
-        })?;
+        let version = self
+            .version(reference)
+            .ok_or_else(|| anyhow!(c2m_i18n::tr!("任务使用的服务已从设置中删除")))?;
         // Single stat of the marker: the match keeps the two error classes
         // ("retired" vs "cannot confirm"), and the in-memory stopped map is
         // checked above, so is_service_retired's second stat is not repeated.
@@ -1526,9 +1524,9 @@ impl Store {
                 !self.is_blocked(PreferenceGroup::Services),
                 c2m_i18n::tr!("服务记录暂时不可用，已保留原文件")
             );
-            let version = self.version(id).context(c2m_i18n::tr!(
-                "任务使用的服务已不在设置中，请调整后重试并选择服务"
-            ))?;
+            let version = self
+                .version(id)
+                .context(c2m_i18n::tr!("任务使用的服务已从设置中删除"))?;
             ensure!(
                 !self.services.stopped.contains_key(&version.service_id),
                 c2m_i18n::tr!("此服务已删除，尚未发送新的请求")
@@ -1610,9 +1608,9 @@ impl Store {
                 // config_for_refs above already ran check_dispatch for exactly
                 // these required ids; same synchronous call chain, so reuse the
                 // validated lookup instead of statting the marker a second time.
-                let version = self.version(&id).context(c2m_i18n::tr!(
-                    "任务使用的服务已不在设置中，请调整后重试并选择服务"
-                ))?;
+                let version = self
+                    .version(&id)
+                    .context(c2m_i18n::tr!("任务使用的服务已从设置中删除"))?;
                 if let Some(reference) = &version.config.credential {
                     let secret = secrets.get(reference).cloned().context(c2m_i18n::tr!(
                         "服务凭据尚未就绪，请重新打开服务设置保存一次"
@@ -2682,7 +2680,7 @@ mod tests {
         let error = store.config_for_preview(&config, &held).unwrap_err();
         assert_eq!(
             error.to_string(),
-            c2m_i18n::tr!("任务使用的服务已不在设置中，请调整后重试并选择服务")
+            c2m_i18n::tr!("任务使用的服务已从设置中删除")
         );
         assert_eq!(store.plan_refs(&held).llm, Some(default.id.clone()));
         let preview = store

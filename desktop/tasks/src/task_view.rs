@@ -303,19 +303,36 @@ const LEGACY_LOGIN_HINT: &str = "提示：请在设置的账号中重新登录 B
 const RENAMED_MESSAGES: &[(&str, &str)] = &[
     (
         "找不到任务使用的服务版本，请选择服务后建立新尝试",
-        "任务使用的服务已不在设置中，请调整后重试并选择服务",
+        "任务使用的服务已从设置中删除",
     ),
     (
         "The service version used by the task cannot be found. Please select the service and create a new attempt.",
-        "任务使用的服务已不在设置中，请调整后重试并选择服务",
+        "任务使用的服务已从设置中删除",
     ),
     (
         "找不到任務使用的服務版本，請選擇服務後建立新嘗試",
-        "任务使用的服务已不在设置中，请调整后重试并选择服务",
+        "任务使用的服务已从设置中删除",
     ),
     (
         "タスクで使用されているサービスのバージョンが見つかりません。サービスを選択し、新しい試行を作成してください。",
+        "任务使用的服务已从设置中删除",
+    ),
+    // The message said the button's words again; it now states only the obstacle.
+    (
         "任务使用的服务已不在设置中，请调整后重试并选择服务",
+        "任务使用的服务已从设置中删除",
+    ),
+    (
+        "The service this task used is no longer in settings. Adjust and try again with a service selected.",
+        "任务使用的服务已从设置中删除",
+    ),
+    (
+        "任務使用的服務已不在設定中，請調整後重試並選擇服務",
+        "任务使用的服务已从设置中删除",
+    ),
+    (
+        "このタスクで使っていたサービスは設定にありません。調整して再試行し、サービスを選択してください",
+        "任务使用的服务已从设置中删除",
     ),
 ];
 
@@ -384,6 +401,18 @@ fn failure_summary_in(
             .map_or(summary, |rest| rest.trim_start_matches([':', ' ']));
         // A message an older version saved under wording since replaced.
         let summary = renamed_message(summary);
+        // A model the engine names by its id reads by its display name, and the
+        // message leaves the action to the button beside it.
+        if let Some(model) = summary
+            .strip_prefix("识别模型 ")
+            .and_then(|rest| rest.strip_suffix(" 尚未下载，请先下载并准备模型，再继续"))
+        {
+            return c2m_i18n::i18n::t_for("识别模型「{}」还没有下载", lang).replacen(
+                "{}",
+                c2m_config::config::model_label(model),
+                1,
+            );
+        }
         // The worker writes for machine consumers in Simplified Chinese, and the
         // desktop saves its own in the language it showed then; the person reads
         // either in the interface language.
@@ -1299,13 +1328,27 @@ mod tests {
         assert!(!actions.contains(&Action::PrepareModel));
     }
 
+    /// The engine names a missing model by its id; the task names it as the app does.
+    #[test]
+    fn a_missing_model_reads_by_its_display_name() {
+        use c2m_i18n::i18n::Lang;
+        let saved = "识别模型 qwen3-1.7b 尚未下载，请先下载并准备模型，再继续";
+        assert_eq!(
+            super::failure_summary_in(TaskState::NeedsAttention, Some(saved), Lang::ZhHans)
+                .as_deref(),
+            Some("识别模型「Qwen3 1.7B」还没有下载")
+        );
+    }
+
     /// A saved error reads in the interface language shown now, whatever language
     /// it was saved in, and under the wording that replaced an older one.
     #[test]
     fn a_saved_error_reads_in_the_current_language_and_wording() {
         use c2m_i18n::i18n::{Lang, t_for};
-        let now = "任务使用的服务已不在设置中，请调整后重试并选择服务";
+        let now = "任务使用的服务已从设置中删除";
         for saved in [
+            "任务使用的服务已不在设置中，请调整后重试并选择服务",
+            "The service this task used is no longer in settings. Adjust and try again with a service selected.",
             "找不到任务使用的服务版本，请选择服务后建立新尝试",
             "找不到任務使用的服務版本，請選擇服務後建立新嘗試",
             "タスクで使用されているサービスのバージョンが見つかりません。サービスを選択し、新しい試行を作成してください。",

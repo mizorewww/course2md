@@ -280,7 +280,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 任务 · {}	任务 · {}	Tasks · {}	任務 · {}	タスク · {}
 任务不存在	任务不存在	Task not found	找不到任務	タスクが見つかりません
 任务与笔记位置必须是绝对路径 / Task paths must be absolute	任务与笔记位置必须是绝对路径	Task paths must be absolute	任務與筆記位置必須是絕對路徑	タスクとノートの場所は絶対パスである必要があります
-任务使用的服务已不在设置中，请调整后重试并选择服务	任务使用的服务已不在设置中，请调整后重试并选择服务	The service this task used is no longer in settings. Adjust and try again with a service selected.	任務使用的服務已不在設定中，請調整後重試並選擇服務	このタスクで使っていたサービスは設定にありません。調整して再試行し、サービスを選択してください
 任务保存位置尚未恢复	任务保存位置尚未恢复	The task save location has not been restored	任務儲存位置尚未恢復	タスクの保存場所が復元されていません
 任务保存位置暂时不可用	任务保存位置暂时不可用	The task save location is temporarily unavailable	任務儲存位置暫時不可用	タスクの保存場所が一時的に利用できなくなりました
 任务保存位置记录缺失	任务保存位置记录缺失	The task save location record is missing	任務儲存位置記錄缺失	タスクの保存場所レコードがありません
@@ -2328,3 +2327,5 @@ macOS 只让有完全磁盘访问权限的应用读取 {} 的数据。course2md 
 稍后设置	稍后设置	Set up later	稍後設定	後で設定
 这次笔记所选的服务已从设置中删除	这次笔记所选的服务已从设置中删除	The service chosen for this note was deleted from settings	這次筆記所選的服務已從設定中刪除	このノートで選んだサービスは設定から削除されました
 使用默认服务「{}」	使用默认服务「{}」	Use the default service “{}”	使用預設服務「{}」	既定のサービス「{}」を使う
+任务使用的服务已从设置中删除	任务使用的服务已从设置中删除	The service this task used was deleted from settings	任務使用的服務已從設定中刪除	このタスクで使っていたサービスは設定から削除されました
+识别模型「{}」还没有下载	识别模型「{}」还没有下载	The speech model “{}” isn't downloaded yet	辨識模型「{}」還沒有下載	音声認識モデル「{}」はまだダウンロードされていません
