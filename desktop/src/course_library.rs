@@ -1511,7 +1511,9 @@ impl Desktop {
                                 })),
                         )
                     })
-                    .child(self.sort_menu(!sidebar, cx))
+                    // The sort keeps its label at every width: the order in force is
+                    // worth reading, not only finding under a tooltip.
+                    .child(self.sort_menu(cx))
                     .child(
                         // A toggle among the view controls: neutral like them, a check
                         // and the secondary container while on.
@@ -2476,8 +2478,6 @@ impl Desktop {
 struct SortMenu {
     sort: Sort,
     enabled: bool,
-    /// An icon button that its tooltip names, where the toolbar is short of room.
-    compact: bool,
     desktop: WeakEntity<Desktop>,
 }
 
@@ -2516,7 +2516,6 @@ impl RenderOnce for SortMenu {
         let Self {
             sort,
             enabled,
-            compact,
             desktop,
         } = self;
         let pick = move |sort: Sort| {
@@ -2576,26 +2575,14 @@ impl RenderOnce for SortMenu {
             (true, true) => symbols::arrow_downward(),
             (true, false) => symbols::arrow_upward(),
         };
-        let trigger = if compact {
-            MaterialTooltip::plain("library-sort-tip", spoken.clone())
-                .trigger(
-                    IconButton::new("library-sort-button", icon, spoken)
-                        .variant(IconButtonVariant::Tonal)
-                        .tone(ButtonTone::Neutral)
-                        .disabled(!enabled)
-                        .on_click(key_toggle),
-                )
-                .into_any_element()
-        } else {
-            material_button("library-sort-button", ButtonVariant::Tonal)
-                .tone(ButtonTone::Neutral)
-                .icon(icon)
-                .child(label)
-                .accessibility_label(spoken)
-                .disabled(!enabled)
-                .on_click(key_toggle)
-                .into_any_element()
-        };
+        let trigger = material_button("library-sort-button", ButtonVariant::Tonal)
+            .tone(ButtonTone::Neutral)
+            .icon(icon)
+            .child(label)
+            .accessibility_label(spoken)
+            .disabled(!enabled)
+            .on_click(key_toggle)
+            .into_any_element();
         ui::menu(
             id,
             trigger,
@@ -2797,12 +2784,11 @@ impl Desktop {
     }
 
     /// The sort menu of the place in view.
-    fn sort_menu(&self, compact: bool, cx: &mut Context<Self>) -> SortMenu {
+    fn sort_menu(&self, cx: &mut Context<Self>) -> SortMenu {
         let (_, _, sort, read) = self.place_sort(cx);
         SortMenu {
             sort,
             enabled: read && self.library(cx).error.is_none(),
-            compact,
             desktop: cx.weak_entity(),
         }
     }
