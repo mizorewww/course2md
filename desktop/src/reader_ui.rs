@@ -415,6 +415,9 @@ impl ReaderPage {
 const HEAD_BLOCK: &str = "reader:head";
 /// The address of the space after the note's last block.
 const END_BLOCK: &str = "reader:end";
+/// The card's inset above the title, inside the scrolled document, so text scrolls
+/// on to the card's edge instead of being cut inside it.
+const START_BLOCK: &str = "reader:start";
 const FIGURE_BLOCK: &str = "figure:";
 
 /// A note as Markdown, with what each top-level block of it shows.
@@ -433,6 +436,7 @@ impl NoteDocument {
         seek: impl Fn(f64) -> Option<String>,
     ) -> Self {
         let mut parts: Vec<(String, Option<usize>)> = vec![
+            (format!("![]({START_BLOCK})"), None),
             (
                 format!("# {}", note_text::plain_inline_markdown(title)),
                 None,
@@ -1998,8 +2002,8 @@ impl ReaderPage {
                 .h_full()
                 .max_w(ARTICLE_MAX)
                 .mx_auto()
-                .pt(rem(24.))
                 .rounded(RADIUS_HERO)
+                .overflow_hidden()
                 .bg(color(SURFACE))
                 // Copying from the note leaves its figures behind.
                 .capture_action(|_: &CopyText, window, cx| {
@@ -2172,6 +2176,8 @@ impl ReaderPage {
                 .into_any_element(),
             // As far below the last block as the note's opening is below the card's top.
             _ if address == END_BLOCK => div().h(rem(24.)).into_any_element(),
+            // With the paragraph gap after it, the title starts the inset down.
+            _ if address == START_BLOCK => div().h(rem(8.)).into_any_element(),
             _ => div().into_any_element(),
         }
     }
@@ -4146,7 +4152,8 @@ impl ReaderPage {
         // the bar carries the title.
         let headline_in_view = self.opened.result_tab == 0
             && self.viewer.is_none()
-            && self.note.list.logical_scroll_top().item_ix == 0;
+            // The document's first item is the inset above the title.
+            && self.note.list.logical_scroll_top().item_ix <= 1;
         bar.gap(rem(12.))
             .child(title_bar_control(div().flex_shrink_0().child(
                 ui::tip_button("reader-back", symbols::arrow_back(), back, |button| {
@@ -4342,7 +4349,7 @@ mod tests {
         assert!(
             document
                 .markdown
-                .starts_with("# 标题 *\n\n![](reader:head)")
+                .starts_with("![](reader:start)\n\n# 标题 *\n\n![](reader:head)")
         );
         assert!(
             document
@@ -4368,6 +4375,7 @@ mod tests {
             [
                 None,
                 None,
+                None,
                 Some(0),
                 Some(4),
                 Some(4),
@@ -4384,10 +4392,10 @@ mod tests {
         // The card's inset below the last block scrolls with the note.
         assert!(document.markdown.ends_with("![](reader:end)"));
         // The overview and every key point are in the summary's panel.
-        assert_eq!(document.item_of(1), Some(2));
-        assert_eq!(document.item_of(3), Some(2));
+        assert_eq!(document.item_of(1), Some(3));
+        assert_eq!(document.item_of(3), Some(3));
         assert_eq!(document.block_at(0), Some(0));
-        assert_eq!(document.block_at(10), Some(5));
+        assert_eq!(document.block_at(11), Some(5));
         assert_eq!(document.block_at(99), None);
     }
 
