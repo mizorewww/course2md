@@ -1561,7 +1561,6 @@ impl Desktop {
     /// where it came from. Its folder is named only where the place does not already
     /// say it; source identity helps recognize a note.
     fn note_line(&self, course: &Course, card: bool, cx: &App) -> String {
-        use chrono::Datelike;
         let ms = course
             .manifest
             .as_ref()
@@ -1618,15 +1617,15 @@ impl Desktop {
                 .map(|instant| instant.with_timezone(&chrono::Local).date_naive())
                 .or(date)
         };
+        // One date format across the app, the published date included.
         match published {
-            Some(published) => parts.push(course2md::tr!("发布于 {}", published)),
-            None => parts.extend(date.map(|date| {
-                if home {
-                    crate::i18n::month_day(date.month(), date.day())
-                } else {
-                    date.format("%Y-%m-%d").to_string()
-                }
-            })),
+            Some(published) => parts.push(course2md::tr!(
+                "发布于 {}",
+                chrono::NaiveDate::parse_from_str(&published, "%Y-%m-%d")
+                    .map(crate::i18n::calendar_date)
+                    .unwrap_or(published)
+            )),
+            None => parts.extend(date.map(crate::i18n::calendar_date)),
         }
         parts.join(" · ")
     }

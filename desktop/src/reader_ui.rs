@@ -2406,7 +2406,16 @@ impl ReaderPage {
             details.push((
                 course2md::tr!("生成日期"),
                 symbols::schedule(),
-                nav::date_local(manifest.created_at_ms),
+                // The app's one date format.
+                i64::try_from(manifest.created_at_ms)
+                    .ok()
+                    .and_then(chrono::DateTime::from_timestamp_millis)
+                    .map(|instant| {
+                        crate::i18n::calendar_date(
+                            instant.with_timezone(&chrono::Local).date_naive(),
+                        )
+                    })
+                    .unwrap_or_else(|| nav::date_local(manifest.created_at_ms)),
             ));
         }
         if let Some(path) = &local_source {
