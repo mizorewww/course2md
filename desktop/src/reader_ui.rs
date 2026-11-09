@@ -4070,6 +4070,12 @@ impl ReaderPage {
         };
         // So short a window keeps the bar for its tools; the note opens with its title.
         let short = ReaderMetrics::new(window, false).short;
+        // The title is said once: while the note's own headline is in view, the bar
+        // names only where the note lives; scrolled past it, or on the screenshots,
+        // the bar carries the title.
+        let headline_in_view = self.opened.result_tab == 0
+            && self.viewer.is_none()
+            && self.note.list.logical_scroll_top().item_ix == 0;
         bar.gap(rem(12.))
             .child(title_bar_control(div().flex_shrink_0().child(
                 ui::tip_button("reader-back", symbols::arrow_back(), back, |button| {
@@ -4093,16 +4099,18 @@ impl ReaderPage {
                             .line_height(TypeRole::BodySmall.scale().line_height)
                             .text_color(color(ON_SURFACE_VARIANT)),
                     )
-                    .child(
-                        // Both lines on their roles' line heights, so the pair centres
-                        // on the back button as its ink does (U20).
-                        accessible_text("reader-crumb-title", title)
-                            .role(Role::Heading)
-                            .truncate()
-                            .text_size(TEXT_TITLE)
-                            .line_height(TypeRole::TitleLarge.scale().line_height)
-                            .text_color(color(ON_SURFACE)),
-                    ),
+                    .when(!headline_in_view, |bar| {
+                        bar.child(
+                            // Both lines on their roles' line heights, so the pair centres
+                            // on the back button as its ink does (U20).
+                            accessible_text("reader-crumb-title", title)
+                                .role(Role::Heading)
+                                .truncate()
+                                .text_size(TEXT_TITLE)
+                                .line_height(TypeRole::TitleLarge.scale().line_height)
+                                .text_color(color(ON_SURFACE)),
+                        )
+                    }),
             )
             .child(tools)
     }
