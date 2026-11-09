@@ -1713,8 +1713,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 语音转写方式 / Transcription	语音转写方式	Transcription	語音轉寫方式	文字起こし方式
 诶	诶	Hey	誒	ねえ
 请为浅色和深色外观分别选择对应的主题	请为浅色和深色外观分别选择对应的主题	Choose separate themes for the light and dark appearances	請為淺色和深色外觀分別選擇對應的主題	明るい外観と暗い外観に別々のテーマを選択してください
-请为这次笔记设置 AI 服务	请为这次笔记设置 AI 服务	Please set up AI service for this note	請為這次筆記設定 AI 服務	このノートに AI サービスを設定してください
-请为这次笔记设置语音识别服务	请为这次笔记设置语音识别服务	Set up speech recognition for this note	請為這次筆記設定語音辨識服務	このノートの音声認識を設定してください
 请使用 Bilibili App 扫码	请使用 Bilibili App 扫码	Scan the QR code with the Bilibili app	請使用 Bilibili App 掃描 QR 碼	Bilibili アプリで QR コードをスキャンしてください
 请先填写 API Key，再获取模型	请先填写 API Key，再获取模型	Enter the API key first, then fetch models	請先填寫 API 金鑰，再取得模型	先に API キーを入力してから、モデルを取得してください
 请先填写有效的服务地址和模型 ID，尚未发送请求	请先填写有效的服务地址和模型 ID，尚未发送请求	Enter a valid service URL and model ID first. The request has not been sent yet.	請先填寫有效的服務網址和模型 ID，尚未傳送請求	先に有効なサービスURLとモデル ID を入力してください。リクエストはまだ送信されていません
@@ -1725,7 +1723,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 请在浏览器中完成授权（约 3 分钟内）	请在浏览器中完成授权（约 3 分钟内）	Please complete the authorization in the browser (within about 3 minutes)	請在瀏覽器中完成授權（約 3 分鐘內）	ブラウザ上で認証を完了してください（3分程度以内）
 请在约 {} 秒内确认	请在约 {} 秒内确认	Please confirm within about {} seconds	請在約 {} 秒內確認	約 {} 秒以内に確認してください
 请在约 1 秒内确认	请在约 1 秒内确认	Please confirm within about 1 second	請在約 1 秒內確認	約 1 秒以内に確認してください
-请填写笔记名称	请填写笔记名称	Please fill in the note name	請填寫筆記名稱	ノート名を入力してください
 请安装支持显卡的 llama.cpp 和驱动，或改用 CPU 识别。 / Install a GPU-capable llama.cpp and driver, or use CPU transcription.	请安装支持显卡的 llama.cpp 和驱动，或改用 CPU 识别。	Install a GPU-capable llama.cpp and driver, or use CPU transcription.	請安裝支援顯示卡的 llama.cpp 和驅動程式，或改用 CPU 辨識。	GPU に対応した llama.cpp とドライバーをインストールするか、CPU での認識に切り替えてください。
 请检查路径；含空格的路径需加引号	请检查路径；含空格的路径需加引号	Check the path and quote paths containing spaces.	請檢查路徑；包含空格的路徑需加上引號	パスを確認してください。スペースを含むパスは引用符で囲む必要があります。
 请求已发送，结果未确认	请求已发送，结果未确认	Request sent, result not confirmed	請求已傳送，結果未確認	リクエストは送信されましたが、結果は未確認です
@@ -2325,3 +2322,6 @@ macOS 只让有完全磁盘访问权限的应用读取 {} 的数据。course2md 
 这个浏览器中没有登录 YouTube。在浏览器中登录后再检查。	这个浏览器中没有登录 YouTube。在浏览器中登录后再检查。	This browser isn't signed in to YouTube. Sign in there, then check again.	這個瀏覽器中沒有登入 YouTube。在瀏覽器中登入後再檢查。	このブラウザーでは YouTube にログインしていません。ブラウザーでログインしてから、もう一度確認してください。
 缺少 {}	缺少 {}	{} is missing	缺少 {}	{} がありません
 需要语音识别时会先请你下载	需要语音识别时会先请你下载	You'll be asked to download it when speech recognition is needed	需要語音辨識時會先請你下載	音声認識が必要になったときにダウンロードを確認します
+这次笔记还没有可用的语音识别服务	这次笔记还没有可用的语音识别服务	No speech recognition service is available for this note	這次筆記還沒有可用的語音辨識服務	このノートで使える音声認識サービスがありません
+这次笔记还没有可用的 AI 服务	这次笔记还没有可用的 AI 服务	No AI service is available for this note	這次筆記還沒有可用的 AI 服務	このノートで使える AI サービスがありません
+笔记还没有名称	笔记还没有名称	The note has no name yet	筆記還沒有名稱	ノートにまだ名前がありません

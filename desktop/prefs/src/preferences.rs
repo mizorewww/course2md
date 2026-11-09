@@ -1544,7 +1544,7 @@ impl Store {
             let id = required
                 .asr
                 .as_deref()
-                .ok_or_else(|| anyhow!(c2m_i18n::tr!("请为这次笔记设置语音识别服务")))?;
+                .ok_or_else(|| anyhow!(c2m_i18n::tr!("这次笔记还没有可用的语音识别服务")))?;
             let version = check(id)?;
             if version.config.protocol.purpose() != ServicePurpose::Speech {
                 bail!(c2m_i18n::tr!("所选服务不支持语音识别"));
@@ -1560,7 +1560,7 @@ impl Store {
             let id = required
                 .llm
                 .as_deref()
-                .ok_or_else(|| anyhow!(c2m_i18n::tr!("请为这次笔记设置 AI 服务")))?;
+                .ok_or_else(|| anyhow!(c2m_i18n::tr!("这次笔记还没有可用的 AI 服务")))?;
             let version = check(id)?;
             if version.config.protocol.purpose() != ServicePurpose::Ai {
                 bail!(c2m_i18n::tr!("所选服务不支持 AI 校对或摘要"));
@@ -2768,7 +2768,7 @@ mod tests {
                 .config_for_preview(&config, &store.plan_refs(&held))
                 .unwrap_err()
                 .to_string(),
-            c2m_i18n::tr!("请为这次笔记设置 AI 服务")
+            c2m_i18n::tr!("这次笔记还没有可用的 AI 服务")
         );
     }
 

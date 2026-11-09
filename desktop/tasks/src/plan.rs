@@ -24,7 +24,7 @@ pub struct TitleRequired;
 
 impl std::fmt::Display for TitleRequired {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(c2m_i18n::tr!("请填写笔记名称"))
+        f.write_str(c2m_i18n::tr!("笔记还没有名称"))
     }
 }
 
