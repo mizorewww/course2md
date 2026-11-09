@@ -620,7 +620,9 @@ impl Desktop {
         // An engine obstacle shown above carries its own 重新检查; one is enough.
         let obstacle_rechecks = full
             && issue.is_some_and(|issue| issue.installable() && issue != DeviceIssue::AppleRuntime);
-        actions = actions.when(!preparing && !obstacle_rechecks, |row| {
+        // A model not on disk has nothing to check again: its download is the action.
+        let not_downloaded = matches!(status.map(|status| status.state), Some(CacheState::Missing));
+        actions = actions.when(!preparing && !obstacle_rechecks && !not_downloaded, |row| {
             row.child(
                 material_button(id("recheck"), ButtonVariant::Text)
                     .icon(symbols::refresh())
