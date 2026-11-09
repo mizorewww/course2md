@@ -1000,17 +1000,10 @@ impl Desktop {
         } else {
             course2md::tr!("目前使用 {}", provider_label(Some(recommended)))
         };
-        // An engine's own obstacle that something here can repair is stated below
-        // the group, after the shared one; hardware this Mac lacks is only its status.
-        let mut issues: Vec<_> = obstacle.into_iter().collect();
-        for issue in engines
-            .iter()
-            .filter_map(|engine| self.engine_issue(*engine))
-        {
-            if issue.installable() && !issues.contains(&issue) {
-                issues.push(issue);
-            }
-        }
+        // Only what stops the chosen route gets its repair here, under the engines; an
+        // engine the person need not use says what it lacks in its own row's chip, and
+        // Settings › 生成笔记 repairs it.
+        let issues: Vec<_> = obstacle.into_iter().collect();
         // Engines are local resources: tinted circles like the routes above, one family so
         // they read as one group. The first tile is automatic choice; the group's index
         // counts it.
