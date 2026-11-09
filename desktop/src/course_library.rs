@@ -2286,6 +2286,7 @@ impl Desktop {
         let summary = (summary != task.state.label()
             && self.workbench_notice.as_deref() != Some(summary.as_str()))
         .then_some(summary);
+        let has_notice = summary.is_some();
         let cover = task.plan.source.cover.clone().or_else(|| {
             self.library(cx)
                 .cover_by_source
@@ -2344,10 +2345,13 @@ impl Desktop {
                                         .flex_basis(rem(240.)),
                                 )
                                 // The same colour as on Tasks: a failure is red, a pause amber.
-                                .child(
-                                    status_chip(crate::task_ui::task_status_kind(task.state))
-                                        .child(task.state.label()),
-                                ),
+                                // A notice below that says why already says it waits.
+                                .when(!has_notice, |row| {
+                                    row.child(
+                                        status_chip(crate::task_ui::task_status_kind(task.state))
+                                            .child(task.state.label()),
+                                    )
+                                }),
                         )
                         // Why it waits, with the way on inside the same notice as on
                         // Tasks; the action never stands above its cause.
