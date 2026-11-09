@@ -1290,9 +1290,12 @@ impl TasksPage {
                             .child(more),
                     )
                     // Whose video first on the workbench, where the step belongs to the bar.
+                    // On the workbench it reads as the draft's line did before the
+                    // task started: body size, under the title.
                     .when(home, |column| {
                         column.when(!support.is_empty(), |column| {
-                            column.child(task_support_line(id, support.clone()))
+                            column
+                                .child(task_support_line(id, support.clone()).text_size(TEXT_BODY))
                         })
                     })
                     .when_some(step, |column, (step, side_by_side)| {
