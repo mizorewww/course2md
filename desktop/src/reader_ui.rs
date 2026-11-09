@@ -336,6 +336,11 @@ impl ReaderPage {
                 .update(cx, |this, cx| this.note_block(address, window, cx))
                 .unwrap_or_else(|_| div().into_any_element())
         });
+        let watcher = cx.weak_entity();
+        let open_link: note_text::OpenLink = Arc::new(move |url, _, cx| {
+            let url = url.to_owned();
+            let _ = watcher.update(cx, |this, cx| this.open_watch_link(&url, cx));
+        });
         let line_width = Arc::new(AtomicU32::new(0));
         let viewer_line = Arc::new(AtomicU32::new(0));
         let gallery_line = Arc::new(AtomicU32::new(0));
@@ -349,7 +354,7 @@ impl ReaderPage {
             note: NoteState {
                 view: note,
                 list: note_list,
-                extensions: note_text::note_extensions(line_width.clone(), render_block),
+                extensions: note_text::note_extensions(line_width.clone(), render_block, open_link),
                 line_width,
                 document: NoteDocument::default(),
                 figure_size: Size::thumbnail(1.),
@@ -996,7 +1001,7 @@ impl ReaderPage {
         let source = self.unmapped_reader_source(cx);
         let chapters = chapter_starts(&preview.blocks, &summary_outline(preview));
         let document = NoteDocument::new(&preview.course.title, &preview.blocks, &chapters, |at| {
-            nav::seek_url(source.as_ref()?, at)
+            nav::watch_url(source.as_ref()?, at)
         });
         self.outline = Rc::new(reader_outline(preview));
         self.note.view.update(cx, |view, cx| {
@@ -1226,6 +1231,58 @@ impl ReaderPage {
         let meta = &self.opened.preview.as_ref()?.document.meta;
         nav::source_target(&meta.webpage_url, meta.is_local())
     }
+    /// Follows a 从此处观看 address: a web page in the browser, a local video from its time.
+    fn open_watch_link(&mut self, url: &str, cx: &mut Context<Self>) {
+        match nav::local_seek_seconds(url) {
+            Some(seconds) => self.watch_local_from(seconds, cx),
+            None => cx.open_url(url),
+        }
+    }
+
+    /// Opens the note's local video at `seconds`: in a player installed here that can
+    /// start at a time, or else the system's player, saying where to go.
+    fn watch_local_from(&mut self, seconds: f64, cx: &mut Context<Self>) {
+        let Some(nav::SourceTarget::Local(path)) = self.source.clone() else {
+            return;
+        };
+        if !path.is_file() {
+            self.open_reader_source(cx);
+            return;
+        }
+        let time = course2md::render::fmt_ts(seconds);
+        let player = nav::seeking_player(
+            &path,
+            seconds,
+            std::env::var_os("PATH").as_deref(),
+            std::env::home_dir().as_deref(),
+        );
+        // Capture runs log what they would open, and open nothing.
+        if cfg!(feature = "capture") {
+            eprintln!(
+                "capture: watch {} from {time} with {player:?}",
+                path.display()
+            );
+            return;
+        }
+        let started = player.is_some_and(|(program, arguments)| {
+            std::process::Command::new(program)
+                .args(arguments)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .is_ok()
+        });
+        if !started {
+            cx.open_with_system(&path);
+            cx.emit(ReaderEvent::Message(course2md::tr!(
+                "已用默认播放器打开原视频，请跳到 {}",
+                time
+            )));
+            cx.notify();
+        }
+    }
+
     fn open_reader_source(&mut self, cx: &mut Context<Self>) {
         match self.source.clone() {
             Some(nav::SourceTarget::Web(url)) => cx.open_url(&url),
@@ -3725,7 +3782,8 @@ impl ReaderPage {
         let source_available = self.source_available;
         let source_link = source
             .as_ref()
-            .and_then(|source| nav::seek_url(source, frame.seconds));
+            .filter(|source| source_available || matches!(source, nav::SourceTarget::Web(_)))
+            .and_then(|source| nav::watch_url(source, frame.seconds));
         let group = || h_flex().flex_shrink_0().gap(rem(4.)).items_center();
         let stepping = group()
             .child(viewer_tool(
@@ -3810,7 +3868,7 @@ impl ReaderPage {
                     symbols::play_arrow(),
                     course2md::tr!("从此处观看"),
                 )
-                .on_click(move |_, _, cx| cx.open_url(&url)),
+                .on_click(cx.listener(move |this, _, _, cx| this.open_watch_link(&url, cx))),
             ),
             (None, Some(source)) => Some(
                 action(
@@ -4350,7 +4408,8 @@ mod tests {
         let document = NoteDocument::new("标题", &note(), &HashMap::new(), |_| None);
         let render: crate::note_text::RenderBlock =
             std::sync::Arc::new(|_, _, _| gpui::IntoElement::into_any_element(gpui::div()));
-        let extensions = crate::note_text::note_extensions(Default::default(), render);
+        let open: crate::note_text::OpenLink = std::sync::Arc::new(|_, _, _| {});
+        let extensions = crate::note_text::note_extensions(Default::default(), render, open);
         let markdown = document.markdown.clone();
         let (view, cx) = cx.add_window_view(move |_, cx| {
             Note(

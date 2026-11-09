@@ -2325,3 +2325,4 @@ course2md 不在“应用程序”文件夹中。请先退出 course2md，在访
 设置语音服务	设置语音服务	Set up a speech service	設定語音服務	音声サービスを設定
 识别模型已就绪	识别模型已就绪	Speech model ready	辨識模型已就緒	音声認識モデルの準備ができました
 缺少 {}	缺少 {}	{} is missing	缺少 {}	{} がありません
+已用默认播放器打开原视频，请跳到 {}	已用默认播放器打开原视频，请跳到 {}	Opened the video in your default player; skip to {}	已用預設播放器開啟原影片，請跳到 {}	既定のプレーヤーで元の動画を開きました。{} に移動してください
