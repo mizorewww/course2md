@@ -29,6 +29,8 @@ use std::sync::{
 /// The guide's content column.
 const COLUMN: Rems = rem(760.);
 const STEPS: usize = 4;
+/// Room beside the column for its scrollbar, inside the page's side inset.
+const SCROLLBAR_GUTTER: f32 = 16.;
 /// Wide enough for a choice and the line saying what it means.
 const SETUP_MENU_WIDTH: f32 = 320.;
 
@@ -237,7 +239,10 @@ impl Desktop {
     #[cfg(feature = "capture")]
     pub(crate) fn capture_setup_step(&mut self, step: &str, cx: &mut Context<Self>) {
         match step {
-            "cloud" => self.apply_setup_provider_choice(ProviderChoice::Online, cx),
+            "cloud" => {
+                self.setup_step(Step::Engine, cx);
+                self.apply_setup_provider_choice(ProviderChoice::Online, cx);
+            }
             "ai" => self.setup_step(Step::Ai, cx),
             "account" => self.setup_step(Step::Account, cx),
             "model" => self.setup_step(Step::Model, cx),
@@ -755,6 +760,8 @@ impl Desktop {
                 .set_offset(point(px(0.), px(-offset)));
         }
         let step = self.onboarding.step;
+        let model_request = self.setup_model_request();
+        let model_state = self.model_cache_state(&model_request);
         let (number, title, description): (usize, _, _) = match step {
             Step::Engine => (
                 1,
@@ -763,8 +770,27 @@ impl Desktop {
             ),
             Step::Ai => (2, course2md::tr!("连接 AI 服务"), None),
             Step::Account => (3, course2md::tr!("连接来源账号"), None),
+            // The title says where setup stands, not where it hoped to be.
             Step::Model if self.onboarding.provider == Some(AsrProvider::Api) => {
-                (4, course2md::tr!("准备就绪"), None)
+                if self.setup_speech_service().is_some() {
+                    (4, course2md::tr!("准备就绪"), None)
+                } else {
+                    (4, course2md::tr!("尚未设置语音服务"), None)
+                }
+            }
+            Step::Model if self.is_preparing(&model_request, cx) => {
+                (4, course2md::tr!("正在准备识别模型"), None)
+            }
+            Step::Model
+                if matches!(
+                    model_state,
+                    Some(
+                        course2md::models::status::CacheState::Cached
+                            | course2md::models::status::CacheState::Loaded
+                    )
+                ) =>
+            {
+                (4, course2md::tr!("识别模型已就绪"), None)
             }
             Step::Model => (4, course2md::tr!("准备识别模型"), None),
         };
@@ -821,7 +847,31 @@ impl Desktop {
                     .w_full()
                     .min_w_0()
                     .gap(rem(4.))
-                    .child(ui::page_title("setup-title", title))
+                    // Skipping is offered in one place on every step that has not
+                    // already made finishing its forward action.
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .min_w_0()
+                            .gap(rem(12.))
+                            .items_center()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(ui::page_title("setup-title", title)),
+                            )
+                            .when(self.setup_skip_offered(cx), |row| {
+                                row.child(
+                                    material_button("setup-later", ButtonVariant::Text)
+                                        .tone(ButtonTone::Neutral)
+                                        .child(course2md::tr!("跳过设置"))
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.skip_setup(window, cx)
+                                        })),
+                                )
+                            }),
+                    )
                     .when_some(description, |view, description| {
                         view.child(TileScale::Regular.support("setup-description", description))
                     }),
@@ -856,7 +906,19 @@ impl Desktop {
                             .pb(rem(4.))
                             .child(motion::state_enter(("setup-step", number), content)),
                     )
-                    .child(Scrollbar::vertical(&self.onboarding.scroll)),
+                    // The scrollbar sits in the gutter beside the column, clear of the
+                    // tiles' trailing radios and chips.
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .right(rem(-SCROLLBAR_GUTTER))
+                            .w(rem(SCROLLBAR_GUTTER))
+                            .child(
+                                Scrollbar::vertical(&self.onboarding.scroll).viewport_from_layout(),
+                            ),
+                    ),
             )
             // A hairline parts the actions from a step that scrolls under them.
             .when(scrollable, |column| {
@@ -1279,29 +1341,53 @@ impl Desktop {
         Some(view)
     }
 
+    /// The default speech service the online route saved, if it still exists.
+    fn setup_speech_service(&self) -> Option<ServiceVersion> {
+        self.preferences
+            .default_refs()
+            .asr
+            .and_then(|id| self.preferences.version(&id))
+            .cloned()
+    }
+
+    /// Whether the guide offers 跳过设置: on every step before the last, whose
+    /// forward action already finishes; not while reviewing a model or after a failed finish.
+    fn setup_skip_offered(&self, _cx: &App) -> bool {
+        self.onboarding.step != Step::Model
+            && self.onboarding.model_return_page.is_none()
+            && !self.onboarding.finish_failed
+    }
+
     fn setup_model_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let request = self.setup_model_request();
         if request.provider == AsrProvider::Api {
-            let version = self
-                .preferences
-                .default_refs()
-                .asr
-                .and_then(|id| self.preferences.version(&id))
-                .cloned();
-            return setup_tile().child(tile_info(
-                "setup-cloud-model-description",
-                version
-                    .map(|version| {
-                        course2md::tr!(
-                            "识别时使用 {} · {}",
-                            version.config.name,
-                            version.config.model
-                        )
-                    })
-                    .unwrap_or_else(|| {
-                        course2md::tr!("当前没有默认语音服务，请返回第一步完成配置。").into()
-                    }),
-            ));
+            return match self.setup_speech_service() {
+                Some(version) => setup_tile().child(tile_info(
+                    "setup-cloud-model-description",
+                    course2md::tr!(
+                        "识别时使用 {} · {}",
+                        version.config.name,
+                        version.config.model
+                    ),
+                )),
+                // Online recognition without a service: say what that means and
+                // lead straight back to where one is set up.
+                None => setup_tile()
+                    .child(tile_info(
+                        "setup-cloud-model-missing",
+                        course2md::tr!("没有字幕的视频需要语音服务才能转换"),
+                    ))
+                    .child(
+                        h_flex().child(
+                            material_button("setup-cloud-model-fix", ButtonVariant::Tonal)
+                                .icon(symbols::arrow_back())
+                                .child(course2md::tr!("设置语音服务"))
+                                .on_click(
+                                    cx.listener(|this, _, _, cx| this.setup_step(Step::Engine, cx)),
+                                ),
+                        ),
+                    ),
+            };
         }
         setup_tile().child(self.model_surface(&request, true, window, cx))
     }
@@ -1431,16 +1517,6 @@ impl Desktop {
             )
             .child(
                 row()
-                    .when(step == Step::Engine, |row| {
-                        // Skipping is not the way forward, so it carries no arrow.
-                        row.child(
-                            material_button("setup-later", ButtonVariant::Text)
-                                .child(course2md::tr!("跳过设置"))
-                                .on_click(
-                                    cx.listener(|this, _, window, cx| this.skip_setup(window, cx)),
-                                ),
-                        )
-                    })
                     .when(step != Step::Engine && !model_review, |row| {
                         row.child(
                             material_button("setup-back", ButtonVariant::Text)
