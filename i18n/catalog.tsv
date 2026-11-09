@@ -2206,7 +2206,6 @@ Apple 模型从镜像下载失败，改用 Hugging Face / Apple model download f
 允许 course2md	允许 course2md	Allow course2md	允許 course2md	course2md を許可
 允许 course2md 读取浏览器数据的步骤	允许 course2md 读取浏览器数据的步骤	Steps to let course2md read browser data	允許 course2md 讀取瀏覽器資料的步驟	course2md にブラウザのデータの読み取りを許可する手順
 在访达中显示 course2md	在访达中显示 course2md	Show course2md in Finder	在 Finder 中顯示 course2md	Finder で course2md を表示
-正在等待权限，打开开关后这里会自动更新	正在等待权限，打开开关后这里会自动更新	Waiting for access. This updates by itself once the switch is on	正在等待權限，開啟開關後這裡會自動更新	アクセス許可を待っています。スイッチをオンにすると自動的に更新されます
 设置权限	设置权限	Set up access	設定權限	アクセスを設定
 重新打开 course2md	重新打开 course2md	Reopen course2md	重新開啟 course2md	course2md を開き直す
 需要完全磁盘访问权限	需要完全磁盘访问权限	Needs Full Disk Access	需要完整磁碟取用權限	フルディスクアクセスが必要
@@ -2220,7 +2219,6 @@ course2md 获得完全磁盘访问权限前，YouTube 视频无法使用这个�
 终端	终端	Terminal	終端機	ターミナル
 macOS 不允许 {} 读取 {} 的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开 {}，然后退出并重新打开它，再试一次。可运行 open "{}" 打开该设置。	macOS 不允许 {} 读取 {} 的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开 {}，然后退出并重新打开它，再试一次。可运行 open "{}" 打开该设置。	macOS does not allow {} to read {}’s data. Turn on {} in System Settings › Privacy & Security › Full Disk Access, quit and reopen it, then try again. Run open "{}" to open that setting.	macOS 不允許 {} 讀取 {} 的資料。請在「系統設定 › 隱私權與安全性 › 完整磁碟取用權限」中開啟 {}，然後結束並重新開啟它，再試一次。可執行 open "{}" 開啟該設定。	macOS が {} による {} のデータの読み取りを許可していません。「システム設定 › プライバシーとセキュリティ › フルディスクアクセス」で {} をオンにし、終了して開き直してから、もう一度お試しください。この設定は open "{}" を実行すると開けます。
 提示：macOS 不允许 {} 读取所连接浏览器的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开 {}（在 course2md 应用中则打开 course2md），退出并重新打开它后重试。可运行 open "{}" 打开该设置。	提示：macOS 不允许 {} 读取所连接浏览器的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开 {}（在 course2md 应用中则打开 course2md），退出并重新打开它后重试。可运行 open "{}" 打开该设置。	Hint: macOS does not allow {} to read the connected browser’s data. Turn on {} (in the course2md app, course2md itself) in System Settings › Privacy & Security › Full Disk Access, quit and reopen it, then retry. Run open "{}" to open that setting.	提示：macOS 不允許 {} 讀取所連接瀏覽器的資料。請在「系統設定 › 隱私權與安全性 › 完整磁碟取用權限」中開啟 {}（在 course2md App 中則開啟 course2md），結束並重新開啟它後重試。可執行 open "{}" 開啟該設定。	ヒント：macOS が {} による接続したブラウザのデータの読み取りを許可していません。「システム設定 › プライバシーとセキュリティ › フルディスクアクセス」で {}（course2md App では course2md）をオンにし、終了して開き直してから再試行してください。この設定は open "{}" を実行すると開けます。
-仍然尝试连接	仍然尝试连接	Try connecting anyway	仍然嘗試連接	それでも接続を試す
 course2md 正从一份临时副本运行（macOS 对刚下载、尚未移动的应用会这样做），给它的权限在下次打开时不会保留。请先退出 course2md，在访达中把它从“下载”等位置拖到“应用程序”文件夹，再从“应用程序”打开，然后回到这里。	course2md 正从一份临时副本运行（macOS 对刚下载、尚未移动的应用会这样做），给它的权限在下次打开时不会保留。请先退出 course2md，在访达中把它从“下载”等位置拖到“应用程序”文件夹，再从“应用程序”打开，然后回到这里。	course2md is running from a temporary copy (macOS does this for an app just downloaded and not yet moved), and access given to it will not last to the next launch. Quit course2md, drag it in Finder from Downloads (or wherever it is) into the Applications folder, open it from Applications, then come back here.	course2md 正從一份暫時副本執行（macOS 對剛下載、尚未移動的 App 會這樣做），給它的權限在下次開啟時不會保留。請先結束 course2md，在 Finder 中把它從「下載項目」等位置拖到「應用程式」檔案夾，再從「應用程式」開啟，然後回到這裡。	course2md は一時的なコピーから実行されています（ダウンロード直後でまだ移動していない App に macOS がこうします）。このコピーに与えた権限は次回起動時に残りません。course2md を終了し、Finder で「ダウンロード」などから「アプリケーション」フォルダへドラッグしてから「アプリケーション」で開き、ここに戻ってください。
 course2md 正从磁盘映像运行，还没有安装。请先退出 course2md，在访达中把它拖到“应用程序”文件夹，再从“应用程序”打开，然后回到这里。	course2md 正从磁盘映像运行，还没有安装。请先退出 course2md，在访达中把它拖到“应用程序”文件夹，再从“应用程序”打开，然后回到这里。	course2md is running from a disk image and is not installed yet. Quit course2md, drag it in Finder into the Applications folder, open it from Applications, then come back here.	course2md 正從磁碟映像檔執行，還沒有安裝。請先結束 course2md，在 Finder 中把它拖到「應用程式」檔案夾，再從「應用程式」開啟，然後回到這裡。	course2md はディスクイメージから実行されていて、まだインストールされていません。course2md を終了し、Finder で「アプリケーション」フォルダへドラッグしてから「アプリケーション」で開き、ここに戻ってください。
 待确认请求所属的部分已经完成，无需重新发送	待确认请求所属的部分已经完成，无需重新发送	The part these unconfirmed requests belong to is already complete; nothing needs to be resent	待確認請求所屬的部分已經完成，無需重新傳送	未確認のリクエストが属する部分はすでに完了しているため、再送信の必要はありません
@@ -2327,3 +2325,5 @@ macOS 只让有完全磁盘访问权限的应用读取 {} 的数据。course2md 
 识别模型「{}」还没有下载	识别模型「{}」还没有下载	The speech model “{}” isn't downloaded yet	辨識模型「{}」還沒有下載	音声認識モデル「{}」はまだダウンロードされていません
 所选服务已从设置中删除	所选服务已从设置中删除	The chosen service was deleted from settings	所選服務已從設定中刪除	選んだサービスは設定から削除されました
 我已打开开关	我已打开开关	I've turned it on	我已開啟開關	オンにしました
+仍然连接	仍然连接	Try anyway	仍然連接	それでも接続
+正在等待权限	正在等待权限	Waiting for access	正在等待權限	アクセスを待っています

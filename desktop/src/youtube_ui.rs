@@ -889,7 +889,7 @@ impl AccountsView {
             .filter(|_| primary.is_some())
             .map(|choice| {
                 material_button("youtube-check-anyway", ButtonVariant::Text)
-                    .child(course2md::tr!("仍然尝试连接"))
+                    .child(course2md::tr!("仍然连接"))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         // The guide keeps its step: a refusal comes back to it.
                         this.check_youtube(choice.clone(), true, true, cx);
@@ -1038,7 +1038,7 @@ impl AccountsView {
                 .children(crate::ui::async_status(
                     "youtube-access-waiting",
                     &crate::ui::AsyncStatus::Busy(
-                        course2md::tr!("正在等待权限，打开开关后这里会自动更新").into(),
+                        course2md::tr!("正在等待权限").into(),
                     ),
                     None,
                     cx,
