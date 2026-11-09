@@ -674,8 +674,14 @@ impl Desktop {
         };
         let mut parts = vec![reveal(
             "service-protocol-reveal",
-            self.service_type_field(FormOwner::Editor, "service-protocol", awaiting_binding, cx)
-                .into_any_element(),
+            self.service_type_field(
+                FormOwner::Editor,
+                "service-protocol",
+                awaiting_binding,
+                rem(40.).to_pixels(window.rem_size()),
+                cx,
+            )
+            .into_any_element(),
         )];
         // Codex account connection: the login decides the model catalog and availability.
         if protocol == ServiceProtocol::CodexResponses {

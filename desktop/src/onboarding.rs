@@ -1137,7 +1137,7 @@ impl Desktop {
     fn setup_service_content(
         &self,
         purpose: ServicePurpose,
-        _window: &Window,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let owner = FormOwner::Setup(purpose);
@@ -1147,17 +1147,20 @@ impl Desktop {
         let suffix = purpose as usize;
         let codex = draft.protocol == ServiceProtocol::CodexResponses;
         let keyless = draft.protocol.keyless();
+        // The service type is a choice on the page ground with its title above it, as
+        // step 1's routes are; the connection's fields are one tile below it.
+        let types = self.setup_reveal(
+            SharedString::from(format!("setup-protocol-reveal-{suffix}")),
+            self.service_type_field(
+                owner,
+                SharedString::from(format!("setup-protocol-{suffix}")),
+                busy,
+                rem(40.).to_pixels(window.rem_size()),
+                cx,
+            ),
+        );
         let form = setup_tile()
             .gap(rem(20.))
-            .child(self.setup_reveal(
-                SharedString::from(format!("setup-protocol-reveal-{suffix}")),
-                self.service_type_field(
-                    owner,
-                    SharedString::from(format!("setup-protocol-{suffix}")),
-                    busy,
-                    cx,
-                ),
-            ))
             .when(!codex, |form| {
                 form.children(self.setup_field(
                     purpose,
@@ -1234,6 +1237,7 @@ impl Desktop {
             .w_full()
             .min_w_0()
             .gap(rem(24.))
+            .child(types)
             .child(form)
             .children(uses)
             .children(self.setup_check_status(purpose, cx))
