@@ -1504,11 +1504,11 @@ impl Desktop {
             {
                 course2md::tr!("继续")
             }
-            (_, Step::Account) => course2md::tr!("跳过登录"),
+            (_, Step::Account) => course2md::tr!("稍后设置"),
             (_, Step::Model) if model_review => course2md::tr!("返回应用"),
             (_, Step::Model) if speech_missing => course2md::tr!("稍后设置"),
             (_, Step::Model) if model_running => course2md::tr!("继续使用"),
-            (_, Step::Model) if prepare_first => course2md::tr!("稍后准备"),
+            (_, Step::Model) if prepare_first => course2md::tr!("稍后设置"),
             (_, Step::Model) => course2md::tr!("开始使用"),
             _ => course2md::tr!("保存并继续"),
         };
@@ -1579,7 +1579,7 @@ impl Desktop {
                         row.child(
                             material_button("setup-skip-ai", ButtonVariant::Outlined)
                                 .tone(ButtonTone::Accent)
-                                .child(course2md::tr!("稍后配置 AI"))
+                                .child(course2md::tr!("稍后设置"))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     // Keep this private edit valid when the person returns
                                     // within the guide; finishing it discards the draft.

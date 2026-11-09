@@ -1522,8 +1522,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 移动记录无法读取	移动记录无法读取	The move record cannot be read	移動記錄無法讀取	移動記録を読み取れません
 移除预览	移除预览	Remove preview	移除預覽	プレビューを削除
 稍后下载模型，再重新运行视频命令： / Download the model, then rerun your video command: course2md models download	稍后下载模型，再重新运行视频命令：	Download the model, then rerun your video command: course2md models download	稍後下載模型，再重新執行影片命令：	後でモデルをダウンロードしてから、動画コマンドを再実行してください:
-稍后准备	稍后准备	Prepare later	稍後準備	後で準備する
-稍后配置 AI	稍后配置 AI	Configure AI later	稍後設定 AI	後で AI を設定する
 稳定画面时长	稳定画面时长	Stable frame duration	穩定畫面時長	画面の安定時間
 端点不支持 response_format，降级重试成功	端点不支持 response_format，降级重试成功	The endpoint does not support response_format; retrying without it succeeded.	端點不支援 response_format，降級重試成功	エンドポイントが response_format をサポートしていないため、フォールバックして再試行し成功しました。
 笔记	笔记	Note	筆記	ノート
@@ -1764,7 +1762,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 账号状态响应不完整，请稍后重试 / Account status response is incomplete; retry later	账号状态响应不完整，请稍后重试	Account status response is incomplete; retry later	帳號狀態回應不完整，請稍後重試	アカウントステータスの応答が不完全です。後でもう一度試してください。
 资源位置超出此笔记 / Asset escapes note directory	资源位置超出此笔记	Asset escapes note directory	資源位置超出此筆記	リソースの場所がこのノートの外にあります
 跟随系统	跟随系统	Follow system	跟隨系統	システムに合わせる
-跳过登录	跳过登录	Skip login	跳過登入	ログインをスキップする
 转写为空，无法摘要 / Transcript is empty; cannot summarize	转写为空，无法摘要	Transcript is empty; cannot summarize	轉寫為空，無法摘要	文字起こしが空のため要約できません
 转换未完成	转换未完成	Conversion not completed	轉換未完成	変換が完了していません
 转换程序	转换程序	Conversion program	轉換程式	変換プログラム
