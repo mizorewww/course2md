@@ -1066,6 +1066,31 @@ impl Store {
             llm: pick(&chosen.llm, &self.services.defaults.llm),
         }
     }
+    /// The first service an input chose, among those its configuration needs, that is
+    /// no longer saved or was deleted, and the version that would take its place: the
+    /// AI service, then speech. A purpose the input does not use never counts, and
+    /// nothing is known to be gone while the services record cannot be read.
+    pub fn dropped_choice(
+        &self,
+        chosen: &ServiceRefs,
+        config: &ConfigFile,
+    ) -> Option<(ServicePurpose, ServiceVersion)> {
+        if self.is_blocked(PreferenceGroup::Services) {
+            return None;
+        }
+        let needed = chosen.required_for(config);
+        let planned = self.plan_refs(chosen);
+        [
+            (ServicePurpose::Ai, needed.llm, planned.llm),
+            (ServicePurpose::Speech, needed.asr, planned.asr),
+        ]
+        .into_iter()
+        .filter_map(|(purpose, own, now)| {
+            own.filter(|id| !self.usable_in_snapshot(id))?;
+            Some((purpose, self.version(&now?)?.clone()))
+        })
+        .next()
+    }
     /// Whether a planned task names a service its configuration needs that is no longer
     /// saved or was deleted: continuing it can only stop again, and only a new attempt
     /// with another service goes on. Unreadable service records are another obstacle.
@@ -1936,6 +1961,74 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let store = open(directory.path(), Arc::new(MemoryCredentialVault::new()));
         (directory, store)
+    }
+
+    #[test]
+    fn a_deleted_choice_counts_only_where_the_input_uses_it() {
+        let (_directory, mut store) = isolated();
+        let chosen = complete_draft(&mut store, "chosen");
+        let chosen = store
+            .publish_service(&chosen.id, BindingScope::CurrentTask)
+            .unwrap();
+        let default = complete_draft(&mut store, "default");
+        let default = store
+            .publish_service(&default.id, BindingScope::Defaults)
+            .unwrap();
+        let refs = ServiceRefs {
+            asr: None,
+            llm: Some(chosen.id.clone()),
+        };
+        let mut config = ConfigFile::default();
+        config.llm.enabled = true;
+        assert!(store.dropped_choice(&refs, &config).is_none());
+        store.delete_service(&chosen.service_id).unwrap();
+        // Used: the default that would take its place is named, to be chosen.
+        let (purpose, replacement) = store.dropped_choice(&refs, &config).unwrap();
+        assert_eq!(purpose, ServicePurpose::Ai);
+        assert_eq!(replacement.id, default.id);
+        // Not used: nothing stands in the way.
+        config.llm.enabled = false;
+        config.llm.summarize = false;
+        config.llm.translate = None;
+        assert!(store.dropped_choice(&refs, &config).is_none());
+    }
+
+    #[test]
+    fn a_deleted_speech_choice_counts_with_ai_off() {
+        let (_directory, mut store) = isolated();
+        let mut speech = ServiceDraft::new(ServicePurpose::Speech);
+        speech.address = "https://example.test/v1".into();
+        speech.model = "speech".into();
+        let speech = store
+            .save_service_draft(speech, Some(Secret::new("test-only-secret")))
+            .unwrap();
+        let speech = store
+            .publish_service(&speech.id, BindingScope::CurrentTask)
+            .unwrap();
+        let mut fallback = ServiceDraft::new(ServicePurpose::Speech);
+        fallback.address = "https://example.test/v1".into();
+        fallback.model = "fallback".into();
+        let fallback = store
+            .save_service_draft(fallback, Some(Secret::new("test-only-secret")))
+            .unwrap();
+        let fallback = store
+            .publish_service(&fallback.id, BindingScope::Defaults)
+            .unwrap();
+        store.delete_service(&speech.service_id).unwrap();
+        let refs = ServiceRefs {
+            asr: Some(speech.id.clone()),
+            llm: None,
+        };
+        let mut config = ConfigFile::default();
+        config.llm.enabled = false;
+        config.llm.summarize = false;
+        config.defaults.provider = Some(AsrProvider::Api);
+        let (purpose, replacement) = store.dropped_choice(&refs, &config).unwrap();
+        assert_eq!(purpose, ServicePurpose::Speech);
+        assert_eq!(replacement.id, fallback.id);
+        // Subtitles only: speech is not used, so its deletion does not stand in the way.
+        config.defaults.transcript_source = Some(TranscriptSource::Subtitle);
+        assert!(store.dropped_choice(&refs, &config).is_none());
     }
 
     fn complete_draft(store: &mut Store, model: &str) -> ServiceDraft {

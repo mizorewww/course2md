@@ -2483,33 +2483,26 @@ impl Desktop {
         self.library(cx).preferred_note(&source.identity, preferred)
     }
 
-    /// A service the current draft chose that is no longer saved, with the default
-    /// that would take its place: the AI service first. Nothing while the services
-    /// cannot be read, since then nothing is known to be gone.
-    pub(crate) fn dropped_draft_service(&self, cx: &App) -> Option<(ServicePurpose, String)> {
+    /// A service the current draft chose, among those its options use, that is no
+    /// longer saved, with the version that would take its place (the AI service
+    /// first). Nothing while the services cannot be read: then nothing is known gone.
+    pub(crate) fn dropped_draft_service(
+        &self,
+        cx: &App,
+    ) -> Option<(ServicePurpose, crate::preferences::ServiceVersion)> {
         let draft = self.workspace(cx)?.state.draft()?;
-        let preferences = &self.preferences;
-        if preferences.is_blocked(crate::preferences::PreferenceGroup::Services) {
-            return None;
-        }
-        let refs = preferences.plan_refs(&crate::preferences::ServiceRefs {
-            asr: draft.asr_service.clone(),
-            llm: draft.ai_service.clone(),
-        });
-        [
-            (ServicePurpose::Ai, &draft.ai_service, refs.llm),
-            (ServicePurpose::Speech, &draft.asr_service, refs.asr),
-        ]
-        .into_iter()
-        .find(|(_, own, _)| {
-            own.as_deref()
-                .is_some_and(|id| !preferences.usable_in_snapshot(id))
-        })
-        .and_then(|(purpose, _, now)| {
-            preferences
-                .version(&now?)
-                .map(|version| (purpose, version.config.name.clone()))
-        })
+        let mut config = draft
+            .base_config
+            .clone()
+            .unwrap_or_else(|| self.preferences.defaults_config());
+        draft.options.apply_to(&mut config);
+        self.preferences.dropped_choice(
+            &crate::preferences::ServiceRefs {
+                asr: draft.asr_service.clone(),
+                llm: draft.ai_service.clone(),
+            },
+            &config,
+        )
     }
 
     fn can_start_input(&self, cx: &App) -> bool {
@@ -3189,8 +3182,10 @@ impl Desktop {
             None => {}
         }
         if notice.is_none()
-            && let Some((purpose, name)) = dropped_service
+            && let Some((purpose, replacement)) = dropped_service
         {
+            let name = replacement.config.name.clone();
+            let id = replacement.id.clone();
             notice = Some(
                 notice_banner(
                     "draft-service-dropped",
@@ -3210,8 +3205,10 @@ impl Desktop {
                             material_button("use-default-service", ButtonVariant::Tonal)
                                 .icon(symbols::check())
                                 .child(course2md::tr!("使用默认服务「{}」", name))
+                                // Binds the version it names, not whatever the
+                                // default is by the time the task runs.
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.bind_service(purpose, None, true, cx);
+                                    this.bind_service(purpose, Some(id.clone()), true, cx);
                                 })),
                         )
                         .child(
