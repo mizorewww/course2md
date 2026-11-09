@@ -101,12 +101,17 @@ impl Desktop {
             }),
         );
         let mut fields = vec![
+            // The group, then what its choice means, as on home's options.
             ui::Field::below(
                 "default-text-source-row",
                 course2md::tr!("文字来源"),
-                div().when(fits, |row| row.flex()).child(group),
-            )
-            .hint(source_hint),
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(rem(8.))
+                    .child(div().when(fits, |row| row.flex()).child(group))
+                    .child(supporting_info("default-text-source-hint", source_hint)),
+            ),
             ui::Field::menu(
                 "default-subtitle-language",
                 course2md::tr!("字幕语言"),
@@ -183,7 +188,7 @@ impl Desktop {
         let selected_provider = preferences.options.provider;
         let online = selected_provider == Some(AsrProvider::Api);
         let methods = [course2md::tr!("本机识别"), course2md::tr!("在线语音服务")];
-        let fits = super::segmented_fits(&methods, false, window);
+        let fits = super::segmented_fits(&methods, true, window);
         let group = ConnectedButtonGroup::new("default-asr-device", course2md::tr!("识别方式"))
             .tone(ButtonTone::Neutral)
             .segmented()
@@ -191,6 +196,9 @@ impl Desktop {
             .vertical(!fits)
             .button_size(ButtonSize::Small)
             .options([("local", methods[0]), ("online", methods[1])])
+            // The same icons the choice has in first use.
+            .icon("local", symbols::computer())
+            .icon("online", symbols::cloud())
             .selected(if online { "online" } else { "local" })
             .on_change(cx.listener(|this, selected: &SharedString, _, cx| {
                 let mut next = this.generation_edit_base();
