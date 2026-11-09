@@ -2110,9 +2110,9 @@ impl ReaderPage {
             return self.note_figure(preview, block, cx);
         }
         match &preview {
-            Some(preview) if address == HEAD_BLOCK => {
-                self.reader_head(preview, window, cx).into_any_element()
-            }
+            Some(preview) if address == HEAD_BLOCK => self
+                .reader_head(preview, true, window, cx)
+                .into_any_element(),
             // As far below the last block as the note's opening is below the card's top.
             _ if address == END_BLOCK => div().h(rem(24.)).into_any_element(),
             _ => div().into_any_element(),
@@ -2205,6 +2205,7 @@ impl ReaderPage {
     fn reader_head(
         &mut self,
         preview: &Rc<notes::Preview>,
+        facts_shown: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -2240,21 +2241,23 @@ impl ReaderPage {
             .w_full()
             .min_w_0()
             .gap(rem(12.))
-            .child(
-                h_flex()
-                    .w_full()
-                    .min_w_0()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_x(rem(12.))
-                    .gap_y(rem(8.))
-                    .children(origin)
-                    .children(
-                        facts
-                            .into_iter()
-                            .map(|fact| status_chip(StatusKind::Neutral).child(fact)),
-                    ),
-            )
+            .when(facts_shown, |head| {
+                head.child(
+                    h_flex()
+                        .w_full()
+                        .min_w_0()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_x(rem(12.))
+                        .gap_y(rem(8.))
+                        .children(origin)
+                        .children(
+                            facts
+                                .into_iter()
+                                .map(|fact| status_chip(StatusKind::Neutral).child(fact)),
+                        ),
+                )
+            })
             .children(self.reader_obstacles(cx))
             .children(self.reader_details(preview, cx))
             .children(self.reader_notices(preview, cx))
@@ -3186,7 +3189,8 @@ impl ReaderPage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
-        let head = self.reader_head(preview, window, cx);
+        // The screenshots repeat none of the note's facts; what needs attention stays.
+        let head = self.reader_head(preview, false, window, cx);
         let panel = || {
             v_flex()
                 .w_full()
