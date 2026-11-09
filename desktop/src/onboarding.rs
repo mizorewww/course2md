@@ -1381,7 +1381,7 @@ impl Desktop {
                     ))
                     .child(
                         h_flex().child(
-                            material_button("setup-cloud-model-fix", ButtonVariant::Tonal)
+                            material_button("setup-cloud-model-fix", ButtonVariant::Filled)
                                 .icon(symbols::settings())
                                 .child(course2md::tr!("设置语音服务"))
                                 .on_click(
@@ -1486,6 +1486,11 @@ impl Desktop {
             let service = self.onboarding.service(purpose);
             service.running.is_some() || service.form.vault_busy
         });
+        // Online recognition with no service: setting one up is the step's main
+        // action, and finishing without it is outlined.
+        let speech_missing = step == Step::Model
+            && self.onboarding.provider == Some(AsrProvider::Api)
+            && self.setup_speech_service().is_none();
         let label = match (service_action, step) {
             (Some(action), _) => action.label(),
             (_, Step::Account)
@@ -1496,6 +1501,7 @@ impl Desktop {
             }
             (_, Step::Account) => course2md::tr!("跳过登录"),
             (_, Step::Model) if model_review => course2md::tr!("返回应用"),
+            (_, Step::Model) if speech_missing => course2md::tr!("稍后设置"),
             (_, Step::Model) if model_running => course2md::tr!("继续使用"),
             (_, Step::Model) if prepare_first => course2md::tr!("稍后准备"),
             (_, Step::Model) => course2md::tr!("开始使用"),
@@ -1505,7 +1511,7 @@ impl Desktop {
         let account_skipped = step == Step::Account
             && !self.accounts.read(cx).account_connected()
             && self.accounts.read(cx).youtube.choice.is_none();
-        let variant = if prepare_first || account_skipped {
+        let variant = if prepare_first || account_skipped || speech_missing {
             ButtonVariant::Outlined
         } else {
             ButtonVariant::Filled
