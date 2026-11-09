@@ -2038,13 +2038,11 @@ impl Desktop {
                     .child(row),
             );
         }
+        // The design names this section 正在处理 whatever its tasks wait for; each
+        // card's own chip says which one needs the person.
         Some(home_section(
             "workbench-active-title",
-            if waiting > 0 {
-                course2md::tr!("任务")
-            } else {
-                course2md::tr!("正在处理")
-            },
+            course2md::tr!("正在处理"),
             None,
             list,
         ))

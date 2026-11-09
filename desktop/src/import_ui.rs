@@ -111,8 +111,10 @@ fn supporting(id: &'static str, text: impl Into<SharedString>) -> Stateful<Div> 
 }
 
 /// A button that shows or hides the technical text under it.
+/// A quiet link to technical details: ink, so it never competes with a repair.
 fn details_toggle(id: impl Into<ElementId>, open: bool) -> MaterialButton {
     material_button(id, ButtonVariant::Text)
+        .tone(ButtonTone::Neutral)
         .icon(disclosure_chevron(open))
         .child(if open {
             course2md::tr!("收起技术详情")
@@ -717,8 +719,9 @@ impl Desktop {
             || self.value(Field::Source, cx).is_empty()
             || self.owning_task(cx).is_some();
         let preview_click = cx.listener(|this, _, window, cx| this.inspect_source(window, cx));
-        // A narrow window keeps the field's text: the action folds to its icon.
-        let preview = if is_compact(window) {
+        // The action keeps its label while the field still leaves the link room to
+        // read; only when it would not does it fold to its icon, named by its tooltip.
+        let preview = if !preview_label_fits(preview_label, window) {
             ui::tip_button(
                 "preview-source",
                 symbols::visibility(),
@@ -1256,11 +1259,15 @@ impl Desktop {
                                         ),
                                     )
                                 },
-                            )
-                            .child(
-                                details_toggle("source-error-details", open)
-                                    .on_click(cx.listener(Self::toggle_preview_details)),
                             ),
+                    ),
+                )
+                // The details are a quiet link under the notice, not a second action
+                // beside its repair.
+                .child(
+                    h_flex().w_full().child(
+                        details_toggle("source-error-details", open)
+                            .on_click(cx.listener(Self::toggle_preview_details)),
                     ),
                 )
                 .child(motion::disclosure(
@@ -3253,6 +3260,21 @@ impl Desktop {
             }
         }
     }
+}
+
+/// Whether the hero field's 预览视频 keeps its label: the field (the home column
+/// within the window's gutters) still leaves the link at least this much room
+/// beside the labeled action, measured at the current text scale.
+fn preview_label_fits(label: &str, window: &Window) -> bool {
+    let scale = f32::from(window.rem_size()) / gpui_kit_material::tokens::typography::BASE_PX;
+    let width = f32::from(window.bounds().size.width) / scale;
+    // The home column, inside 16px gutters at the narrowest.
+    let field = (width - 32.).min(760.);
+    // A medium tonal button: 24 + 20 icon + 8 before its label, 24 after; the field's
+    // leading icon and insets take about 72 more.
+    let action =
+        crate::views::shaped_width(label, 16. * scale, FontWeight::MEDIUM, window) / scale + 76.;
+    field - action - 72. >= 280.
 }
 
 /// The text source menu's width in design px: at least its chip's, and wide enough
