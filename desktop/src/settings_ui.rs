@@ -1878,7 +1878,8 @@ impl Desktop {
                             .min_w_0()
                             .min_h(ui::RESOURCE_ICON)
                             .items_center()
-                            .flex_wrap()
+                            // The recheck stays at the conclusion's end; a long
+                            // conclusion wraps in its own column.
                             .gap(rem(16.))
                             .child(
                                 TileScale::Regular
@@ -1890,7 +1891,7 @@ impl Desktop {
                                     .flex_1()
                                     .flex_basis(rem(200.)),
                             )
-                            .child(recheck),
+                            .child(div().flex_shrink_0().child(recheck)),
                     )
                     .child(
                         h_flex()
