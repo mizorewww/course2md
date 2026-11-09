@@ -1913,6 +1913,50 @@ impl Desktop {
                 self.engine_obstacle("diagnostic-engine-obstacle", issue, false, cx),
             ));
         }
+        // A missing media program: its repair beside the check, not inside the details.
+        let missing_tools: Vec<&str> = [
+            ("ffmpeg", e.ffmpeg),
+            ("ffprobe", e.ffprobe),
+            ("yt-dlp", e.ytdlp),
+        ]
+        .into_iter()
+        .filter_map(|(name, found)| (!found).then_some(name))
+        .collect();
+        if e.engine && !missing_tools.is_empty() {
+            let command = media_install_command();
+            let actions = h_flex()
+                .min_w_0()
+                .flex_wrap()
+                .items_center()
+                .child(
+                    material_button("repair-media-download-app", ButtonVariant::Text)
+                        .icon(symbols::download())
+                        .child(course2md::tr!("下载完整应用"))
+                        .on_click(|_, _, cx| {
+                            cx.open_url("https://github.com/mizorewww/course2md/releases")
+                        }),
+                )
+                .child(
+                    material_button("repair-media-copy-command", ButtonVariant::Text)
+                        .icon(symbols::content_copy())
+                        .child(course2md::tr!("复制安装命令"))
+                        .on_click(move |_, _, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(command.into()))
+                        }),
+                )
+                .into_any_element();
+            fields.push(ui::Field::content(
+                "repair-media-tools",
+                div().children(ui::async_status(
+                    "repair-media-tools-status",
+                    &ui::AsyncStatus::Warning(
+                        course2md::tr!("缺少 {}", missing_tools.join("、")).into(),
+                    ),
+                    Some(actions),
+                    cx,
+                )),
+            ));
+        }
         if !e.engine {
             fields.push(ui::Field::inline(
                 "repair-bundled-engine",
@@ -1973,18 +2017,13 @@ impl Desktop {
         });
         let repair =
             (!environment.ffmpeg || !environment.ffprobe || !environment.ytdlp).then(|| {
-                let (help, command) = if cfg!(target_os = "macos") {
-                    (course2md::tr!("在终端运行"), "brew install ffmpeg yt-dlp")
+                let command = media_install_command();
+                let help = if cfg!(target_os = "macos") {
+                    course2md::tr!("在终端运行")
                 } else if cfg!(target_os = "windows") {
-                    (
-                        course2md::tr!("在 PowerShell 运行"),
-                        "winget install Gyan.FFmpeg; winget install yt-dlp.yt-dlp",
-                    )
+                    course2md::tr!("在 PowerShell 运行")
                 } else {
-                    (
-                        course2md::tr!("用系统包管理器安装 ffmpeg，再运行"),
-                        "pipx install yt-dlp",
-                    )
+                    course2md::tr!("用系统包管理器安装 ffmpeg，再运行")
                 };
                 v_flex()
                     .w_full()
@@ -2226,6 +2265,17 @@ fn pending_after_save<T, E>(result: &std::result::Result<(), E>, next: T) -> Opt
 
 fn search_placeholder() -> &'static str {
     course2md::tr!("搜索设置")
+}
+
+/// The command that installs the media programs on this system.
+fn media_install_command() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "brew install ffmpeg yt-dlp"
+    } else if cfg!(target_os = "windows") {
+        "winget install Gyan.FFmpeg; winget install yt-dlp.yt-dlp"
+    } else {
+        "pipx install yt-dlp"
+    }
 }
 
 #[cfg(test)]
