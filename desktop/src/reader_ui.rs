@@ -86,6 +86,20 @@ struct ImageViewer {
     focus: FocusHandle,
 }
 
+/// Where the viewer puts a screenshot's text.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TextPlacement {
+    /// Instead of the image, in a window too short for both.
+    Only,
+    /// In a column beside the image.
+    Beside,
+    /// Under the image, at most part of the height.
+    Below,
+}
+
+/// The width of the text column beside the image: a comfortable reading measure.
+const VIEWER_TEXT_COLUMN: Rems = rem(360.);
+
 const ZOOM_STEP_IN: f32 = 1.25;
 const ZOOM_STEP_OUT: f32 = 0.8;
 /// One of the viewer's icons: `tip` also names its key.
@@ -3684,6 +3698,10 @@ impl ReaderPage {
     fn viewer_height(window: &Window) -> Pixels {
         window.bounds().size.height - Self::viewer_safe_top(window)
     }
+    /// Wide enough for the text to sit beside a usefully large image.
+    fn viewer_is_wide(window: &Window) -> bool {
+        window.bounds().size.width >= rem(880.).to_pixels(window.rem_size())
+    }
     fn viewer_is_short(window: &Window) -> bool {
         Self::viewer_height(window) < rem(420.).to_pixels(window.rem_size())
     }
@@ -3763,8 +3781,38 @@ impl ReaderPage {
         };
         let has_text = !frame.transcript.trim().is_empty();
         let media = (!text_only).then(|| self.reader_viewer_media(label.clone(), cx));
-        let text = (text_only || (has_text && text_open))
-            .then(|| self.reader_viewer_text(text_only, window));
+        let shows_text = text_only || (has_text && text_open);
+        let placement = if text_only {
+            TextPlacement::Only
+        } else if Self::viewer_is_wide(window) {
+            TextPlacement::Beside
+        } else {
+            TextPlacement::Below
+        };
+        let text = shows_text.then(|| self.reader_viewer_text(placement, window));
+        // A wide window gives the text a column of its own beside the image, the
+        // window's whole height to read in; a narrow one keeps it below.
+        let body = match (media, text) {
+            (Some(media), Some(text)) if placement == TextPlacement::Beside => h_flex()
+                .id("reader-image-body")
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .items_stretch()
+                .gap(rem(24.))
+                .child(v_flex().flex_1().min_w_0().h_full().child(media))
+                .child(text)
+                .into_any_element(),
+            (media, text) => v_flex()
+                .id("reader-image-body")
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .gap(rem(8.))
+                .children(media)
+                .children(text)
+                .into_any_element(),
+        };
         let controls = self.reader_viewer_controls(window, cx);
         let viewer = self.viewer.as_mut()?;
         let focus = viewer.focus.clone();
@@ -3816,8 +3864,7 @@ impl ReaderPage {
             .w_full()
             .gap(rem(8.))
             .pb(rem(12.))
-            .children(media)
-            .children(text)
+            .child(body)
             .child(controls);
         let dismiss = cx.weak_entity();
         Some(
@@ -3839,22 +3886,28 @@ impl ReaderPage {
     }
 
     /// The transcript: selectable note text in its own scroll region.
-    fn reader_viewer_text(&self, text_only: bool, window: &Window) -> Stateful<Div> {
+    fn reader_viewer_text(&self, placement: TextPlacement, window: &Window) -> Stateful<Div> {
         let reader = self;
         let viewer = reader.viewer.as_ref().expect("the viewer draws its text");
+        let column = VIEWER_TEXT_COLUMN.to_pixels(window.rem_size());
         reader.viewer_line.store(
-            f32::from(window.bounds().size.width) as u32,
+            f32::from(match placement {
+                TextPlacement::Beside => column,
+                _ => window.bounds().size.width,
+            }) as u32,
             Ordering::Relaxed,
         );
         let frame = &viewer.frames[viewer.index];
         div()
             .id("image-details")
             .relative()
-            .w_full()
             .min_w_0()
             .min_h_0()
-            .when(text_only, |view| view.flex_1())
-            .when(!text_only, |view| view.flex_shrink_0().max_h(relative(0.4)))
+            .map(|view| match placement {
+                TextPlacement::Only => view.w_full().flex_1(),
+                TextPlacement::Beside => view.flex_shrink_0().w(column).h_full(),
+                TextPlacement::Below => view.w_full().flex_shrink_0().max_h(relative(0.4)),
+            })
             .pr(rem(12.))
             .overflow_y_scroll()
             // A sideways swipe scrolls a wide formula, not the text.
