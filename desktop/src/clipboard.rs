@@ -2,7 +2,9 @@
 //! capture run records it instead of replacing the person's clipboard.
 //!
 //! Images go on the clipboard as PNG. GPUI writes one to the macOS pasteboard as
-//! `public.png` and to the Windows clipboard as the registered `PNG` format; its
+//! `public.png` and to the Windows clipboard as the registered `PNG` format only,
+//! with no `CF_DIB` bitmap: browsers, Office and current Paint paste it, but an
+//! app that reads only bitmaps does not, and GPUI offers no way to add one. Its
 //! Linux clipboards (X11 and Wayland) carry text only, so there the app offers the
 //! image's path instead (see [`IMAGES`]).
 use gpui::{App, ClipboardItem, Image, ImageFormat};
@@ -114,7 +116,7 @@ fn record(item: &ClipboardItem) {
 
 /// The picture at `path` as a PNG clipboard image. A PNG file is copied as it is;
 /// any other format the reader shows (JPEG, WebP) is decoded and encoded as PNG,
-/// which every clipboard reader accepts. Run it off the UI thread.
+/// the format most apps paste. Run it off the UI thread.
 pub(crate) fn png_image(path: &Path) -> anyhow::Result<ClipboardItem> {
     let bytes = std::fs::read(path)?;
     let reader = image::ImageReader::new(Cursor::new(&bytes)).with_guessed_format()?;
