@@ -2017,7 +2017,7 @@ impl ReaderPage {
                     let text = TextSelection::selected_text(window, cx);
                     let text = copied_text(&text);
                     if !text.is_empty() {
-                        cx.write_to_clipboard(ClipboardItem::new_string(text));
+                        crate::clipboard::write(ClipboardItem::new_string(text), cx);
                         cx.stop_propagation();
                     }
                 })
@@ -2912,7 +2912,7 @@ impl ReaderPage {
                         } else {
                             &source.plain_text
                         };
-                        cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                        crate::clipboard::write(ClipboardItem::new_string(text.clone()), cx);
                         cx.emit(ReaderEvent::Message(copied.into()));
                         cx.notify();
                     })),

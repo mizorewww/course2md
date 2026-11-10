@@ -412,7 +412,7 @@ impl Desktop {
                 .on_click(move |_, _, cx| match repair {
                     Repair::Open(url) => cx.open_url(url),
                     Repair::Copy(text) => {
-                        cx.write_to_clipboard(ClipboardItem::new_string(text.into()))
+                        crate::clipboard::write(ClipboardItem::new_string(text.into()), cx)
                     }
                 })
                 .into_any_element()

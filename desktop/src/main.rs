@@ -8,6 +8,7 @@ mod account_ui;
 mod appearance_ui;
 #[cfg(feature = "capture")]
 mod capture;
+mod clipboard;
 mod codex_ui;
 mod course_library;
 mod exports_ui;

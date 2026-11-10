@@ -478,7 +478,7 @@ impl Desktop {
             Command::global(
                 course2md::tr!("复制原视频链接"),
                 symbols::link(),
-                move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(link.clone())),
+                move |_, cx| crate::clipboard::write(ClipboardItem::new_string(link.clone()), cx),
             )
         }));
         if let Some(last) = commands.pop() {

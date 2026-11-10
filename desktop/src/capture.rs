@@ -38,7 +38,9 @@
 //! shows a Full Disk Access guide step whatever the folder says, and
 //! `dialog:youtube~access-open-settings` takes the guide's first action on the
 //! real look at the fixture folder. In capture runs, opening System Settings,
-//! showing the app in Finder and reopening the app are logged, not taken. Each
+//! showing the app in Finder and reopening the app are logged, not taken, and a copy
+//! never reaches the system clipboard: it is logged, and written to the file
+//! `COURSE2MD_CAPTURE_CLIPBOARD` names when set (an image as its PNG bytes). Each
 //! capture first closes the dialogs an earlier one opened, so one shot shows
 //! one dialog. Nothing a dialog would change is saved unless its action is
 //! taken.

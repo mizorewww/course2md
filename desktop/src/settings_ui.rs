@@ -1965,7 +1965,7 @@ impl Desktop {
                         .icon(symbols::content_copy())
                         .child(course2md::tr!("复制安装命令"))
                         .on_click(move |_, _, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(command.into()))
+                            crate::clipboard::write(ClipboardItem::new_string(command.into()), cx)
                         }),
                 )
                 .into_any_element();
@@ -2061,7 +2061,10 @@ impl Desktop {
                             .icon(symbols::content_copy())
                             .child(course2md::tr!("复制安装命令"))
                             .on_click(move |_, _, cx| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(command.into()))
+                                crate::clipboard::write(
+                                    ClipboardItem::new_string(command.into()),
+                                    cx,
+                                )
                             }),
                     )
             });
@@ -2107,7 +2110,7 @@ impl Desktop {
                         .icon(symbols::content_copy())
                         .child(course2md::tr!("复制诊断信息"))
                         .on_click(move |_, _, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(report.clone()))
+                            crate::clipboard::write(ClipboardItem::new_string(report.clone()), cx)
                         }),
                 ),
             )

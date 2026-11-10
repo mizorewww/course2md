@@ -1311,9 +1311,10 @@ impl Desktop {
             }
             TaskAction::OpenExports => self.open_task_export_location(id, cx),
             TaskAction::OpenSource => cx.open_url(&task.plan.source.input),
-            TaskAction::CopyLink => {
-                cx.write_to_clipboard(ClipboardItem::new_string(task.plan.source.input.clone()))
-            }
+            TaskAction::CopyLink => crate::clipboard::write(
+                ClipboardItem::new_string(task.plan.source.input.clone()),
+                cx,
+            ),
             TaskAction::Details => self
                 .tasks
                 .update(cx, |page, cx| page.toggle_task_row(&id, cx)),
