@@ -2231,6 +2231,7 @@ impl ReaderPage {
         });
         let enlarge = course2md::tr!("放大{}", label);
         // The frame's time at one corner and the action that enlarges it at the other.
+        let copyable = !matches!(loaded, Loaded::Failed);
         let slot = screenshot_slot(("note-figure-slot", block), Some(loaded)).when_some(
             frame,
             |slot, frame| {
@@ -2272,7 +2273,9 @@ impl ReaderPage {
         );
         let menu = frame
             .filter(|frame| self.frames[*frame].image.is_some())
-            .map(|_| self.image_context_menu(("note-figure-context", block), path.clone(), cx));
+            .map(|_| {
+                self.image_context_menu(("note-figure-context", block), path.clone(), copyable, cx)
+            });
         let card = MaterialCard::new(("note-figure", block), CardVariant::Filled)
             .rounded(RADIUS_LARGE_INCREASED)
             .accessibility_label(enlarge)
@@ -3402,6 +3405,7 @@ impl ReaderPage {
             .as_ref()
             .map(|file| self.images.get(&file.path, thumbnail, cx));
         let openable = matches!(loaded, Some(Loaded::Pending | Loaded::Ready(..)));
+        let copyable = !matches!(loaded, Some(Loaded::Failed));
         let excerpt = self
             .gallery
             .excerpts
@@ -3410,7 +3414,12 @@ impl ReaderPage {
             .unwrap_or_default();
         let to_note = course2md::tr!("在笔记中查看");
         let menu = frame.image.as_ref().map(|image| {
-            self.image_context_menu(("screenshot-context", index), image.path.clone(), cx)
+            self.image_context_menu(
+                ("screenshot-context", index),
+                image.path.clone(),
+                copyable,
+                cx,
+            )
         });
         let card = MaterialCard::new(
             SharedString::from(frame.anchor.clone()),
@@ -3503,33 +3512,48 @@ impl ReaderPage {
         &self,
         id: impl Into<ElementId>,
         path: PathBuf,
+        copyable: bool,
         cx: &mut Context<Self>,
     ) -> MaterialContextMenu {
+        command_context_menu(id, None, self.image_commands(path, copyable, cx))
+    }
+
+    /// The commands for the screenshot at `path`. A file that could not be
+    /// decoded (`copyable` false) keeps its path and location but not 复制图片.
+    fn image_commands(
+        &self,
+        path: PathBuf,
+        copyable: bool,
+        cx: &mut Context<Self>,
+    ) -> Vec<Command> {
         let reader = cx.weak_entity();
+        let say = |reader: &WeakEntity<Self>, message: &'static str, cx: &mut App| {
+            let _ = reader.update(cx, |_, cx| cx.emit(ReaderEvent::Message(message.into())));
+        };
         let mut commands = Vec::new();
         if crate::clipboard::IMAGES {
             let (reader, path) = (reader.clone(), path.clone());
-            commands.push(Command::global(
-                course2md::tr!("复制图片"),
-                symbols::content_copy(),
-                move |_, cx| {
-                    let _ = reader.update(cx, |this, cx| this.copy_reader_image(path.clone(), cx));
-                },
-            ));
+            commands.push(
+                Command::global(
+                    course2md::tr!("复制图片"),
+                    symbols::content_copy(),
+                    move |_, cx| {
+                        let _ =
+                            reader.update(cx, |this, cx| this.copy_reader_image(path.clone(), cx));
+                    },
+                )
+                .disabled(!copyable),
+            );
         }
         commands.push({
-            let path = path.clone();
+            let (reader, path) = (reader.clone(), path.clone());
             Command::global(
                 course2md::tr!("复制图片路径"),
                 symbols::link(),
                 move |_, cx| {
                     let text = path.display().to_string();
                     crate::clipboard::write(ClipboardItem::new_string(text), cx);
-                    let _ = reader.update(cx, |_, cx| {
-                        cx.emit(ReaderEvent::Message(
-                            course2md::tr!("已复制图片路径").into(),
-                        ))
-                    });
+                    say(&reader, course2md::tr!("已复制图片路径"), cx);
                 },
             )
         });
@@ -3544,19 +3568,24 @@ impl ReaderPage {
             reveal,
             symbols::folder_open(),
             move |_, cx| {
-                if !crate::youtube_ui::stubbed(&format!("reveal {}", path.display())) {
+                // A file moved or deleted since the note opened has nothing to show.
+                if !path.exists() {
+                    say(&reader, course2md::tr!("找不到这张截图的文件"), cx);
+                } else if !crate::youtube_ui::stubbed(&format!("reveal {}", path.display())) {
                     cx.reveal_path(&path);
                 }
             },
         ));
-        command_context_menu(id, None, commands)
+        commands
     }
 
-    /// Puts the screenshot at `path` on the clipboard as PNG, encoded off the UI thread.
     /// A later copy, or leaving the note, supersedes one still encoding.
     fn copy_reader_image(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         let copy = self.image_copy.begin();
-        let encode = cx.background_spawn(async move { crate::clipboard::png_image(&path) });
+        let encode = cx.background_spawn({
+            let path = path.clone();
+            async move { crate::clipboard::png_image(&path) }
+        });
         cx.spawn(async move |this, cx| {
             let result = encode.await;
             let _ = this.update(cx, |this, cx| {
@@ -3568,7 +3597,11 @@ impl ReaderPage {
                         crate::clipboard::write(item, cx);
                         course2md::tr!("已复制图片").to_owned()
                     }
-                    Err(error) => course2md::tr!("无法复制图片：{}", format!("{error:#}")),
+                    Err(error) => {
+                        // The person is told it failed; the reason is for a report.
+                        eprintln!("course2md: could not copy {}: {error:#}", path.display());
+                        course2md::tr!("无法复制图片").to_owned()
+                    }
                 };
                 cx.emit(ReaderEvent::Message(message));
             });
@@ -4265,7 +4298,7 @@ impl ReaderPage {
                             .child(picture),
                     ),
             );
-        let menu = self.image_context_menu("enlarged-image-context", image.path.clone(), cx);
+        let menu = self.image_context_menu("enlarged-image-context", image.path.clone(), true, cx);
         // The kit's outlined card surface frames the image: its outline and corners.
         CardSurface::new(CardVariant::Outlined)
             .rounded(RADIUS_LARGE)
