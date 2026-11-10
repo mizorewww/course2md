@@ -92,7 +92,7 @@ fn resume_marker_path() -> PathBuf {
 
 /// Capture runs report a system action instead of taking it: they open no System
 /// Settings or Finder window and do not quit or reopen the app.
-fn stubbed(action: &str) -> bool {
+pub(crate) fn stubbed(action: &str) -> bool {
     #[cfg(feature = "capture")]
     if std::env::var_os("COURSE2MD_CAPTURE").is_some() {
         eprintln!("capture: {action} (not taken)");

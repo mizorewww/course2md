@@ -4,6 +4,7 @@
 use crate::{
     Change, Course, Page,
     exports_ui::NoteExports,
+    folder_tree::{Command, command_context_menu},
     note_text,
     notes::{self, PreviewBlock},
     reader_images::{Loaded, ReaderImages, Size},
@@ -26,7 +27,7 @@ use gpui_kit::component::{
 };
 use gpui_kit_material::{
     color::ColorRole::*,
-    components::title_bar_control,
+    components::{MaterialContextMenu, title_bar_control},
     icons::{Icon, SymbolIcon},
     motion,
     prelude::*,
@@ -2252,11 +2253,16 @@ impl ReaderPage {
                 )
             },
         );
+        let menu = frame
+            .filter(|frame| self.frames[*frame].image.is_some())
+            .map(|_| self.image_context_menu(("note-figure-context", block), path.clone(), cx));
         let card = MaterialCard::new(("note-figure", block), CardVariant::Filled)
             .rounded(RADIUS_LARGE_INCREASED)
             .accessibility_label(enlarge)
             .w_full()
             .overflow_hidden()
+            .relative()
+            .children(menu)
             .child(slot);
         match frame {
             Some(frame) => card
@@ -3386,6 +3392,9 @@ impl ReaderPage {
             .cloned()
             .unwrap_or_default();
         let to_note = course2md::tr!("在笔记中查看");
+        let menu = frame.image.as_ref().map(|image| {
+            self.image_context_menu(("screenshot-context", index), image.path.clone(), cx)
+        });
         let card = MaterialCard::new(
             SharedString::from(frame.anchor.clone()),
             CardVariant::Surface,
@@ -3396,6 +3405,8 @@ impl ReaderPage {
         .h_full()
         .min_w_0()
         .overflow_hidden()
+        .relative()
+        .children(menu)
         .child(
             div()
                 .w_full()
@@ -3466,6 +3477,81 @@ impl ReaderPage {
         } else {
             card.into_any_element()
         }
+    }
+
+    /// What a right press on a screenshot offers: the picture itself, where a
+    /// clipboard can hold one, its file's path and its file in the file manager.
+    /// The first child of the `relative` element it serves.
+    fn image_context_menu(
+        &self,
+        id: impl Into<ElementId>,
+        path: PathBuf,
+        cx: &mut Context<Self>,
+    ) -> MaterialContextMenu {
+        let reader = cx.weak_entity();
+        let mut commands = Vec::new();
+        if crate::clipboard::IMAGES {
+            let (reader, path) = (reader.clone(), path.clone());
+            commands.push(Command::global(
+                course2md::tr!("复制图片"),
+                symbols::content_copy(),
+                move |_, cx| {
+                    let _ = reader.update(cx, |this, cx| this.copy_reader_image(path.clone(), cx));
+                },
+            ));
+        }
+        commands.push({
+            let path = path.clone();
+            Command::global(
+                course2md::tr!("复制图片路径"),
+                symbols::link(),
+                move |_, cx| {
+                    let text = path.display().to_string();
+                    crate::clipboard::write(ClipboardItem::new_string(text), cx);
+                    let _ = reader.update(cx, |_, cx| {
+                        cx.emit(ReaderEvent::Message(
+                            course2md::tr!("已复制图片路径").into(),
+                        ))
+                    });
+                },
+            )
+        });
+        let reveal = if cfg!(target_os = "macos") {
+            course2md::tr!("在访达中显示")
+        } else if cfg!(target_os = "windows") {
+            course2md::tr!("在文件资源管理器中显示")
+        } else {
+            course2md::tr!("在文件管理器中显示")
+        };
+        commands.push(Command::global(
+            reveal,
+            symbols::folder_open(),
+            move |_, cx| {
+                if !crate::youtube_ui::stubbed(&format!("reveal {}", path.display())) {
+                    cx.reveal_path(&path);
+                }
+            },
+        ));
+        command_context_menu(id, None, commands)
+    }
+
+    /// Puts the screenshot at `path` on the clipboard as PNG, encoded off the UI thread.
+    fn copy_reader_image(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        let encode = cx.background_spawn(async move { crate::clipboard::png_image(&path) });
+        cx.spawn(async move |this, cx| {
+            let result = encode.await;
+            let _ = this.update(cx, |_, cx| {
+                let message = match result {
+                    Ok(item) => {
+                        crate::clipboard::write(item, cx);
+                        course2md::tr!("已复制图片").to_owned()
+                    }
+                    Err(error) => course2md::tr!("无法复制图片：{}", format!("{error:#}")),
+                };
+                cx.emit(ReaderEvent::Message(message));
+            });
+        })
+        .detach();
     }
 
     pub(crate) fn open_reader_image(
@@ -4117,6 +4203,7 @@ impl ReaderPage {
                             .child(picture),
                     ),
             );
+        let menu = self.image_context_menu("enlarged-image-context", image.path.clone(), cx);
         // The kit's outlined card surface frames the image: its outline and corners.
         CardSurface::new(CardVariant::Outlined)
             .rounded(RADIUS_LARGE)
@@ -4124,6 +4211,8 @@ impl ReaderPage {
             .min_h(rem(112.))
             .w_full()
             .overflow_hidden()
+            .relative()
+            .child(menu)
             .child(viewport)
             .into_any_element()
     }
