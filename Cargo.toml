@@ -48,8 +48,8 @@ sys-locale = "0.3"
 # they use. The root's [patch] applies Material's optional engine patches to these.
 gpui-kit = { version = "0.9.1", features = ["gpui-fast"] }
 gpui-base = "0.9.1"
-gpui-kit-material = { version = "0.1", default-features = false, features = ["serde", "gpui-fast"] }
-gpui-kit-material-color = { version = "0.1", features = ["serde"] }
+gpui-kit-material = { version = "0.1.1", default-features = false, features = ["serde", "gpui-fast"] }
+gpui-kit-material-color = { version = "0.1.1", features = ["serde"] }
 # The release gpui-kit-material depends on.
 gpui-material-symbols = { version = "0.1", default-features = false }
 smol = "2"
@@ -88,8 +88,8 @@ strip = true
 # off-screen items over later frames after a width change instead of laying out every
 # item each frame. Each crate is the same version crates.io has; drop the set once both
 # patches are released upstream.
-gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "98c72b8d183418631b3dcf91064fcece6a96350f" }
-gpui-pre = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "98c72b8d183418631b3dcf91064fcece6a96350f" }
-gpui-pre-apple = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "98c72b8d183418631b3dcf91064fcece6a96350f" }
-gpui-pre-web = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "98c72b8d183418631b3dcf91064fcece6a96350f" }
-gpui-fast = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "98c72b8d183418631b3dcf91064fcece6a96350f" }
+gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1fa46b7c7770896101ba2a3ee3c4fb9dc5e5a734" }
+gpui-pre = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1fa46b7c7770896101ba2a3ee3c4fb9dc5e5a734" }
+gpui-pre-apple = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1fa46b7c7770896101ba2a3ee3c4fb9dc5e5a734" }
+gpui-pre-web = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1fa46b7c7770896101ba2a3ee3c4fb9dc5e5a734" }
+gpui-fast = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1fa46b7c7770896101ba2a3ee3c4fb9dc5e5a734" }
