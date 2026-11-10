@@ -102,6 +102,8 @@ enum TextPlacement {
 
 /// The width of the text column beside the image: a comfortable reading measure.
 const VIEWER_TEXT_COLUMN: Rems = rem(360.);
+/// The space the text keeps clear for its scrollbar.
+const VIEWER_TEXT_GUTTER: Rems = rem(12.);
 /// Between the image and the text column beside it.
 const VIEWER_BESIDE_GAP: Rems = rem(24.);
 /// Between the image and the text below it.
@@ -4001,9 +4003,11 @@ impl ReaderPage {
         let reader = self;
         let viewer = reader.viewer.as_ref().expect("the viewer draws its text");
         let column = VIEWER_TEXT_COLUMN.to_pixels(window.rem_size());
+        // Formulas wrap to the line the text actually has: inside the scrollbar's gutter.
+        let gutter = VIEWER_TEXT_GUTTER.to_pixels(window.rem_size());
         reader.viewer_line.store(
             f32::from(match placement {
-                TextPlacement::Beside => column,
+                TextPlacement::Beside => column - gutter,
                 _ => window.bounds().size.width,
             }) as u32,
             Ordering::Relaxed,
@@ -4022,7 +4026,7 @@ impl ReaderPage {
                     .flex_shrink_0()
                     .max_h(relative(VIEWER_BELOW_TEXT)),
             })
-            .pr(rem(12.))
+            .pr(VIEWER_TEXT_GUTTER)
             .overflow_y_scroll()
             // A sideways swipe scrolls a wide formula, not the text.
             .restrict_scroll_to_axis()
