@@ -3,6 +3,7 @@
 //! highlights and virtualization; the screenshots are a list of rows beside it.
 use crate::{
     Change, Course, Page,
+    course_library::CommandsButton,
     exports_ui::NoteExports,
     folder_tree::{Command, command_context_menu},
     note_text,
@@ -4131,6 +4132,17 @@ impl ReaderPage {
                 }
             }))
         });
+        // The right-click menu's commands, reachable from the keyboard: the note's
+        // and the gallery's screenshots open here with Enter.
+        let path = frame.image.as_ref().map(|image| image.path.clone());
+        let more = path.map(|path| CommandsButton {
+            id: "image-commands".into(),
+            label: course2md::tr!("截图操作").into(),
+            subject: None,
+            commands: self.image_commands(path, readable, cx),
+            width: None,
+            tonal: false,
+        });
         h_flex()
             .id("reader-image-actions")
             .w_full()
@@ -4145,6 +4157,7 @@ impl ReaderPage {
             .children(to_note)
             .children(watch)
             .children(text_toggle)
+            .children(more)
     }
 
     /// The zoomable image, or a notice when its file cannot be read.
