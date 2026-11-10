@@ -38,7 +38,13 @@
 //! shows a Full Disk Access guide step whatever the folder says, and
 //! `dialog:youtube~access-open-settings` takes the guide's first action on the
 //! real look at the fixture folder. In capture runs, opening System Settings,
-//! showing the app in Finder and reopening the app are logged, not taken. Each
+//! showing the app in Finder and reopening the app are logged, not taken. The app's
+//! own copies are logged and written to the file `COURSE2MD_CAPTURE_CLIPBOARD` names,
+//! when set (an image as its PNG bytes), instead of the system clipboard. So are text
+//! copies of selected note text, taken over from the kit by the Copy and Cut keys in
+//! any window and by Copy and Cut actions in the app's view; a copy or cut in a text
+//! field is logged and dropped. A Copy action dispatched in a window-level overlay
+//! without its key is not covered. Each
 //! capture first closes the dialogs an earlier one opened, so one shot shows
 //! one dialog. Nothing a dialog would change is saved unless its action is
 //! taken.
@@ -118,6 +124,7 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
     let Ok(spec) = std::env::var("COURSE2MD_CAPTURE") else {
         return;
     };
+    crate::clipboard::intercept_text_copies(cx);
     if let Ok(name) = std::env::var("COURSE2MD_CAPTURE_PALETTE") {
         let palette = serde_json::from_value(serde_json::Value::String(name.clone()))
             .unwrap_or_else(|_| panic!("unknown capture palette {name}"));

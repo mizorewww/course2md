@@ -3,7 +3,9 @@
 //! highlights and virtualization; the screenshots are a list of rows beside it.
 use crate::{
     Change, Course, Page,
+    course_library::CommandsButton,
     exports_ui::NoteExports,
+    folder_tree::{Command, command_context_menu},
     note_text,
     notes::{self, PreviewBlock},
     reader_images::{Loaded, ReaderImages, Size},
@@ -26,7 +28,7 @@ use gpui_kit::component::{
 };
 use gpui_kit_material::{
     color::ColorRole::*,
-    components::title_bar_control,
+    components::{MaterialContextMenu, title_bar_control},
     icons::{Icon, SymbolIcon},
     motion,
     prelude::*,
@@ -75,6 +77,8 @@ struct ImageViewer {
     text_scroll: ScrollHandle,
     viewport_scroll: ScrollHandle,
     viewport_size: gpui::Size<Pixels>,
+    /// The space for the image and its text together, as last laid out.
+    body_size: gpui::Size<Pixels>,
     frames: Vec<Frame>,
     filtered: bool,
     index: usize,
@@ -83,6 +87,43 @@ struct ImageViewer {
     drag: Option<(Point<Pixels>, Point<Pixels>)>,
     text_open: Option<bool>,
     focus: FocusHandle,
+}
+
+/// Where the viewer puts a screenshot's text.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TextPlacement {
+    /// Instead of the image, in a window too short for both.
+    Only,
+    /// In a column beside the image.
+    Beside,
+    /// Under the image, at most part of the height.
+    Below,
+}
+
+/// The width of the text column beside the image: a comfortable reading measure.
+const VIEWER_TEXT_COLUMN: Rems = rem(360.);
+/// The space the text keeps clear for its scrollbar.
+const VIEWER_TEXT_GUTTER: Rems = rem(12.);
+/// Between the image and the text column beside it.
+const VIEWER_BESIDE_GAP: Rems = rem(24.);
+/// Between the image and the text below it.
+const VIEWER_BELOW_GAP: Rems = rem(8.);
+/// The most of the viewer's height the text below the image takes.
+const VIEWER_BELOW_TEXT: f32 = 0.4;
+
+/// Whether an image (`width`, `height`) fits at least as large beside a text column
+/// (`column` wide with its gap) as above a long text, in a body of `body` pixels.
+/// Below, the text takes up to [`VIEWER_BELOW_TEXT`] of the height; neither layout
+/// enlarges the image past its own size.
+fn text_beside(body: (f32, f32), image: (f32, f32), column: f32, below_gap: f32) -> bool {
+    let (width, height) = body;
+    if width <= 0. || height <= 0. || image.0 <= 0. || image.1 <= 0. {
+        return false;
+    }
+    let fit = |w: f32, h: f32| (w / image.0).min(h / image.1).clamp(0., 1.);
+    let beside = fit(width - column, height);
+    let below = fit(width, height * (1. - VIEWER_BELOW_TEXT) - below_gap);
+    beside >= below
 }
 
 const ZOOM_STEP_IN: f32 = 1.25;
@@ -171,6 +212,8 @@ pub(crate) struct ReaderPage {
     viewer: Option<ImageViewer>,
     viewer_text: MarkdownExtensions,
     viewer_line: Arc<AtomicU32>,
+    /// The image copy in flight: an older one finishing late is dropped.
+    image_copy: crate::clipboard::Latest,
     export_folder: Option<PathBuf>,
     source_loading: bool,
     /// Cancels the source relocation probe in flight; set when the note changes, a new probe starts or it finishes.
@@ -398,6 +441,7 @@ impl ReaderPage {
             viewer: None,
             viewer_text: note_text::extensions(viewer_line.clone()),
             viewer_line,
+            image_copy: crate::clipboard::Latest::default(),
             export_folder: None,
             source_loading: false,
             source_probe_cancel: None,
@@ -2017,7 +2061,7 @@ impl ReaderPage {
                     let text = TextSelection::selected_text(window, cx);
                     let text = copied_text(&text);
                     if !text.is_empty() {
-                        cx.write_to_clipboard(ClipboardItem::new_string(text));
+                        crate::clipboard::write(ClipboardItem::new_string(text), cx);
                         cx.stop_propagation();
                     }
                 })
@@ -2213,6 +2257,7 @@ impl ReaderPage {
         });
         let enlarge = course2md::tr!("放大{}", label);
         // The frame's time at one corner and the action that enlarges it at the other.
+        let copyable = !matches!(loaded, Loaded::Failed);
         let slot = screenshot_slot(("note-figure-slot", block), Some(loaded)).when_some(
             frame,
             |slot, frame| {
@@ -2252,11 +2297,18 @@ impl ReaderPage {
                 )
             },
         );
+        let menu = frame
+            .filter(|frame| self.frames[*frame].image.is_some())
+            .map(|_| {
+                self.image_context_menu(("note-figure-context", block), path.clone(), copyable, cx)
+            });
         let card = MaterialCard::new(("note-figure", block), CardVariant::Filled)
             .rounded(RADIUS_LARGE_INCREASED)
             .accessibility_label(enlarge)
             .w_full()
             .overflow_hidden()
+            .relative()
+            .children(menu)
             .child(slot);
         match frame {
             Some(frame) => card
@@ -2912,7 +2964,7 @@ impl ReaderPage {
                         } else {
                             &source.plain_text
                         };
-                        cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                        crate::clipboard::write(ClipboardItem::new_string(text.clone()), cx);
                         cx.emit(ReaderEvent::Message(copied.into()));
                         cx.notify();
                     })),
@@ -3379,6 +3431,7 @@ impl ReaderPage {
             .as_ref()
             .map(|file| self.images.get(&file.path, thumbnail, cx));
         let openable = matches!(loaded, Some(Loaded::Pending | Loaded::Ready(..)));
+        let copyable = !matches!(loaded, Some(Loaded::Failed));
         let excerpt = self
             .gallery
             .excerpts
@@ -3386,6 +3439,14 @@ impl ReaderPage {
             .cloned()
             .unwrap_or_default();
         let to_note = course2md::tr!("在笔记中查看");
+        let menu = frame.image.as_ref().map(|image| {
+            self.image_context_menu(
+                ("screenshot-context", index),
+                image.path.clone(),
+                copyable,
+                cx,
+            )
+        });
         let card = MaterialCard::new(
             SharedString::from(frame.anchor.clone()),
             CardVariant::Surface,
@@ -3396,6 +3457,8 @@ impl ReaderPage {
         .h_full()
         .min_w_0()
         .overflow_hidden()
+        .relative()
+        .children(menu)
         .child(
             div()
                 .w_full()
@@ -3468,6 +3531,110 @@ impl ReaderPage {
         }
     }
 
+    /// What a right press on a screenshot offers: the picture itself, where a
+    /// clipboard can hold one, its file's path and its file in the file manager.
+    /// The first child of the `relative` element it serves.
+    fn image_context_menu(
+        &self,
+        id: impl Into<ElementId>,
+        path: PathBuf,
+        copyable: bool,
+        cx: &mut Context<Self>,
+    ) -> MaterialContextMenu {
+        command_context_menu(id, None, self.image_commands(path, copyable, cx))
+    }
+
+    /// The commands for the screenshot at `path`. A file that could not be
+    /// decoded (`copyable` false) keeps its path and location but not 复制图片.
+    fn image_commands(
+        &self,
+        path: PathBuf,
+        copyable: bool,
+        cx: &mut Context<Self>,
+    ) -> Vec<Command> {
+        let reader = cx.weak_entity();
+        let say = |reader: &WeakEntity<Self>, message: &'static str, cx: &mut App| {
+            let _ = reader.update(cx, |_, cx| cx.emit(ReaderEvent::Message(message.into())));
+        };
+        let mut commands = Vec::new();
+        if crate::clipboard::IMAGES {
+            let (reader, path) = (reader.clone(), path.clone());
+            commands.push(
+                Command::global(
+                    course2md::tr!("复制图片"),
+                    symbols::content_copy(),
+                    move |_, cx| {
+                        let _ =
+                            reader.update(cx, |this, cx| this.copy_reader_image(path.clone(), cx));
+                    },
+                )
+                .disabled(!copyable),
+            );
+        }
+        commands.push({
+            let (reader, path) = (reader.clone(), path.clone());
+            Command::global(
+                course2md::tr!("复制图片路径"),
+                symbols::link(),
+                move |_, cx| {
+                    let text = path.display().to_string();
+                    crate::clipboard::write(ClipboardItem::new_string(text), cx);
+                    say(&reader, course2md::tr!("已复制图片路径"), cx);
+                },
+            )
+        });
+        let reveal = if cfg!(target_os = "macos") {
+            course2md::tr!("在访达中显示")
+        } else if cfg!(target_os = "windows") {
+            course2md::tr!("在文件资源管理器中显示")
+        } else {
+            course2md::tr!("在文件管理器中显示")
+        };
+        commands.push(Command::global(
+            reveal,
+            symbols::folder_open(),
+            move |_, cx| {
+                // A file moved or deleted since the note opened has nothing to show.
+                if !path.exists() {
+                    say(&reader, course2md::tr!("找不到这张截图的文件"), cx);
+                } else if !crate::youtube_ui::stubbed(&format!("reveal {}", path.display())) {
+                    cx.reveal_path(&path);
+                }
+            },
+        ));
+        commands
+    }
+
+    /// A later copy, or leaving the note, supersedes one still encoding.
+    fn copy_reader_image(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        let copy = self.image_copy.begin();
+        let encode = cx.background_spawn({
+            let path = path.clone();
+            async move { crate::clipboard::png_image(&path) }
+        });
+        cx.spawn(async move |this, cx| {
+            let result = encode.await;
+            let _ = this.update(cx, |this, cx| {
+                if !this.image_copy.is_current(copy) {
+                    return;
+                }
+                let message = match result {
+                    Ok(item) => {
+                        crate::clipboard::write(item, cx);
+                        course2md::tr!("已复制图片").to_owned()
+                    }
+                    Err(error) => {
+                        // The person is told it failed; the reason is for a report.
+                        eprintln!("course2md: could not copy {}: {error:#}", path.display());
+                        course2md::tr!("无法复制图片").to_owned()
+                    }
+                };
+                cx.emit(ReaderEvent::Message(message));
+            });
+        })
+        .detach();
+    }
+
     pub(crate) fn open_reader_image(
         &mut self,
         index: usize,
@@ -3500,6 +3667,7 @@ impl ReaderPage {
             text_scroll: ScrollHandle::new(),
             viewport_scroll: ScrollHandle::new(),
             viewport_size: size(px(0.), px(0.)),
+            body_size: size(px(0.), px(0.)),
             frames: visible
                 .iter()
                 .map(|index| self.frames[*index].clone())
@@ -3523,6 +3691,7 @@ impl ReaderPage {
     /// Leaving the reader releases its decoded screenshots.
     pub(crate) fn release_reader_images(&mut self, cx: &mut Context<Self>) {
         self.viewer = None;
+        self.image_copy.begin();
         self.images.clear(cx);
     }
     pub(crate) fn close_reader_image(&mut self, cx: &mut Context<Self>) {
@@ -3597,6 +3766,31 @@ impl ReaderPage {
     /// The height the viewer has below the title bar's row.
     fn viewer_height(window: &Window) -> Pixels {
         window.bounds().size.height - Self::viewer_safe_top(window)
+    }
+    /// Whether the text goes in a column beside the image: only where the image
+    /// is drawn at least as large there as above the text.
+    fn viewer_text_beside(viewer: &ImageViewer, window: &Window) -> bool {
+        let Some(image) = &viewer.frames[viewer.index].image else {
+            return false;
+        };
+        let rem_size = window.rem_size();
+        let to_f32 = |rems: Rems| f32::from(rems.to_pixels(rem_size));
+        // Until the viewer has been laid out once, the window less the dialog's
+        // header, padding and action row.
+        let body = if viewer.body_size.width > px(0.) && viewer.body_size.height > px(0.) {
+            viewer.body_size
+        } else {
+            size(
+                window.bounds().size.width - rem(56.).to_pixels(rem_size),
+                Self::viewer_height(window) - rem(130.).to_pixels(rem_size),
+            )
+        };
+        text_beside(
+            (f32::from(body.width), f32::from(body.height)),
+            (image.width as f32, image.height as f32),
+            to_f32(VIEWER_TEXT_COLUMN) + to_f32(VIEWER_BESIDE_GAP),
+            to_f32(VIEWER_BELOW_GAP),
+        )
     }
     fn viewer_is_short(window: &Window) -> bool {
         Self::viewer_height(window) < rem(420.).to_pixels(window.rem_size())
@@ -3676,9 +3870,62 @@ impl ReaderPage {
             course2md::tr!("截图 · {}", time)
         };
         let has_text = !frame.transcript.trim().is_empty();
+        let shows_text = text_only || (has_text && text_open);
+        let placement = if text_only {
+            TextPlacement::Only
+        } else if Self::viewer_text_beside(viewer, window) {
+            TextPlacement::Beside
+        } else {
+            TextPlacement::Below
+        };
         let media = (!text_only).then(|| self.reader_viewer_media(label.clone(), cx));
-        let text = (text_only || (has_text && text_open))
-            .then(|| self.reader_viewer_text(text_only, window));
+        let text = shows_text.then(|| self.reader_viewer_text(placement, window));
+        // Where the image stays as large, the text gets a column of its own beside
+        // it, the viewer's whole height to read in; elsewhere it stays below.
+        let owner = cx.weak_entity();
+        let measure = canvas(
+            move |bounds, window, cx| {
+                let size = bounds.size;
+                window.defer(cx, move |_, cx| {
+                    let _ = owner.update(cx, |this, cx| {
+                        if let Some(viewer) = &mut this.viewer
+                            && viewer.body_size != size
+                        {
+                            viewer.body_size = size;
+                            cx.notify();
+                        }
+                    });
+                });
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .inset_0();
+        let body = match (media, text) {
+            (Some(media), Some(text)) if placement == TextPlacement::Beside => h_flex()
+                .id("reader-image-body")
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .items_stretch()
+                .gap(VIEWER_BESIDE_GAP)
+                .child(measure)
+                .child(v_flex().flex_1().min_w_0().h_full().child(media))
+                .child(text)
+                .into_any_element(),
+            (media, text) => v_flex()
+                .id("reader-image-body")
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .gap(VIEWER_BELOW_GAP)
+                .child(measure)
+                .children(media)
+                .children(text)
+                .into_any_element(),
+        };
         let controls = self.reader_viewer_controls(window, cx);
         let viewer = self.viewer.as_mut()?;
         let focus = viewer.focus.clone();
@@ -3730,8 +3977,7 @@ impl ReaderPage {
             .w_full()
             .gap(rem(8.))
             .pb(rem(12.))
-            .children(media)
-            .children(text)
+            .child(body)
             .child(controls);
         let dismiss = cx.weak_entity();
         Some(
@@ -3753,23 +3999,34 @@ impl ReaderPage {
     }
 
     /// The transcript: selectable note text in its own scroll region.
-    fn reader_viewer_text(&self, text_only: bool, window: &Window) -> Stateful<Div> {
+    fn reader_viewer_text(&self, placement: TextPlacement, window: &Window) -> Stateful<Div> {
         let reader = self;
         let viewer = reader.viewer.as_ref().expect("the viewer draws its text");
+        let column = VIEWER_TEXT_COLUMN.to_pixels(window.rem_size());
+        // Formulas wrap to the line the text actually has: inside the scrollbar's gutter.
+        let gutter = VIEWER_TEXT_GUTTER.to_pixels(window.rem_size());
         reader.viewer_line.store(
-            f32::from(window.bounds().size.width) as u32,
+            f32::from(match placement {
+                TextPlacement::Beside => column - gutter,
+                _ => window.bounds().size.width,
+            }) as u32,
             Ordering::Relaxed,
         );
         let frame = &viewer.frames[viewer.index];
         div()
             .id("image-details")
             .relative()
-            .w_full()
             .min_w_0()
             .min_h_0()
-            .when(text_only, |view| view.flex_1())
-            .when(!text_only, |view| view.flex_shrink_0().max_h(relative(0.4)))
-            .pr(rem(12.))
+            .map(|view| match placement {
+                TextPlacement::Only => view.w_full().flex_1(),
+                TextPlacement::Beside => view.flex_shrink_0().w(column).h_full(),
+                TextPlacement::Below => view
+                    .w_full()
+                    .flex_shrink_0()
+                    .max_h(relative(VIEWER_BELOW_TEXT)),
+            })
+            .pr(VIEWER_TEXT_GUTTER)
             .overflow_y_scroll()
             // A sideways swipe scrolls a wide formula, not the text.
             .restrict_scroll_to_axis()
@@ -3950,6 +4207,17 @@ impl ReaderPage {
                 }
             }))
         });
+        // The right-click menu's commands, reachable from the keyboard: the note's
+        // and the gallery's screenshots open here with Enter.
+        let path = frame.image.as_ref().map(|image| image.path.clone());
+        let more = path.map(|path| CommandsButton {
+            id: "image-commands".into(),
+            label: course2md::tr!("截图操作").into(),
+            subject: None,
+            commands: self.image_commands(path, readable, cx),
+            width: None,
+            tonal: false,
+        });
         h_flex()
             .id("reader-image-actions")
             .w_full()
@@ -3964,6 +4232,7 @@ impl ReaderPage {
             .children(to_note)
             .children(watch)
             .children(text_toggle)
+            .children(more)
     }
 
     /// The zoomable image, or a notice when its file cannot be read.
@@ -4117,6 +4386,7 @@ impl ReaderPage {
                             .child(picture),
                     ),
             );
+        let menu = self.image_context_menu("enlarged-image-context", image.path.clone(), true, cx);
         // The kit's outlined card surface frames the image: its outline and corners.
         CardSurface::new(CardVariant::Outlined)
             .rounded(RADIUS_LARGE)
@@ -4124,6 +4394,8 @@ impl ReaderPage {
             .min_h(rem(112.))
             .w_full()
             .overflow_hidden()
+            .relative()
+            .child(menu)
             .child(viewport)
             .into_any_element()
     }
@@ -4299,6 +4571,31 @@ mod tests {
         let lights = traffic_light_position(crate::views::APP_BAR_HEIGHT);
         assert!(row >= lights.y * 2. + px(14.), "{row:?}");
         assert!(row >= px(32.));
+    }
+
+    #[test]
+    fn the_text_goes_beside_the_image_only_where_the_image_stays_as_large() {
+        use super::text_beside;
+        // The column and its gap, and the gap below, at 100% text.
+        let (column, gap) = (360. + 24., 8.);
+        let slide = (1280., 720.);
+        // Bodies measured in the native viewer (window less header, padding and
+        // action row), and what each layout draws a 16:9 slide at.
+        // 1280×620: beside 62%, below 37% — the column wins.
+        assert!(text_beside((1224., 446.), slide, column, gap));
+        // 880×760: beside 34%, below 49% — the image would shrink by a third.
+        assert!(!text_beside((824., 586.), slide, column, gap));
+        // 1024×768: beside 46%, below 48% — still below.
+        assert!(!text_beside((968., 594.), slide, column, gap));
+        // 1440×900: beside 78%, below 59%.
+        assert!(text_beside((1384., 726.), slide, column, gap));
+        // 1920×1080 shows the slide at full size either way: beside.
+        assert!(text_beside((1864., 906.), slide, column, gap));
+        // A tall portrait image is limited by height, so the column costs nothing.
+        assert!(text_beside((824., 586.), (720., 1280.), column, gap));
+        // Nothing measured, or nothing to fit: below.
+        assert!(!text_beside((0., 0.), slide, column, gap));
+        assert!(!text_beside((1224., 446.), (0., 0.), column, gap));
     }
 
     #[test]
