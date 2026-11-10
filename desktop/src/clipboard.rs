@@ -23,6 +23,64 @@ pub(crate) fn write(item: ClipboardItem, cx: &mut App) {
     cx.write_to_clipboard(item);
 }
 
+/// Under capture, the text copies the kit makes itself (selected note text, a
+/// text field's Copy and Cut) are taken over before they reach its handlers,
+/// which write to the system clipboard directly: by the Copy and Cut key
+/// bindings in any window, and by a Copy or Cut action dispatched in the app's
+/// own view. Selected note text is recorded as [`write`] records a copy; a copy
+/// or cut in a text field is logged and dropped, so it changes nothing.
+#[cfg(feature = "capture")]
+pub(crate) fn intercept_text_copies(cx: &mut App) {
+    cx.intercept_keystrokes(|event, window, cx| {
+        let copies = window
+            .possible_bindings_for_input(std::slice::from_ref(&event.keystroke))
+            .iter()
+            .any(|binding| is_text_copy(binding.action().as_any()));
+        if copies {
+            record_text_copy(window, cx);
+            cx.stop_propagation();
+        }
+    })
+    .detach();
+}
+
+/// The app view's root under capture: Copy and Cut dispatched anywhere in it (as
+/// a menu does, without a key) are taken over as [`intercept_text_copies`] says.
+pub(crate) fn intercept_view_copies(root: gpui::Stateful<gpui::Div>) -> gpui::Stateful<gpui::Div> {
+    #[cfg(feature = "capture")]
+    if std::env::var_os("COURSE2MD_CAPTURE").is_some() {
+        use gpui::InteractiveElement as _;
+        return root
+            .capture_action(|_: &gpui_base::input::Copy, window, cx| {
+                record_text_copy(window, cx);
+                cx.stop_propagation();
+            })
+            .capture_action(|_: &gpui_base::input::Cut, window, cx| {
+                record_text_copy(window, cx);
+                cx.stop_propagation();
+            });
+    }
+    root
+}
+
+/// Whether `action` is the kit's Copy or Cut.
+#[cfg(feature = "capture")]
+fn is_text_copy(action: &dyn std::any::Any) -> bool {
+    action.is::<gpui_base::input::Copy>() || action.is::<gpui_base::input::Cut>()
+}
+
+/// A capture run's text copy: the selected note text, recorded; anything else
+/// (a text field's selection, which only the field can read) logged and dropped.
+#[cfg(feature = "capture")]
+pub(crate) fn record_text_copy(window: &mut gpui::Window, cx: &mut App) {
+    let text = gpui_base::TextSelection::selected_text(window, cx);
+    if text.trim().is_empty() {
+        eprintln!("capture: text copy with no note text selected (not copied)");
+    } else {
+        write(ClipboardItem::new_string(text), cx);
+    }
+}
+
 /// A capture run's would-be clipboard write: an image's bytes or the text, in the
 /// file `COURSE2MD_CAPTURE_CLIPBOARD` names.
 #[cfg(feature = "capture")]

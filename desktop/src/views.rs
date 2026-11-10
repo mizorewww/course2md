@@ -741,8 +741,7 @@ impl Render for Desktop {
             .text_size(rems(1.))
             .child(topbar)
             .child(body);
-        div()
-            .id("desktop-action-root")
+        crate::clipboard::intercept_view_copies(div().id("desktop-action-root"))
             .relative()
             .group("workbench-drop")
             .track_focus(&self.root_focus)
