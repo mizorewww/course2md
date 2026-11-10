@@ -77,6 +77,8 @@ struct ImageViewer {
     text_scroll: ScrollHandle,
     viewport_scroll: ScrollHandle,
     viewport_size: gpui::Size<Pixels>,
+    /// The space for the image and its text together, as last laid out.
+    body_size: gpui::Size<Pixels>,
     frames: Vec<Frame>,
     filtered: bool,
     index: usize,
@@ -100,6 +102,27 @@ enum TextPlacement {
 
 /// The width of the text column beside the image: a comfortable reading measure.
 const VIEWER_TEXT_COLUMN: Rems = rem(360.);
+/// Between the image and the text column beside it.
+const VIEWER_BESIDE_GAP: Rems = rem(24.);
+/// Between the image and the text below it.
+const VIEWER_BELOW_GAP: Rems = rem(8.);
+/// The most of the viewer's height the text below the image takes.
+const VIEWER_BELOW_TEXT: f32 = 0.4;
+
+/// Whether an image (`width`, `height`) fits at least as large beside a text column
+/// (`column` wide with its gap) as above a long text, in a body of `body` pixels.
+/// Below, the text takes up to [`VIEWER_BELOW_TEXT`] of the height; neither layout
+/// enlarges the image past its own size.
+fn text_beside(body: (f32, f32), image: (f32, f32), column: f32, below_gap: f32) -> bool {
+    let (width, height) = body;
+    if width <= 0. || height <= 0. || image.0 <= 0. || image.1 <= 0. {
+        return false;
+    }
+    let fit = |w: f32, h: f32| (w / image.0).min(h / image.1).clamp(0., 1.);
+    let beside = fit(width - column, height);
+    let below = fit(width, height * (1. - VIEWER_BELOW_TEXT) - below_gap);
+    beside >= below
+}
 
 const ZOOM_STEP_IN: f32 = 1.25;
 const ZOOM_STEP_OUT: f32 = 0.8;
@@ -3642,6 +3665,7 @@ impl ReaderPage {
             text_scroll: ScrollHandle::new(),
             viewport_scroll: ScrollHandle::new(),
             viewport_size: size(px(0.), px(0.)),
+            body_size: size(px(0.), px(0.)),
             frames: visible
                 .iter()
                 .map(|index| self.frames[*index].clone())
@@ -3741,9 +3765,30 @@ impl ReaderPage {
     fn viewer_height(window: &Window) -> Pixels {
         window.bounds().size.height - Self::viewer_safe_top(window)
     }
-    /// Wide enough for the text to sit beside a usefully large image.
-    fn viewer_is_wide(window: &Window) -> bool {
-        window.bounds().size.width >= rem(880.).to_pixels(window.rem_size())
+    /// Whether the text goes in a column beside the image: only where the image
+    /// is drawn at least as large there as above the text.
+    fn viewer_text_beside(viewer: &ImageViewer, window: &Window) -> bool {
+        let Some(image) = &viewer.frames[viewer.index].image else {
+            return false;
+        };
+        let rem_size = window.rem_size();
+        let to_f32 = |rems: Rems| f32::from(rems.to_pixels(rem_size));
+        // Until the viewer has been laid out once, the window less the dialog's
+        // header, padding and action row.
+        let body = if viewer.body_size.width > px(0.) && viewer.body_size.height > px(0.) {
+            viewer.body_size
+        } else {
+            size(
+                window.bounds().size.width - rem(56.).to_pixels(rem_size),
+                Self::viewer_height(window) - rem(130.).to_pixels(rem_size),
+            )
+        };
+        text_beside(
+            (f32::from(body.width), f32::from(body.height)),
+            (image.width as f32, image.height as f32),
+            to_f32(VIEWER_TEXT_COLUMN) + to_f32(VIEWER_BESIDE_GAP),
+            to_f32(VIEWER_BELOW_GAP),
+        )
     }
     fn viewer_is_short(window: &Window) -> bool {
         Self::viewer_height(window) < rem(420.).to_pixels(window.rem_size())
@@ -3823,35 +3868,58 @@ impl ReaderPage {
             course2md::tr!("截图 · {}", time)
         };
         let has_text = !frame.transcript.trim().is_empty();
-        let media = (!text_only).then(|| self.reader_viewer_media(label.clone(), cx));
         let shows_text = text_only || (has_text && text_open);
         let placement = if text_only {
             TextPlacement::Only
-        } else if Self::viewer_is_wide(window) {
+        } else if Self::viewer_text_beside(viewer, window) {
             TextPlacement::Beside
         } else {
             TextPlacement::Below
         };
+        let media = (!text_only).then(|| self.reader_viewer_media(label.clone(), cx));
         let text = shows_text.then(|| self.reader_viewer_text(placement, window));
-        // A wide window gives the text a column of its own beside the image, the
-        // window's whole height to read in; a narrow one keeps it below.
+        // Where the image stays as large, the text gets a column of its own beside
+        // it, the viewer's whole height to read in; elsewhere it stays below.
+        let owner = cx.weak_entity();
+        let measure = canvas(
+            move |bounds, window, cx| {
+                let size = bounds.size;
+                window.defer(cx, move |_, cx| {
+                    let _ = owner.update(cx, |this, cx| {
+                        if let Some(viewer) = &mut this.viewer
+                            && viewer.body_size != size
+                        {
+                            viewer.body_size = size;
+                            cx.notify();
+                        }
+                    });
+                });
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .inset_0();
         let body = match (media, text) {
             (Some(media), Some(text)) if placement == TextPlacement::Beside => h_flex()
                 .id("reader-image-body")
+                .relative()
                 .flex_1()
                 .min_h_0()
                 .w_full()
                 .items_stretch()
-                .gap(rem(24.))
+                .gap(VIEWER_BESIDE_GAP)
+                .child(measure)
                 .child(v_flex().flex_1().min_w_0().h_full().child(media))
                 .child(text)
                 .into_any_element(),
             (media, text) => v_flex()
                 .id("reader-image-body")
+                .relative()
                 .flex_1()
                 .min_h_0()
                 .w_full()
-                .gap(rem(8.))
+                .gap(VIEWER_BELOW_GAP)
+                .child(measure)
                 .children(media)
                 .children(text)
                 .into_any_element(),
@@ -3949,7 +4017,10 @@ impl ReaderPage {
             .map(|view| match placement {
                 TextPlacement::Only => view.w_full().flex_1(),
                 TextPlacement::Beside => view.flex_shrink_0().w(column).h_full(),
-                TextPlacement::Below => view.w_full().flex_shrink_0().max_h(relative(0.4)),
+                TextPlacement::Below => view
+                    .w_full()
+                    .flex_shrink_0()
+                    .max_h(relative(VIEWER_BELOW_TEXT)),
             })
             .pr(rem(12.))
             .overflow_y_scroll()
@@ -4496,6 +4567,31 @@ mod tests {
         let lights = traffic_light_position(crate::views::APP_BAR_HEIGHT);
         assert!(row >= lights.y * 2. + px(14.), "{row:?}");
         assert!(row >= px(32.));
+    }
+
+    #[test]
+    fn the_text_goes_beside_the_image_only_where_the_image_stays_as_large() {
+        use super::text_beside;
+        // The column and its gap, and the gap below, at 100% text.
+        let (column, gap) = (360. + 24., 8.);
+        let slide = (1280., 720.);
+        // Bodies measured in the native viewer (window less header, padding and
+        // action row), and what each layout draws a 16:9 slide at.
+        // 1280×620: beside 62%, below 37% — the column wins.
+        assert!(text_beside((1224., 446.), slide, column, gap));
+        // 880×760: beside 34%, below 49% — the image would shrink by a third.
+        assert!(!text_beside((824., 586.), slide, column, gap));
+        // 1024×768: beside 46%, below 48% — still below.
+        assert!(!text_beside((968., 594.), slide, column, gap));
+        // 1440×900: beside 78%, below 59%.
+        assert!(text_beside((1384., 726.), slide, column, gap));
+        // 1920×1080 shows the slide at full size either way: beside.
+        assert!(text_beside((1864., 906.), slide, column, gap));
+        // A tall portrait image is limited by height, so the column costs nothing.
+        assert!(text_beside((824., 586.), (720., 1280.), column, gap));
+        // Nothing measured, or nothing to fit: below.
+        assert!(!text_beside((0., 0.), slide, column, gap));
+        assert!(!text_beside((1224., 446.), (0., 0.), column, gap));
     }
 
     #[test]
