@@ -74,6 +74,25 @@ pub(crate) fn png_image(path: &Path) -> anyhow::Result<ClipboardItem> {
     )))
 }
 
+/// The latest of a series of asynchronous copies. Each copy takes a number when
+/// it starts; when it finishes, only the latest one may still reach the
+/// clipboard, so a slow encode cannot overwrite what a later copy put there.
+#[derive(Default)]
+pub(crate) struct Latest(u64);
+
+impl Latest {
+    /// Starts a copy, superseding every earlier one, and returns its number.
+    pub(crate) fn begin(&mut self) -> u64 {
+        self.0 += 1;
+        self.0
+    }
+
+    /// Whether the copy numbered `copy` is still the latest.
+    pub(crate) fn is_current(&self, copy: u64) -> bool {
+        self.0 == copy
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,6 +146,20 @@ mod tests {
         let broken = dir.path().join("broken.jpg");
         std::fs::write(&broken, b"not an image").unwrap();
         assert!(png_image(&broken).is_err());
+    }
+
+    #[test]
+    fn only_the_latest_copy_may_finish() {
+        let mut latest = Latest::default();
+        let slow = latest.begin();
+        let fast = latest.begin();
+        // The later copy finishes first and is kept; the earlier one, arriving
+        // after it, is dropped.
+        assert!(latest.is_current(fast));
+        assert!(!latest.is_current(slow));
+        // Leaving the note supersedes the copy in flight too.
+        latest.begin();
+        assert!(!latest.is_current(fast));
     }
 
     #[gpui::test]

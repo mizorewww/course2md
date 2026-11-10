@@ -186,6 +186,8 @@ pub(crate) struct ReaderPage {
     viewer: Option<ImageViewer>,
     viewer_text: MarkdownExtensions,
     viewer_line: Arc<AtomicU32>,
+    /// The image copy in flight: an older one finishing late is dropped.
+    image_copy: crate::clipboard::Latest,
     export_folder: Option<PathBuf>,
     source_loading: bool,
     /// Cancels the source relocation probe in flight; set when the note changes, a new probe starts or it finishes.
@@ -413,6 +415,7 @@ impl ReaderPage {
             viewer: None,
             viewer_text: note_text::extensions(viewer_line.clone()),
             viewer_line,
+            image_copy: crate::clipboard::Latest::default(),
             export_folder: None,
             source_loading: false,
             source_probe_cancel: None,
@@ -3550,11 +3553,16 @@ impl ReaderPage {
     }
 
     /// Puts the screenshot at `path` on the clipboard as PNG, encoded off the UI thread.
+    /// A later copy, or leaving the note, supersedes one still encoding.
     fn copy_reader_image(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        let copy = self.image_copy.begin();
         let encode = cx.background_spawn(async move { crate::clipboard::png_image(&path) });
         cx.spawn(async move |this, cx| {
             let result = encode.await;
-            let _ = this.update(cx, |_, cx| {
+            let _ = this.update(cx, |this, cx| {
+                if !this.image_copy.is_current(copy) {
+                    return;
+                }
                 let message = match result {
                     Ok(item) => {
                         crate::clipboard::write(item, cx);
@@ -3623,6 +3631,7 @@ impl ReaderPage {
     /// Leaving the reader releases its decoded screenshots.
     pub(crate) fn release_reader_images(&mut self, cx: &mut Context<Self>) {
         self.viewer = None;
+        self.image_copy.begin();
         self.images.clear(cx);
     }
     pub(crate) fn close_reader_image(&mut self, cx: &mut Context<Self>) {
