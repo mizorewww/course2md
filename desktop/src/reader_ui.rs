@@ -4292,8 +4292,12 @@ impl ReaderPage {
             });
         let clearance = viewer.actions_clearance.clone();
         let measure = canvas(
-            move |bounds, window, _| {
-                clearance.set(Some(window.viewport_size().height - bounds.top()));
+            move |bounds, window, cx| {
+                let measured = Some(window.viewport_size().height - bounds.top());
+                // The window's snackbar reads it on the next frame; draw one when it moves.
+                if clearance.replace(measured) != measured {
+                    window.defer(cx, |window, _| window.refresh());
+                }
             },
             |_, _, _, _| {},
         )
