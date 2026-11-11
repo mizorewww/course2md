@@ -3312,12 +3312,19 @@ impl ReaderPage {
                             )
                             .into_any_element(),
                     };
-                    // List measurements include padding, not margins.
+                    // List measurements include padding, not margins. The list
+                    // reaches past the column by the focus ring's room, and each
+                    // item pads back into it.
                     div()
                         .w_full()
                         .min_w_0()
                         .flex_shrink_0()
-                        .when(!last, |row| row.pb(GALLERY_GAP))
+                        .px(ui::FOCUS_RING_ROOM)
+                        .pb(if last {
+                            ui::FOCUS_RING_ROOM
+                        } else {
+                            GALLERY_GAP
+                        })
                         .child(content)
                         .into_any_element()
                 })
@@ -3331,7 +3338,16 @@ impl ReaderPage {
             .min_h_0()
             .min_w_0()
             .w_full()
-            .child(gallery.size_full())
+            // Past the column on either side, so a focused card's ring is not cut;
+            // its items pad back to the column.
+            .child(
+                gallery
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(-ui::FOCUS_RING_ROOM)
+                    .right(-ui::FOCUS_RING_ROOM),
+            )
             // The scrollbar sits in the gutter beside the column, clear of a notice's
             // trailing action.
             .child(

@@ -213,9 +213,11 @@ impl Desktop {
                     .child(
                         div()
                             .id("palette-scroll")
-                            .w_full()
                             .min_w_0()
                             .min_h_0()
+                            // Room for a focused card's ring, which the scroll would cut.
+                            .m(-ui::FOCUS_RING_ROOM)
+                            .p(ui::FOCUS_RING_ROOM)
                             .overflow_y_scroll()
                             .track_scroll(&scroll)
                             .child(grid),
