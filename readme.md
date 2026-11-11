@@ -148,6 +148,19 @@ Notes go to a default library; add other folders in **Settings → Storage**. Th
 
 **How large are the model downloads, and where do they go?** About 1–2.3 GB on Apple Silicon (`~/Library/Caches/qwen3-speech/`) and 2.4 GB elsewhere (`~/.cache/course2md/models/`). On a system set up for mainland China (its locale or time zone) they download from domestic mirrors (ModelScope / hf-mirror.com); elsewhere these are fallbacks. `HF_ENDPOINT` names a host outright, and `COURSE2MD_IP_LOOKUP=1` lets course2md ask public services for your country instead, which sends them your IP address. Downloads resume after interruptions, and GPU/CPU models are checked with SHA-256.
 
+**How do I use Qwen speech recognition (`qwen3-asr-flash`)?** Add a speech service under **Settings → Services & accounts** and choose the service type **Qwen speech recognition (e.g. qwen3-asr-flash)**. Use the address `https://maas.qianwenaiapi.com/compatible-mode/v1` (or your Alibaba Cloud Model Studio region's `…/compatible-mode/v1` address), the model `qwen3-asr-flash` and your API key. Qwen does not offer this model as *Dedicated transcription* or *Multimodal conversations*: it takes the audio alone, so course2md sends it in Qwen's own format and sends the audio in pieces of up to two minutes, well within one request's limit (5 minutes, 10 MB). In the CLI, set it in `config.toml`:
+
+```toml
+[defaults]
+provider = "api"
+
+[asr_api]
+mode = "qwen-chat"
+base_url = "https://maas.qianwenaiapi.com/compatible-mode/v1"
+model = "qwen3-asr-flash"
+# the key: COURSE2MD_ASR_API_KEY
+```
+
 **I upgraded from 1.7. Where are my notes?** Notes made by 1.x stay where they were as `course.md` / `course.html` and still open in any editor or browser, but the 2.0 library only lists notes made by 2.0. Downloaded models, the Bilibili login and the CLI's `config.toml` keep working; set up recognition and AI services again in the setup steps.
 
 More answers in [Troubleshooting](https://github.com/mizorewww/course2md/wiki/Troubleshooting).

@@ -58,6 +58,12 @@ pub enum AsrApiMode {
     /// POST {base_url}/chat/completions（支持音频输入的多模态 LLM，
     /// 如 gpt-4o-audio-preview、Gemini、Qwen2-Audio 等 OpenAI 兼容端点）
     Chat,
+    /// POST {base_url}/chat/completions in Qwen ASR's own shape (qwen3-asr-flash on
+    /// DashScope / Model Studio): the user message carries only the audio as a data URI,
+    /// an optional system message is recognition context, never an instruction.
+    #[serde(rename = "qwen-chat")]
+    #[strum(serialize = "qwen-chat")]
+    QwenChat,
 }
 
 /// 云端 STT（provider = "api"，OpenAI 兼容端点，如 OpenRouter）。
@@ -208,5 +214,33 @@ mod tests {
             }
         );
         assert!(!debug.contains("secret-key"), "{debug}");
+    }
+
+    /// The README's Qwen ASR configuration reads as written and reaches Qwen's endpoint.
+    #[test]
+    fn the_documented_qwen_configuration_reads() {
+        let file: super::ConfigFile = toml::from_str(
+            r#"
+[defaults]
+provider = "api"
+
+[asr_api]
+mode = "qwen-chat"
+base_url = "https://maas.qianwenaiapi.com/compatible-mode/v1"
+model = "qwen3-asr-flash"
+"#,
+        )
+        .unwrap();
+        assert_eq!(file.asr_api.mode, super::AsrApiMode::QwenChat);
+        assert_eq!(
+            crate::config::asr_endpoint(&file.asr_api).unwrap(),
+            "https://maas.qianwenaiapi.com/compatible-mode/v1/chat/completions"
+        );
+        let refused = super::AsrApi {
+            base_url: "https://maas.qianwenaiapi.com/compatible-mode/v1/audio/transcriptions"
+                .into(),
+            ..file.asr_api
+        };
+        assert!(crate::config::asr_endpoint(&refused).is_err());
     }
 }

@@ -64,7 +64,9 @@ pub fn asr_endpoint(api: &crate::settings::AsrApi) -> AnyhowResult<String> {
     let base = api.base_url.trim().trim_end_matches('/');
     let suffix = match api.mode {
         crate::settings::AsrApiMode::Transcriptions => "/audio/transcriptions",
-        crate::settings::AsrApiMode::Chat => "/chat/completions",
+        crate::settings::AsrApiMode::Chat | crate::settings::AsrApiMode::QwenChat => {
+            "/chat/completions"
+        }
     };
     anyhow::ensure!(
         !conflicting_endpoint_suffix(
