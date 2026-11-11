@@ -86,8 +86,8 @@ struct ImageViewer {
     drag: Option<(Point<Pixels>, Point<Pixels>)>,
     text_open: Option<bool>,
     focus: FocusHandle,
-    /// The screenshot's commands: on a right press on it, Shift+F10 or the Menu
-    /// key anywhere in the viewer, and its ⋮ button.
+    /// The ⋮ button's screenshot commands: the button, and Shift+F10 or the
+    /// Menu key anywhere in the viewer, open them beside it.
     menu: ContextMenuHandle,
     /// From the window's bottom to the top of the action row, as last laid out:
     /// a snackbar shown over the viewer stays above it.
@@ -3569,19 +3569,20 @@ impl ReaderPage {
         }
     }
 
-    /// The viewer's screenshot commands, the first child of its `relative` body: a
-    /// right press on the image or its text, Shift+F10 or the Menu key while the
-    /// viewer has focus, and its ⋮ button open them. None for a frame without a file.
-    fn reader_viewer_menu(&self, cx: &mut Context<Self>) -> Option<MaterialContextMenu> {
+    /// The viewer's screenshot commands, `id` naming one of its two places: the
+    /// first child of the `relative` body, for a right press on the image or its
+    /// text, and the ⋮ button's, which Shift+F10, the Menu key and the button open
+    /// beside it. None for a frame without a file.
+    fn reader_viewer_menu(
+        &self,
+        id: &'static str,
+        cx: &mut Context<Self>,
+    ) -> Option<MaterialContextMenu> {
         let viewer = self.viewer.as_ref()?;
         let image = viewer.frames[viewer.index].image.as_ref()?;
         // A file that exists but cannot be decoded keeps its path and location.
         let readable = !self.images.failed(&image.path, Size::Original);
-        Some(
-            self.image_context_menu("enlarged-image-context", image.path.clone(), readable, cx)
-                .trigger(&viewer.focus)
-                .handle(&viewer.menu),
-        )
+        Some(self.image_context_menu(id, image.path.clone(), readable, cx))
     }
 
     /// What a right press on a screenshot offers: the picture itself, where a
@@ -3936,7 +3937,7 @@ impl ReaderPage {
         };
         let media = (!text_only).then(|| self.reader_viewer_media(label.clone(), cx));
         let text = shows_text.then(|| self.reader_viewer_text(placement, window));
-        let menu = self.reader_viewer_menu(cx);
+        let menu = self.reader_viewer_menu("enlarged-image-context", cx);
         // Where the image stays as large, the text gets a column of its own beside
         // it, the viewer's whole height to read in; elsewhere it stays below.
         let owner = cx.weak_entity();
@@ -4268,19 +4269,27 @@ impl ReaderPage {
         });
         // The right-click menu, opened (or closed again) where the button is: the
         // note's and the gallery's screenshots open here with Enter.
-        let more = frame.image.as_ref().map(|_| {
-            let menu = viewer.menu.clone();
-            ui::tip_button(
-                "image-commands",
-                symbols::more_vert(),
-                course2md::tr!("截图操作"),
-                |button| {
-                    button.on_click(move |event: &ClickEvent, _, cx| {
-                        menu.toggle_at(event, cx);
-                    })
-                },
-            )
-        });
+        // From the keyboard the menu opens beside this button, not beside the
+        // whole body, where it would cover the title.
+        let more = self
+            .reader_viewer_menu("image-commands-menu", cx)
+            .map(|context| {
+                let menu = viewer.menu.clone();
+                div()
+                    .relative()
+                    .flex_shrink_0()
+                    .child(context.trigger(&viewer.focus).handle(&viewer.menu))
+                    .child(ui::tip_button(
+                        "image-commands",
+                        symbols::more_vert(),
+                        course2md::tr!("截图操作"),
+                        |button| {
+                            button.on_click(move |event: &ClickEvent, _, cx| {
+                                menu.toggle_at(event, cx);
+                            })
+                        },
+                    ))
+            });
         let clearance = viewer.actions_clearance.clone();
         let measure = canvas(
             move |bounds, window, _| {
