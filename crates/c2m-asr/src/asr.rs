@@ -691,19 +691,22 @@ pub fn reply_text(mode: AsrApiMode, reply: &Value) -> Option<String> {
     })
 }
 
-/// A request Qwen ASR refused for its parameters names what usually causes that: a
-/// model other than its synchronous ASR model, or an address outside its compatible
-/// mode. Every other failure passes unchanged.
+/// A request Qwen ASR refused names what to check. A missing endpoint or model (404)
+/// is about the model or address; a parameter refusal may have other causes, and the
+/// ledger keeps no response text to tell them apart, so it is offered as one possible
+/// cause. Every other failure passes unchanged.
 fn qwen_rejection(error: anyhow::Error) -> anyhow::Error {
     let status = error
         .downcast_ref::<crate::dispatch::Failure>()
         .and_then(|failure| failure.status);
-    if matches!(status, Some(400 | 404 | 422)) {
-        error.context(tr!(
+    match status {
+        Some(404) => error.context(tr!(
             "千问语音识别拒绝了请求：请确认模型是 qwen3-asr-flash，接口地址以 /compatible-mode/v1 结尾 / Qwen ASR refused the request: check that the model is qwen3-asr-flash and the address ends in /compatible-mode/v1"
-        ))
-    } else {
-        error
+        )),
+        Some(400 | 422) => error.context(tr!(
+            "千问语音识别拒绝了请求参数；可能原因之一是模型不是 qwen3-asr-flash，或接口地址不以 /compatible-mode/v1 结尾 / Qwen ASR rejected the request parameters; one possible cause is a model other than qwen3-asr-flash or an address that does not end in /compatible-mode/v1"
+        )),
+        _ => error,
     }
 }
 
@@ -1727,40 +1730,45 @@ mod cloud_tests {
         );
     }
 
-    /// A refused request says what Qwen needs, is not resent, and records the refusal
-    /// without the response body.
+    /// A refused request says what to check, is not resent, and records the refusal
+    /// without the response body. Only a missing endpoint or model is pinned on the
+    /// model or address; a parameter refusal offers them as one possible cause.
     #[test]
-    fn a_qwen_refusal_names_the_model_and_address() {
+    fn a_qwen_refusal_says_what_to_check() {
         if which::which("ffmpeg").is_err() {
             assert!(std::env::var_os("CI").is_none(), "ffmpeg is required in CI");
             return;
         }
-        let dir = tempfile::tempdir().unwrap();
-        let wav = lavfi_wav(dir.path(), "aevalsrc=sin(440*2*PI*t):d=2:s=16000");
-        let body = r#"{"error":{"code":"InvalidParameter","message":"secret-bearing detail"}}"#;
-        let refusal = format!(
-            "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        );
-        let (base, server) = crate::test_http::serve(vec![refusal]);
-        let api = qwen_api(base);
-        let identity = Backend::Api(api.clone()).identity(30.);
-        let mut cp = Checkpoint::open(dir.path(), true, &identity).unwrap();
-        let control = TaskControl::open(dir.path(), Default::default()).unwrap();
-        let error = transcribe_all(Backend::Api(api), &wav, 30., &mut cp, &control).unwrap_err();
-        assert_eq!(server.join().unwrap().len(), 1);
-        let message = format!("{error:#}");
-        assert!(message.contains("qwen3-asr-flash"), "{message}");
-        assert!(message.contains("/compatible-mode/v1"), "{message}");
-        assert!(!message.contains("secret-bearing"), "{message}");
-        assert_eq!(
-            error
-                .downcast_ref::<crate::dispatch::Failure>()
-                .and_then(|failure| failure.status),
-            Some(400)
-        );
-        let receipts = crate::dispatch::receipts(dir.path()).unwrap();
-        assert_eq!(receipts[0].state, crate::dispatch::State::Rejected);
+        for (status, reason, possible) in [(400, "Bad Request", true), (404, "Not Found", false)] {
+            let dir = tempfile::tempdir().unwrap();
+            let wav = lavfi_wav(dir.path(), "aevalsrc=sin(440*2*PI*t):d=2:s=16000");
+            let body = r#"{"error":{"code":"InvalidParameter","message":"secret-bearing detail"}}"#;
+            let refusal = format!(
+                "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let (base, server) = crate::test_http::serve(vec![refusal]);
+            let api = qwen_api(base);
+            let identity = Backend::Api(api.clone()).identity(30.);
+            let mut cp = Checkpoint::open(dir.path(), true, &identity).unwrap();
+            let control = TaskControl::open(dir.path(), Default::default()).unwrap();
+            let error =
+                transcribe_all(Backend::Api(api), &wav, 30., &mut cp, &control).unwrap_err();
+            assert_eq!(server.join().unwrap().len(), 1);
+            let message = format!("{error:#}");
+            assert!(message.contains("qwen3-asr-flash"), "{message}");
+            assert!(message.contains("/compatible-mode/v1"), "{message}");
+            assert_eq!(message.contains("可能原因之一"), possible, "{message}");
+            assert!(!message.contains("secret-bearing"), "{message}");
+            assert_eq!(
+                error
+                    .downcast_ref::<crate::dispatch::Failure>()
+                    .and_then(|failure| failure.status),
+                Some(status)
+            );
+            let receipts = crate::dispatch::receipts(dir.path()).unwrap();
+            assert_eq!(receipts[0].state, crate::dispatch::State::Rejected);
+        }
     }
 
     /// Saved progress and receipts belong to a request mode: the earlier modes keep the

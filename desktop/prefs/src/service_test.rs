@@ -467,9 +467,15 @@ fn run_test(
         } else if config.protocol == ServiceProtocol::SpeechQwenChat
             && matches!(response.status, 400 | 404 | 422)
         {
-            c2m_i18n::tr!(
-                "千问语音识别未接受请求，请确认模型是 qwen3-asr-flash，接口地址以 /compatible-mode/v1 结尾"
-            )
+            if qwen_points_at_model_or_address(response.status, &code, json.as_ref()) {
+                c2m_i18n::tr!(
+                    "千问语音识别未接受请求，请确认模型是 qwen3-asr-flash，接口地址以 /compatible-mode/v1 结尾"
+                )
+            } else {
+                c2m_i18n::tr!(
+                    "千问语音识别未接受这项测试请求；可能原因之一是模型不是 qwen3-asr-flash，或接口地址不以 /compatible-mode/v1 结尾"
+                )
+            }
         } else if (300..400).contains(&response.status) {
             c2m_i18n::tr!("服务地址已变更或不正确，请核对")
         } else {
@@ -526,6 +532,20 @@ fn run_test(
         }
     }
     evidence
+}
+
+/// Whether Qwen's refusal is about the model or the address: a missing endpoint, or an
+/// error that names a model or URL. The text is read, never shown.
+fn qwen_points_at_model_or_address(status: u16, code: &str, json: Option<&Value>) -> bool {
+    let message = json
+        .and_then(|value| value.pointer("/error/message"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    status == 404
+        || [code, message.as_str()]
+            .iter()
+            .any(|text| text.contains("model") || text.contains("url"))
 }
 
 fn request_body(config: &ServiceConfiguration, kind: TestKind) -> (String, Vec<u8>) {
@@ -1070,11 +1090,27 @@ mod tests {
             json!({"error":{"code":"InvalidParameter","message":"The audio is empty"}}),
         ));
         assert_eq!(refused.outcome, TestOutcome::ContractMismatch);
+        // Nothing points at the model or address: one possible cause, not a verdict.
         assert_eq!(
             refused.message,
-            "千问语音识别未接受请求，请确认模型是 qwen3-asr-flash，接口地址以 /compatible-mode/v1 结尾"
+            "千问语音识别未接受这项测试请求；可能原因之一是模型不是 qwen3-asr-flash，或接口地址不以 /compatible-mode/v1 结尾"
         );
         assert!(!format!("{refused:?}").contains("The audio is empty"));
+        let definite = "千问语音识别未接受请求，请确认模型是 qwen3-asr-flash，接口地址以 /compatible-mode/v1 结尾";
+        for (status, body) in [
+            (
+                400,
+                json!({"error":{"code":"InvalidParameter","message":"Model access denied."}}),
+            ),
+            (
+                400,
+                json!({"error":{"code":"InvalidParameter","message":"url error"}}),
+            ),
+            (404, json!({"error":{"code":"NotFound"}})),
+        ] {
+            let evidence = check(&transport(status, body));
+            assert_eq!(evidence.message, definite, "{status}");
+        }
         assert_eq!(
             check(&transport(404, json!({"error":{"code":"ModelNotFound"}}))).outcome,
             TestOutcome::ModelRefused
