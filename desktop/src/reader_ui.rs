@@ -4252,8 +4252,8 @@ impl ReaderPage {
                 }
             }))
         });
-        // The right-click menu, opened where the button is: the note's and the
-        // gallery's screenshots open here with Enter.
+        // The right-click menu, opened (or closed again) where the button is: the
+        // note's and the gallery's screenshots open here with Enter.
         let more = frame.image.as_ref().map(|_| {
             let menu = viewer.menu.clone();
             ui::tip_button(
@@ -4262,7 +4262,7 @@ impl ReaderPage {
                 course2md::tr!("截图操作"),
                 |button| {
                     button.on_click(move |event: &ClickEvent, _, cx| {
-                        menu.open_at(event.position(), cx);
+                        menu.toggle_at(event, cx);
                     })
                 },
             )
