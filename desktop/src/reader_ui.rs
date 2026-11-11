@@ -3,9 +3,8 @@
 //! highlights and virtualization; the screenshots are a list of rows beside it.
 use crate::{
     Change, Course, Page,
-    course_library::CommandsButton,
     exports_ui::NoteExports,
-    folder_tree::{Command, command_context_menu},
+    folder_tree::{Command, command_context_menu, with_context_menu},
     note_text,
     notes::{self, PreviewBlock},
     reader_images::{Loaded, ReaderImages, Size},
@@ -28,7 +27,7 @@ use gpui_kit::component::{
 };
 use gpui_kit_material::{
     color::ColorRole::*,
-    components::{MaterialContextMenu, title_bar_control},
+    components::{ContextMenuHandle, MaterialContextMenu, title_bar_control},
     icons::{Icon, SymbolIcon},
     motion,
     prelude::*,
@@ -87,6 +86,12 @@ struct ImageViewer {
     drag: Option<(Point<Pixels>, Point<Pixels>)>,
     text_open: Option<bool>,
     focus: FocusHandle,
+    /// The ⋮ button's screenshot commands: the button, and Shift+F10 or the
+    /// Menu key anywhere in the viewer, open them beside it.
+    menu: ContextMenuHandle,
+    /// From the window's bottom to the top of the action row, as last laid out:
+    /// a snackbar shown over the viewer stays above it.
+    actions_clearance: Rc<Cell<Option<Pixels>>>,
 }
 
 /// Where the viewer puts a screenshot's text.
@@ -778,6 +783,15 @@ impl ReaderPage {
 
     pub(super) fn reader_viewer_open(&self) -> bool {
         self.viewer.as_ref().is_some_and(|viewer| viewer.open)
+    }
+
+    /// While the viewer is open, how far above the window's bottom a snackbar
+    /// must stay to leave the viewer's action row uncovered.
+    pub(super) fn viewer_snackbar_clearance(&self) -> Option<Pixels> {
+        self.viewer
+            .as_ref()
+            .filter(|viewer| viewer.open)
+            .and_then(|viewer| viewer.actions_clearance.get())
     }
 
     /// The list of the current view.
@@ -2306,19 +2320,22 @@ impl ReaderPage {
             .rounded(RADIUS_LARGE_INCREASED)
             .accessibility_label(enlarge)
             .w_full()
-            .overflow_hidden()
             .relative()
-            .children(menu)
             .child(slot);
-        match frame {
-            Some(frame) => card
-                .on_click(
-                    cx.listener(move |this, _, window, cx| {
+        let card =
+            match frame {
+                Some(frame) => card
+                    .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_reader_image(frame, window, cx)
-                    }),
-                )
+                    }))
+                    .into_any_element(),
+                None => card.into_any_element(),
+            };
+        match menu {
+            Some(menu) => with_context_menu(("note-figure-scope", block), menu, card)
+                .w_full()
                 .into_any_element(),
-            None => card.into_any_element(),
+            None => card,
         }
     }
 
@@ -3295,12 +3312,19 @@ impl ReaderPage {
                             )
                             .into_any_element(),
                     };
-                    // List measurements include padding, not margins.
+                    // List measurements include padding, not margins. The list
+                    // reaches past the column by the focus ring's room, and each
+                    // item pads back into it.
                     div()
                         .w_full()
                         .min_w_0()
                         .flex_shrink_0()
-                        .when(!last, |row| row.pb(GALLERY_GAP))
+                        .px(ui::FOCUS_RING_ROOM)
+                        .pb(if last {
+                            ui::FOCUS_RING_ROOM
+                        } else {
+                            GALLERY_GAP
+                        })
                         .child(content)
                         .into_any_element()
                 })
@@ -3314,7 +3338,16 @@ impl ReaderPage {
             .min_h_0()
             .min_w_0()
             .w_full()
-            .child(gallery.size_full())
+            // Past the column on either side, so a focused card's ring is not cut;
+            // its items pad back to the column.
+            .child(
+                gallery
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(-ui::FOCUS_RING_ROOM)
+                    .right(-ui::FOCUS_RING_ROOM),
+            )
             // The scrollbar sits in the gutter beside the column, clear of a notice's
             // trailing action.
             .child(
@@ -3456,9 +3489,7 @@ impl ReaderPage {
         .w_full()
         .h_full()
         .min_w_0()
-        .overflow_hidden()
         .relative()
-        .children(menu)
         .child(
             div()
                 .w_full()
@@ -3521,19 +3552,43 @@ impl ReaderPage {
                         ),
                 ),
         );
-        if openable {
+        let card = if openable {
             card.on_click(
                 cx.listener(move |this, _, window, cx| this.open_reader_image(index, window, cx)),
             )
             .into_any_element()
         } else {
             card.into_any_element()
+        };
+        match menu {
+            Some(menu) => with_context_menu(("screenshot-scope", index), menu, card)
+                .size_full()
+                .min_w_0()
+                .into_any_element(),
+            None => card,
         }
+    }
+
+    /// The viewer's screenshot commands, `id` naming one of its two places: the
+    /// first child of the `relative` body, for a right press on the image or its
+    /// text, and the ⋮ button's, which Shift+F10, the Menu key and the button open
+    /// beside it. None for a frame without a file.
+    fn reader_viewer_menu(
+        &self,
+        id: &'static str,
+        cx: &mut Context<Self>,
+    ) -> Option<MaterialContextMenu> {
+        let viewer = self.viewer.as_ref()?;
+        let image = viewer.frames[viewer.index].image.as_ref()?;
+        // A file that exists but cannot be decoded keeps its path and location.
+        let readable = !self.images.failed(&image.path, Size::Original);
+        Some(self.image_context_menu(id, image.path.clone(), readable, cx))
     }
 
     /// What a right press on a screenshot offers: the picture itself, where a
     /// clipboard can hold one, its file's path and its file in the file manager.
-    /// The first child of the `relative` element it serves.
+    /// Shown by [`with_context_menu`], or as the first child of the `relative`
+    /// element it serves.
     fn image_context_menu(
         &self,
         id: impl Into<ElementId>,
@@ -3678,6 +3733,8 @@ impl ReaderPage {
             drag: None,
             text_open: None,
             focus: cx.focus_handle(),
+            menu: ContextMenuHandle::default(),
+            actions_clearance: Rc::default(),
         });
         let _ = window;
         cx.notify();
@@ -3880,6 +3937,7 @@ impl ReaderPage {
         };
         let media = (!text_only).then(|| self.reader_viewer_media(label.clone(), cx));
         let text = shows_text.then(|| self.reader_viewer_text(placement, window));
+        let menu = self.reader_viewer_menu("enlarged-image-context", cx);
         // Where the image stays as large, the text gets a column of its own beside
         // it, the viewer's whole height to read in; elsewhere it stays below.
         let owner = cx.weak_entity();
@@ -3910,6 +3968,7 @@ impl ReaderPage {
                 .w_full()
                 .items_stretch()
                 .gap(VIEWER_BESIDE_GAP)
+                .children(menu)
                 .child(measure)
                 .child(v_flex().flex_1().min_w_0().h_full().child(media))
                 .child(text)
@@ -3921,6 +3980,7 @@ impl ReaderPage {
                 .min_h_0()
                 .w_full()
                 .gap(VIEWER_BELOW_GAP)
+                .children(menu)
                 .child(measure)
                 .children(media)
                 .children(text)
@@ -4207,19 +4267,45 @@ impl ReaderPage {
                 }
             }))
         });
-        // The right-click menu's commands, reachable from the keyboard: the note's
-        // and the gallery's screenshots open here with Enter.
-        let path = frame.image.as_ref().map(|image| image.path.clone());
-        let more = path.map(|path| CommandsButton {
-            id: "image-commands".into(),
-            label: course2md::tr!("截图操作").into(),
-            subject: None,
-            commands: self.image_commands(path, readable, cx),
-            width: None,
-            tonal: false,
-        });
+        // The right-click menu, opened (or closed again) where the button is: the
+        // note's and the gallery's screenshots open here with Enter.
+        // From the keyboard the menu opens beside this button, not beside the
+        // whole body, where it would cover the title.
+        let more = self
+            .reader_viewer_menu("image-commands-menu", cx)
+            .map(|context| {
+                let menu = viewer.menu.clone();
+                div()
+                    .relative()
+                    .flex_shrink_0()
+                    .child(context.trigger(&viewer.focus).handle(&viewer.menu))
+                    .child(ui::tip_button(
+                        "image-commands",
+                        symbols::more_vert(),
+                        course2md::tr!("截图操作"),
+                        |button| {
+                            button.on_click(move |event: &ClickEvent, _, cx| {
+                                menu.toggle_at(event, cx);
+                            })
+                        },
+                    ))
+            });
+        let clearance = viewer.actions_clearance.clone();
+        let measure = canvas(
+            move |bounds, window, cx| {
+                let measured = Some(window.viewport_size().height - bounds.top());
+                // The window's snackbar reads it on the next frame; draw one when it moves.
+                if clearance.replace(measured) != measured {
+                    window.defer(cx, |window, _| window.refresh());
+                }
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .inset_0();
         h_flex()
             .id("reader-image-actions")
+            .relative()
             .w_full()
             .min_w_0()
             .flex_shrink_0()
@@ -4233,6 +4319,7 @@ impl ReaderPage {
             .children(watch)
             .children(text_toggle)
             .children(more)
+            .child(measure)
     }
 
     /// The zoomable image, or a notice when its file cannot be read.
@@ -4386,7 +4473,6 @@ impl ReaderPage {
                             .child(picture),
                     ),
             );
-        let menu = self.image_context_menu("enlarged-image-context", image.path.clone(), true, cx);
         // The kit's outlined card surface frames the image: its outline and corners.
         CardSurface::new(CardVariant::Outlined)
             .rounded(RADIUS_LARGE)
@@ -4395,7 +4481,6 @@ impl ReaderPage {
             .w_full()
             .overflow_hidden()
             .relative()
-            .child(menu)
             .child(viewport)
             .into_any_element()
     }

@@ -1065,6 +1065,15 @@ impl TasksPage {
         };
         let body = body.then(|| self.task_body(task, place, window, cx));
         let footer = self.home_footer.take();
+        // Shift+F10 or the Menu key opens the commands while focus is in the card.
+        let menu_focus = window
+            .use_keyed_state(
+                SharedString::from(format!("task-menu-focus-{id}")),
+                cx,
+                |_, cx| cx.focus_handle(),
+            )
+            .read(cx)
+            .clone();
         tile(outer)
             .map(|card| match place {
                 CardPlace::Home => card.rounded_t(RADIUS_HERO),
@@ -1076,10 +1085,14 @@ impl TasksPage {
             .flex()
             .flex_col()
             .overflow_hidden()
-            .child(MaterialContextMenu::new(
-                SharedString::from(format!("task-context-{id}")),
-                context_menu,
-            ))
+            .track_focus(&menu_focus)
+            .child(
+                MaterialContextMenu::new(
+                    SharedString::from(format!("task-context-{id}")),
+                    context_menu,
+                )
+                .trigger(&menu_focus),
+            )
             .map(|card| match place {
                 CardPlace::Row { .. } => card
                     .child(head)

@@ -17,7 +17,7 @@ use crate::service_test::{self, TestKind};
 use crate::{ConversionOptions, Desktop, Page, symbols, ui};
 use crate::{
     course_library::CommandsButton,
-    folder_tree::{Command, command_context_menu},
+    folder_tree::{Command, command_context_menu, with_context_menu},
 };
 use anyhow::{Context as _, Result, anyhow};
 use course2md::execution::Component;
@@ -1196,23 +1196,21 @@ impl Desktop {
             this.open_settings_service_editor(purpose, Some(open_version.clone()), window, cx);
         });
         ui::Field::tile(format!("saved-service-row-{id}"), move |outer| {
-            div()
-                .id(SharedString::from(format!("service-context-{id}")))
-                .relative()
-                .w_full()
-                .min_w_0()
-                .child(command_context_menu(
+            with_context_menu(
+                SharedString::from(format!("service-context-{id}")),
+                command_context_menu(
                     SharedString::from(format!("service-context-menu-{id}")),
                     Some(MENU_WIDTH),
                     actions,
-                ))
-                .child(
-                    TileScale::Regular
-                        .button(SharedString::from(format!("saved-service-{id}")), outer)
-                        .on_click(open)
-                        .child(row),
-                )
-                .into_any_element()
+                ),
+                TileScale::Regular
+                    .button(SharedString::from(format!("saved-service-{id}")), outer)
+                    .on_click(open)
+                    .child(row),
+            )
+            .w_full()
+            .min_w_0()
+            .into_any_element()
         })
     }
 

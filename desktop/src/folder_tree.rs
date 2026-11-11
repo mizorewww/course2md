@@ -170,6 +170,61 @@ pub(crate) fn command_context_menu(
     })
 }
 
+/// `element` with `menu` on a right press anywhere on it, and from the keyboard:
+/// Shift+F10 or the Menu key opens the menu while focus is anywhere inside it.
+/// The scope is the menu's `relative` parent and tracks a focus handle kept for
+/// `id` across frames as the menu's trigger, for elements whose controls keep
+/// their focus handles to themselves. Style it as `element`'s place in its
+/// parent asks (width, flex); `element` fills it.
+pub(crate) fn with_context_menu(
+    id: impl Into<ElementId>,
+    menu: MaterialContextMenu,
+    element: impl IntoElement,
+) -> ContextMenuScope {
+    ContextMenuScope {
+        id: id.into(),
+        menu,
+        element: element.into_any_element(),
+        style: StyleRefinement::default(),
+    }
+}
+
+/// See [`with_context_menu`].
+#[derive(gpui::IntoElement)]
+pub(crate) struct ContextMenuScope {
+    id: ElementId,
+    menu: MaterialContextMenu,
+    element: AnyElement,
+    style: StyleRefinement,
+}
+
+impl Styled for ContextMenuScope {
+    fn style(&mut self) -> &mut StyleRefinement {
+        &mut self.style
+    }
+}
+
+impl RenderOnce for ContextMenuScope {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let focus = window
+            .use_keyed_state(
+                ElementId::NamedChild(Arc::new(self.id.clone()), "menu-focus".into()),
+                cx,
+                |_, cx| cx.focus_handle(),
+            )
+            .read(cx)
+            .clone();
+        let mut scope = div()
+            .id(self.id)
+            .relative()
+            .track_focus(&focus)
+            .child(self.menu.trigger(&focus))
+            .child(self.element);
+        scope.style().refine(&self.style);
+        scope
+    }
+}
+
 /// Note counts shown beside the navigation's places.
 #[derive(Default)]
 struct NavCounts {
@@ -619,17 +674,16 @@ impl Desktop {
                 cx.stop_propagation();
             })
         };
+        // 全部笔记 has no commands, so no menu to open.
+        let menu = (!commands.is_empty()).then(|| {
+            command_context_menu(format!("{key}-context"), Some(COMMAND_MENU_WIDTH), commands)
+        });
         let mut row = div()
             .id(SharedString::from(format!("{key}-row")))
             .relative()
-            .flex_1()
+            .w_full()
             .min_w_0()
             .on_key_down(keys)
-            .child(command_context_menu(
-                format!("{key}-context"),
-                Some(COMMAND_MENU_WIDTH),
-                commands,
-            ))
             // No tooltip: the kit's list item cannot tell whether its name was cut, and
             // one that repeats a whole name only covers the row above (V11).
             .child(item);
@@ -677,7 +731,13 @@ impl Desktop {
                     },
                 ))
             })
-            .child(row)
+            .child(match menu {
+                Some(menu) => with_context_menu(format!("{key}-scope"), menu, row)
+                    .flex_1()
+                    .min_w_0()
+                    .into_any_element(),
+                None => div().flex_1().min_w_0().child(row).into_any_element(),
+            })
             .into_any_element()
     }
 
@@ -692,37 +752,30 @@ impl Desktop {
     ) -> impl IntoElement {
         let commands = self.root_commands(root, cx);
         let toggle = root.to_path_buf();
-        div()
-            .id(SharedString::from(format!(
-                "folder-tree-library-{}",
-                root.display()
-            )))
-            .relative()
-            .w_full()
-            .mt(rem(8.))
-            .child(command_context_menu(
+        with_context_menu(
+            SharedString::from(format!("folder-tree-library-{}", root.display())),
+            command_context_menu(
                 SharedString::from(format!("folder-tree-library-context-{}", root.display())),
                 Some(COMMAND_MENU_WIDTH),
                 commands,
-            ))
-            .child(
-                ListItem::new("library-header", name)
-                    .density(ListDensity::Compact)
-                    .container(ground)
-                    .segment([true; 4])
-                    .leading(ListLeading::Icon(symbols::database().into()))
-                    .trailing(ListTrailing::Icon(
-                        if open {
-                            symbols::keyboard_arrow_down()
-                        } else {
-                            symbols::chevron_right()
-                        }
-                        .into(),
-                    ))
-                    .on_click(
-                        cx.listener(move |this, _, _, cx| this.toggle_tree_node(&toggle, 0, cx)),
-                    ),
-            )
+            ),
+            ListItem::new("library-header", name)
+                .density(ListDensity::Compact)
+                .container(ground)
+                .segment([true; 4])
+                .leading(ListLeading::Icon(symbols::database().into()))
+                .trailing(ListTrailing::Icon(
+                    if open {
+                        symbols::keyboard_arrow_down()
+                    } else {
+                        symbols::chevron_right()
+                    }
+                    .into(),
+                ))
+                .on_click(cx.listener(move |this, _, _, cx| this.toggle_tree_node(&toggle, 0, cx))),
+        )
+        .w_full()
+        .mt(rem(8.))
     }
 
     /// The folder navigation: every note, each library's unfiled notes and its
@@ -899,35 +952,38 @@ impl Desktop {
                     id,
                     name: name.clone(),
                 };
-                self.drop_target(
-                    div()
-                        .id(SharedString::from(format!("folder-row-{id}")))
-                        .relative()
-                        .min_w_0(),
-                    root,
-                    Some(id),
-                    cx,
-                )
-                .child(command_context_menu(
+                let menu = command_context_menu(
                     ("folder-context", id as usize),
                     Some(COMMAND_MENU_WIDTH),
                     commands,
-                ))
-                .child(
-                    ListItem::new(("folder-item", id as usize), name)
-                        .leading(ListLeading::Icon(symbols::folder().into()))
-                        .supporting(note_count(notes))
-                        .segment([true; 4])
-                        .trailing(ListTrailing::Icon(symbols::chevron_right().into()))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.select_library_scope(
-                                open_root.clone(),
-                                FolderFilter::Folder(id),
-                                cx,
-                            )
-                        })),
-                )
-                .on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
+                );
+                let row = self
+                    .drop_target(
+                        div()
+                            .id(SharedString::from(format!("folder-row-{id}")))
+                            .relative()
+                            .w_full()
+                            .min_w_0(),
+                        root,
+                        Some(id),
+                        cx,
+                    )
+                    .child(
+                        ListItem::new(("folder-item", id as usize), name)
+                            .leading(ListLeading::Icon(symbols::folder().into()))
+                            .supporting(note_count(notes))
+                            .segment([true; 4])
+                            .trailing(ListTrailing::Icon(symbols::chevron_right().into()))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.select_library_scope(
+                                    open_root.clone(),
+                                    FolderFilter::Folder(id),
+                                    cx,
+                                )
+                            })),
+                    )
+                    .on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()));
+                with_context_menu(("folder-scope", id as usize), menu, row).min_w_0()
             })
             .collect();
         Some(

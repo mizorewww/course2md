@@ -206,6 +206,12 @@ pub fn page_title(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Di
 /// A question or a short form: roomier than the kit's default for a sentence in Chinese.
 pub const DIALOG_WIDTH_ROOMY: f32 = 448.;
 
+/// What a clipping container (a scroll view, a list) leaves around the cards it holds
+/// for the kit's keyboard focus ring, 3dp drawn 2dp outside a card. The container
+/// reaches this far past its cards on every side and pads them back into place, so the
+/// cards keep their position and the ring is not cut.
+pub const FOCUS_RING_ROOM: Rems = rem(8.);
+
 /// The tinted circle of a resource row: an account, a service, a library location. The
 /// add row's plus and later lines of a resource keep to this column.
 pub const RESOURCE_ICON: Rems = rem(RESOURCE_ICON_SIZE);

@@ -116,7 +116,6 @@ impl Desktop {
         MaterialCard::new(("palette", palette as usize), CardVariant::Outlined)
             .rounded(RADIUS_LARGE)
             .w_full()
-            .overflow_hidden()
             .accessibility_label(course2md::tr!(
                 "{}，{}",
                 palette.name(),
@@ -214,9 +213,11 @@ impl Desktop {
                     .child(
                         div()
                             .id("palette-scroll")
-                            .w_full()
                             .min_w_0()
                             .min_h_0()
+                            // Room for a focused card's ring, which the scroll would cut.
+                            .m(-ui::FOCUS_RING_ROOM)
+                            .p(ui::FOCUS_RING_ROOM)
                             .overflow_y_scroll()
                             .track_scroll(&scroll)
                             .child(grid),

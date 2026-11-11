@@ -3,7 +3,7 @@ use crate::Change as _;
 use crate::{
     Desktop,
     course_library::CommandsButton,
-    folder_tree::{Command, command_context_menu},
+    folder_tree::{Command, command_context_menu, with_context_menu},
     storage::{self, Phase, Progress},
     symbols,
     ui::{self, AsyncStatus, Resource},
@@ -1170,20 +1170,16 @@ impl Desktop {
             actions: vec![open.into_any_element(), more.into_any_element()],
         }
         .row(cx);
-        div()
-            .id(("storage-location", index))
-            .relative()
-            .w_full()
-            .min_w_0()
-            .px(ITEM_INSET)
-            .py(rem(16.))
-            .child(command_context_menu(
-                ("storage-location-context", index),
-                None,
-                actions,
-            ))
-            .child(row)
-            .into_any_element()
+        with_context_menu(
+            ("storage-location", index),
+            command_context_menu(("storage-location-context", index), None, actions),
+            row,
+        )
+        .w_full()
+        .min_w_0()
+        .px(ITEM_INSET)
+        .py(rem(16.))
+        .into_any_element()
     }
 
     /// Storage locations listed in the settings page; per-location operations
