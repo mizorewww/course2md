@@ -1129,8 +1129,26 @@ impl Desktop {
         let service = self.onboarding.service(purpose);
         let kept = (field == FormField::Key && service.form.draft.credential.is_some())
             .then(|| course2md::tr!("已保存密钥，留空则保留").to_owned());
+        let hint = match field {
+            FormField::Address => {
+                let (address, protocol) = (
+                    service.form.value(FormField::Address, cx),
+                    service.form.draft.protocol,
+                );
+                // Setup's inputs have no placeholder; Qwen's address is not guessable.
+                if protocol == ServiceProtocol::SpeechQwenChat && address.trim().is_empty() {
+                    Some(course2md::tr!(
+                        "例如 {}",
+                        crate::preferences::QWEN_ADDRESS_EXAMPLE
+                    ))
+                } else {
+                    crate::settings_ui::service_form::qwen_type_suggestion(&address, protocol)
+                }
+            }
+            _ => kept,
+        };
         let owner = FormOwner::Setup(purpose);
-        let input = self.service_text_field(owner, field, label, kept, service.busy(), cx)?;
+        let input = self.service_text_field(owner, field, label, hint, service.busy(), cx)?;
         let id = format!("setup-{}-{field:?}-reveal", purpose as usize);
         Some(self.setup_reveal(SharedString::from(id), input))
     }

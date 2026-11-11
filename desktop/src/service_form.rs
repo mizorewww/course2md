@@ -262,10 +262,22 @@ impl ServiceForm {
     }
 }
 
+/// Below a Qwen address under another speech type: which type it needs. Only a
+/// suggestion; the person's choice stays.
+pub(crate) fn qwen_type_suggestion(address: &str, protocol: ServiceProtocol) -> Option<String> {
+    preferences::suggests_qwen_speech(address, protocol).then(|| {
+        course2md::tr!(
+            "千问的 qwen3-asr-flash 请选择“{}”服务类型",
+            ServiceProtocol::SpeechQwenChat.choice_label()
+        )
+    })
+}
+
 pub(crate) fn protocol_icon(protocol: ServiceProtocol) -> SymbolIcon {
     match protocol {
         ServiceProtocol::SpeechTranscriptions => symbols::mic(),
         ServiceProtocol::SpeechChat => symbols::article(),
+        ServiceProtocol::SpeechQwenChat => symbols::graphic_eq(),
         ServiceProtocol::AiChat => symbols::cloud(),
         ServiceProtocol::OllamaChat => symbols::dns(),
         ServiceProtocol::CodexResponses => symbols::auto_awesome(),
@@ -493,6 +505,9 @@ impl Desktop {
         let error = form.error(field).map(str::to_owned);
         let saved_key = field == FormField::Key && form.draft.credential.is_some();
         let placeholder = match field {
+            FormField::Address if form.draft.protocol == ServiceProtocol::SpeechQwenChat => {
+                preferences::QWEN_ADDRESS_EXAMPLE
+            }
             FormField::Address => "https://api.example.com/v1",
             FormField::Name => course2md::tr!("例如：我的 API"),
             _ if saved_key => "••••••••",

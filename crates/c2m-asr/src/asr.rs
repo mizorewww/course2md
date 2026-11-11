@@ -122,6 +122,17 @@ impl Backend {
         }
     }
 
+    /// The longest segment this backend accepts: the chosen length, shortened only
+    /// where a service limits one request's audio.
+    fn max_speech(&self, chosen: f32) -> f32 {
+        match self {
+            Self::Api(api) if api.mode == AsrApiMode::QwenChat => {
+                chosen.min(crate::qwen::max_segment_seconds() as f32)
+            }
+            _ => chosen,
+        }
+    }
+
     /// The speech in the audio, cut to `max_speech`.
     fn segments(&self, wav: &Path, max_speech: f64) -> Result<Vec<Seg>> {
         match self {
@@ -150,9 +161,10 @@ pub async fn run(
     job: &crate::job::Job,
 ) -> Result<Vec<TranscriptEvent>> {
     let backend = Backend::resolve(cfg).await?;
-    let mut cp = Checkpoint::open(&job.dir, true, &backend.identity(cfg.max_speech))?;
+    let max_speech = backend.max_speech(cfg.max_speech);
+    let mut cp = Checkpoint::open(&job.dir, true, &backend.identity(max_speech))?;
     let (wav, control) = (wav.to_path_buf(), job.control.clone());
-    let max_speech = cfg.max_speech as f64;
+    let max_speech = max_speech as f64;
     let events = tokio::task::spawn_blocking(move || {
         let events = transcribe_all(backend, &wav, max_speech, &mut cp, &control)?;
         cp.finish()?;
@@ -564,7 +576,8 @@ impl Transcribe for CloudSpeech {
     /// A paid request's ledger identity hashes these bytes, so they must not change: a
     /// request sent but unconfirmed by an earlier version is found again by this identity
     /// and is never resent without authorization. Hence ffmpeg, with exactly these
-    /// arguments, and not the in-process cut.
+    /// arguments, and not the in-process cut. Qwen ASR, which came later, adds only its
+    /// silence padding.
     fn cut(&self, wav: &Path, seg: Seg, chunk: &Path) -> Result<()> {
         let mut cmd = Command::new(crate::tools::program("ffmpeg"));
         cmd.args([
@@ -579,9 +592,14 @@ impl Transcribe for CloudSpeech {
         .arg("-t")
         .arg(format!("{:.3}", (seg.cut_end - seg.cut_start).max(0.05)))
         .arg("-i")
-        .arg(wav)
-        .args(["-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le"])
-        .arg(chunk);
+        .arg(wav);
+        // Qwen ASR refuses audio shorter than a second: pad a short chunk with silence.
+        if self.mode == AsrApiMode::QwenChat {
+            cmd.arg("-af")
+                .arg(format!("apad=whole_dur={}", crate::qwen::MIN_AUDIO_SECONDS));
+        }
+        cmd.args(["-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le"])
+            .arg(chunk);
         let out = crate::runtime::run_bounded("ffmpeg", &mut cmd, CUT_TIMEOUT)?;
         anyhow::ensure!(
             out.status.success(),
@@ -618,6 +636,30 @@ impl Transcribe for CloudSpeech {
                     &identity,
                 )
             }
+            AsrApiMode::QwenChat => {
+                anyhow::ensure!(
+                    bytes.len() <= crate::qwen::MAX_INLINE_WAV_BYTES,
+                    tr!(
+                        "这段音频超过千问语音识别单次请求的大小上限，尚未发送 / This audio exceeds Qwen ASR's per-request size limit; nothing was sent"
+                    )
+                );
+                let body = crate::qwen::request_body(&self.model, &bytes, None);
+                let reply = self
+                    .post(
+                        seg,
+                        "application/json",
+                        &serde_json::to_vec(&body)?,
+                        &identity,
+                    )
+                    .map_err(qwen_rejection);
+                if let Ok(reply) = &reply {
+                    tracing::debug!(
+                        language = crate::qwen::detected_language(reply).unwrap_or("-"),
+                        "qwen asr"
+                    );
+                }
+                reply
+            }
         }
         .with_context(|| tr!("云端语音识别失败：{}", crate::timeline::fmt_ts(seg.start)))?;
         Ok(reply_text(self.mode, &reply)
@@ -632,9 +674,9 @@ impl Transcribe for CloudSpeech {
 }
 
 /// The transcript in a service's reply, `None` when the reply carries no text at all:
-/// `text` from a transcription endpoint; from chat, `message.content`, a string or
-/// multimodal parts `[{type:"text", text:...}]` joined.
-fn reply_text(mode: AsrApiMode, reply: &Value) -> Option<String> {
+/// `text` from a transcription endpoint; from chat (Qwen ASR included),
+/// `message.content`, a string or multimodal parts `[{type:"text", text:...}]` joined.
+pub fn reply_text(mode: AsrApiMode, reply: &Value) -> Option<String> {
     if mode == AsrApiMode::Transcriptions {
         return reply["text"].as_str().map(str::to_owned);
     }
@@ -647,6 +689,25 @@ fn reply_text(mode: AsrApiMode, reply: &Value) -> Option<String> {
             .collect();
         (!parts.is_empty()).then(|| parts.concat())
     })
+}
+
+/// A request Qwen ASR refused names what to check. A missing endpoint or model (404)
+/// is about the model or address; a parameter refusal may have other causes, and the
+/// ledger keeps no response text to tell them apart, so it is offered as one possible
+/// cause. Every other failure passes unchanged.
+fn qwen_rejection(error: anyhow::Error) -> anyhow::Error {
+    let status = error
+        .downcast_ref::<crate::dispatch::Failure>()
+        .and_then(|failure| failure.status);
+    match status {
+        Some(404) => error.context(tr!(
+            "千问语音识别拒绝了请求：请确认模型是 qwen3-asr-flash，接口地址以 /compatible-mode/v1 结尾 / Qwen ASR refused the request: check that the model is qwen3-asr-flash and the address ends in /compatible-mode/v1"
+        )),
+        Some(400 | 422) => error.context(tr!(
+            "千问语音识别拒绝了请求参数；可能原因之一是模型不是 qwen3-asr-flash，或接口地址不以 /compatible-mode/v1 结尾 / Qwen ASR rejected the request parameters; one possible cause is a model other than qwen3-asr-flash or an address that does not end in /compatible-mode/v1"
+        )),
+        _ => error,
+    }
 }
 
 /// Standard OpenAI-compatible file upload, also accepted by OpenRouter.
@@ -1515,5 +1576,224 @@ mod cloud_tests {
         let mut cp = crate::checkpoint::Checkpoint::open(dir.path(), true, &identity).unwrap();
         let again = transcribe_all(cloud(), &wav, 30., &mut cp, &Default::default()).unwrap();
         assert_eq!(again.len(), segments);
+    }
+
+    fn qwen_api(base: String) -> AsrApi {
+        AsrApi {
+            base_url: format!("{base}/compatible-mode/v1"),
+            api_key: "sk-loopback-only".into(),
+            model: "qwen3-asr-flash".into(),
+            mode: AsrApiMode::QwenChat,
+        }
+    }
+
+    fn qwen_reply(text: &str) -> String {
+        crate::test_http::json_response(
+            &json!({"choices":[{"finish_reason":"stop","index":0,"message":{
+                "annotations":[{"emotion":"neutral","language":"zh","type":"audio_info"}],
+                "content":text,"role":"assistant"}}],
+                "object":"chat.completion","usage":{"seconds":1}})
+            .to_string(),
+        )
+    }
+
+    fn lavfi_wav(dir: &Path, source: &str) -> PathBuf {
+        let wav = dir.join("speech.wav");
+        let status = Command::new("ffmpeg")
+            .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i"])
+            .arg(source)
+            .args(["-ac", "1", "-ar", "16000"])
+            .arg(&wav)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        wav
+    }
+
+    /// The audio a Qwen request carried, decoded from its data URI.
+    fn qwen_audio(body: &Value) -> Vec<u8> {
+        use base64::Engine as _;
+        let uri = body["messages"][0]["content"][0]["input_audio"]["data"]
+            .as_str()
+            .unwrap();
+        let b64 = uri.strip_prefix("data:audio/wav;base64,").unwrap();
+        base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .unwrap()
+    }
+
+    /// Each chunk goes out exactly as Qwen ASR documents it: the audio alone, as a WAV
+    /// data URI, in the only user message; no instruction text; `asr_options` and a
+    /// non-streaming reply. A sub-second chunk is padded past the service's 1 s minimum.
+    #[test]
+    fn qwen_requests_carry_only_the_audio_and_resume_without_resending() {
+        if which::which("ffmpeg").is_err() {
+            assert!(std::env::var_os("CI").is_none(), "ffmpeg is required in CI");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        // A 0.5 s tone, then a 1.5 s tone: two segments, the first under a second.
+        let wav = lavfi_wav(
+            dir.path(),
+            "aevalsrc=sin(440*2*PI*t)*(between(t\\,0.5\\,1)+between(t\\,2.5\\,4)):d=5:s=16000",
+        );
+        let segs = ffmpeg_vad(&wav, 30.).unwrap();
+        assert_eq!(segs.len(), 2, "{segs:?}");
+        let (base, server) = crate::test_http::serve(vec![qwen_reply("课程"), qwen_reply("课程")]);
+        let api = qwen_api(base);
+        let backend = || Backend::Api(api.clone());
+        let identity = backend().identity(30.);
+        let mut cp = Checkpoint::open(dir.path(), true, &identity).unwrap();
+        let control = TaskControl::open(dir.path(), Default::default()).unwrap();
+        let events = transcribe_all(backend(), &wav, 30., &mut cp, &control).unwrap();
+        let texts: Vec<_> = events.iter().map(|event| event.text.as_str()).collect();
+        // Chunks run in parallel, so the replies may arrive in either order.
+        assert_eq!(texts, ["课程", "课程"]);
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        for request in &requests {
+            let head = request.head.to_ascii_lowercase();
+            assert!(
+                head.starts_with("post /compatible-mode/v1/chat/completions "),
+                "{head}"
+            );
+            assert!(head.contains("authorization: bearer sk-loopback-only"));
+            assert!(head.contains("content-type: application/json"));
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
+            let audio = qwen_audio(&body);
+            assert_eq!(
+                body,
+                crate::qwen::request_body("qwen3-asr-flash", &audio, None)
+            );
+            assert_eq!(
+                body,
+                json!({
+                    "model": "qwen3-asr-flash",
+                    "messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {
+                        "data": crate::qwen::wav_data_uri(&audio)
+                    }}]}],
+                    "stream": false,
+                    "asr_options": {"enable_itn": false},
+                })
+            );
+            let reader = hound::WavReader::new(std::io::Cursor::new(&audio)).unwrap();
+            let spec = reader.spec();
+            assert_eq!((spec.channels, spec.sample_rate), (1, 16000));
+            let seconds = reader.duration() as f64 / 16000.0;
+            assert!(
+                seconds >= crate::qwen::MIN_AUDIO_SECONDS - 0.01,
+                "{seconds}"
+            );
+        }
+        // Each request has a completed receipt under the Qwen mode's own identity.
+        let receipts = crate::dispatch::receipts(dir.path()).unwrap();
+        assert_eq!(receipts.len(), 2);
+        assert!(
+            receipts
+                .iter()
+                .all(|receipt| receipt.state == crate::dispatch::State::Completed)
+        );
+        drop(cp);
+        // Resuming sends nothing: the fake server is gone.
+        let mut cp = Checkpoint::open(dir.path(), true, &identity).unwrap();
+        let again = transcribe_all(backend(), &wav, 30., &mut cp, &control).unwrap();
+        assert_eq!(again.len(), 2);
+    }
+
+    /// Speech longer than one Qwen request allows is cut to fit, whatever length the
+    /// task chose; other backends keep the chosen length.
+    #[test]
+    fn qwen_segments_fit_one_request() {
+        let limit = crate::qwen::max_segment_seconds() as f32;
+        let qwen = Backend::Api(qwen_api("http://127.0.0.1:9".into()));
+        assert_eq!(qwen.max_speech(600.), limit);
+        assert_eq!(qwen.max_speech(20.), 20.);
+        let chat = Backend::Api(AsrApi {
+            mode: AsrApiMode::Chat,
+            ..qwen_api("http://127.0.0.1:9".into())
+        });
+        assert_eq!(chat.max_speech(600.), 600.);
+        if which::which("ffmpeg").is_err() {
+            assert!(std::env::var_os("CI").is_none(), "ffmpeg is required in CI");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let wav = lavfi_wav(
+            dir.path(),
+            &format!("aevalsrc=sin(440*2*PI*t):d={}:s=16000", limit + 30.),
+        );
+        let segs = qwen.segments(&wav, qwen.max_speech(600.) as f64).unwrap();
+        assert_eq!(segs.len(), 2, "{segs:?}");
+        assert!(
+            segs.iter()
+                .all(|seg| seg.cut_end - seg.cut_start <= limit as f64 + 0.5)
+        );
+    }
+
+    /// A refused request says what to check, is not resent, and records the refusal
+    /// without the response body. Only a missing endpoint or model is pinned on the
+    /// model or address; a parameter refusal offers them as one possible cause.
+    #[test]
+    fn a_qwen_refusal_says_what_to_check() {
+        if which::which("ffmpeg").is_err() {
+            assert!(std::env::var_os("CI").is_none(), "ffmpeg is required in CI");
+            return;
+        }
+        for (status, reason, possible) in [(400, "Bad Request", true), (404, "Not Found", false)] {
+            let dir = tempfile::tempdir().unwrap();
+            let wav = lavfi_wav(dir.path(), "aevalsrc=sin(440*2*PI*t):d=2:s=16000");
+            let body = r#"{"error":{"code":"InvalidParameter","message":"secret-bearing detail"}}"#;
+            let refusal = format!(
+                "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let (base, server) = crate::test_http::serve(vec![refusal]);
+            let api = qwen_api(base);
+            let identity = Backend::Api(api.clone()).identity(30.);
+            let mut cp = Checkpoint::open(dir.path(), true, &identity).unwrap();
+            let control = TaskControl::open(dir.path(), Default::default()).unwrap();
+            let error =
+                transcribe_all(Backend::Api(api), &wav, 30., &mut cp, &control).unwrap_err();
+            assert_eq!(server.join().unwrap().len(), 1);
+            let message = format!("{error:#}");
+            assert!(message.contains("qwen3-asr-flash"), "{message}");
+            assert!(message.contains("/compatible-mode/v1"), "{message}");
+            assert_eq!(message.contains("可能原因之一"), possible, "{message}");
+            assert!(!message.contains("secret-bearing"), "{message}");
+            assert_eq!(
+                error
+                    .downcast_ref::<crate::dispatch::Failure>()
+                    .and_then(|failure| failure.status),
+                Some(status)
+            );
+            let receipts = crate::dispatch::receipts(dir.path()).unwrap();
+            assert_eq!(receipts[0].state, crate::dispatch::State::Rejected);
+        }
+    }
+
+    /// Saved progress and receipts belong to a request mode: the earlier modes keep the
+    /// identities their tasks were saved under, and Qwen's is its own.
+    #[test]
+    fn each_cloud_mode_keeps_its_own_identity() {
+        let api = |mode| AsrApi {
+            base_url: "https://example.test/v1/".into(),
+            api_key: "k".into(),
+            model: "m".into(),
+            mode,
+        };
+        for (mode, name) in [
+            (AsrApiMode::Transcriptions, "transcriptions"),
+            (AsrApiMode::Chat, "chat"),
+            (AsrApiMode::QwenChat, "qwen-chat"),
+        ] {
+            assert_eq!(
+                Backend::Api(api(mode)).identity(20.),
+                AsrIdentity::new("api", &format!("https://example.test/v1:{name}:m"), 20.)
+            );
+            assert_eq!(json!(mode), json!(name));
+            let parsed: AsrApiMode = serde_json::from_value(json!(name)).unwrap();
+            assert_eq!(parsed, mode);
+            assert_eq!(<&str>::from(mode), name);
+        }
     }
 }

@@ -48,6 +48,11 @@ fn asr_api_mode_help(mode: settings::AsrApiMode) -> Option<&'static str> {
                 "POST {base_url}/chat/completions（支持音频输入的多模态 LLM， 如 gpt-4o-audio-preview、Gemini、Qwen2-Audio 等 OpenAI 兼容端点）"
             )
         }
+        settings::AsrApiMode::QwenChat => {
+            tr!(
+                "POST {base_url}/chat/completions（千问语音识别 qwen3-asr-flash，如阿里云百炼 compatible-mode/v1）"
+            )
+        }
     })
 }
 
@@ -319,7 +324,7 @@ pub struct RunOpts {
     #[cfg_attr(feature = "clap", arg(long, help_heading = SPEECH))]
     pub asr_api_model: Option<String>,
 
-    /// 云端请求方式 / Cloud request mode: transcriptions (default) or chat (audio-capable models)
+    /// 云端请求方式 / Cloud request mode: transcriptions (default), chat (audio-capable models) or qwen-chat (Qwen ASR)
     #[cfg_attr(feature = "clap", arg(long, value_parser = choice(asr_api_mode_help), help_heading = SPEECH))]
     pub asr_api_mode: Option<crate::settings::AsrApiMode>,
 

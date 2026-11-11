@@ -308,6 +308,9 @@ pub enum ServicePurpose {
 pub enum ServiceProtocol {
     SpeechTranscriptions,
     SpeechChat,
+    /// Qwen ASR (qwen3-asr-flash) on its OpenAI-compatible chat endpoint: audio-only
+    /// user message, optional recognition context; see `c2m_asr::qwen`.
+    SpeechQwenChat,
     AiChat,
     /// 本地 Ollama 服务（OpenAI 兼容方言，无需密钥）
     OllamaChat,
@@ -318,15 +321,18 @@ pub enum ServiceProtocol {
 impl ServiceProtocol {
     pub fn purpose(self) -> ServicePurpose {
         match self {
-            Self::SpeechTranscriptions | Self::SpeechChat => ServicePurpose::Speech,
+            Self::SpeechTranscriptions | Self::SpeechChat | Self::SpeechQwenChat => {
+                ServicePurpose::Speech
+            }
             Self::AiChat | Self::OllamaChat | Self::CodexResponses => ServicePurpose::Ai,
         }
     }
 
     /// Choice order: account sign-in, then this computer, then API services.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::SpeechTranscriptions,
         Self::SpeechChat,
+        Self::SpeechQwenChat,
         Self::CodexResponses,
         Self::OllamaChat,
         Self::AiChat,
@@ -342,7 +348,9 @@ impl ServiceProtocol {
     pub(crate) fn endpoint_suffix(self) -> &'static str {
         match self {
             Self::SpeechTranscriptions => "/audio/transcriptions",
-            Self::SpeechChat | Self::AiChat | Self::OllamaChat => "/chat/completions",
+            Self::SpeechChat | Self::SpeechQwenChat | Self::AiChat | Self::OllamaChat => {
+                "/chat/completions"
+            }
             Self::CodexResponses => "/responses",
         }
     }
@@ -357,6 +365,7 @@ impl ServiceProtocol {
         match self {
             Self::SpeechTranscriptions => c2m_i18n::tr!("专用转写（如 Whisper）"),
             Self::SpeechChat => c2m_i18n::tr!("多模态对话（如 GPT-4o 音频）"),
+            Self::SpeechQwenChat => c2m_i18n::tr!("千问语音识别（如 qwen3-asr-flash）"),
             Self::AiChat => c2m_i18n::tr!("OpenAI 兼容服务"),
             Self::OllamaChat => c2m_i18n::tr!("Ollama 本地服务"),
             Self::CodexResponses => c2m_i18n::tr!("OpenAI Codex 订阅"),
@@ -368,6 +377,7 @@ impl ServiceProtocol {
         match self {
             Self::SpeechTranscriptions => c2m_i18n::tr!("上传音频，返回转写文字"),
             Self::SpeechChat => c2m_i18n::tr!("支持音频输入的对话模型"),
+            Self::SpeechQwenChat => c2m_i18n::tr!("阿里云百炼的 Qwen-ASR 接口"),
             Self::AiChat => c2m_i18n::tr!("填写接口地址和 API Key，适用于大多数云端服务"),
             Self::OllamaChat => c2m_i18n::tr!("使用本机运行的模型，不需要 API Key"),
             Self::CodexResponses => c2m_i18n::tr!("使用 ChatGPT 订阅，不需要 API Key"),
@@ -392,6 +402,28 @@ fn url_credentials() -> &'static str {
 pub const CODEX_ADDRESS: &str = c2m_ai::provider::CODEX_BASE_URL;
 /// Ollama 本地服务的默认地址（与 CLI 登录一致）。
 pub const OLLAMA_DEFAULT_ADDRESS: &str = "http://localhost:11434";
+
+/// Qwen ASR's documented OpenAI-compatible address, the example its service type shows.
+pub const QWEN_ADDRESS_EXAMPLE: &str = "https://maas.qianwenaiapi.com/compatible-mode/v1";
+
+/// The address is Qwen's (Qwen platform or Alibaba Cloud Model Studio / DashScope) while
+/// another speech type is chosen. Those hosts offer `qwen3-asr-flash` only through Qwen's
+/// own chat shape, so the editor suggests that type; it never switches by itself.
+pub fn suggests_qwen_speech(address: &str, protocol: ServiceProtocol) -> bool {
+    if protocol.purpose() != ServicePurpose::Speech || protocol == ServiceProtocol::SpeechQwenChat {
+        return false;
+    }
+    let Some(host) = url::Url::parse(address.trim())
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+    else {
+        return false;
+    };
+    let under = |domain: &str| host == domain || host.ends_with(&format!(".{domain}"));
+    under("qianwenaiapi.com")
+        || under("maas.aliyuncs.com")
+        || (host.starts_with("dashscope") && host.ends_with(".aliyuncs.com"))
+}
 
 /// 地址在其协议下归一化后的展示主机名——空服务名称的自动取值来源。
 pub fn service_host(address: &str, protocol: ServiceProtocol) -> Option<String> {
@@ -1576,6 +1608,7 @@ impl Store {
             config.asr_api.model = version.config.model.clone();
             config.asr_api.mode = match version.config.protocol {
                 ServiceProtocol::SpeechTranscriptions => AsrApiMode::Transcriptions,
+                ServiceProtocol::SpeechQwenChat => AsrApiMode::QwenChat,
                 _ => AsrApiMode::Chat,
             };
         }
@@ -2574,6 +2607,101 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    /// Each speech type reaches the engine as its own request mode; the saved names
+    /// of the earlier types (part of every evidence fingerprint) stay as they were.
+    #[test]
+    fn speech_types_map_to_their_engine_modes_and_keep_their_saved_names() {
+        for (protocol, name, address, endpoint, mode) in [
+            (
+                ServiceProtocol::SpeechTranscriptions,
+                "speech_transcriptions",
+                "https://example.test/v1",
+                "https://example.test/v1/audio/transcriptions",
+                AsrApiMode::Transcriptions,
+            ),
+            (
+                ServiceProtocol::SpeechChat,
+                "speech_chat",
+                "https://example.test/v1",
+                "https://example.test/v1/chat/completions",
+                AsrApiMode::Chat,
+            ),
+            (
+                ServiceProtocol::SpeechQwenChat,
+                "speech_qwen_chat",
+                QWEN_ADDRESS_EXAMPLE,
+                "https://maas.qianwenaiapi.com/compatible-mode/v1/chat/completions",
+                AsrApiMode::QwenChat,
+            ),
+        ] {
+            assert_eq!(serde_json::to_value(protocol).unwrap(), name);
+            assert_eq!(protocol.purpose(), ServicePurpose::Speech);
+            let (_directory, mut store) = isolated();
+            let mut draft = ServiceDraft::new(ServicePurpose::Speech);
+            draft.protocol = protocol;
+            draft.address = address.into();
+            draft.model = "qwen3-asr-flash".into();
+            let draft = store
+                .save_service_draft(draft, Some(Secret::new("test-only-secret")))
+                .unwrap();
+            let version = store
+                .publish_service(&draft.id, BindingScope::Defaults)
+                .unwrap();
+            assert_eq!(version.config.endpoint, endpoint);
+            let mut config = ConfigFile::default();
+            config.defaults.provider = Some(AsrProvider::Api);
+            let resolved = store
+                .config_for_refs(&config, &store.default_refs())
+                .unwrap();
+            assert_eq!(resolved.asr_api.mode, mode);
+            assert_eq!(resolved.asr_api.base_url, endpoint);
+            assert_eq!(
+                c2m_config::config::asr_endpoint(&resolved.asr_api).unwrap(),
+                endpoint
+            );
+        }
+        assert!(
+            normalize_endpoint(
+                "https://maas.qianwenaiapi.com/compatible-mode/v1/audio/transcriptions",
+                ServiceProtocol::SpeechQwenChat
+            )
+            .is_err()
+        );
+    }
+
+    /// A Qwen address under another speech type earns a suggestion, never a switch.
+    #[test]
+    fn qwen_addresses_suggest_the_qwen_type_for_speech_only() {
+        for address in [
+            "https://maas.qianwenaiapi.com/compatible-mode/v1",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            "https://ws-1.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+        ] {
+            assert!(
+                suggests_qwen_speech(address, ServiceProtocol::SpeechTranscriptions),
+                "{address}"
+            );
+            assert!(suggests_qwen_speech(address, ServiceProtocol::SpeechChat));
+            assert!(!suggests_qwen_speech(
+                address,
+                ServiceProtocol::SpeechQwenChat
+            ));
+            assert!(!suggests_qwen_speech(address, ServiceProtocol::AiChat));
+        }
+        for address in [
+            "https://openrouter.ai/api/v1",
+            "https://notqianwenaiapi.com/v1",
+            "https://oss.aliyuncs.com/v1",
+            "not a url",
+        ] {
+            assert!(
+                !suggests_qwen_speech(address, ServiceProtocol::SpeechTranscriptions),
+                "{address}"
+            );
+        }
     }
 
     #[test]
