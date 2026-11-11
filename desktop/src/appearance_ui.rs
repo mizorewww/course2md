@@ -116,7 +116,6 @@ impl Desktop {
         MaterialCard::new(("palette", palette as usize), CardVariant::Outlined)
             .rounded(RADIUS_LARGE)
             .w_full()
-            .overflow_hidden()
             .accessibility_label(course2md::tr!(
                 "{}，{}",
                 palette.name(),

@@ -2320,7 +2320,6 @@ impl ReaderPage {
             .rounded(RADIUS_LARGE_INCREASED)
             .accessibility_label(enlarge)
             .w_full()
-            .overflow_hidden()
             .relative()
             .child(slot);
         let card =
@@ -3474,7 +3473,6 @@ impl ReaderPage {
         .w_full()
         .h_full()
         .min_w_0()
-        .overflow_hidden()
         .relative()
         .child(
             div()
