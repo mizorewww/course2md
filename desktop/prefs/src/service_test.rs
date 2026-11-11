@@ -453,6 +453,8 @@ fn run_test(
             "model_not_available",
             "unsupported_model",
             "model_not_supported",
+            // Qwen / Model Studio
+            "modelnotfound",
         ]
         .contains(&code.as_str());
         evidence.outcome = classify_status(Some(response.status), model_error, false);
@@ -1073,6 +1075,10 @@ mod tests {
             "千问语音识别未接受请求，请确认模型是 qwen3-asr-flash，接口地址以 /compatible-mode/v1 结尾"
         );
         assert!(!format!("{refused:?}").contains("The audio is empty"));
+        assert_eq!(
+            check(&transport(404, json!({"error":{"code":"ModelNotFound"}}))).outcome,
+            TestOutcome::ModelRefused
+        );
         assert_eq!(
             check(&transport(
                 200,
