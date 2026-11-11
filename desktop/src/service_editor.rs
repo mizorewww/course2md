@@ -515,6 +515,16 @@ impl Desktop {
             "speech" => {
                 self.open_settings_service_editor(ServicePurpose::Speech, None, window, cx);
             }
+            // Qwen ASR chosen; `qwen-address`: a Qwen address under another speech type.
+            "speech~qwen" | "speech~qwen-address" => {
+                let mut draft = ServiceDraft::new(ServicePurpose::Speech);
+                if kind == "speech~qwen" {
+                    draft.protocol = ServiceProtocol::SpeechQwenChat;
+                } else {
+                    draft.address = preferences::QWEN_ADDRESS_EXAMPLE.into();
+                }
+                self.open_service_draft(draft, None, None, window, cx);
+            }
             "confirm" => self.confirm_delete_service("capture".into(), window, cx),
             "dialog" => {
                 self.open_service_draft(
@@ -718,10 +728,19 @@ impl Desktop {
             let hint = if ollama {
                 Some(course2md::tr!("本机运行的 Ollama 会自动填好").to_owned())
             } else {
-                preferences::normalize_endpoint(&address, protocol)
+                let resolved = preferences::normalize_endpoint(&address, protocol)
                     .ok()
                     .filter(|endpoint| endpoint != address.trim())
-                    .map(|endpoint| course2md::tr!("实际地址：{}", endpoint))
+                    .map(|endpoint| course2md::tr!("实际地址：{}", endpoint));
+                match (
+                    service_form::qwen_type_suggestion(&address, protocol),
+                    resolved,
+                ) {
+                    (Some(suggestion), Some(resolved)) => {
+                        Some(format!("{suggestion} · {resolved}"))
+                    }
+                    (suggestion, resolved) => suggestion.or(resolved),
+                }
             };
             parts.extend(text_field(
                 self,

@@ -53,7 +53,9 @@ impl TestKind {
         match self {
             Self::Speech => matches!(
                 protocol,
-                ServiceProtocol::SpeechTranscriptions | ServiceProtocol::SpeechChat
+                ServiceProtocol::SpeechTranscriptions
+                    | ServiceProtocol::SpeechChat
+                    | ServiceProtocol::SpeechQwenChat
             ),
             // Ollama 与 AiChat 同为 chat/completions 方言；Codex 由 test_codex_blocking 覆盖
             _ => matches!(
@@ -460,6 +462,12 @@ fn run_test(
             c2m_i18n::tr!("服务暂时无法接受测试请求，请查看服务的额度或速率限制")
         } else if model_error {
             c2m_i18n::tr!("服务不接受所选模型，请检查模型 ID 和使用权限")
+        } else if config.protocol == ServiceProtocol::SpeechQwenChat
+            && matches!(response.status, 400 | 404 | 422)
+        {
+            c2m_i18n::tr!(
+                "千问语音识别未接受请求，请确认模型是 qwen3-asr-flash，接口地址以 /compatible-mode/v1 结尾"
+            )
         } else if (300..400).contains(&response.status) {
             c2m_i18n::tr!("服务地址已变更或不正确，请核对")
         } else {
@@ -473,18 +481,25 @@ fn run_test(
         evidence.message = c2m_i18n::tr!("服务返回的内容格式不对，请确认服务类型和地址").into();
         return evidence;
     };
-    let content = if config.protocol == ServiceProtocol::SpeechTranscriptions {
-        json.get("text").and_then(Value::as_str)
-    } else {
-        json.pointer("/choices/0/message/content")
+    let content = match config.protocol {
+        ServiceProtocol::SpeechTranscriptions => {
+            json.get("text").and_then(Value::as_str).map(str::to_owned)
+        }
+        // Read as transcription reads it.
+        ServiceProtocol::SpeechQwenChat => {
+            c2m_asr::asr::reply_text(c2m_config::settings::AsrApiMode::QwenChat, &json)
+        }
+        _ => json
+            .pointer("/choices/0/message/content")
             .and_then(Value::as_str)
+            .map(str::to_owned),
     };
     let Some(content) = content.filter(|content| !content.trim().is_empty()) else {
         evidence.outcome = TestOutcome::ContractMismatch;
         evidence.message = c2m_i18n::tr!("服务有回应但内容为空，请确认模型支持此用途").into();
         return evidence;
     };
-    match verify_sample(kind, content) {
+    match verify_sample(kind, &content) {
         Ok(()) => {
             evidence.outcome = TestOutcome::Passed;
             evidence.message = passed_message(kind);
@@ -500,7 +515,7 @@ fn run_test(
             let excerpt = if let Some(secret) = &request.authorization {
                 content.replace(secret.expose(), c2m_i18n::tr!("[已隐藏凭据]"))
             } else {
-                content.to_owned()
+                content.clone()
             };
             evidence.details.push(c2m_i18n::tr!(
                 "样例回应：{}",
@@ -518,6 +533,14 @@ fn request_body(config: &ServiceConfiguration, kind: TestKind) -> (String, Vec<u
         body.extend_from_slice(SPEECH_SAMPLE);
         body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
         return (format!("multipart/form-data; boundary={boundary}"), body);
+    }
+    // The request transcription sends: the audio alone, no instruction (issue #61).
+    if config.protocol == ServiceProtocol::SpeechQwenChat {
+        let body = c2m_asr::qwen::request_body(&config.model, SPEECH_SAMPLE, None);
+        return (
+            "application/json".into(),
+            serde_json::to_vec(&body).expect("sample is serializable"),
+        );
     }
     let (system, user) = match kind {
         TestKind::Speech => (
@@ -960,6 +983,116 @@ mod tests {
             &config(),
             &[TestKind::Proofread.contract()]
         ));
+    }
+
+    fn qwen(endpoint: String) -> ServiceConfiguration {
+        ServiceConfiguration {
+            protocol: ServiceProtocol::SpeechQwenChat,
+            endpoint,
+            model: "qwen3-asr-flash".into(),
+            authentication: Authentication::ApiKey,
+            credential: Some("qwen-key".into()),
+            ..config()
+        }
+    }
+
+    /// The check sends what transcription sends (one shared builder): the audio alone
+    /// as a data URI, no instruction, Qwen's own options; and reads the reply the same way.
+    #[test]
+    fn the_qwen_speech_check_sends_the_transcription_request_over_loopback() {
+        let reply = json!({"choices":[{"finish_reason":"stop","index":0,"message":{
+            "annotations":[{"emotion":"neutral","language":"en","type":"audio_info"}],
+            "content":"The blue notebook contains 7 pages.","role":"assistant"}}],
+            "model":"qwen3-asr-flash","object":"chat.completion",
+            "usage":{"seconds":3,"total_tokens":90}});
+        let (base, server) =
+            c2m_test_http::serve(vec![c2m_test_http::json_response(&reply.to_string())]);
+        let vault = MemoryCredentialVault::new();
+        let credential = vault.insert(Secret::new("sk-loopback-only")).unwrap();
+        let config = ServiceConfiguration {
+            credential: Some(credential),
+            ..qwen(format!("{base}/compatible-mode/v1/chat/completions"))
+        };
+        let evidence = run_test(
+            &config,
+            TestKind::Speech,
+            &vault,
+            &AtomicBool::new(false),
+            &HttpTransport,
+        );
+        assert_eq!(evidence.outcome, TestOutcome::Passed, "{evidence:?}");
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 1);
+        let head = requests[0].head.to_ascii_lowercase();
+        assert!(head.starts_with("post /compatible-mode/v1/chat/completions "));
+        assert!(head.contains("authorization: bearer sk-loopback-only"));
+        assert!(head.contains("content-type: application/json"));
+        let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(
+            body,
+            c2m_asr::qwen::request_body("qwen3-asr-flash", SPEECH_SAMPLE, None)
+        );
+        assert_eq!(
+            body,
+            json!({
+                "model": "qwen3-asr-flash",
+                "messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {
+                    "data": format!("data:audio/wav;base64,{}",
+                        base64::engine::general_purpose::STANDARD.encode(SPEECH_SAMPLE))
+                }}]}],
+                "stream": false,
+                "asr_options": {"enable_itn": false},
+            })
+        );
+    }
+
+    #[test]
+    fn a_qwen_refusal_names_its_model_and_address() {
+        let config = qwen("https://example.test/compatible-mode/v1/chat/completions".into());
+        let vault = MemoryCredentialVault::new();
+        let config = ServiceConfiguration {
+            credential: Some(vault.insert(Secret::new("k")).unwrap()),
+            ..config
+        };
+        let check = |fake: &FakeTransport| {
+            run_test(
+                &config,
+                TestKind::Speech,
+                &vault,
+                &AtomicBool::new(false),
+                fake,
+            )
+        };
+        let refused = check(&transport(
+            400,
+            json!({"error":{"code":"InvalidParameter","message":"The audio is empty"}}),
+        ));
+        assert_eq!(refused.outcome, TestOutcome::ContractMismatch);
+        assert_eq!(
+            refused.message,
+            "千问语音识别未接受请求，请确认模型是 qwen3-asr-flash，接口地址以 /compatible-mode/v1 结尾"
+        );
+        assert!(!format!("{refused:?}").contains("The audio is empty"));
+        assert_eq!(
+            check(&transport(
+                200,
+                json!({"choices":[{"message":{"content":""}}]})
+            ))
+            .outcome,
+            TestOutcome::ContractMismatch
+        );
+        // Qwen's check is speech only.
+        assert_eq!(
+            run_test(
+                &config,
+                TestKind::Proofread,
+                &vault,
+                &AtomicBool::new(false),
+                &transport(200, chat("ignored"))
+            )
+            .outcome,
+            TestOutcome::NotSent
+        );
     }
 
     #[test]

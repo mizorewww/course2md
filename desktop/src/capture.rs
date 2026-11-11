@@ -25,7 +25,7 @@
 //! window as it is (see `simulate_input`), steps joined by `+`, then
 //! captures; it neither navigates nor closes dialogs.
 //!
-//! Dialogs open over their page: `service-editor:<ai|speech|dialog|confirm>`
+//! Dialogs open over their page: `service-editor:<ai|speech|speech~qwen|speech~qwen-address|dialog|confirm>`
 //! over Settings › 服务与账号, and `dialog:<name>` for `palette`, `rename`,
 //! `delete`, `move`, `confirm` (a `ui::Confirm`) and `image` (the newest note; give it a longer
 //! `COURSE2MD_CAPTURE_DELAY_MS`), `folder`, `storage`, `login` and `youtube`.

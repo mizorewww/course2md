@@ -43,6 +43,7 @@ fit_screen
 folder
 folder_open
 format_list_bulleted
+graphic_eq
 grid_view
 history
 image
