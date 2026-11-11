@@ -3,9 +3,8 @@
 //! highlights and virtualization; the screenshots are a list of rows beside it.
 use crate::{
     Change, Course, Page,
-    course_library::CommandsButton,
     exports_ui::NoteExports,
-    folder_tree::{Command, command_context_menu},
+    folder_tree::{Command, command_context_menu, with_context_menu},
     note_text,
     notes::{self, PreviewBlock},
     reader_images::{Loaded, ReaderImages, Size},
@@ -28,7 +27,7 @@ use gpui_kit::component::{
 };
 use gpui_kit_material::{
     color::ColorRole::*,
-    components::{MaterialContextMenu, title_bar_control},
+    components::{ContextMenuHandle, MaterialContextMenu, title_bar_control},
     icons::{Icon, SymbolIcon},
     motion,
     prelude::*,
@@ -87,6 +86,9 @@ struct ImageViewer {
     drag: Option<(Point<Pixels>, Point<Pixels>)>,
     text_open: Option<bool>,
     focus: FocusHandle,
+    /// The screenshot's commands: on a right press on it, Shift+F10 or the Menu
+    /// key anywhere in the viewer, and its ⋮ button.
+    menu: ContextMenuHandle,
 }
 
 /// Where the viewer puts a screenshot's text.
@@ -2308,17 +2310,21 @@ impl ReaderPage {
             .w_full()
             .overflow_hidden()
             .relative()
-            .children(menu)
             .child(slot);
-        match frame {
-            Some(frame) => card
-                .on_click(
-                    cx.listener(move |this, _, window, cx| {
+        let card =
+            match frame {
+                Some(frame) => card
+                    .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_reader_image(frame, window, cx)
-                    }),
-                )
+                    }))
+                    .into_any_element(),
+                None => card.into_any_element(),
+            };
+        match menu {
+            Some(menu) => with_context_menu(("note-figure-scope", block), menu, card)
+                .w_full()
                 .into_any_element(),
-            None => card.into_any_element(),
+            None => card,
         }
     }
 
@@ -3458,7 +3464,6 @@ impl ReaderPage {
         .min_w_0()
         .overflow_hidden()
         .relative()
-        .children(menu)
         .child(
             div()
                 .w_full()
@@ -3521,19 +3526,42 @@ impl ReaderPage {
                         ),
                 ),
         );
-        if openable {
+        let card = if openable {
             card.on_click(
                 cx.listener(move |this, _, window, cx| this.open_reader_image(index, window, cx)),
             )
             .into_any_element()
         } else {
             card.into_any_element()
+        };
+        match menu {
+            Some(menu) => with_context_menu(("screenshot-scope", index), menu, card)
+                .size_full()
+                .min_w_0()
+                .into_any_element(),
+            None => card,
         }
+    }
+
+    /// The viewer's screenshot commands, the first child of its `relative` body: a
+    /// right press on the image or its text, Shift+F10 or the Menu key while the
+    /// viewer has focus, and its ⋮ button open them. None for a frame without a file.
+    fn reader_viewer_menu(&self, cx: &mut Context<Self>) -> Option<MaterialContextMenu> {
+        let viewer = self.viewer.as_ref()?;
+        let image = viewer.frames[viewer.index].image.as_ref()?;
+        // A file that exists but cannot be decoded keeps its path and location.
+        let readable = !self.images.failed(&image.path, Size::Original);
+        Some(
+            self.image_context_menu("enlarged-image-context", image.path.clone(), readable, cx)
+                .trigger(&viewer.focus)
+                .handle(&viewer.menu),
+        )
     }
 
     /// What a right press on a screenshot offers: the picture itself, where a
     /// clipboard can hold one, its file's path and its file in the file manager.
-    /// The first child of the `relative` element it serves.
+    /// Shown by [`with_context_menu`], or as the first child of the `relative`
+    /// element it serves.
     fn image_context_menu(
         &self,
         id: impl Into<ElementId>,
@@ -3678,6 +3706,7 @@ impl ReaderPage {
             drag: None,
             text_open: None,
             focus: cx.focus_handle(),
+            menu: ContextMenuHandle::default(),
         });
         let _ = window;
         cx.notify();
@@ -3880,6 +3909,7 @@ impl ReaderPage {
         };
         let media = (!text_only).then(|| self.reader_viewer_media(label.clone(), cx));
         let text = shows_text.then(|| self.reader_viewer_text(placement, window));
+        let menu = self.reader_viewer_menu(cx);
         // Where the image stays as large, the text gets a column of its own beside
         // it, the viewer's whole height to read in; elsewhere it stays below.
         let owner = cx.weak_entity();
@@ -3910,6 +3940,7 @@ impl ReaderPage {
                 .w_full()
                 .items_stretch()
                 .gap(VIEWER_BESIDE_GAP)
+                .children(menu)
                 .child(measure)
                 .child(v_flex().flex_1().min_w_0().h_full().child(media))
                 .child(text)
@@ -3921,6 +3952,7 @@ impl ReaderPage {
                 .min_h_0()
                 .w_full()
                 .gap(VIEWER_BELOW_GAP)
+                .children(menu)
                 .child(measure)
                 .children(media)
                 .children(text)
@@ -4207,16 +4239,20 @@ impl ReaderPage {
                 }
             }))
         });
-        // The right-click menu's commands, reachable from the keyboard: the note's
-        // and the gallery's screenshots open here with Enter.
-        let path = frame.image.as_ref().map(|image| image.path.clone());
-        let more = path.map(|path| CommandsButton {
-            id: "image-commands".into(),
-            label: course2md::tr!("截图操作").into(),
-            subject: None,
-            commands: self.image_commands(path, readable, cx),
-            width: None,
-            tonal: false,
+        // The right-click menu, opened where the button is: the note's and the
+        // gallery's screenshots open here with Enter.
+        let more = frame.image.as_ref().map(|_| {
+            let menu = viewer.menu.clone();
+            ui::tip_button(
+                "image-commands",
+                symbols::more_vert(),
+                course2md::tr!("截图操作"),
+                |button| {
+                    button.on_click(move |event: &ClickEvent, _, cx| {
+                        menu.open_at(event.position(), cx);
+                    })
+                },
+            )
         });
         h_flex()
             .id("reader-image-actions")
@@ -4386,7 +4422,6 @@ impl ReaderPage {
                             .child(picture),
                     ),
             );
-        let menu = self.image_context_menu("enlarged-image-context", image.path.clone(), true, cx);
         // The kit's outlined card surface frames the image: its outline and corners.
         CardSurface::new(CardVariant::Outlined)
             .rounded(RADIUS_LARGE)
@@ -4395,7 +4430,6 @@ impl ReaderPage {
             .w_full()
             .overflow_hidden()
             .relative()
-            .child(menu)
             .child(viewport)
             .into_any_element()
     }
