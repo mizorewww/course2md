@@ -23,11 +23,18 @@ const WAV_BYTES_PER_SECOND: f64 = 16_000.0 * 2.0;
 /// Header allowance around a chunk's samples.
 const WAV_HEADER_BYTES: f64 = 1024.0;
 
-/// The longest speech segment that keeps a cut chunk within both limits, with room for
-/// the silence padding added on each side of a segment.
+/// The longest segment the engine sends, well inside the service's limits: about
+/// 3.8 MB of WAV, 5.1 MB once encoded, so one request uploads within the engine's
+/// 120 s request timeout on an uplink of about 1 Mbit/s.
+pub const MAX_SEGMENT_SECONDS: f64 = 119.0;
+
+/// The longest speech segment that keeps a cut chunk within the service's limits and
+/// [`MAX_SEGMENT_SECONDS`], with room for the silence padding added on each side.
 pub fn max_segment_seconds() -> f64 {
     let by_size = (MAX_INLINE_WAV_BYTES as f64 - WAV_HEADER_BYTES) / WAV_BYTES_PER_SECOND;
-    (MAX_AUDIO_SECONDS.min(by_size) - 1.0).floor()
+    (MAX_AUDIO_SECONDS.min(by_size) - 1.0)
+        .floor()
+        .min(MAX_SEGMENT_SECONDS)
 }
 
 const DATA_URI_PREFIX: &str = "data:audio/wav;base64,";
@@ -120,12 +127,15 @@ mod tests {
     #[test]
     fn a_full_segment_stays_within_both_limits() {
         let seconds = max_segment_seconds();
-        assert!(seconds >= 200.0, "{seconds}");
+        assert_eq!(seconds, MAX_SEGMENT_SECONDS);
         // A segment may grow by its silence padding (0.25 s each side).
         let padded = seconds + 0.5;
         assert!(padded <= MAX_AUDIO_SECONDS);
         let wav = (padded * WAV_BYTES_PER_SECOND + 44.0) as usize;
         assert!(wav <= MAX_INLINE_WAV_BYTES);
-        assert!(wav_data_uri(&vec![0; wav]).len() <= 10_000_000);
+        let encoded = wav_data_uri(&vec![0; wav]).len();
+        assert!(encoded <= 10_000_000);
+        // About 5.1 MB: one request uploads on a slow uplink within the request timeout.
+        assert!(encoded <= 5_200_000, "{encoded}");
     }
 }

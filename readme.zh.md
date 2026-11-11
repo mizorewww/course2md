@@ -148,7 +148,7 @@ Intel Mac 和 Linux ARM64 暂无桌面应用，可以使用[命令行工具](#�
 
 **模型有多大，保存在哪里？**Apple 芯片约 1–2.3 GB（`~/Library/Caches/qwen3-speech/`），其他平台约 2.4 GB（`~/.cache/course2md/models/`）。系统地区或时区为中国大陆时从国内镜像（ModelScope / hf-mirror.com）下载，其他地区以镜像作为备用。可用 `HF_ENDPOINT` 直接指定地址；设置 `COURSE2MD_IP_LOOKUP=1` 后，course2md 会向公共服务查询所在国家，这会把你的 IP 地址发送给这些服务。下载中断后可以续传，GPU/CPU 模型另按 SHA-256 校验。
 
-**怎样使用千问语音识别（`qwen3-asr-flash`）？**在「设置 → 服务与账号」添加语音服务，服务类型选「千问语音识别（如 qwen3-asr-flash）」，接口地址填 `https://maas.qianwenaiapi.com/compatible-mode/v1`（或阿里云百炼所在地域的 `…/compatible-mode/v1` 地址），模型填 `qwen3-asr-flash`，再填 API Key。千问不以「专用转写」或「多模态对话」方式提供这个模型：它只接收音频本身，course2md 按千问的格式发送，并把每段音频控制在单次请求的上限内（5 分钟、10 MB）。命令行工具在 `config.toml` 中设置：
+**怎样使用千问语音识别（`qwen3-asr-flash`）？**在「设置 → 服务与账号」添加语音服务，服务类型选「千问语音识别（如 qwen3-asr-flash）」，接口地址填 `https://maas.qianwenaiapi.com/compatible-mode/v1`（或阿里云百炼所在地域的 `…/compatible-mode/v1` 地址），模型填 `qwen3-asr-flash`，再填 API Key。千问不以「专用转写」或「多模态对话」方式提供这个模型：它只接收音频本身，course2md 按千问的格式发送，每段音频不超过两分钟，远低于单次请求的上限（5 分钟、10 MB）。命令行工具在 `config.toml` 中设置：
 
 ```toml
 [defaults]
