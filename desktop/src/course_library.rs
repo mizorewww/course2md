@@ -2,6 +2,7 @@
 use super::*;
 use crate::folder_tree::{
     COMMAND_MENU_WIDTH, Command, NoteDrag, command_context_menu, command_menu, note_count,
+    with_context_menu,
 };
 use crate::library_ui::{Moving, NameTarget};
 use crate::{symbols, ui};
@@ -1779,12 +1780,7 @@ impl Desktop {
             .rounded(TILE_RADIUS)
             .accessibility_label(course2md::tr!("阅读 {}", course.title))
             .on_click(cx.listener(move |this, _, _, cx| this.open_course(open.clone(), cx)))
-            .relative()
-            .child(command_context_menu(
-                ("note-card-context", index),
-                Some(COMMAND_MENU_WIDTH),
-                commands,
-            ))
+            .w_full()
             .child(
                 v_flex()
                     .w_full()
@@ -1824,7 +1820,15 @@ impl Desktop {
             .relative()
             .min_w_0()
             .gap(rem(4.))
-            .child(card)
+            .child(with_context_menu(
+                ("note-card-scope", index),
+                command_context_menu(
+                    ("note-card-context", index),
+                    Some(COMMAND_MENU_WIDTH),
+                    commands,
+                ),
+                card,
+            ))
             .child(
                 div()
                     .absolute()
@@ -1922,19 +1926,20 @@ impl Desktop {
                             }
                         }),
                 );
-        list_surface(outer)
+        let surface = list_surface(outer)
             .id(("note", index))
             .relative()
-            .child(command_context_menu(
-                ("note-context", index),
-                Some(COMMAND_MENU_WIDTH),
-                commands,
-            ))
             .child(row)
             .children(details)
             .on_drag(note_drag(course), |drag, _, _, cx| cx.new(|_| drag.clone()))
-            .when(!home, |row| self.reorderable(row, index, outer, cx))
-            .into_any_element()
+            .when(!home, |row| self.reorderable(row, index, outer, cx));
+        with_context_menu(
+            ("note-scope", index),
+            command_context_menu(("note-context", index), Some(COMMAND_MENU_WIDTH), commands),
+            surface,
+        )
+        .w_full()
+        .into_any_element()
     }
 
     /// Tasks waiting on the person, then every queued/running task, without replacing
@@ -2055,15 +2060,15 @@ impl Desktop {
                         ),
                 );
             list = list.child(
-                div()
-                    .id(SharedString::from(format!("workbench-task-{cancel}")))
-                    .relative()
-                    .w_full()
-                    .child(MaterialContextMenu::new(
+                with_context_menu(
+                    SharedString::from(format!("workbench-task-{cancel}")),
+                    MaterialContextMenu::new(
                         SharedString::from(format!("workbench-task-context-{cancel}")),
                         menu,
-                    ))
-                    .child(row),
+                    ),
+                    row,
+                )
+                .w_full(),
             );
         }
         // The design names this section 正在处理 whatever its tasks wait for; each
