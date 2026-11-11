@@ -7,6 +7,7 @@ pub mod download;
 pub mod hub;
 pub mod models;
 pub mod npu;
+pub mod qwen;
 
 use c2m_config::{config, settings};
 use c2m_core::{digest, fsio, timeline};

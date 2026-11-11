@@ -258,7 +258,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 云端语音识别密钥未清除；如需清除：course2md remove --asr / Cloud speech key kept; to clear it: course2md remove --asr	云端语音识别密钥未清除；如需清除：course2md remove --asr	Cloud speech key kept; to clear it: course2md remove --asr	雲端語音辨識金鑰未清除；如需清除：course2md remove --asr	クラウド音声認識キーは削除されていません。削除するには：course2md remove --asr
 云端语音识别需要 API Key，请在服务设置中填写 / Cloud transcription requires an API key; add it in service settings	云端语音识别需要 API Key，请在服务设置中填写	Cloud transcription requires an API key; add it in service settings	雲端語音辨識需要 API Key，請在服務設定中填寫	クラウド音声認識には API キーが必要です。サービス設定に入力してください。
 云端语音识别需要 API Key：用 --asr-api-key 或环境变量 COURSE2MD_ASR_API_KEY 提供 / Cloud transcription requires an API key: pass --asr-api-key or set COURSE2MD_ASR_API_KEY	云端语音识别需要 API Key：用 --asr-api-key 或环境变量 COURSE2MD_ASR_API_KEY 提供	Cloud transcription requires an API key: pass --asr-api-key or set COURSE2MD_ASR_API_KEY	雲端語音辨識需要 API Key：用 --asr-api-key 或環境變數 COURSE2MD_ASR_API_KEY 提供	クラウド音声認識には API キーが必要です：--asr-api-key または環境変数 COURSE2MD_ASR_API_KEY で指定してください
-云端请求方式 / Cloud request mode: transcriptions (default) or chat (audio-capable models)	云端请求方式	Cloud request mode: transcriptions (default) or chat (audio-capable models)	雲端請求方式	クラウドリクエスト方法
+云端请求方式 / Cloud request mode: transcriptions (default), chat (audio-capable models) or qwen-chat (Qwen ASR)	云端请求方式	Cloud request mode: transcriptions (default), chat (audio-capable models) or qwen-chat (Qwen ASR)	雲端請求方式	クラウドリクエスト方法
 人工字幕	人工字幕	Human-made subtitles	人工字幕	手動字幕
 仅保存	仅保存	Save only	僅儲存	保存のみ
 仅发送文字 / Send text only	仅发送文字	Send text only	僅傳送文字	テキストのみを送信する
@@ -2333,3 +2333,6 @@ course2md 会读取所选浏览器中的 YouTube 登录，只在打开 YouTube �
 无法复制图片	无法复制图片	Unable to copy the image	無法複製圖片	画像をコピーできません
 找不到这张截图的文件	找不到这张截图的文件	This screenshot's file can't be found	找不到這張截圖的檔案	このスクリーンショットのファイルが見つかりません
 截图操作	截图操作	Screenshot actions	截圖操作	スクリーンショットの操作
+这段音频超过千问语音识别单次请求的大小上限，尚未发送 / This audio exceeds Qwen ASR's per-request size limit; nothing was sent	这段音频超过千问语音识别单次请求的大小上限，尚未发送	This audio exceeds Qwen ASR's per-request size limit; nothing was sent	這段音訊超過千問語音辨識單次請求的大小上限，尚未傳送	この音声は Qwen 音声認識の 1 回のリクエストのサイズ上限を超えています。送信していません
+千问语音识别拒绝了请求：请确认模型是 qwen3-asr-flash，接口地址以 /compatible-mode/v1 结尾 / Qwen ASR refused the request: check that the model is qwen3-asr-flash and the address ends in /compatible-mode/v1	千问语音识别拒绝了请求：请确认模型是 qwen3-asr-flash，接口地址以 /compatible-mode/v1 结尾	Qwen ASR refused the request: check that the model is qwen3-asr-flash and the address ends in /compatible-mode/v1	千問語音辨識拒絕了請求：請確認模型是 qwen3-asr-flash，介面網址以 /compatible-mode/v1 結尾	Qwen 音声認識がリクエストを拒否しました。モデルが qwen3-asr-flash で、アドレスが /compatible-mode/v1 で終わっているか確認してください
+POST {base_url}/chat/completions（千问语音识别 qwen3-asr-flash，如阿里云百炼 compatible-mode/v1）	POST {base_url}/chat/completions（千问语音识别 qwen3-asr-flash，如阿里云百炼 compatible-mode/v1）	POST {base_url}/chat/completions (Qwen speech recognition qwen3-asr-flash, e.g. Alibaba Cloud Model Studio compatible-mode/v1)	POST {base_url}/chat/completions（千問語音辨識 qwen3-asr-flash，如阿里雲百煉 compatible-mode/v1）	POST {base_url}/chat/completions（Qwen 音声認識 qwen3-asr-flash。例：Alibaba Cloud Model Studio の compatible-mode/v1）

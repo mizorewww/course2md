@@ -51,6 +51,7 @@
 [asr_api]
 # OpenAI 兼容语音服务 / OpenAI-compatible speech service
 # transcriptions: /audio/transcriptions; chat: /chat/completions
+# qwen-chat: Qwen ASR (qwen3-asr-flash) on /chat/completions, e.g. https://maas.qianwenaiapi.com/compatible-mode/v1
 # 请求方式和模型需由服务商支持 / The provider must support the selected mode and model
 #mode = "transcriptions"
 #base_url = {asr_api.base_url}
