@@ -499,7 +499,7 @@ impl Desktop {
         };
         let close = dismiss.clone();
         // Keyed by its text, so entrance motion replays when the text changes.
-        Snackbar::new(
+        let snackbar = Snackbar::new(
             SharedString::from(format!("app-message-{message}")),
             message,
         )
@@ -507,7 +507,17 @@ impl Desktop {
         .close(course2md::tr!("关闭提示"), move |_, window, cx| {
             close(window, cx)
         })
-        .on_dismiss(dismiss)
+        .on_dismiss(dismiss);
+        // Over the screenshot viewer it rises above the viewer's action row,
+        // whose stepping and zoom controls sit where it would otherwise be.
+        let clearance = self.reader.read(cx).viewer_snackbar_clearance();
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom(clearance.unwrap_or_default())
+            .child(snackbar)
     }
 }
 

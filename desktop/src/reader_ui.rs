@@ -89,6 +89,9 @@ struct ImageViewer {
     /// The screenshot's commands: on a right press on it, Shift+F10 or the Menu
     /// key anywhere in the viewer, and its ⋮ button.
     menu: ContextMenuHandle,
+    /// From the window's bottom to the top of the action row, as last laid out:
+    /// a snackbar shown over the viewer stays above it.
+    actions_clearance: Rc<Cell<Option<Pixels>>>,
 }
 
 /// Where the viewer puts a screenshot's text.
@@ -780,6 +783,15 @@ impl ReaderPage {
 
     pub(super) fn reader_viewer_open(&self) -> bool {
         self.viewer.as_ref().is_some_and(|viewer| viewer.open)
+    }
+
+    /// While the viewer is open, how far above the window's bottom a snackbar
+    /// must stay to leave the viewer's action row uncovered.
+    pub(super) fn viewer_snackbar_clearance(&self) -> Option<Pixels> {
+        self.viewer
+            .as_ref()
+            .filter(|viewer| viewer.open)
+            .and_then(|viewer| viewer.actions_clearance.get())
     }
 
     /// The list of the current view.
@@ -3707,6 +3719,7 @@ impl ReaderPage {
             text_open: None,
             focus: cx.focus_handle(),
             menu: ContextMenuHandle::default(),
+            actions_clearance: Rc::default(),
         });
         let _ = window;
         cx.notify();
@@ -4254,8 +4267,18 @@ impl ReaderPage {
                 },
             )
         });
+        let clearance = viewer.actions_clearance.clone();
+        let measure = canvas(
+            move |bounds, window, _| {
+                clearance.set(Some(window.viewport_size().height - bounds.top()));
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .inset_0();
         h_flex()
             .id("reader-image-actions")
+            .relative()
             .w_full()
             .min_w_0()
             .flex_shrink_0()
@@ -4269,6 +4292,7 @@ impl ReaderPage {
             .children(watch)
             .children(text_toggle)
             .children(more)
+            .child(measure)
     }
 
     /// The zoomable image, or a notice when its file cannot be read.
