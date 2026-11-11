@@ -18,11 +18,11 @@ Paste a YouTube or Bilibili link, or drop in a local video. course2md captures a
 
 ## Download
 
-[![Download for macOS](https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.6/course2md-gui-macos-arm64.dmg)
-[![Download for Windows](https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0wIDBoMTEuNHYxMS40SDB6TTEyLjYgMEgyNHYxMS40SDEyLjZ6TTAgMTIuNmgxMS40VjI0SDB6TTEyLjYgMTIuNkgyNFYyNEgxMi42eiIvPjwvc3ZnPg%3D%3D)](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.6/course2md-desktop-windows-x64-setup.exe)
-[![Download for Linux](https://img.shields.io/badge/Download-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.6/course2md-desktop-linux-x86_64.tar.gz)
+[![Download for macOS](https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.7/course2md-gui-macos-arm64.dmg)
+[![Download for Windows](https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0wIDBoMTEuNHYxMS40SDB6TTEyLjYgMEgyNHYxMS40SDEyLjZ6TTAgMTIuNmgxMS40VjI0SDB6TTEyLjYgMTIuNkgyNFYyNEgxMi42eiIvPjwvc3ZnPg%3D%3D)](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.7/course2md-desktop-windows-x64-setup.exe)
+[![Download for Linux](https://img.shields.io/badge/Download-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.7/course2md-desktop-linux-x86_64.tar.gz)
 
-Version 3.0.0-alpha.6, a preview of 3.0: [macOS DMG](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.6/course2md-gui-macos-arm64.dmg) (Apple Silicon, macOS 15 or later) · [Windows installer](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.6/course2md-desktop-windows-x64-setup.exe) (x64; [portable ZIP](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.6/course2md-desktop-windows-AMD64.zip)) · [Linux tar.gz](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.6/course2md-desktop-linux-x86_64.tar.gz) (x86_64) · [all releases](https://github.com/mizorewww/course2md/releases)
+Version 3.0.0-alpha.7, a preview of 3.0: [macOS DMG](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.7/course2md-gui-macos-arm64.dmg) (Apple Silicon, macOS 15 or later) · [Windows installer](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.7/course2md-desktop-windows-x64-setup.exe) (x64; [portable ZIP](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.7/course2md-desktop-windows-AMD64.zip)) · [Linux tar.gz](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.7/course2md-desktop-linux-x86_64.tar.gz) (x86_64) · [all releases](https://github.com/mizorewww/course2md/releases)
 
 On macOS you can also install it with Homebrew: `brew install --cask mizorewww/tap/course2md-gui@alpha`. Each download includes the conversion engine and its video tools; [Install](#install) has the steps for each system.
 
@@ -107,14 +107,14 @@ With [Homebrew](https://brew.sh), this installs the app together with `yt-dlp` a
 brew install --cask mizorewww/tap/course2md-gui@alpha
 ```
 
-Then open **course2md** from **Applications**. Without Homebrew, [download the DMG](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.6/course2md-gui-macos-arm64.dmg) and drag **course2md** to Applications; see the [macOS guide](https://github.com/mizorewww/course2md/wiki/GUI-Installation#macos-apple-silicon).
+Then open **course2md** from **Applications**. Without Homebrew, [download the DMG](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.7/course2md-gui-macos-arm64.dmg) and drag **course2md** to Applications; see the [macOS guide](https://github.com/mizorewww/course2md/wiki/GUI-Installation#macos-apple-silicon).
 
 ### Windows (x64)
 
-1. [Download the installer](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.6/course2md-desktop-windows-x64-setup.exe) and run it. It installs for your account only, needs no administrator rights, and later versions upgrade it in place. While it is unsigned, SmartScreen asks first: choose **More info → Run anyway**.
+1. [Download the installer](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.7/course2md-desktop-windows-x64-setup.exe) and run it. It installs for your account only, needs no administrator rights, and later versions upgrade it in place. While it is unsigned, SmartScreen asks first: choose **More info → Run anyway**.
 2. Open **course2md** from the Start menu. The app includes `ffmpeg`, `yt-dlp`, `aria2`, `uv` (Intel NPU recognition) and `llama-server` for GPU (Vulkan) and CPU recognition. GPU and CPU recognition also need the [Microsoft Visual C++ runtime](https://aka.ms/vs/17/release/vc_redist.x64.exe); if it is missing, **Run checks** says so and links the installer.
 
-To run without installing, [download the portable ZIP](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.6/course2md-desktop-windows-AMD64.zip), **extract everything** to a permanent folder and open **course2md-desktop.exe**, keeping the other files next to it. Uninstalling keeps your settings, model downloads and notes.
+To run without installing, [download the portable ZIP](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.7/course2md-desktop-windows-AMD64.zip), **extract everything** to a permanent folder and open **course2md-desktop.exe**, keeping the other files next to it. Uninstalling keeps your settings, model downloads and notes.
 
 ### Arch Linux / CachyOS (x86_64)
 
@@ -126,7 +126,7 @@ yay -S course2md-gui-bin
 
 ### Ubuntu and other Linux (x86_64)
 
-[Download the tar.gz](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.6/course2md-desktop-linux-x86_64.tar.gz), install the graphics libraries from the [Linux guide](https://github.com/mizorewww/course2md/wiki/GUI-Installation#other-linux-x64-distributions), extract it and run `./course2md-desktop`. Built on Ubuntu 24.04; it includes `ffmpeg`, `yt-dlp`, `uv` and `llama-server` (GPU recognition uses your Vulkan driver).
+[Download the tar.gz](https://github.com/mizorewww/course2md/releases/download/v3.0.0-alpha.7/course2md-desktop-linux-x86_64.tar.gz), install the graphics libraries from the [Linux guide](https://github.com/mizorewww/course2md/wiki/GUI-Installation#other-linux-x64-distributions), extract it and run `./course2md-desktop`. Built on Ubuntu 24.04; it includes `ffmpeg`, `yt-dlp`, `uv` and `llama-server` (GPU recognition uses your Vulkan driver).
 
 Intel Macs and Linux ARM64 have no desktop app yet; use the [command-line tool](#command-line-tool).
 

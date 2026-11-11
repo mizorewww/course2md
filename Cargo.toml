@@ -6,7 +6,7 @@ members = ["crates/*", "desktop", "desktop/accounts", "desktop/prefs", "desktop/
 default-members = ["crates/*"]
 
 [workspace.package]
-version = "3.0.0-alpha.6"
+version = "3.0.0-alpha.7"
 edition = "2024"
 license = "MIT"
 
