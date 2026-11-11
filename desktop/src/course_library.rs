@@ -1777,7 +1777,6 @@ impl Desktop {
                     .map(|status| div().absolute().left(rem(8.)).top(rem(8.)).child(status)),
             );
         let card = MaterialCard::new(("note-card", index), CardVariant::Surface)
-            .rounded(TILE_RADIUS)
             .accessibility_label(course2md::tr!("阅读 {}", course.title))
             .on_click(cx.listener(move |this, _, _, cx| this.open_course(open.clone(), cx)))
             .w_full()
