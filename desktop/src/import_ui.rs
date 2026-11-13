@@ -559,8 +559,35 @@ impl Desktop {
         self.abort_subtitle_read();
         self.import.subtitle_error = None;
         self.set_text_source(mode, cx);
+        self.check_import_model(cx);
         self.advance_conversion_when_ready(cx);
         cx.notify();
+    }
+
+    /// The local speech model Settings would recognize this video with, when they
+    /// name a local engine: the engine, the model and where models are kept.
+    fn import_model_request(&self) -> Option<(course2md::config::AsrProvider, String, PathBuf)> {
+        use course2md::config::AsrProvider;
+        let mut config = self.preferences.defaults_config();
+        let provider = match config.defaults.provider {
+            Some(AsrProvider::Api) => return None,
+            Some(provider) => provider,
+            None => self.recommended_local_provider(),
+        };
+        // The run's rule: an empty model takes the engine's default.
+        desktop_tasks::plan::fill_default_asr_model(&mut config, provider);
+        let model = config.defaults.asr_model.unwrap_or_default();
+        let root = course2md::config::model_dir_from(config.defaults.model_dir.as_deref());
+        Some((provider, model, root))
+    }
+
+    /// Checks, off the render path, the model this video would be recognized with.
+    pub(crate) fn check_import_model(&mut self, cx: &mut Context<Self>) {
+        if self.import_uses_speech(cx)
+            && let Some((provider, model, root)) = self.import_model_request()
+        {
+            self.ensure_model_diagnostic(provider, Some(&model), &root, cx);
+        }
     }
 
     fn use_speech(&mut self, cx: &mut Context<Self>) {
@@ -767,7 +794,9 @@ impl Desktop {
                 .child(label)
                 .on_click(cx.listener(|this, _, window, cx| this.pick_video(window, cx)))
         };
-        if input.is_empty() {
+        // While a task owns the input its card shows the task, and the drop zone
+        // stays above it for the next video, as the link field does online.
+        if input.is_empty() || self.workbench_linked_task(cx).is_some() {
             return Some(
                 // The kit's drop target on the tile's surface: dashed at rest, primary
                 // while a file is dragged over it.
@@ -1506,6 +1535,14 @@ impl Desktop {
             .min_w_0()
             .gap(rem(8.))
             .child(h_flex().min_w_0().child(chip))
+            // Recognized on this computer: whether its model is ready, and the way
+            // to get it, before anything is submitted.
+            .when_some(
+                self.import_model_request().filter(|_| speech),
+                |view, (provider, model, root)| {
+                    view.child(self.model_status_line(provider, Some(&model), &root, window, cx))
+                },
+            )
             // A confirmed subtitle is good news, in the success role as before (U16).
             .when(
                 !speech

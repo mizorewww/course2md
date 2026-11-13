@@ -183,7 +183,7 @@ pub(crate) fn ensure_asr_capability(
 }
 
 /// Without an explicit model, fill in the default for the recognition engine.
-/// import_ui's import_model_request and both plan builders share this rule.
+/// The workbench's model status and every run share this rule.
 pub fn fill_default_asr_model(
     config: &mut c2m_config::settings::ConfigFile,
     provider: c2m_config::config::AsrProvider,

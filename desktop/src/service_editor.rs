@@ -1445,6 +1445,7 @@ impl Desktop {
         self.desktop_settings = self.preferences.application().desktop.clone();
         // A preview checked against the old settings is checked again.
         self.import.preview_plan_cache = None;
+        self.check_import_model(cx);
         cx.notify();
     }
 }

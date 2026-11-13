@@ -307,6 +307,7 @@ impl Desktop {
                             }
                             this.import.source_preview = Some(source);
                             this.save_current_draft(cx);
+                            this.check_import_model(cx);
                             if this.text_mode(cx) != course2md::config::TranscriptSource::Asr && let Some(track) = default_track {
                                 if wanted.is_none() { this.confirm_default_subtitle(track, cx); } else { this.confirm_subtitle(track, false, cx); }
                             }

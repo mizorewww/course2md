@@ -449,6 +449,24 @@ impl Desktop {
         .unwrap_or_else(div)
     }
 
+    /// The workbench's model status: one chip and the action that moves it on.
+    pub(crate) fn model_status_line(
+        &self,
+        provider: AsrProvider,
+        model: Option<&str>,
+        root: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let request = Request::new(provider, model, root);
+        match self.engine_issue(provider) {
+            Some(issue) => {
+                self.engine_obstacle(&format!("import-engine-{}", request.key()), issue, true, cx)
+            }
+            None => self.model_surface(&request, false, window, cx),
+        }
+    }
+
     /// The one report of a model. `full` adds its name, engine and details, for a
     /// surface where the model is the subject; the workbench shows the rest.
     /// The engine, and before a download what the model is for and how much it downloads.

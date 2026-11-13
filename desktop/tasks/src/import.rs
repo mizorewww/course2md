@@ -442,8 +442,6 @@ pub struct ImportSession {
     pub preview_workers: usize,
     pub preview_error: Option<String>,
     pub source_validation: Option<String>,
-    /// The current validation error is the missing-title case (typed, not text-matched).
-    pub title_required: bool,
     pub show_preview_details: bool,
     pub subtitle_issue_open: bool,
     pub source_editor_open: bool,
@@ -493,7 +491,6 @@ impl ImportSession {
         self.subtitle_error = None;
         self.preview_error = None;
         self.source_validation = None;
-        self.title_required = false;
         self.show_preview_details = false;
         self.subtitle_issue_open = false;
     }

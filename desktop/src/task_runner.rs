@@ -389,7 +389,7 @@ impl Desktop {
         cx.notify();
     }
 
-    /// The plan the form would submit, checked against loaded snapshots.
+    /// The plan the form would submit, checked against what is loaded now.
     /// Submission rechecks live storage, local source and dispatch markers
     /// before a task can enter the queue.
     pub fn preview_plan(&self, cx: &App) -> Result<TaskPlan> {
