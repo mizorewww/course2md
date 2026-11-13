@@ -654,6 +654,35 @@ impl Desktop {
         cx.notify();
     }
 
+    /// Continues a paused or stopped task with the current settings. When that would
+    /// send what its earlier run already had answered to another AI service, which
+    /// may cost again, the person decides first.
+    fn resume_task(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        let resent = self.task(&id, cx).and_then(|task| {
+            let answered = workspace::has_answered_ai_requests(task);
+            run::ai_work_sent_again(&self.preferences, task, answered)
+        });
+        let Some((before, now)) = resent else {
+            self.set_task_intent(id, Intent::Run, cx);
+            return;
+        };
+        ui::Confirm::new(
+            course2md::tr!("用新的 AI 服务继续生成？"),
+            course2md::tr!("暂不继续"),
+            course2md::tr!("继续生成"),
+        )
+        .text(course2md::tr!(
+            "设置中的 AI 服务已从「{}」换成「{}」。继续生成时，上次已完成的校对、翻译或摘要会重新发送给新服务，可能产生额外费用。",
+            before,
+            now
+        ))
+        .ask(
+            cx.listener(move |this, _, _, cx| this.set_task_intent(id.clone(), Intent::Run, cx)),
+            window,
+            cx,
+        );
+    }
+
     pub fn set_task_intent(&mut self, id: String, intent: Intent, cx: &mut Context<Self>) {
         let active = self.is_running_task(&id, cx);
         if active && intent == Intent::Run {
@@ -1241,7 +1270,7 @@ impl Desktop {
                 }
             }
             TaskAction::Pause => self.set_task_intent(id, Intent::Pause, cx),
-            TaskAction::Resume => self.set_task_intent(id, Intent::Run, cx),
+            TaskAction::Resume => self.resume_task(id, window, cx),
             TaskAction::PrepareModel => self.prepare_task_model(&task, cx),
             TaskAction::Cancel => self.set_task_intent(id, Intent::Cancel, cx),
             TaskAction::Repair => self.repair_task_service(id, window, cx),

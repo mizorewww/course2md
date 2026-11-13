@@ -103,6 +103,37 @@ pub fn task_refs(preferences: &preferences::Store, task: &TaskRecord) -> prefere
     }
 }
 
+/// The AI service a task would continue with, when it is another than the one
+/// its earlier run used and its requests differ (another model, address or kind of
+/// service): what that run already had answered is then sent, and paid for, again.
+/// The old and new services' names. `answered` says whether the earlier run has
+/// answered AI requests (`workspace::has_answered_ai_requests`). Identical requests
+/// to an edited service (a new key or name) reuse their answers and ask nothing.
+pub fn ai_work_sent_again(
+    preferences: &preferences::Store,
+    task: &TaskRecord,
+    answered: bool,
+) -> Option<(String, String)> {
+    let before = task.ran_with.as_ref()?.ai_service.as_deref()?;
+    let now = task_refs(preferences, task).llm?;
+    if !answered || before == now {
+        return None;
+    }
+    let now = preferences.version(&now)?;
+    let changed = preferences.version(before).is_none_or(|before| {
+        before.config.model != now.config.model
+            || before.config.endpoint != now.config.endpoint
+            || before.config.protocol != now.config.protocol
+    });
+    changed.then(|| {
+        let name = preferences.version(before).map_or_else(
+            || now.config.name.clone(),
+            |before| before.config.name.clone(),
+        );
+        (name, now.config.name.clone())
+    })
+}
+
 /// Whether a service the task would run with now is no longer saved or was deleted,
 /// so that starting it again could only stop with the same reason.
 pub fn services_missing(
@@ -771,6 +802,55 @@ mod tests {
         let resend = run(&workspace);
         assert_eq!(resend.service_versions.get("llm"), Some(&old_service));
         assert_eq!(resend.config.llm.model, "old-ai");
+    }
+
+    /// Continuing a task with another AI model or service than its earlier run
+    /// would pay again for what that run had answered: that is asked first. An edit
+    /// that leaves the requests as they were (a new key or name) reuses the answers
+    /// and asks nothing, and nothing is asked before any request was answered.
+    #[test]
+    fn continuing_with_a_changed_ai_service_asks_before_paying_again() {
+        use desktop_prefs::preferences::{BindingScope, ServiceDraft, Store};
+        let (root, mut workspace, id) = queued_task();
+        let (mut preferences, first) = preferences_with_ai_service(root.path(), "model-a");
+        let publish = |preferences: &mut Store, base: &str, edit: &dyn Fn(&mut ServiceDraft)| {
+            let mut draft = ServiceDraft::from_version(preferences.version(base).unwrap());
+            edit(&mut draft);
+            let draft = preferences.commit_service_draft(draft, None).unwrap();
+            let verified = Store::verify_credential(
+                preferences.vault().as_ref(),
+                preferences.publication_credential(&draft.id).unwrap(),
+            )
+            .unwrap();
+            preferences
+                .commit_publication(&draft.id, BindingScope::Defaults, verified)
+                .unwrap()
+                .id
+        };
+        workspace
+            .transaction(|state| {
+                state.task_mut(&id).unwrap().ran_with = Some(RunSettings::new(
+                    &Default::default(),
+                    None,
+                    Some(first.clone()),
+                ));
+                Ok(())
+            })
+            .unwrap();
+        let task = workspace.state.task(&id).unwrap().clone();
+        assert_eq!(ai_work_sent_again(&preferences, &task, true), None);
+        // Renamed only: the same requests, whose answers are reused.
+        publish(&mut preferences, &first, &|draft| {
+            draft.name = "renamed".into()
+        });
+        assert_eq!(ai_work_sent_again(&preferences, &task, true), None);
+        // Another model: the answered work would be sent again.
+        let default = preferences.default_refs().llm.unwrap();
+        publish(&mut preferences, &default, &|draft| {
+            draft.model = "model-b".into()
+        });
+        assert!(ai_work_sent_again(&preferences, &task, true).is_some());
+        assert_eq!(ai_work_sent_again(&preferences, &task, false), None);
     }
 
     /// A task an older version queued fixed the model it would use; it now runs with

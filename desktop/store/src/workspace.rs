@@ -1992,6 +1992,17 @@ fn worker_holds(work_dir: &Path) -> bool {
         .is_ok_and(|file| matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock)))
 }
 
+/// Whether the task's work directory holds AI requests that were answered: work
+/// already paid for. Blocking: it reads the task's request records.
+pub fn has_answered_ai_requests(task: &TaskRecord) -> bool {
+    c2m_dispatch::dispatch::receipts(&task.work_dir).is_ok_and(|receipts| {
+        receipts.iter().any(|receipt| {
+            receipt.state == c2m_dispatch::dispatch::State::Completed
+                && Component::parse(&receipt.purpose).is_some_and(Component::is_ai)
+        })
+    })
+}
+
 pub fn reconcile_receipts(task: &mut TaskRecord) -> Result<()> {
     let uncertain = uncertain_requests(task)?;
     apply_receipts(task, uncertain);
