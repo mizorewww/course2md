@@ -1552,10 +1552,13 @@ impl Desktop {
             && read_error
                 .or(source_failure)
                 .is_some_and(source::legacy_login_failure_from_text);
+        // Subtitles only, and none to use: said with its repairs beneath the chip,
+        // unless a failed read already says what happened.
+        let missing = self.text_source_missing(cx);
         let notice = match &source.subtitles {
-            _ if !speech || self.import.subtitle_loading => None,
-            SubtitleEvidence::NoneFound => Some(course2md::tr!("未找到字幕").to_owned()),
-            SubtitleEvidence::Unsupported { message } => Some(message.clone()),
+            _ if self.import.subtitle_loading => None,
+            SubtitleEvidence::NoneFound if speech => Some(course2md::tr!("未找到字幕").to_owned()),
+            SubtitleEvidence::Unsupported { message } if speech || missing => Some(message.clone()),
             _ => None,
         };
         let warning = match &source.subtitles {
@@ -1623,6 +1626,88 @@ impl Desktop {
             .when_some(failure.map(str::to_owned).or(warning), |view, message| {
                 view.child(self.subtitle_issue(&message, failure.is_some(), source, login, cx))
             })
+            .when(missing && failure.is_none(), |view| {
+                view.child(self.missing_text_source_notice(source, cx))
+            })
+    }
+
+    /// Settings ask for subtitles only and this video has none: what stands in the
+    /// way, and the ways past it from the card.
+    fn missing_text_source_notice(&self, source: &source::Source, cx: &mut Context<Self>) -> Div {
+        let unchecked = matches!(source.subtitles, SubtitleEvidence::Unchecked);
+        let summary = if unchecked {
+            course2md::tr!("还没读取这个视频的字幕，而文字来源设置为仅字幕")
+        } else {
+            course2md::tr!("这个视频没有字幕，而文字来源设置为仅字幕")
+        };
+        // Never read: reading them is the first way on.
+        let retry = unchecked.then(|| {
+            material_button("read-missing-subtitles", ButtonVariant::Text)
+                .icon(symbols::refresh())
+                .child(course2md::tr!("重新读取字幕"))
+                .on_click(cx.listener(|this, _, _, cx| this.retry_subtitles(cx)))
+                .into_any_element()
+        });
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(rem(8.))
+            .children(ui::async_status(
+                "missing-text-source",
+                &ui::AsyncStatus::Warning(summary.into()),
+                retry,
+                cx,
+            ))
+            .child(
+                h_flex()
+                    .gap(rem(8.))
+                    .flex_wrap()
+                    .children(self.text_source_repairs(source, cx)),
+            )
+    }
+
+    /// Under subtitles only, what gives this video a text source: a subtitle file
+    /// beside a local video, or another 文字来源 in Settings, where it is decided.
+    fn text_source_repairs(
+        &self,
+        source: &source::Source,
+        cx: &mut Context<Self>,
+    ) -> Vec<MaterialButton> {
+        if self.text_mode(cx) != TranscriptSource::Subtitle {
+            return Vec::new();
+        }
+        let mut repairs = Vec::new();
+        if !source.online {
+            repairs.push(
+                material_button("attach-missing-subtitle", ButtonVariant::Outlined)
+                    .tone(ButtonTone::Accent)
+                    .icon(symbols::file_upload())
+                    .child(course2md::tr!("选择字幕文件"))
+                    .disabled(self.import.subtitle_loading)
+                    .on_click(
+                        cx.listener(|this, _, window, cx| {
+                            this.choose_attached_subtitle(window, cx)
+                        }),
+                    ),
+            );
+        }
+        repairs.push(
+            material_button("change-text-source", ButtonVariant::Outlined)
+                .tone(ButtonTone::Accent)
+                .icon(symbols::settings())
+                .child(course2md::tr!("更改文字来源"))
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.save_current_draft(cx);
+                    this.open_settings(window, cx);
+                    // 文字来源 is the category's first row.
+                    this.select_settings_tab(
+                        crate::settings_ui::SettingsTab::Generation,
+                        window,
+                        cx,
+                    );
+                })),
+        );
+        repairs
     }
 
     /// The video's subtitle tracks, and the ways to get more of them.
@@ -1777,6 +1862,11 @@ impl Desktop {
                             )
                         },
                     )
+                    // Subtitles only: no fallback to speech, so the issue offers what
+                    // gives the video a text source.
+                    .when(failed, |row| {
+                        row.children(self.text_source_repairs(source, cx))
+                    })
                     .when(login, |row| {
                         row.child(
                             material_button("login-for-subtitles", ButtonVariant::Outlined)
