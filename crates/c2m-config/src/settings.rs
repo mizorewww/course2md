@@ -109,8 +109,11 @@ pub struct DesktopSettings {
     pub reduce_motion: bool,
     /// The home page lists recent notes below the input.
     pub home_recent_notes: bool,
-    /// The home page shows the processing options below the input.
-    pub home_options: bool,
+    /// Older versions kept whether the home page showed its per-video processing
+    /// options; those options are now Settings alone, so a saved value is read and
+    /// dropped.
+    #[serde(rename = "home_options", skip_serializing)]
+    pub retired_home_options: serde::de::IgnoredAny,
 }
 
 /// New libraries open as a card grid; a saved choice is kept as written.
@@ -123,7 +126,7 @@ impl Default for DesktopSettings {
             system_titlebar: false,
             reduce_motion: false,
             home_recent_notes: true,
-            home_options: true,
+            retired_home_options: serde::de::IgnoredAny,
         }
     }
 }
@@ -214,6 +217,26 @@ mod tests {
             }
         );
         assert!(!debug.contains("secret-key"), "{debug}");
+    }
+
+    /// Settings an older version saved with the home page's per-video options
+    /// switch still read; the switch is dropped when they are written again.
+    #[test]
+    fn a_retired_home_options_switch_still_reads() {
+        let file: super::ConfigFile = toml::from_str(
+            r#"
+[desktop]
+home_options = false
+home_recent_notes = false
+"#,
+        )
+        .unwrap();
+        assert!(!file.desktop.home_recent_notes);
+        let written = toml::to_string(&file).unwrap();
+        assert!(!written.contains("home_options"), "{written}");
+        let json: super::DesktopSettings =
+            serde_json::from_str(r#"{"home_options":true,"library_cards":false}"#).unwrap();
+        assert!(!json.library_cards);
     }
 
     /// The README's Qwen ASR configuration reads as written and reaches Qwen's endpoint.
