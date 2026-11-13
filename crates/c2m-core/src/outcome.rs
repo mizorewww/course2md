@@ -117,6 +117,19 @@ impl Outcomes {
 pub struct HttpResponse {
     pub status: u16,
     pub body: Vec<u8>,
+    /// How long the service asked to be left alone (`Retry-After` in seconds).
+    pub retry_after: Option<std::time::Duration>,
+}
+
+impl HttpResponse {
+    /// An answer that asks for no particular wait.
+    pub fn new(status: u16, body: Vec<u8>) -> Self {
+        Self {
+            status,
+            body,
+            retry_after: None,
+        }
+    }
 }
 
 /// A request that got no complete answer, and whether it provably never left.
@@ -323,6 +336,8 @@ pub struct Failure {
     pub message: String,
     pub unsupported_response_format: bool,
     pub kind: FailureKind,
+    /// The wait the service asked for before another attempt, if it named one.
+    pub retry_after: Option<std::time::Duration>,
 }
 
 impl std::fmt::Display for Failure {
@@ -342,6 +357,7 @@ impl Failure {
             message: error.to_string(),
             unsupported_response_format: false,
             kind: FailureKind::Local,
+            retry_after: None,
         }
     }
     pub fn with_status(status: Option<u16>, retryable: bool, message: impl Into<String>) -> Self {

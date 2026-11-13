@@ -803,8 +803,8 @@ impl<'a> Chat<'a> {
                             }
                         })?;
                     return Ok(crate::dispatch::HttpResponse {
-                        status: response.status,
                         body: serde_json::to_vec(&canonical).unwrap_or_default(),
+                        ..response
                     });
                 }
                 Ok(response)

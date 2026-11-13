@@ -333,10 +333,7 @@ pub fn receive(
         // An agent that reports statuses as errors has dropped the body; the status
         // still classifies the answer.
         Err(ureq::Error::StatusCode(status)) => {
-            return Ok(HttpResponse {
-                status,
-                body: Vec::new(),
-            });
+            return Ok(HttpResponse::new(status, Vec::new()));
         }
         Err(error) => {
             let definitely_unsent = never_sent(&error);
@@ -352,6 +349,7 @@ pub fn receive(
         }
     };
     let status = response.status().as_u16();
+    let retry_after = retry_after(response.headers());
     let mut body = Vec::new();
     const MAX_RESPONSE_BYTES: u64 = 32 * 1024 * 1024;
     response
@@ -370,7 +368,24 @@ pub fn receive(
             definitely_unsent: false,
         });
     }
-    Ok(HttpResponse { status, body })
+    Ok(HttpResponse {
+        status,
+        body,
+        retry_after,
+    })
+}
+
+/// A `Retry-After` given in seconds. The HTTP-date form is rare from API services
+/// and is read as no particular wait, which falls back to the caller's backoff.
+fn retry_after(headers: &ureq::http::HeaderMap) -> Option<Duration> {
+    headers
+        .get(ureq::http::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .map(Duration::from_secs)
 }
 
 /// A menu that Esc cancels with `cancelled` as the error, not accepting the default.

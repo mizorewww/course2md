@@ -174,11 +174,29 @@ struct Ledger {
 pub const CONTROL_POLL: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// Whether an unconfirmed request may be sent again without asking: only when
-/// the service has no per-request billing.
+/// the service has no per-request billing, or the person turned on automatic retries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Resend {
     AskUser,
     Free,
+    /// The person allowed failed requests to be sent again on their own, knowing
+    /// that a request whose answer was lost may be charged twice. A lost answer, a
+    /// server error or an answer that could not be used is recorded as a failure
+    /// the caller may send again, in this run or a later one, instead of an
+    /// uncertain result to ask about. What another process left unresolved (it
+    /// stopped mid-request) still waits for the person, as for [`Resend::AskUser`].
+    Automatic,
+}
+
+impl Resend {
+    fn asks(self) -> bool {
+        self == Self::AskUser
+    }
+}
+
+/// Statuses that say "not now" rather than "not this": the same request may follow.
+fn retryable_status(status: u16) -> bool {
+    matches!(status, 408 | 429)
 }
 
 /// The process that started a task. If it goes away (the app was killed
@@ -502,6 +520,7 @@ impl Ledger {
         let control = self.check_intent(Some(&service_version))?;
         let authorized = old.as_ref().is_some_and(|receipt| {
             (resend == Resend::Free && matches!(receipt.state, State::Sending | State::Uncertain))
+                || (resend == Resend::Automatic && receipt.state == State::Failed)
                 || control.resend.contains(&receipt.request_id)
                 || (matches!(receipt.state, State::Failed | State::Rejected)
                     && receipt.retry_authorized.as_ref() == Some(&receipt.request_id))
@@ -515,9 +534,9 @@ impl Ledger {
             }
             let settled = match old.state {
                 State::Failed => Some(crate::tr!("此请求未完成 / Request failed")),
-                State::Rejected if old.http_status != Some(429) => Some(crate::tr!(
-                    "服务拒绝了此请求 / Service rejected this request"
-                )),
+                State::Rejected if !old.http_status.is_some_and(retryable_status) => Some(
+                    crate::tr!("服务拒绝了此请求 / Service rejected this request"),
+                ),
                 _ => None,
             };
             if let Some(fallback) = settled
@@ -543,7 +562,7 @@ impl Ledger {
         for unresolved in self
             .unresolved_receipts()?
             .into_iter()
-            .filter(|_| resend == Resend::AskUser)
+            .filter(|_| resend != Resend::Free)
             .filter(|unresolved| !control.resend.contains(&unresolved.request_id))
         {
             if unresolved.stable_id != stable_id {
@@ -588,14 +607,20 @@ impl Ledger {
                     self.save(&receipt)?;
                     return Err(Failure::with_status(None, true, error.message));
                 }
-                receipt.state = State::Uncertain;
+                // With automatic retries allowed, the lost answer is a failure the
+                // person already agreed to send again; nothing is left to decide.
+                receipt.state = if resend == Resend::Automatic {
+                    State::Failed
+                } else {
+                    State::Uncertain
+                };
                 receipt.message = Some(error.message.clone());
                 self.save(&receipt)?;
                 // Without per-request billing (a ChatGPT plan, a local server) a
                 // stalled or unfinished response costs nothing to send again, so
                 // the caller's bounded retry loop resends it instead of stopping
                 // every later request behind an uncertain result.
-                if resend == Resend::Free {
+                if !resend.asks() {
                     tracing::warn!(
                         "AI 响应中断，将重新发送 / AI response was interrupted; sending again"
                     );
@@ -618,20 +643,32 @@ impl Ledger {
             // a confirmed rejection without requiring uncertain-request authorization.
             return Err(Failure {
                 unsupported_response_format: unsupported,
-                ..Failure::with_status(Some(response.status), response.status == 429, message)
+                retry_after: response.retry_after,
+                ..Failure::with_status(
+                    Some(response.status),
+                    retryable_status(response.status),
+                    message,
+                )
             });
         }
         if !(200..300).contains(&response.status) {
-            receipt.state = State::Uncertain;
+            receipt.state = if resend == Resend::Automatic {
+                State::Failed
+            } else {
+                State::Uncertain
+            };
             self.save(&receipt)?;
             // As for a lost response above: without per-request billing, a server
             // error costs nothing to send again, so no one needs to be asked.
-            if resend == Resend::Free {
-                return Err(Failure::with_status(
-                    Some(response.status),
-                    true,
-                    rejection_message(response.status),
-                ));
+            if !resend.asks() {
+                return Err(Failure {
+                    retry_after: response.retry_after,
+                    ..Failure::with_status(
+                        Some(response.status),
+                        true,
+                        rejection_message(response.status),
+                    )
+                });
             }
             return Err(self.block(BlockReason::Uncertain, Some(&receipt), crate::tr!("服务返回错误，无法确认是否已处理。再次提交可能产生额外费用 / Service processing is uncertain")));
         }
@@ -644,14 +681,22 @@ impl Ledger {
                         .into(),
                 );
                 self.save(&receipt)?;
-                return Err(Failure::local(receipt.message.unwrap()));
+                return Err(Failure {
+                    retryable: resend == Resend::Automatic,
+                    ..Failure::local(receipt.message.unwrap())
+                });
             }
         };
         if let Err(error) = validate(&value) {
             receipt.state = State::Failed;
             receipt.message = Some(format!("{error:#}"));
             self.save(&receipt)?;
-            return Err(Failure::local(receipt.message.unwrap()));
+            // An unusable answer may come out usable the next time; sending it
+            // again is what the person allowed with automatic retries.
+            return Err(Failure {
+                retryable: resend == Resend::Automatic,
+                ..Failure::local(receipt.message.unwrap())
+            });
         }
         receipt.state = State::Completed;
         receipt.response = Some(value.clone());
@@ -775,10 +820,10 @@ mod tests {
         let calls = AtomicUsize::new(0);
         let reject = || {
             calls.fetch_add(1, Ordering::SeqCst);
-            Ok(HttpResponse {
-                status: 400,
-                body: br#"{"error":{"message":"invalid model"}}"#.to_vec(),
-            })
+            Ok(HttpResponse::new(
+                400,
+                br#"{"error":{"message":"invalid model"}}"#.to_vec(),
+            ))
         };
         assert!(
             ledger
@@ -841,10 +886,7 @@ mod tests {
         );
     }
     fn success() -> std::result::Result<HttpResponse, NetworkFailure> {
-        Ok(HttpResponse {
-            status: 200,
-            body: br#"{"text":"saved"}"#.to_vec(),
-        })
+        Ok(HttpResponse::new(200, br#"{"text":"saved"}"#.to_vec()))
     }
     /// Reads one request, then runs `answer` on its connection. Counts requests.
     fn answering_server(
@@ -997,10 +1039,7 @@ mod tests {
                 },
                 || {
                     if ok {
-                        Ok(HttpResponse {
-                            status: 200,
-                            body: br#"{"ok":true}"#.to_vec(),
-                        })
+                        Ok(HttpResponse::new(200, br#"{"ok":true}"#.to_vec()))
                     } else {
                         Err(NetworkFailure {
                             message: "stalled".into(),
@@ -1045,12 +1084,7 @@ mod tests {
             former: &[],
             resend: Resend::Free,
         };
-        let failed = || {
-            Ok(HttpResponse {
-                status: 502,
-                body: b"bad gateway".to_vec(),
-            })
-        };
+        let failed = || Ok(HttpResponse::new(502, b"bad gateway".to_vec()));
         let first = ledger
             .send_described(&spec, failed, |_| Ok(()))
             .unwrap_err();
@@ -1064,6 +1098,156 @@ mod tests {
         let resent = ledger.send_described(&spec, success, |_| Ok(())).unwrap();
         assert!(!resent.replayed);
         assert_eq!(receipts(dir.path()).unwrap()[0].attempt, 2);
+    }
+
+    #[test]
+    fn automatic_retries_resend_failures_but_never_rejections() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = Ledger::new(dir.path(), None, &Default::default()).unwrap();
+        let payload = |text: &str| serde_json::json!({ "text": text });
+        let send = |payload: &Value,
+                    answer: &dyn Fn() -> std::result::Result<HttpResponse, NetworkFailure>,
+                    valid: bool| {
+            ledger.send_described(
+                &RequestSpec {
+                    service: "llm",
+                    purpose: "proofreading",
+                    description: "segment",
+                    endpoint: "https://example.test",
+                    identity: payload,
+                    former: &[],
+                    resend: Resend::Automatic,
+                },
+                answer,
+                |_| {
+                    anyhow::ensure!(valid, "invalid structure");
+                    Ok(())
+                },
+            )
+        };
+        let state = |text: &str| {
+            let id = receipts(dir.path())
+                .unwrap()
+                .into_iter()
+                .find(|r| {
+                    r.request_id
+                        .starts_with(&ledger_id(&ledger, &payload(text)))
+                })
+                .unwrap();
+            (id.state, id.attempt)
+        };
+        // A lost answer is a failure to send again, never a question.
+        let lost = send(
+            &payload("lost"),
+            &|| {
+                Err(NetworkFailure {
+                    message: "stalled".into(),
+                    definitely_unsent: false,
+                })
+            },
+            true,
+        )
+        .unwrap_err();
+        assert!(lost.retryable && !lost.uncertain());
+        assert_eq!(state("lost"), (State::Failed, 1));
+        // It holds nothing back, and goes out again itself.
+        assert!(send(&payload("other"), &success, true).is_ok());
+        assert!(send(&payload("lost"), &success, true).is_ok());
+        assert_eq!(state("lost"), (State::Completed, 2));
+        // An answer that cannot be used is sent again too.
+        let invalid = send(&payload("invalid"), &success, false).unwrap_err();
+        assert!(invalid.retryable);
+        assert!(send(&payload("invalid"), &success, true).is_ok());
+        assert_eq!(state("invalid"), (State::Completed, 2));
+        // A server error, with the wait the service asked for.
+        let busy = send(
+            &payload("busy"),
+            &|| {
+                Ok(HttpResponse {
+                    retry_after: Some(std::time::Duration::from_secs(3)),
+                    ..HttpResponse::new(503, Vec::new())
+                })
+            },
+            true,
+        )
+        .unwrap_err();
+        assert!(busy.retryable);
+        assert_eq!(busy.retry_after, Some(std::time::Duration::from_secs(3)));
+        assert_eq!(state("busy"), (State::Failed, 1));
+        // A timeout status is temporary; a bad key is not.
+        let timeout = send(
+            &payload("408"),
+            &|| Ok(HttpResponse::new(408, vec![])),
+            true,
+        );
+        assert!(timeout.unwrap_err().retryable);
+        assert!(send(&payload("408"), &success, true).is_ok());
+        let denied = send(
+            &payload("401"),
+            &|| Ok(HttpResponse::new(401, vec![])),
+            true,
+        );
+        assert!(!denied.unwrap_err().retryable);
+        let again = send(
+            &payload("401"),
+            &|| panic!("a rejected request was sent again"),
+            true,
+        );
+        assert!(again.is_err());
+        // A request another process left mid-flight is still the person's to decide.
+        let stable_id = ledger_id(&ledger, &payload("dead"));
+        ledger
+            .save(&Receipt {
+                schema: 1,
+                stable_id: stable_id.clone(),
+                request_id: format!("{stable_id}.1"),
+                purpose: "proofreading".into(),
+                description: "segment".into(),
+                service_version: snapshot_id(&digest(b"https://example.test")),
+                attempt: 1,
+                state: State::Sending,
+                http_status: None,
+                response: None,
+                message: None,
+                unsupported_response_format: false,
+                retry_authorized: None,
+            })
+            .unwrap();
+        let held = send(
+            &payload("dead"),
+            &|| panic!("an unresolved request was sent again unasked"),
+            true,
+        );
+        assert!(held.unwrap_err().uncertain());
+    }
+
+    fn ledger_id(ledger: &Ledger, payload: &Value) -> String {
+        let version = ledger
+            .service_versions
+            .get("llm")
+            .cloned()
+            .unwrap_or_else(|| snapshot_id(&digest(b"https://example.test")));
+        json_digest(&serde_json::json!({"service_version":version,"purpose":"proofreading","endpoint":"https://example.test","payload":payload})).unwrap()
+    }
+
+    #[test]
+    fn retry_after_is_read_from_the_response() {
+        use std::io::Write;
+        let (url, _) = answering_server(|stream| {
+            let _ = write!(
+                stream,
+                "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 12\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+        });
+        let client = crate::runtime::http_agent_keeping_errors(std::time::Duration::from_secs(5));
+        let response = crate::runtime::receive(client.post(&url).send_json(body()))
+            .ok()
+            .unwrap();
+        assert_eq!(response.status, 429);
+        assert_eq!(
+            response.retry_after,
+            Some(std::time::Duration::from_secs(12))
+        );
     }
 
     /// Lost responses leave several paid batches uncertain. Authorizing all of them
@@ -1119,10 +1303,7 @@ mod tests {
             assert_eq!(uncertain.len(), count);
             let ok = |calls: &AtomicUsize| {
                 calls.fetch_add(1, Ordering::SeqCst);
-                Ok(HttpResponse {
-                    status: 200,
-                    body: b"{}".to_vec(),
-                })
+                Ok(HttpResponse::new(200, b"{}".to_vec()))
             };
             // Without the decision nothing goes out, a never-sent batch included.
             let ledger = Ledger::new(dir.path(), Some(&control), &Default::default()).unwrap();
@@ -1332,10 +1513,7 @@ mod tests {
             &payload,
             || {
                 assert_eq!(receipts(dir.path()).unwrap()[0].state, State::Sending);
-                Ok(HttpResponse {
-                    status: 200,
-                    body: br#"{"error":"invalid"}"#.to_vec(),
-                })
+                Ok(HttpResponse::new(200, br#"{"error":"invalid"}"#.to_vec()))
             },
             |_| anyhow::bail!("协议错误"),
         );
@@ -1432,7 +1610,7 @@ mod ephemeral_tests {
                 former: &[],
                 resend,
             },
-            move || Ok(HttpResponse { status, body }),
+            move || Ok(HttpResponse::new(status, body)),
             |_| Ok(()),
         )
     }
