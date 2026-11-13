@@ -391,18 +391,43 @@ where
             let (more, error) = self.send(image, &mut rest, splits, false);
             return (done + more, error);
         }
-        if !full_budget {
-            return self.send(image, &mut rest, splits, true);
+        // Codex takes no output limit from here: its full budget is the same request.
+        let budgeted = self.chat.settings.provider != LlmProvider::Codex;
+        match after_empty_answer(rest.len(), splits, full_budget, budgeted) {
+            EmptyAnswer::FullBudget => self.send(image, &mut rest, splits, true),
+            EmptyAnswer::GiveUp => (0, Some(anyhow::anyhow!(output_limit_message()))),
+            EmptyAnswer::Halve => {
+                let middle = rest.len() / 2;
+                let (left, right) = rest.split_at_mut(middle);
+                // The full budget did not do for the whole; the halves start with it.
+                let (left_done, left_error) = self.send(image, left, splits + 1, budgeted);
+                let (right_done, right_error) = self.send(image, right, splits + 1, budgeted);
+                (left_done + right_done, left_error.or(right_error))
+            }
         }
-        if rest.len() == 1 || splits >= MAX_SPLITS {
-            return (0, Some(anyhow::anyhow!(output_limit_message())));
-        }
-        let middle = rest.len() / 2;
-        let (left, right) = rest.split_at_mut(middle);
-        // The full budget did not do for the whole; the halves start with it.
-        let (left_done, left_error) = self.send(image, left, splits + 1, true);
-        let (right_done, right_error) = self.send(image, right, splits + 1, true);
-        (left_done + right_done, left_error.or(right_error))
+    }
+}
+
+/// What follows an answer cut off with nothing finished.
+#[derive(Debug, PartialEq, Eq)]
+enum EmptyAnswer {
+    /// The same items with the full output budget.
+    FullBudget,
+    /// The items in two halves.
+    Halve,
+    /// Nothing: the items stay unfinished.
+    GiveUp,
+}
+
+/// For `items` events halved `splits` times so far, asked with the full budget
+/// or not, on a service that takes an output budget (`budgeted`) or not.
+fn after_empty_answer(items: usize, splits: u32, full_budget: bool, budgeted: bool) -> EmptyAnswer {
+    if !full_budget && budgeted {
+        EmptyAnswer::FullBudget
+    } else if items > 1 && splits < MAX_SPLITS {
+        EmptyAnswer::Halve
+    } else {
+        EmptyAnswer::GiveUp
     }
 }
 
@@ -1168,7 +1193,6 @@ impl<'a> Chat<'a> {
             no_reasoning: true,
             ..Default::default()
         };
-        let ran_out = std::cell::Cell::new(false);
         let answer = self.send(
             body,
             description,
@@ -1177,7 +1201,6 @@ impl<'a> Chat<'a> {
             &|content, truncated| {
                 if truncated {
                     if salvage_segments(content, expected).is_empty() {
-                        ran_out.set(true);
                         return Err(anyhow::Error::new(crate::dispatch::Repeats(
                             output_limit_message().into(),
                         )));
@@ -1201,7 +1224,12 @@ impl<'a> Chat<'a> {
         );
         let answer = match answer {
             Ok(answer) => answer,
-            Err(_) if ran_out.get() => {
+            // Now, or recorded by an earlier run: either way nothing was sent again.
+            Err(error)
+                if error
+                    .downcast_ref::<crate::dispatch::Failure>()
+                    .is_some_and(|failure| failure.repeats) =>
+            {
                 return Ok(Segments {
                     segments: Vec::new(),
                     truncated: true,
@@ -2259,6 +2287,54 @@ mod tests {
             states.contains(&crate::dispatch::State::Completed),
             "{states:?}"
         );
+    }
+
+    #[test]
+    fn a_later_run_goes_straight_to_the_full_budget_answer() {
+        for auto_retry in [true, false] {
+            let (url, bodies) = scripted_service_with_body(|body, items| {
+                if body["max_tokens"] == CHAT_MAX_TOKENS {
+                    streamed(&proofread(items), "stop")
+                } else {
+                    streamed("", "length")
+                }
+            });
+            let settings = LlmSettings {
+                auto_retry,
+                ..polish_settings(url, 3)
+            };
+            let work = tempfile::tempdir().unwrap();
+            let run = || {
+                let control =
+                    crate::dispatch::TaskControl::open(work.path(), Default::default()).unwrap();
+                let mut sections = one_section(&["一", "二", "三"]);
+                let report =
+                    polish_sections_report(&mut sections, Path::new(""), &settings, &control)
+                        .unwrap();
+                (report.succeeded, texts(&sections))
+            };
+            assert_eq!(run().0, 3, "auto_retry={auto_retry}");
+            assert_eq!(bodies.lock().unwrap().len(), 2, "auto_retry={auto_retry}");
+            // Resumed or retried: both answers are on record, nothing is sent.
+            let (succeeded, texts) = run();
+            assert_eq!(succeeded, 3, "auto_retry={auto_retry}");
+            assert_eq!(texts, ["一!", "二!", "三!"]);
+            assert_eq!(bodies.lock().unwrap().len(), 2, "auto_retry={auto_retry}");
+        }
+    }
+
+    #[test]
+    fn a_batch_that_finished_nothing_asks_for_more_room_then_halves() {
+        use EmptyAnswer::*;
+        // A budget the service takes: once with the full budget, then halves.
+        assert_eq!(after_empty_answer(20, 0, false, true), FullBudget);
+        assert_eq!(after_empty_answer(20, 0, true, true), Halve);
+        assert_eq!(after_empty_answer(20, MAX_SPLITS, true, true), GiveUp);
+        assert_eq!(after_empty_answer(1, 0, true, true), GiveUp);
+        // Codex takes no output limit: a "full budget" ask would be the same
+        // request again, so it halves at once.
+        assert_eq!(after_empty_answer(20, 0, false, false), Halve);
+        assert_eq!(after_empty_answer(1, 0, false, false), GiveUp);
     }
 
     #[test]

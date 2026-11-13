@@ -353,6 +353,9 @@ pub struct Failure {
     /// request (`stream_options`, `stream`, `reasoning`): sent without it, the
     /// request may be accepted.
     pub refused_parameter: Option<String>,
+    /// The answer was unusable in a way the same request would only repeat
+    /// ([`Repeats`]); the caller has to ask differently.
+    pub repeats: bool,
     pub kind: FailureKind,
     /// The wait the service asked for before another attempt, if it named one.
     pub retry_after: Option<std::time::Duration>,
@@ -375,6 +378,7 @@ impl Failure {
             message: error.to_string(),
             unsupported_response_format: false,
             refused_parameter: None,
+            repeats: false,
             kind: FailureKind::Local,
             retry_after: None,
         }

@@ -1475,6 +1475,7 @@ mod cloud_tests {
             message: None,
             unsupported_response_format: false,
             refused_parameter: None,
+            repeats: false,
             retry_authorized: None,
         };
         std::fs::write(&receipt_path, serde_json::to_vec(&receipt).unwrap()).unwrap();

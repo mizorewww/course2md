@@ -76,6 +76,11 @@ pub struct Receipt {
     /// [`refused_parameter`] reads it; never the provider's error body.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refused_parameter: Option<String>,
+    /// The answer failed in a way the same request would only repeat
+    /// ([`Repeats`]): it is never sent again, and a later run gets the same
+    /// failure back at once, so the caller asks differently without paying again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub repeats: bool,
     /// Explicit component reprocessing permits this exact known-failed attempt once.
     /// Sending/uncertain attempts still require Control::resend authorization.
     #[serde(default)]
@@ -162,36 +167,40 @@ fn rejects_response_format(status: u16, value: Option<&Value>) -> bool {
         .any(|term| message.contains(term)))
 }
 
-/// Optional request parameters a service may refuse by name; longer names first,
-/// so `stream_options` is not read as `stream`.
-const OPTIONAL_PARAMETERS: [&str; 3] = ["stream_options", "stream", "reasoning"];
+/// Optional request parameters a service may refuse by name, most specific first:
+/// when a refusal names several ("reasoning_effort is not supported when stream is
+/// true"), the one it is about comes before plain streaming. Each has the words
+/// that name it.
+const OPTIONAL_PARAMETERS: [(&str, &[&str]); 3] = [
+    ("reasoning", &["reasoning", "think", "thinking"]),
+    ("stream_options", &["stream_options"]),
+    ("stream", &["stream", "streaming"]),
+];
 
-/// The optional parameter a 400/422 names, as its `param`, `code` or message, so the
-/// request may go again without it. Only a name stands as evidence: an arbitrary
-/// rejection never changes the payload. The body itself is not kept.
+/// The optional parameter a 400/422 names anywhere in its body (messages, `param`,
+/// `code`, pydantic's `loc`, nested or in arrays), so the request may go again
+/// without it. Only a name stands as evidence: an arbitrary rejection never changes
+/// the payload. The body itself is not kept.
 pub fn refused_parameter(status: u16, value: Option<&Value>) -> Option<&'static str> {
     if !matches!(status, 400 | 422) {
         return None;
     }
-    let value = value?;
-    let error = value.get("error").unwrap_or(value);
-    let text = [
-        error.get("param"),
-        error.get("code"),
-        error.get("message"),
-        value.get("detail"),
-        value.get("message"),
-        Some(error),
-    ]
-    .into_iter()
-    .flatten()
-    .filter_map(Value::as_str)
-    .collect::<Vec<_>>()
-    .join(" ")
-    .to_ascii_lowercase();
+    let mut strings = Vec::new();
+    collect_strings(value?, &mut strings);
+    let text = strings.join(" ").to_ascii_lowercase();
     OPTIONAL_PARAMETERS
         .into_iter()
-        .find(|name| names(&text, name))
+        .find(|(_, words)| words.iter().any(|word| names(&text, word)))
+        .map(|(name, _)| name)
+}
+
+fn collect_strings<'a>(value: &'a Value, out: &mut Vec<&'a str>) {
+    match value {
+        Value::String(text) => out.push(text),
+        Value::Array(items) => items.iter().for_each(|item| collect_strings(item, out)),
+        Value::Object(map) => map.values().for_each(|item| collect_strings(item, out)),
+        _ => {}
+    }
 }
 
 /// Whether `text` holds `word` as a word of its own (`stream`, not `upstream`;
@@ -585,6 +594,12 @@ impl Ledger {
                 || (matches!(receipt.state, State::Failed | State::Rejected)
                     && receipt.retry_authorized.as_ref() == Some(&receipt.request_id))
         });
+        if let Some(old) = old.as_ref().filter(|old| old.repeats) {
+            return Err(Failure {
+                repeats: true,
+                ..Failure::local(old.message.clone().unwrap_or_default())
+            });
+        }
         if let Some(old) = &old {
             if matches!(old.state, State::Sending | State::Uncertain) && !authorized {
                 let mut uncertain = old.clone();
@@ -656,6 +671,7 @@ impl Ledger {
             message: None,
             unsupported_response_format: false,
             refused_parameter: None,
+            repeats: false,
             retry_authorized: None,
         };
         // This durable write happens before the only call that can send network bytes.
@@ -671,7 +687,7 @@ impl Ledger {
                 }
                 // With automatic retries allowed, the lost answer is a failure the
                 // person already agreed to send again; nothing is left to decide.
-                receipt.state = if resend == Resend::Automatic {
+                receipt.state = if resend.retries_failures() {
                     State::Failed
                 } else {
                     State::Uncertain
@@ -718,7 +734,7 @@ impl Ledger {
             });
         }
         if !(200..300).contains(&response.status) {
-            receipt.state = if resend == Resend::Automatic {
+            receipt.state = if resend.retries_failures() {
                 State::Failed
             } else {
                 State::Uncertain
@@ -761,8 +777,11 @@ impl Ledger {
             // again is what the person allowed with automatic retries. One that
             // would only come back the same is left for the caller to change.
             let repeats = error.downcast_ref::<crate::outcome::Repeats>().is_some();
+            receipt.repeats = repeats;
+            self.save(&receipt)?;
             return Err(Failure {
                 retryable: resend.retries_failures() && !repeats,
+                repeats,
                 ..Failure::local(receipt.message.unwrap())
             });
         }
@@ -893,6 +912,39 @@ mod tests {
             named(serde_json::json!({"detail":"reasoning_effort is not permitted"})),
             Some("reasoning")
         );
+        // Bodies as services send them.
+        for (body, expected) in [
+            // FastAPI / pydantic (vLLM, LiteLLM, many gateways)
+            (
+                serde_json::json!({"detail":[{"loc":["body","stream_options"],"msg":"extra fields not permitted","type":"value_error.extra"}]}),
+                Some("stream_options"),
+            ),
+            // Gemini's OpenAI layer answers with an array.
+            (
+                serde_json::json!([{"error":{"code":400,"message":"Invalid JSON payload received. Unknown name \"stream_options\"","status":"INVALID_ARGUMENT"}}]),
+                Some("stream_options"),
+            ),
+            (
+                serde_json::json!({"error":{"message":"Streaming is not supported for this model"}}),
+                Some("stream"),
+            ),
+            (
+                serde_json::json!({"error":{"message":"This model does not support thinking"}}),
+                Some("reasoning"),
+            ),
+            // Several names: the specific one is what was refused.
+            (
+                serde_json::json!({"error":{"message":"reasoning_effort is not supported when stream is true"}}),
+                Some("reasoning"),
+            ),
+            (
+                serde_json::json!({"error":{"message":"stream_options is only allowed when stream is true"}}),
+                Some("stream_options"),
+            ),
+            (serde_json::json!({"error":{"message":"rate limit"}}), None),
+        ] {
+            assert_eq!(named(body.clone()), expected, "{body}");
+        }
         // An arbitrary rejection, or one that only contains the word, names nothing.
         assert_eq!(
             named(serde_json::json!({"error":{"message":"upstream error"}})),
@@ -1311,6 +1363,7 @@ mod tests {
                 message: None,
                 unsupported_response_format: false,
                 refused_parameter: None,
+                repeats: false,
                 retry_authorized: None,
             })
             .unwrap();
@@ -1320,6 +1373,68 @@ mod tests {
             true,
         );
         assert!(held.unwrap_err().uncertain());
+    }
+
+    #[test]
+    fn free_automatic_retries_record_failures_and_an_answer_that_repeats_is_kept_as_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = Ledger::new(dir.path(), None, &Default::default()).unwrap();
+        let spec = |payload: &'static Value, resend| RequestSpec {
+            service: "llm",
+            purpose: "proofreading",
+            description: "segment",
+            endpoint: "https://example.test",
+            identity: payload,
+            former: &[],
+            resend,
+        };
+        static LOST: std::sync::LazyLock<Value> =
+            std::sync::LazyLock::new(|| serde_json::json!({"text": "lost"}));
+        static FULL: std::sync::LazyLock<Value> =
+            std::sync::LazyLock::new(|| serde_json::json!({"text": "full"}));
+        // A free service with automatic retries settles a lost answer as a failure,
+        // as a paid one does, not as a question for the person.
+        let lost = ledger
+            .send_described(
+                &spec(&LOST, Resend::FreeAutomatic),
+                || {
+                    Err(NetworkFailure {
+                        message: "stalled".into(),
+                        definitely_unsent: false,
+                    })
+                },
+                |_| Ok(()),
+            )
+            .unwrap_err();
+        assert!(lost.retryable);
+        let states: Vec<_> = receipts(dir.path())
+            .unwrap()
+            .into_iter()
+            .map(|r| r.state)
+            .collect();
+        assert_eq!(states, [State::Failed]);
+
+        // An answer that would only repeat is recorded so, never sent again, and a
+        // later run gets the same failure back without sending, in every mode.
+        let repeats = || {
+            ledger.send_described(&spec(&FULL, Resend::Automatic), success, |_| {
+                Err(anyhow::Error::new(crate::outcome::Repeats(
+                    "ran out".into(),
+                )))
+            })
+        };
+        let first = repeats().unwrap_err();
+        assert!(first.repeats && !first.retryable);
+        for resend in [Resend::Automatic, Resend::AskUser, Resend::FreeAutomatic] {
+            let again = ledger
+                .send_described(
+                    &spec(&FULL, resend),
+                    || panic!("an answer that repeats was asked for again"),
+                    |_| Ok(()),
+                )
+                .unwrap_err();
+            assert!(again.repeats, "{resend:?}");
+        }
     }
 
     fn ledger_id(ledger: &Ledger, payload: &Value) -> String {
