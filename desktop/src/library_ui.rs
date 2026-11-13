@@ -309,7 +309,7 @@ impl Desktop {
                             this.save_current_draft(cx);
                             this.check_import_model(cx);
                             if this.text_mode(cx) != course2md::config::TranscriptSource::Asr && let Some(track) = default_track {
-                                if wanted.is_none() { this.confirm_default_subtitle(track, cx); } else { this.confirm_subtitle(track, false, cx); }
+                                if wanted.is_none() { this.confirm_default_subtitle(track, cx); } else { this.confirm_subtitle(track, cx); }
                             }
                         }
                         Ok(source::SourceProbe::Collection { title, candidates, unavailable_entries }) => {

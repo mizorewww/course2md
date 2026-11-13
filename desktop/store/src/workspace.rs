@@ -1,6 +1,6 @@
 //! Durable user work. Views never supply the identity or settings of a retry.
 use anyhow::{Context, Result, bail, ensure};
-use c2m_config::{config::TranscriptSource, settings::ConfigFile};
+use c2m_config::settings::ConfigFile;
 use c2m_engine::execution::Component;
 use c2m_protocol::progress::BlockReason;
 use desktop_prefs::conversion::ConversionOptions;
@@ -106,10 +106,6 @@ pub struct Draft {
     /// Subtitle events live in a separate file beside the workspace record.
     #[serde(default, serialize_with = "serialize_draft_source")]
     pub source: Option<Source>,
-    /// The text source the person chose on this video's card: one of its
-    /// subtitles, or speech recognition. `None` follows Settings.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub text_source: Option<TranscriptSource>,
     #[serde(default)]
     pub subtitle: Option<PathBuf>,
     #[serde(default)]
@@ -129,7 +125,6 @@ impl Draft {
             online,
             input: String::new(),
             source: None,
-            text_source: None,
             subtitle: None,
             retry_of: None,
             submitted_task: None,
@@ -146,7 +141,6 @@ impl Draft {
         self.input = input;
         self.source = None;
         self.subtitle = None;
-        self.text_source = None;
         self.submitted_task = None;
         self.updated = now();
     }
@@ -263,10 +257,6 @@ pub struct TaskPlan {
     pub library_id: String,
     pub folder: Option<u64>,
     pub subtitle: Option<PathBuf>,
-    /// The text source the person chose on the video's card: one of its subtitles,
-    /// or speech recognition. `None` follows Settings when the task runs.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub text_source: Option<TranscriptSource>,
     /// What a repair keeps of the note it repairs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repair: Option<RepairScope>,
@@ -466,6 +456,11 @@ pub struct TaskRecord {
     /// The settings (`RunSettings::token`) the person agreed to redo that work with.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rework_accepted: Option<String>,
+    /// The service versions whose answers the task's AI results are: the services
+    /// that actually produced them, which an answer replayed from an earlier version
+    /// keeps, whatever service the latest run named.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ai_answered_by: Vec<String>,
     /// The later attempt that replaced this one: the task whose `parent` this is.
     #[serde(skip)]
     pub handled_by: Option<String>,
@@ -505,6 +500,8 @@ struct TaskRecordWire {
     rework: Option<Rework>,
     #[serde(default)]
     rework_accepted: Option<String>,
+    #[serde(default)]
+    ai_answered_by: Vec<String>,
     #[serde(flatten)]
     events: JobEvents,
 }
@@ -552,6 +549,7 @@ impl From<TaskRecordWire> for TaskRecord {
             ran_with,
             rework: wire.rework,
             rework_accepted: wire.rework_accepted,
+            ai_answered_by: wire.ai_answered_by,
             handled_by: None,
             held: false,
             work_dir: PathBuf::new(),
@@ -617,7 +615,7 @@ impl TaskRecord {
                 .and_then(Component::parse)
                 .filter(|component| component.is_ai())
                 .context(c2m_i18n::tr!(
-                    "待确认的请求不属于笔记中可补做的部分，请调整后重新生成"
+                    "待确认的请求不属于笔记中可补做的部分，请在主页重新生成"
                 ))?;
             ensure!(
                 outcomes.is_some_and(|outcomes| {
@@ -1048,7 +1046,6 @@ impl State {
             None => source.selected_subtitle = None,
         }
         draft.source = Some(source);
-        draft.text_source = task.plan.text_source;
         draft.subtitle = task.plan.subtitle;
         draft.retry_of = Some(id.to_owned());
         self.replace_input(draft);
@@ -1128,6 +1125,7 @@ impl State {
             ran_with: None,
             rework: None,
             rework_accepted: None,
+            ai_answered_by: Vec::new(),
             // A new task has said nothing yet.
             events: JobEvents {
                 loaded: true,
@@ -1997,7 +1995,9 @@ fn output_format(key: &str) -> Option<c2m_config::config::OutputFormat> {
 
 /// What a task's receipts say: the requests whose result is unknown, and the
 /// purposes that have any attempt at all.
-type ReceiptFacts = (Vec<BlockedRequest>, BTreeSet<String>);
+/// Requests whose result is unknown, the purposes attempted, and the service
+/// versions that answered the AI requests.
+type ReceiptFacts = (Vec<BlockedRequest>, BTreeSet<String>, BTreeSet<String>);
 
 /// Requests whose result is unknown, read from the task's receipts.
 fn uncertain_requests(task: &TaskRecord) -> Result<ReceiptFacts> {
@@ -2005,6 +2005,14 @@ fn uncertain_requests(task: &TaskRecord) -> Result<ReceiptFacts> {
     let attempted = receipts
         .iter()
         .map(|receipt| receipt.purpose.clone())
+        .collect();
+    let answered_by = receipts
+        .iter()
+        .filter(|receipt| {
+            receipt.state == c2m_dispatch::dispatch::State::Completed
+                && Component::parse(&receipt.purpose).is_some_and(Component::is_ai)
+        })
+        .map(|receipt| receipt.service_version.clone())
         .collect();
     let uncertain = receipts
         .into_iter()
@@ -2035,10 +2043,11 @@ fn uncertain_requests(task: &TaskRecord) -> Result<ReceiptFacts> {
             },
         })
         .collect();
-    Ok((uncertain, attempted))
+    Ok((uncertain, attempted, answered_by))
 }
 
-fn apply_receipts(task: &mut TaskRecord, (uncertain, attempted): ReceiptFacts) {
+fn apply_receipts(task: &mut TaskRecord, (uncertain, attempted, answered_by): ReceiptFacts) {
+    task.ai_answered_by = answered_by.into_iter().collect();
     task.events
         .blocked
         .retain(|request| !request.is_uncertain());
@@ -2075,6 +2084,8 @@ fn worker_holds(work_dir: &Path) -> bool {
 pub struct PaidWork {
     /// AI requests that were answered.
     pub ai: bool,
+    /// Of them, translation or summary requests: built from the proofread text.
+    pub after_proofreading: bool,
     /// Speech recognition: a recognized transcript, or progress towards one.
     pub transcription: bool,
 }
@@ -2082,13 +2093,18 @@ pub struct PaidWork {
 /// What the task's work directory holds that was paid for. Blocking: it reads the
 /// task's request records.
 pub fn paid_work(task: &TaskRecord) -> PaidWork {
+    let answered: Vec<Component> = c2m_dispatch::dispatch::receipts(&task.work_dir)
+        .unwrap_or_default()
+        .iter()
+        .filter(|receipt| receipt.state == c2m_dispatch::dispatch::State::Completed)
+        .filter_map(|receipt| Component::parse(&receipt.purpose))
+        .filter(|component| component.is_ai())
+        .collect();
     PaidWork {
-        ai: c2m_dispatch::dispatch::receipts(&task.work_dir).is_ok_and(|receipts| {
-            receipts.iter().any(|receipt| {
-                receipt.state == c2m_dispatch::dispatch::State::Completed
-                    && Component::parse(&receipt.purpose).is_some_and(Component::is_ai)
-            })
-        }),
+        ai: !answered.is_empty(),
+        after_proofreading: answered
+            .iter()
+            .any(|component| matches!(component, Component::Translation | Component::Summary)),
         // Recognized speech, not a transcript taken from subtitles.
         transcription: task.work_dir.join("asr.jsonl").is_file()
             || std::fs::read(task.work_dir.join("transcript.json"))
@@ -3270,7 +3286,6 @@ mod tests {
             library_id: library.into(),
             folder: None,
             subtitle: None,
-            text_source: None,
             repair: None,
         }
     }
@@ -3821,10 +3836,10 @@ mod tests {
         assert!(!accept_source(&mut draft, old, source("A", "title-a")));
         let revision = draft.revision;
         assert!(accept_source(&mut draft, revision, source("B", "title-b")));
-        // A new link forgets the previous video's text choice.
-        draft.text_source = Some(c2m_config::config::TranscriptSource::Asr);
+        // A new link forgets the previous video's subtitle file.
+        draft.subtitle = Some("b.srt".into());
         draft.change_source("C".into());
-        assert_eq!(draft.text_source, None);
+        assert_eq!(draft.subtitle, None);
     }
 
     #[test]
@@ -3835,7 +3850,6 @@ mod tests {
         let task = ws.state.enqueue(submitted.clone(), None).unwrap().0;
         let input = ws.state.draft_mut().unwrap();
         input.input = "first.mp4".into();
-        input.text_source = Some(c2m_config::config::TranscriptSource::Asr);
         input.submitted_task = Some(task.clone());
         let first_id = input.id.clone();
         assert!(!ws.state.prepare_next_import("first.mp4"));
@@ -3844,7 +3858,6 @@ mod tests {
         let input = ws.state.draft().unwrap();
         assert_ne!(input.id, first_id);
         assert_eq!(input.input, "second.mp4");
-        assert_eq!(input.text_source, None);
         assert!(ws.state.task(&task).unwrap().plan == submitted);
         // An unsubmitted input is edited in place.
         assert!(!ws.state.prepare_next_import("revised-second.mp4"));
@@ -3891,7 +3904,6 @@ mod tests {
         let mut original = plan(&ws.state.default_library);
         original.title = "A 的名称".into();
         original.subtitle = Some(dir.path().join("french.srt"));
-        original.text_source = Some(c2m_config::config::TranscriptSource::Subtitle);
         let id = ws.state.enqueue(original.clone(), None).unwrap().0;
         ws.state.task_mut(&id).unwrap().state = TaskState::Running;
         ws.state.reset_input(true);
@@ -3911,7 +3923,6 @@ mod tests {
         assert_eq!(revised.input, original.source.input);
         assert_eq!(revised.source.as_ref(), Some(&original.source));
         assert_eq!(revised.subtitle, original.subtitle);
-        assert_eq!(revised.text_source, original.text_source);
         assert_eq!(revised.retry_of.as_deref(), Some(id.as_str()));
         let revision = revised.clone();
         drop(ws);
@@ -3971,6 +3982,7 @@ mod tests {
             plan.insert("asr_service".into(), serde_json::Value::Null);
             plan.insert("ai_service".into(), "ai-version-old".into());
             plan.insert("options".into(), serde_json::json!({"llm": true}));
+            plan.insert("text_source".into(), "asr".into());
         }
         let draft = &mut legacy["drafts"][0];
         for (key, value) in [
@@ -3987,6 +3999,7 @@ mod tests {
             ("ai_service", serde_json::json!("ai-version-old")),
             ("base_config", serde_json::to_value(&old_config).unwrap()),
             ("local_provider", serde_json::json!("cpu")),
+            ("text_source", serde_json::json!("asr")),
         ] {
             draft[key] = value;
         }
@@ -3995,7 +4008,12 @@ mod tests {
 
         let reopened = Workspace::open_at_inline(file.clone(), library).unwrap();
         let draft = reopened.state.draft().unwrap();
-        assert_eq!(draft.text_source, None);
+        // An older choice of text source on the card is not read: Settings decide.
+        assert!(
+            !serde_json::to_string(draft)
+                .unwrap()
+                .contains("text_source")
+        );
         // A waiting task keeps what its requests would be compared with: its next run
         // uses the current settings, and redoing paid work under them is asked first.
         let waiting = reopened.state.task(&queued).unwrap();
@@ -4018,7 +4036,13 @@ mod tests {
         let written: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
         for task in written["tasks"].as_array().unwrap() {
-            for key in ["config", "asr_service", "ai_service", "options"] {
+            for key in [
+                "config",
+                "asr_service",
+                "ai_service",
+                "options",
+                "text_source",
+            ] {
                 assert!(task["plan"].get(key).is_none(), "{key}: {task}");
             }
         }
@@ -5978,7 +6002,6 @@ mod tests {
         // Other options for the same video are still the same note.
         let mut other = plan(&library);
         other.title = "另一个名字".into();
-        other.text_source = Some(c2m_config::config::TranscriptSource::Asr);
         assert_eq!(
             ws.state.duplicate_of(&other, None).map(|t| t.id.clone()),
             Some(first.clone())

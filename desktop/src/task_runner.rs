@@ -25,22 +25,13 @@ impl Desktop {
         self.draft(cx).is_none_or(|draft| draft.online)
     }
 
-    /// Where this video's text comes from: the person's choice on its card, or
-    /// Settings' 文字来源.
-    pub(crate) fn text_mode(&self, cx: &App) -> course2md::config::TranscriptSource {
-        self.draft(cx)
-            .and_then(|draft| draft.text_source)
-            .or(self.preferences.generation().options.transcript_source)
+    /// Where videos' text comes from: Settings' 文字来源.
+    pub(crate) fn text_mode(&self, _cx: &App) -> course2md::config::TranscriptSource {
+        self.preferences
+            .generation()
+            .options
+            .transcript_source
             .unwrap_or_default()
-    }
-
-    /// Records the text source the person chose on the video's card.
-    pub(crate) fn set_text_source(
-        &mut self,
-        mode: course2md::config::TranscriptSource,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        self.update_draft(|draft| draft.text_source = Some(mode), cx)
     }
 
     /// One saved change to the workspace. A failure shows in the shell as `failure`,
@@ -670,6 +661,26 @@ impl Desktop {
     /// because that would redo paid work its earlier run finished continues only once
     /// the person agrees here; every other way a task resumes (all at once, after a
     /// move, when its model is ready, on relaunch) leaves it waiting for this.
+    /// The video reopened from task `id` goes back to being that task's: the card
+    /// shows it again, and it continues.
+    pub(crate) fn continue_retried_task(
+        &mut self,
+        id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let linked = self.update_draft(
+            |draft| {
+                draft.submitted_task = Some(id.clone());
+                draft.retry_of = None;
+            },
+            cx,
+        );
+        if linked {
+            self.resume_task(id, window, cx);
+        }
+    }
+
     fn resume_task(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         let Some(rework) = self.task(&id, cx).and_then(|task| task.rework.clone()) else {
             self.set_task_intent(id, Intent::Run, cx);
@@ -1394,10 +1405,10 @@ impl Desktop {
             .workspace
             .iter()
             .flat_map(|workspace| &workspace.state.tasks)
-            .filter_map(|task| task.ran_with.as_ref()?.ai_service.as_ref())
+            .flat_map(desktop_tasks::task_view::ai_producers)
             .filter_map(|id| {
                 let version = self.preferences.version(id)?;
-                Some((id.clone(), version.config.name.clone()))
+                Some((id.to_owned(), version.config.name.clone()))
             })
             .collect();
         let reassociate = records

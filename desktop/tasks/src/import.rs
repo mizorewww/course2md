@@ -226,8 +226,21 @@ pub fn retired_input_task<'a>(
     let submitted = tasks
         .iter()
         .find(|task| Some(task.id.as_str()) == draft.submitted_task.as_deref())?;
-    (draft.text_source == submitted.plan.text_source && draft.subtitle == submitted.plan.subtitle)
-        .then_some(task)
+    (draft.subtitle == submitted.plan.subtitle).then_some(task)
+}
+
+/// The task the current input was reopened from on Home, while it still waits: a
+/// conversion of the input would take its place, which the card says, and the
+/// person may continue that task instead.
+pub fn waiting_retried_task<'a>(
+    draft: &workspace::Draft,
+    tasks: &'a [workspace::TaskRecord],
+) -> Option<&'a workspace::TaskRecord> {
+    let id = draft.retry_of.as_deref()?;
+    tasks
+        .iter()
+        .find(|task| task.id == id)
+        .filter(|task| !task.state.finished() && task.handled_by.is_none() && !task.held)
 }
 
 /// A live navigation intent is separate from the saved task. Leaving its
@@ -980,7 +993,6 @@ mod tests {
             library_id: state.default_library.clone(),
             folder: None,
             subtitle: None,
-            text_source: None,
             repair: None,
         };
         // Before submission the options belong to the form.
@@ -1054,7 +1066,6 @@ mod tests {
             library_id: state.default_library.clone(),
             folder: None,
             subtitle: None,
-            text_source: None,
             repair: None,
         };
         let (id, _) = state.enqueue(plan.clone(), None).unwrap();
@@ -1113,7 +1124,6 @@ mod tests {
                 library_id: "library".into(),
                 folder: None,
                 subtitle: None,
-                text_source: None,
                 repair: None,
             },
             state: workspace::TaskState::Uncertain,
@@ -1134,6 +1144,7 @@ mod tests {
             replaced_by: None,
             rework: None,
             rework_accepted: None,
+            ai_answered_by: Vec::new(),
             ran_with: None,
         };
         let mut recovery = original.clone();
@@ -1152,6 +1163,26 @@ mod tests {
         };
         original.handled_by = Some(recovery.id.clone());
         (draft, vec![original, recovery])
+    }
+
+    #[test]
+    fn a_video_reopened_from_a_waiting_task_names_it_until_it_is_replaced() {
+        let (mut draft, mut tasks) = submitted_recovery_chain();
+        draft.retry_of = Some(tasks[1].id.clone());
+        tasks[1].handled_by = None;
+        tasks[1].state = workspace::TaskState::Paused;
+        assert_eq!(
+            super::waiting_retried_task(&draft, &tasks).unwrap().id,
+            tasks[1].id
+        );
+        // Finished, or already followed by another attempt: nothing to take the place of.
+        tasks[1].state = workspace::TaskState::Complete;
+        assert!(super::waiting_retried_task(&draft, &tasks).is_none());
+        tasks[1].state = workspace::TaskState::NeedsAttention;
+        tasks[1].handled_by = Some("later".into());
+        assert!(super::waiting_retried_task(&draft, &tasks).is_none());
+        draft.retry_of = None;
+        assert!(super::waiting_retried_task(&draft, &tasks).is_none());
     }
 
     #[test]
@@ -1184,10 +1215,7 @@ mod tests {
         }
         tasks[1].state = workspace::TaskState::Partial;
         let unchanged = draft.clone();
-        // A text choice made on the card since is a change to keep.
-        draft.text_source = Some(TranscriptSource::Asr);
-        assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
-        draft = unchanged.clone();
+        // A subtitle file attached since is a change to keep.
         draft.subtitle = Some("other.srt".into());
         assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
         draft = unchanged;

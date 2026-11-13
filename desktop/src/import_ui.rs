@@ -316,37 +316,21 @@ impl Desktop {
         cx.notify();
     }
 
-    pub fn confirm_subtitle(
-        &mut self,
-        track: SubtitleTrack,
-        explicit: bool,
-        cx: &mut Context<Self>,
-    ) {
-        self.read_track(track, explicit, false, cx);
+    pub fn confirm_subtitle(&mut self, track: SubtitleTrack, cx: &mut Context<Self>) {
+        self.read_track(track, false, cx);
     }
 
     /// Read the track the source's order put first. When it cannot be read, the
     /// next ones are tried, as the command line does; a track the person picked,
     /// or one they had before, is read alone.
     pub fn confirm_default_subtitle(&mut self, track: SubtitleTrack, cx: &mut Context<Self>) {
-        self.read_track(track, false, true, cx);
+        self.read_track(track, true, cx);
     }
 
-    fn read_track(
-        &mut self,
-        track: SubtitleTrack,
-        explicit: bool,
-        fallback: bool,
-        cx: &mut Context<Self>,
-    ) {
+    fn read_track(&mut self, track: SubtitleTrack, fallback: bool, cx: &mut Context<Self>) {
         let requested = track.clone();
         self.read_subtitles(
-            move |this, cx| {
-                if explicit {
-                    // The requested text source takes effect before I/O. A failed
-                    // caption read must never silently keep the previous ASR choice.
-                    this.set_text_source(TranscriptSource::Subtitle, cx);
-                }
+            move |this, _| {
                 if let Some(source) = &mut this.import.source_preview {
                     source.subtitle_request = Some(requested);
                     source.subtitle_read_error = None;
@@ -371,9 +355,6 @@ impl Desktop {
                             source.selected_subtitle = Some(subtitle);
                             source.subtitle_request = None;
                             source.subtitle_read_error = None;
-                        }
-                        if explicit {
-                            this.set_text_source(TranscriptSource::Subtitle, cx);
                         }
                     }
                     Err(SubtitleReadError::Cancelled) => {
@@ -458,7 +439,7 @@ impl Desktop {
                 }
             }
         }
-        self.confirm_subtitle(track, true, cx);
+        self.confirm_subtitle(track, cx);
     }
 
     fn retry_subtitles(&mut self, cx: &mut Context<Self>) {
@@ -535,7 +516,7 @@ impl Desktop {
         self.save_current_draft(cx);
         match track {
             Some(track) if old_id.is_none() => self.confirm_default_subtitle(track, cx),
-            Some(track) => self.confirm_subtitle(track, false, cx),
+            Some(track) => self.confirm_subtitle(track, cx),
             None => {}
         }
     }
@@ -554,11 +535,11 @@ impl Desktop {
         }
     }
 
-    /// The person settled the text source: drop what was in flight and go on.
-    fn settle_text_source(&mut self, mode: TranscriptSource, cx: &mut Context<Self>) {
+    /// The person settled which of the video's subtitles to use: drop what was in
+    /// flight and go on.
+    fn settle_subtitle(&mut self, cx: &mut Context<Self>) {
         self.abort_subtitle_read();
         self.import.subtitle_error = None;
-        self.set_text_source(mode, cx);
         self.check_import_model(cx);
         self.advance_conversion_when_ready(cx);
         cx.notify();
@@ -590,10 +571,6 @@ impl Desktop {
         }
     }
 
-    fn use_speech(&mut self, cx: &mut Context<Self>) {
-        self.settle_text_source(TranscriptSource::Asr, cx);
-    }
-
     fn use_confirmed_subtitle(&mut self, cx: &mut Context<Self>) {
         if self
             .import
@@ -601,7 +578,7 @@ impl Desktop {
             .as_ref()
             .is_some_and(|source| source.selected_subtitle.is_some())
         {
-            self.settle_text_source(TranscriptSource::Subtitle, cx);
+            self.settle_subtitle(cx);
         }
     }
 
@@ -1508,8 +1485,19 @@ impl Desktop {
         } else {
             symbols::subtitles()
         });
-        let menu = self.text_source_menu(source, &value, window, cx);
-        let chip = ui::menu("text-source-menu", trigger, menu, window, cx);
+        // Settings' 文字来源 decides between subtitles and speech recognition. Set to
+        // speech recognition, the chip says so and offers no subtitles to choose.
+        let chip = if mode == TranscriptSource::Asr {
+            semantic_label(
+                "text-source",
+                course2md::tr!("语音识别（文字来源设置）"),
+                Icon::from(symbols::mic()).color(color(ColorRole::ON_SURFACE_VARIANT)),
+            )
+            .into_any_element()
+        } else {
+            let menu = self.text_source_menu(source, &value, window, cx);
+            ui::menu("text-source-menu", trigger, menu, window, cx).into_any_element()
+        };
         let login = source.online
             && course2md::auth::is_bilibili_url(&source.input)
             && read_error
@@ -1535,6 +1523,10 @@ impl Desktop {
             .min_w_0()
             .gap(rem(8.))
             .child(h_flex().min_w_0().child(chip))
+            // Why this video is recognized from speech, before what that takes.
+            .when_some(notice, |view, notice| {
+                view.child(supporting_info("import-subtitle-message", notice))
+            })
             // Recognized on this computer: whether its model is ready, and the way
             // to get it, before anything is submitted.
             .when_some(
@@ -1559,9 +1551,6 @@ impl Desktop {
                     ))
                 },
             )
-            .when_some(notice, |view, notice| {
-                view.child(supporting_info("import-subtitle-message", notice))
-            })
             .when(self.import.subtitle_loading, |view| {
                 view.children(ui::async_status(
                     "subtitle-reading",
@@ -1587,7 +1576,7 @@ impl Desktop {
             })
     }
 
-    /// The tracks, speech recognition, and the ways to get more subtitles.
+    /// The video's subtitle tracks, and the ways to get more of them.
     fn text_source_menu(
         &self,
         source: &source::Source,
@@ -1635,7 +1624,7 @@ impl Desktop {
                         if confirmed {
                             this.use_confirmed_subtitle(cx);
                         } else {
-                            this.confirm_subtitle(track.clone(), true, cx);
+                            this.confirm_subtitle(track.clone(), cx);
                         }
                     }))
             })
@@ -1655,13 +1644,6 @@ impl Desktop {
                     .on_click(cx.listener(|this, _, _, cx| this.use_confirmed_subtitle(cx))),
             );
         }
-        items.push(
-            MaterialMenuItem::new(course2md::tr!("语音识别"))
-                .leading(Icon::from(symbols::mic()))
-                .selected(speech)
-                .divider(true)
-                .on_click(cx.listener(|this, _, _, cx| this.use_speech(cx))),
-        );
         items.push(
             MaterialMenuItem::new(course2md::tr!("重新读取字幕"))
                 .leading(Icon::from(symbols::refresh()))
@@ -2234,7 +2216,11 @@ impl Desktop {
                 button(
                     "repair-generation-preferences",
                     ButtonVariant::Tonal,
-                    symbols::refresh(),
+                    if issue.can_retry {
+                        symbols::refresh()
+                    } else {
+                        symbols::restart_alt()
+                    },
                     if issue.can_retry {
                         course2md::tr!("重试保存生成笔记设置")
                     } else {
@@ -2276,6 +2262,36 @@ impl Desktop {
                 .disabled(self.storage_ui.busy)
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.begin_library_reassociation(id.clone(), window, cx)
+                })),
+            );
+        }
+        // Reopened from a task that is paused or stopped: converting starts over with
+        // the current settings and takes that task's place, said beside the action,
+        // and continuing that task instead stays one click away.
+        if let Some((id, title)) = self.workspace(cx).and_then(|workspace| {
+            let state = &workspace.state;
+            desktop_tasks::import::waiting_retried_task(state.draft()?, &state.tasks)
+                .map(|task| (task.id.clone(), task.plan.title.clone()))
+        }) {
+            facts.push(
+                supporting_info(
+                    "retried-task-consequence",
+                    course2md::tr!(
+                        "开始转换会按当前设置重新生成，并取代暂停的任务《{}》",
+                        title
+                    ),
+                )
+                .into_any_element(),
+            );
+            actions.push(
+                button(
+                    "continue-retried-task",
+                    ButtonVariant::Text,
+                    symbols::play_arrow(),
+                    course2md::tr!("继续原任务"),
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.continue_retried_task(id.clone(), window, cx)
                 })),
             );
         }

@@ -757,7 +757,6 @@ mod tests {
                 library_id: library.id.clone(),
                 folder: None,
                 subtitle: None,
-                text_source: None,
                 repair: None,
             },
             state: workspace::TaskState::Complete,
@@ -778,6 +777,7 @@ mod tests {
             replaced_by: None,
             rework: None,
             rework_accepted: None,
+            ai_answered_by: Vec::new(),
             // Its run kept the downloaded video.
             ran_with: Some(workspace::RunSettings::new(
                 &c2m_config::settings::ConfigFile {

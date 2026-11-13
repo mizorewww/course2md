@@ -106,7 +106,7 @@ pub fn save_failure_message(group: PreferenceGroup, error: &anyhow::Error) -> St
         .unwrap_or(c2m_i18n::tr!("设置变更暂时无法保存"));
     let name = match group {
         PreferenceGroup::Application => c2m_i18n::tr!("应用偏好"),
-        PreferenceGroup::Generation => c2m_i18n::tr!("生成笔记偏好"),
+        PreferenceGroup::Generation => c2m_i18n::tr!("生成笔记设置"),
         PreferenceGroup::Services => c2m_i18n::tr!("服务配置"),
     };
     c2m_i18n::tr!("{}未保存：{}", name, reason)

@@ -462,13 +462,12 @@ impl PlanInputs<'_> {
             .clone()
             .context(c2m_i18n::tr!("请先读取并确认视频"))?;
         let environment = self.ensure_plan_environment(source.online)?;
-        let mode = draft.text_source.unwrap_or_else(|| {
-            self.preferences
-                .generation()
-                .options
-                .transcript_source
-                .unwrap_or_default()
-        });
+        let mode = self
+            .preferences
+            .generation()
+            .options
+            .transcript_source
+            .unwrap_or_default();
         ensure!(
             mode == TranscriptSource::Asr
                 || (source.subtitle_request.is_none() && source.subtitle_read_error.is_none()),
@@ -511,7 +510,6 @@ impl PlanInputs<'_> {
             library_id: library.id.clone(),
             folder: None,
             subtitle: draft.subtitle.clone(),
-            text_source: draft.text_source,
             repair: None,
         };
         self.finish_plan(plan, validation, environment, None)
@@ -554,7 +552,6 @@ impl PlanInputs<'_> {
             library_id: library.id.clone(),
             folder: None,
             subtitle: None,
-            text_source: None,
             repair: None,
         };
         // Subtitles-only never reaches speech recognition; other modes may fall back to it
@@ -916,7 +913,6 @@ pub mod tests {
                         library_id: state.default_library.clone(),
                         folder: None,
                         subtitle: None,
-                        text_source: None,
                         repair: None,
                     },
                     None,

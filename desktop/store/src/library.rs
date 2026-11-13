@@ -623,7 +623,6 @@ mod tests {
                 library_id: "library-1".into(),
                 folder: None,
                 subtitle: None,
-                text_source: None,
                 repair: None,
             },
             state,
@@ -644,6 +643,7 @@ mod tests {
             replaced_by: None,
             rework: None,
             rework_accepted: None,
+            ai_answered_by: Vec::new(),
             ran_with: None,
         };
         let busy = super::note_has_unfinished_task;

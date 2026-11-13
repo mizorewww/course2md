@@ -2123,7 +2123,7 @@ impl Desktop {
         if self.preferences.is_blocked(PreferenceGroup::Generation) {
             return Some(OrdinaryPreferenceIssue {
                 group,
-                message: course2md::tr!("生成选项暂时无法读取，原文件与当前输入已保留").into(),
+                message: course2md::tr!("生成笔记设置暂时无法读取，原文件与当前输入已保留").into(),
                 can_retry: false,
             });
         }
@@ -2135,7 +2135,7 @@ impl Desktop {
                     .filter(|(_, error)| *error)
                     .map(|(message, _)| message)
                     .unwrap_or_else(|| {
-                        course2md::tr!("生成选项的修改尚未保存，当前输入已保留").into()
+                        course2md::tr!("生成笔记设置的修改尚未保存，当前输入已保留").into()
                     }),
                 can_retry: true,
             });

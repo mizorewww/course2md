@@ -701,13 +701,15 @@ pub fn resumable(task: &TaskRecord) -> bool {
     task.state == TaskState::Paused && task.handled_by.is_none() && !task.has_uncertain()
 }
 
+/// What reopening a task's video on Home is for: regenerating its note, or another
+/// attempt with the current settings.
 pub fn adjust_label(task: &TaskRecord) -> &'static str {
     if task.artifact.is_some() {
-        c2m_i18n::tr!("调整并重新生成")
+        c2m_i18n::tr!("在主页重新生成")
     } else if task.state == TaskState::Paused {
         c2m_i18n::tr!("在主页重新打开")
     } else {
-        c2m_i18n::tr!("调整后重试")
+        c2m_i18n::tr!("在主页重试")
     }
 }
 
@@ -731,6 +733,21 @@ pub fn task_log_text(task: &TaskRecord) -> Option<String> {
         .collect::<Vec<_>>()
         .join("\n");
     (!text.trim().is_empty()).then_some(text)
+}
+
+/// The AI services a task's text goes to: while it works, the one its run uses; once
+/// it has finished, those whose answers its results are (an answer replayed from an
+/// earlier service keeps that service), never one that produced none of them.
+pub fn ai_producers(task: &TaskRecord) -> Vec<&str> {
+    if task.state.finished() || task.state == TaskState::Uncertain {
+        return task.ai_answered_by.iter().map(String::as_str).collect();
+    }
+    task.ran_with
+        .as_ref()
+        .filter(|ran_with| ran_with.config.llm.uses_service())
+        .and_then(|ran_with| ran_with.ai_service.as_deref())
+        .into_iter()
+        .collect()
 }
 
 /// Where the text of a task's latest run came from; `None` before it ran.
@@ -1067,7 +1084,7 @@ pub fn task_actions_for(
                     actions.push(Read);
                 }
                 // The rest stays behind ⋯: this card is one step of the workbench. A
-                // task whose service is gone keeps 调整后重试, its only way on.
+                // task whose service is gone keeps 在主页重试, its only way on.
                 if recovery.len() > 1 && !services_missing {
                     recovery.retain(|action| *action != Adjust);
                 }
@@ -1232,7 +1249,6 @@ mod tests {
                 library_id: "library".into(),
                 folder: None,
                 subtitle: None,
-                text_source: None,
                 repair: None,
             },
             state: desktop_store::workspace::TaskState::Paused,
@@ -1253,6 +1269,7 @@ mod tests {
             replaced_by: None,
             rework: None,
             rework_accepted: None,
+            ai_answered_by: Vec::new(),
             ran_with: None,
         }
     }
@@ -1897,7 +1914,6 @@ mod tests {
                 library_id: "library".into(),
                 folder: None,
                 subtitle: None,
-                text_source: None,
                 repair: None,
             },
             state: TaskState::Partial,
@@ -1918,6 +1934,7 @@ mod tests {
             replaced_by: None,
             rework: None,
             rework_accepted: None,
+            ai_answered_by: Vec::new(),
             ran_with: None,
         };
         // The first recovery action in Recent Notes and every action in the

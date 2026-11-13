@@ -21,13 +21,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// The text a generated note is made from: the video's own choice on its card,
-/// otherwise `settings`. A subtitle confirmed for the video is used unless speech
-/// recognition is chosen, and a video found to have none at preview goes straight
-/// to speech recognition.
-pub fn text_source(plan: &TaskPlan, settings: TranscriptSource) -> TranscriptSource {
+/// The text a generated note is made from: Settings' 文字来源 (`mode`). A subtitle
+/// confirmed for the video is used unless Settings say speech recognition, and a
+/// video found to have none at preview goes straight to speech recognition.
+pub fn text_source(plan: &TaskPlan, mode: TranscriptSource) -> TranscriptSource {
     use c2m_source::subtitle::SubtitleEvidence;
-    let mode = plan.text_source.unwrap_or(settings);
     let source = &plan.source;
     if mode == TranscriptSource::Asr {
         TranscriptSource::Asr
@@ -195,8 +193,14 @@ pub fn rework(
     );
     if paid.ai && before.ai_service.is_some() && next.ai_service.is_some() && !free {
         if request(before) != request(next)
+            // Another translation language is translated again; none at all is not.
             || (before.config.llm.translate.is_some()
+                && next.config.llm.translate.is_some()
                 && before.config.llm.translate != next.config.llm.translate)
+            // Translation and summary are made from the proofread text: proofreading
+            // turned on or off changes what they are sent.
+            || (paid.after_proofreading
+                && before.config.llm.enabled != next.config.llm.enabled)
         {
             changes.push(change(
                 c2m_i18n::tr!("AI 服务"),
@@ -701,7 +705,6 @@ mod tests {
             library_id: state.default_library.clone(),
             folder: None,
             subtitle: None,
-            text_source: None,
             repair: None,
         };
         let (id, _) = state.enqueue(plan, None).unwrap();
@@ -1008,6 +1011,7 @@ mod tests {
         use workspace::PaidWork;
         let ai = PaidWork {
             ai: true,
+            after_proofreading: false,
             transcription: false,
         };
         let before = settings(|_| {});
@@ -1032,6 +1036,26 @@ mod tests {
             rework(VIDEO, Some(&before), &rule, ai).unwrap().changes,
             ["AI 处理的设置已更改"]
         );
+        // Proofreading turned off after a translation or summary was answered: they
+        // are made from the proofread text, so they would be sent again.
+        let downstream = workspace::PaidWork {
+            ai: true,
+            after_proofreading: true,
+            transcription: false,
+        };
+        let unproofread = settings(|s| s.config.llm.enabled = false);
+        assert!(rework(VIDEO, Some(&before), &unproofread, downstream).is_some());
+        // With only proofreading answered, turning it off sends nothing again.
+        assert_eq!(rework(VIDEO, Some(&before), &unproofread, ai), None);
+        // Turning translation off sends nothing again; another language does.
+        let english = settings(|s| s.config.llm.translate = Some("en".into()));
+        let no_translation = settings(|s| s.config.llm.translate = None);
+        assert_eq!(
+            rework(VIDEO, Some(&english), &no_translation, downstream),
+            None
+        );
+        let japanese = settings(|s| s.config.llm.translate = Some("ja".into()));
+        assert!(rework(VIDEO, Some(&english), &japanese, downstream).is_some());
         // Nothing answered, or nothing run before: nothing to pay for again.
         assert_eq!(
             rework(VIDEO, Some(&before), &other, PaidWork::default()),
@@ -1047,6 +1071,7 @@ mod tests {
         // Cloud speech recognition that changed redoes a paid transcript; local does not.
         let speech = PaidWork {
             ai: false,
+            after_proofreading: false,
             transcription: true,
         };
         let cloud = |model: &str, name: &str| {
@@ -1090,6 +1115,7 @@ mod tests {
     fn work_redone_under_paid_ai_is_asked_first() {
         let ai = workspace::PaidWork {
             ai: true,
+            after_proofreading: false,
             transcription: false,
         };
         let local = |edit: &dyn Fn(&mut RunSettings)| {
@@ -1220,6 +1246,47 @@ mod tests {
         );
     }
 
+    /// The UI review's case: proofreading answered by service A, the task continued
+    /// with service B whose requests are the same, so A's answers were replayed and
+    /// nothing was sent to B. The task's results name A, never B; while it works
+    /// they name the service its run uses.
+    #[test]
+    fn finished_ai_results_name_the_service_that_answered_them() {
+        let (_root, mut workspace, id) = queued_task();
+        let work_dir = workspace.state.task(&id).unwrap().work_dir.clone();
+        std::fs::create_dir_all(work_dir.join("requests")).unwrap();
+        std::fs::write(
+            work_dir.join("requests/answered.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "schema": 1, "stable_id": "answered", "request_id": "answered.1",
+                "purpose": "proofreading", "description": "", "service_version": "service-a",
+                "attempt": 1, "state": "completed", "http_status": 200,
+                "response": {}, "message": null,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let mut b = c2m_config::settings::ConfigFile::default();
+        b.llm.enabled = true;
+        b.llm.base_url = "https://ai.example.test/v1".into();
+        b.llm.model = "model".into();
+        workspace
+            .transaction(|state| {
+                let task = state.task_mut(&id).unwrap();
+                task.ran_with = Some(RunSettings::new(&b, None, Some("service-b".into())));
+                task.state = TaskState::Running;
+                Ok(())
+            })
+            .unwrap();
+        let task = workspace.state.task(&id).unwrap();
+        assert_eq!(crate::task_view::ai_producers(task), ["service-b"]);
+        let task = record_finish(&mut workspace.state, &id, None, None, true, true, false).unwrap();
+        assert_eq!(task.ai_answered_by, ["service-a"]);
+        let mut finished = task.clone();
+        finished.state = TaskState::Complete;
+        assert_eq!(crate::task_view::ai_producers(&finished), ["service-a"]);
+    }
+
     /// A task an older version queued fixed the model it would use; it now runs with
     /// the one Settings name.
     #[test]
@@ -1251,10 +1318,10 @@ mod tests {
         assert_eq!(request.config.llm.model, "current-ai");
     }
 
-    /// The video's own text choice and its confirmed subtitle decide the text
-    /// source; otherwise Settings do, and a repair works from the note's text.
+    /// Settings' 文字来源 decides; within it, the video's confirmed subtitle is used,
+    /// and a video found to have none goes to speech recognition.
     #[test]
-    fn the_text_source_follows_the_video_choice_then_settings() {
+    fn the_text_source_follows_settings() {
         use c2m_source::subtitle::SubtitleEvidence;
         let (_root, workspace, id) = queued_task();
         let mut plan = workspace.state.task(&id).unwrap().plan.clone();
@@ -1279,17 +1346,6 @@ mod tests {
         // Settings that say speech recognition only win over a subtitle found.
         assert_eq!(
             text_source(&plan, TranscriptSource::Asr),
-            TranscriptSource::Asr
-        );
-        // The person's choice on the card wins over Settings.
-        plan.text_source = Some(TranscriptSource::Subtitle);
-        assert_eq!(
-            text_source(&plan, TranscriptSource::Asr),
-            TranscriptSource::Subtitle
-        );
-        plan.text_source = Some(TranscriptSource::Asr);
-        assert_eq!(
-            text_source(&plan, TranscriptSource::Subtitle),
             TranscriptSource::Asr
         );
     }

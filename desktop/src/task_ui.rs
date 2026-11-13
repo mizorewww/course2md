@@ -887,14 +887,24 @@ impl TasksPage {
     }
 
     /// Which service received the text in the task's latest run, when one did.
+    /// The services whose answers the task's AI results are, which a result replayed
+    /// from an earlier service keeps: never a service that did not produce the text.
     fn task_ai_destination(&self, task: &TaskRecord) -> Option<String> {
         let ran_with = task.ran_with.as_ref()?;
-        let name = self.facts.services.get(
-            ran_with
-                .ai_service
-                .as_ref()
-                .filter(|_| ran_with.config.llm.uses_service())?,
-        )?;
+        let names: Vec<&str> = desktop_tasks::task_view::ai_producers(task)
+            .into_iter()
+            .filter_map(|id| {
+                self.facts.services.get(id).map(String::as_str).or_else(|| {
+                    (ran_with.ai_service.as_deref() == Some(id))
+                        .then_some(ran_with.ai_service_name.as_deref())
+                        .flatten()
+                })
+            })
+            .collect();
+        if names.is_empty() {
+            return None;
+        }
+        let name = names.join(course2md::tr!("、"));
         Some(course2md::tr!(
             "{}发送到「{}」",
             if ran_with.options().vision {
@@ -1879,7 +1889,7 @@ impl TasksPage {
                 self.facts.storage_busy,
             ),
             TaskAction::Resend => (tr!("重新发送以上内容"), symbols::refresh(), false),
-            TaskAction::Adjust => (adjust_label(task), symbols::tune(), false),
+            TaskAction::Adjust => (adjust_label(task), symbols::home(), false),
             TaskAction::Cancel if cancelling => (tr!("正在取消…"), symbols::close(), true),
             TaskAction::Cancel => (tr!("取消任务"), symbols::close(), false),
             TaskAction::ViewTask => (tr!("查看任务"), symbols::task(), false),
@@ -2103,7 +2113,6 @@ mod tests {
                 library_id: "library".into(),
                 folder: None,
                 subtitle: None,
-                text_source: None,
                 repair: None,
             },
             state: crate::workspace::TaskState::Paused,
@@ -2124,6 +2133,7 @@ mod tests {
             replaced_by: None,
             rework: None,
             rework_accepted: None,
+            ai_answered_by: Vec::new(),
             ran_with: None,
         }
     }

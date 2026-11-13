@@ -394,7 +394,6 @@ mod tests {
             library_id: id.clone(),
             folder: Some(7),
             subtitle: None,
-            text_source: None,
             repair: None,
         };
         let (task_id, _) = workspace.state.enqueue(plan, None).unwrap();
@@ -768,7 +767,6 @@ mod tests {
             library_id: library_id.clone(),
             folder: Some(17),
             subtitle: Some(old.join("subtitles/selected.srt")),
-            text_source: None,
             repair: None,
         };
         let (task_id, _) = workspace.state.enqueue(plan, None).unwrap();
