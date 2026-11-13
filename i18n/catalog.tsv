@@ -1521,7 +1521,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 移除预览	移除预览	Remove preview	移除預覽	プレビューを削除
 稍后下载模型，再重新运行视频命令： / Download the model, then rerun your video command: course2md models download	稍后下载模型，再重新运行视频命令：	Download the model, then rerun your video command: course2md models download	稍後下載模型，再重新執行影片命令：	後でモデルをダウンロードしてから、動画コマンドを再実行してください:
 稳定画面时长	稳定画面时长	Stable frame duration	穩定畫面時長	画面の安定時間
-端点不支持 response_format，降级重试成功	端点不支持 response_format，降级重试成功	The endpoint does not support response_format; retrying without it succeeded.	端點不支援 response_format，降級重試成功	エンドポイントが response_format をサポートしていないため、フォールバックして再試行し成功しました。
 笔记	笔记	Note	筆記	ノート
 笔记不在这个笔记库中	笔记不在这个笔记库中	The note is not in this note library	筆記不在這個筆記庫中	このノートはこのノート ライブラリにありません
 笔记位置无效	笔记位置无效	Invalid note location	筆記位置無效	ノートの場所が無効です
@@ -2343,3 +2342,8 @@ POST {base_url}/chat/completions（千问语音识别 qwen3-asr-flash，如阿�
 例如 {}	例如 {}	For example, {}	例如 {}	例: {}
 千问语音识别拒绝了请求参数；可能原因之一是模型不是 qwen3-asr-flash，或接口地址不以 /compatible-mode/v1 结尾 / Qwen ASR rejected the request parameters; one possible cause is a model other than qwen3-asr-flash or an address that does not end in /compatible-mode/v1	千问语音识别拒绝了请求参数；可能原因之一是模型不是 qwen3-asr-flash，或接口地址不以 /compatible-mode/v1 结尾	Qwen ASR rejected the request parameters; one possible cause is a model other than qwen3-asr-flash or an address that does not end in /compatible-mode/v1	千問語音辨識拒絕了請求參數；可能原因之一是模型不是 qwen3-asr-flash，或介面網址不以 /compatible-mode/v1 結尾	Qwen 音声認識がリクエストのパラメーターを拒否しました。考えられる原因の一つは、モデルが qwen3-asr-flash でないか、アドレスが /compatible-mode/v1 で終わっていないことです
 千问语音识别未接受这项测试请求；可能原因之一是模型不是 qwen3-asr-flash，或接口地址不以 /compatible-mode/v1 结尾	千问语音识别未接受这项测试请求；可能原因之一是模型不是 qwen3-asr-flash，或接口地址不以 /compatible-mode/v1 结尾	Qwen speech recognition did not accept this test request; one possible cause is a model other than qwen3-asr-flash or an address that does not end in /compatible-mode/v1	千問語音辨識未接受這項測試請求；可能原因之一是模型不是 qwen3-asr-flash，或介面網址不以 /compatible-mode/v1 結尾	Qwen 音声認識がこのテストリクエストを受け付けませんでした。考えられる原因の一つは、モデルが qwen3-asr-flash でないか、アドレスが /compatible-mode/v1 で終わっていないことです
+这一段的结果超出了输出上限 / The answer for this paragraph exceeds the output limit	这一段的结果超出了输出上限	The answer for this paragraph exceeds the output limit	這一段的結果超出了輸出上限	この段落の結果が出力上限を超えています
+重试未完成的校对部分	重试未完成的校对部分	Retry unfinished proofreading	重試未完成的校對部分	未完了のAI校正を再試行する
+重试未完成的翻译部分	重试未完成的翻译部分	Retry unfinished translation	重試未完成的翻譯部分	未完了のAI翻訳を再試行する
+  失败自动重试 / Automatic retries: {}	  失败自动重试：{}	  Automatic retries: {}	  失敗自動重試：{}	  失敗時の自動再試行：{}
+开启，每个请求最多发送 {} 次 / on, up to {} sends per request	开启，每个请求最多发送 {} 次	on, up to {} sends per request	開啟，每個請求最多傳送 {} 次	オン（1 リクエストにつき最大 {} 回送信）

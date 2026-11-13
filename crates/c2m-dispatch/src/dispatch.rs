@@ -1,7 +1,7 @@
 //! Durable external-request receipts. A lost response is never permission to resend.
 
 use crate::outcome::FailureKind;
-pub use crate::outcome::{Failure, HttpResponse, NetworkFailure};
+pub use crate::outcome::{Failure, HttpResponse, NetworkFailure, Repeats};
 use crate::{
     digest::{digest, json_digest},
     fsio::atomic_write,
@@ -72,6 +72,15 @@ pub struct Receipt {
     /// A reviewed compatibility rejection; never stores the provider's error body.
     #[serde(default)]
     pub unsupported_response_format: bool,
+    /// An optional parameter the service named when it refused the request, as
+    /// [`refused_parameter`] reads it; never the provider's error body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refused_parameter: Option<String>,
+    /// The answer failed in a way the same request would only repeat
+    /// ([`Repeats`]): it is never sent again, and a later run gets the same
+    /// failure back at once, so the caller asks differently without paying again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub repeats: bool,
     /// Explicit component reprocessing permits this exact known-failed attempt once.
     /// Sending/uncertain attempts still require Control::resend authorization.
     #[serde(default)]
@@ -158,6 +167,53 @@ fn rejects_response_format(status: u16, value: Option<&Value>) -> bool {
         .any(|term| message.contains(term)))
 }
 
+/// Optional request parameters a service may refuse by name, most specific first:
+/// when a refusal names several ("reasoning_effort is not supported when stream is
+/// true"), the one it is about comes before plain streaming. Each has the words
+/// that name it.
+const OPTIONAL_PARAMETERS: [(&str, &[&str]); 3] = [
+    ("reasoning", &["reasoning", "think", "thinking"]),
+    ("stream_options", &["stream_options"]),
+    ("stream", &["stream", "streaming"]),
+];
+
+/// The optional parameter a 400/422 names anywhere in its body (messages, `param`,
+/// `code`, pydantic's `loc`, nested or in arrays), so the request may go again
+/// without it. Only a name stands as evidence: an arbitrary rejection never changes
+/// the payload. The body itself is not kept.
+pub fn refused_parameter(status: u16, value: Option<&Value>) -> Option<&'static str> {
+    if !matches!(status, 400 | 422) {
+        return None;
+    }
+    let mut strings = Vec::new();
+    collect_strings(value?, &mut strings);
+    let text = strings.join(" ").to_ascii_lowercase();
+    OPTIONAL_PARAMETERS
+        .into_iter()
+        .find(|(_, words)| words.iter().any(|word| names(&text, word)))
+        .map(|(name, _)| name)
+}
+
+fn collect_strings<'a>(value: &'a Value, out: &mut Vec<&'a str>) {
+    match value {
+        Value::String(text) => out.push(text),
+        Value::Array(items) => items.iter().for_each(|item| collect_strings(item, out)),
+        Value::Object(map) => map.values().for_each(|item| collect_strings(item, out)),
+        _ => {}
+    }
+}
+
+/// Whether `text` holds `word` as a word of its own (`stream`, not `upstream`;
+/// `reasoning` also as the start of `reasoning_effort`).
+fn names(text: &str, word: &str) -> bool {
+    let part = |c: Option<char>| c.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
+    text.match_indices(word).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + word.len()..].chars().next();
+        !part(before) && (!part(after) || (word == "reasoning" && after == Some('_')))
+    })
+}
+
 struct Ledger {
     /// Where receipts are kept, so a later run sees them. A plain CLI request has none:
     /// a lost response is classified the same way, and nothing outlives the call.
@@ -174,11 +230,42 @@ struct Ledger {
 pub const CONTROL_POLL: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// Whether an unconfirmed request may be sent again without asking: only when
-/// the service has no per-request billing.
+/// the service has no per-request billing, or the person turned on automatic retries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Resend {
     AskUser,
     Free,
+    /// The person allowed failed requests to be sent again on their own, knowing
+    /// that a request whose answer was lost may be charged twice. A lost answer, a
+    /// server error or an answer that could not be used is recorded as a failure
+    /// the caller may send again, in this run or a later one, instead of an
+    /// uncertain result to ask about. What another process left unresolved (it
+    /// stopped mid-request) still waits for the person, as for [`Resend::AskUser`].
+    Automatic,
+    /// A free service with automatic retries: as [`Resend::Free`], and an answer
+    /// that could not be used is sent again too.
+    FreeAutomatic,
+}
+
+impl Resend {
+    fn asks(self) -> bool {
+        self == Self::AskUser
+    }
+
+    /// Sending again costs nothing: an unresolved request is resent unasked.
+    fn free(self) -> bool {
+        matches!(self, Self::Free | Self::FreeAutomatic)
+    }
+
+    /// A failed answer may be sent again.
+    fn retries_failures(self) -> bool {
+        matches!(self, Self::Automatic | Self::FreeAutomatic)
+    }
+}
+
+/// Statuses that say "not now" rather than "not this": the same request may follow.
+fn retryable_status(status: u16) -> bool {
+    matches!(status, 408 | 429)
 }
 
 /// The process that started a task. If it goes away (the app was killed
@@ -501,11 +588,25 @@ impl Ledger {
         }
         let control = self.check_intent(Some(&service_version))?;
         let authorized = old.as_ref().is_some_and(|receipt| {
-            (resend == Resend::Free && matches!(receipt.state, State::Sending | State::Uncertain))
+            (resend.free() && matches!(receipt.state, State::Sending | State::Uncertain))
+                || (resend.retries_failures() && receipt.state == State::Failed)
                 || control.resend.contains(&receipt.request_id)
                 || (matches!(receipt.state, State::Failed | State::Rejected)
                     && receipt.retry_authorized.as_ref() == Some(&receipt.request_id))
         });
+        // An answer that would only repeat is not sent again on its own, automatic
+        // retries included; only the person's own retry of that request sends it
+        // (a thinking model may finish another time).
+        let asked_again = old.as_ref().is_some_and(|receipt| {
+            control.resend.contains(&receipt.request_id)
+                || receipt.retry_authorized.as_ref() == Some(&receipt.request_id)
+        });
+        if let Some(old) = old.as_ref().filter(|old| old.repeats && !asked_again) {
+            return Err(Failure {
+                repeats: true,
+                ..Failure::local(old.message.clone().unwrap_or_default())
+            });
+        }
         if let Some(old) = &old {
             if matches!(old.state, State::Sending | State::Uncertain) && !authorized {
                 let mut uncertain = old.clone();
@@ -515,9 +616,9 @@ impl Ledger {
             }
             let settled = match old.state {
                 State::Failed => Some(crate::tr!("此请求未完成 / Request failed")),
-                State::Rejected if old.http_status != Some(429) => Some(crate::tr!(
-                    "服务拒绝了此请求 / Service rejected this request"
-                )),
+                State::Rejected if !old.http_status.is_some_and(retryable_status) => Some(
+                    crate::tr!("服务拒绝了此请求 / Service rejected this request"),
+                ),
                 _ => None,
             };
             if let Some(fallback) = settled
@@ -525,6 +626,7 @@ impl Ledger {
             {
                 return Err(Failure {
                     unsupported_response_format: old.unsupported_response_format,
+                    refused_parameter: old.refused_parameter.clone(),
                     ..Failure::with_status(
                         old.http_status,
                         false,
@@ -543,7 +645,7 @@ impl Ledger {
         for unresolved in self
             .unresolved_receipts()?
             .into_iter()
-            .filter(|_| resend == Resend::AskUser)
+            .filter(|_| !resend.free())
             .filter(|unresolved| !control.resend.contains(&unresolved.request_id))
         {
             if unresolved.stable_id != stable_id {
@@ -575,6 +677,8 @@ impl Ledger {
             response: None,
             message: None,
             unsupported_response_format: false,
+            refused_parameter: None,
+            repeats: false,
             retry_authorized: None,
         };
         // This durable write happens before the only call that can send network bytes.
@@ -588,14 +692,20 @@ impl Ledger {
                     self.save(&receipt)?;
                     return Err(Failure::with_status(None, true, error.message));
                 }
-                receipt.state = State::Uncertain;
+                // With automatic retries allowed, the lost answer is a failure the
+                // person already agreed to send again; nothing is left to decide.
+                receipt.state = if resend.retries_failures() {
+                    State::Failed
+                } else {
+                    State::Uncertain
+                };
                 receipt.message = Some(error.message.clone());
                 self.save(&receipt)?;
                 // Without per-request billing (a ChatGPT plan, a local server) a
                 // stalled or unfinished response costs nothing to send again, so
                 // the caller's bounded retry loop resends it instead of stopping
                 // every later request behind an uncertain result.
-                if resend == Resend::Free {
+                if !resend.asks() {
                     tracing::warn!(
                         "AI 响应中断，将重新发送 / AI response was interrupted; sending again"
                     );
@@ -611,6 +721,9 @@ impl Ledger {
             let message = rejection_message(response.status);
             receipt.state = State::Rejected;
             receipt.unsupported_response_format = unsupported;
+            let refused =
+                refused_parameter(response.status, value.as_ref().ok()).map(str::to_owned);
+            receipt.refused_parameter = refused.clone();
             receipt.message = Some(message.clone());
             // Error bodies may echo credentials. Keep status, not the untrusted body.
             self.save(&receipt)?;
@@ -618,20 +731,33 @@ impl Ledger {
             // a confirmed rejection without requiring uncertain-request authorization.
             return Err(Failure {
                 unsupported_response_format: unsupported,
-                ..Failure::with_status(Some(response.status), response.status == 429, message)
+                refused_parameter: refused,
+                retry_after: response.retry_after,
+                ..Failure::with_status(
+                    Some(response.status),
+                    retryable_status(response.status),
+                    message,
+                )
             });
         }
         if !(200..300).contains(&response.status) {
-            receipt.state = State::Uncertain;
+            receipt.state = if resend.retries_failures() {
+                State::Failed
+            } else {
+                State::Uncertain
+            };
             self.save(&receipt)?;
             // As for a lost response above: without per-request billing, a server
             // error costs nothing to send again, so no one needs to be asked.
-            if resend == Resend::Free {
-                return Err(Failure::with_status(
-                    Some(response.status),
-                    true,
-                    rejection_message(response.status),
-                ));
+            if !resend.asks() {
+                return Err(Failure {
+                    retry_after: response.retry_after,
+                    ..Failure::with_status(
+                        Some(response.status),
+                        true,
+                        rejection_message(response.status),
+                    )
+                });
             }
             return Err(self.block(BlockReason::Uncertain, Some(&receipt), crate::tr!("服务返回错误，无法确认是否已处理。再次提交可能产生额外费用 / Service processing is uncertain")));
         }
@@ -644,14 +770,26 @@ impl Ledger {
                         .into(),
                 );
                 self.save(&receipt)?;
-                return Err(Failure::local(receipt.message.unwrap()));
+                return Err(Failure {
+                    retryable: resend.retries_failures(),
+                    ..Failure::local(receipt.message.unwrap())
+                });
             }
         };
         if let Err(error) = validate(&value) {
+            // An unusable answer may come out usable the next time; sending it
+            // again is what the person allowed with automatic retries. One that
+            // would only come back the same is left for the caller to change.
+            let repeats = error.downcast_ref::<crate::outcome::Repeats>().is_some();
             receipt.state = State::Failed;
             receipt.message = Some(format!("{error:#}"));
+            receipt.repeats = repeats;
             self.save(&receipt)?;
-            return Err(Failure::local(receipt.message.unwrap()));
+            return Err(Failure {
+                retryable: resend.retries_failures() && !repeats,
+                repeats,
+                ..Failure::local(receipt.message.unwrap())
+            });
         }
         receipt.state = State::Completed;
         receipt.response = Some(value.clone());
@@ -761,6 +899,71 @@ mod tests {
                 assert!(!rejects_response_format(status, Some(&error)));
             }
         }
+        let named = |body: Value| refused_parameter(400, Some(&body));
+        assert_eq!(
+            named(
+                serde_json::json!({"error":{"message":"Unrecognized request argument supplied: stream_options"}})
+            ),
+            Some("stream_options")
+        );
+        assert_eq!(
+            named(serde_json::json!({"error":{"param":"stream","code":"unsupported_value"}})),
+            Some("stream")
+        );
+        assert_eq!(
+            named(serde_json::json!({"error":{"message":"invalid reasoning value: \"none\""}})),
+            Some("reasoning")
+        );
+        assert_eq!(
+            named(serde_json::json!({"detail":"reasoning_effort is not permitted"})),
+            Some("reasoning")
+        );
+        // Bodies as services send them.
+        for (body, expected) in [
+            // FastAPI / pydantic (vLLM, LiteLLM, many gateways)
+            (
+                serde_json::json!({"detail":[{"loc":["body","stream_options"],"msg":"extra fields not permitted","type":"value_error.extra"}]}),
+                Some("stream_options"),
+            ),
+            // Gemini's OpenAI layer answers with an array.
+            (
+                serde_json::json!([{"error":{"code":400,"message":"Invalid JSON payload received. Unknown name \"stream_options\"","status":"INVALID_ARGUMENT"}}]),
+                Some("stream_options"),
+            ),
+            (
+                serde_json::json!({"error":{"message":"Streaming is not supported for this model"}}),
+                Some("stream"),
+            ),
+            (
+                serde_json::json!({"error":{"message":"This model does not support thinking"}}),
+                Some("reasoning"),
+            ),
+            // Several names: the specific one is what was refused.
+            (
+                serde_json::json!({"error":{"message":"reasoning_effort is not supported when stream is true"}}),
+                Some("reasoning"),
+            ),
+            (
+                serde_json::json!({"error":{"message":"stream_options is only allowed when stream is true"}}),
+                Some("stream_options"),
+            ),
+            (serde_json::json!({"error":{"message":"rate limit"}}), None),
+        ] {
+            assert_eq!(named(body.clone()), expected, "{body}");
+        }
+        // An arbitrary rejection, or one that only contains the word, names nothing.
+        assert_eq!(
+            named(serde_json::json!({"error":{"message":"upstream error"}})),
+            None
+        );
+        assert_eq!(
+            named(serde_json::json!({"error":{"message":"invalid model"}})),
+            None
+        );
+        assert_eq!(
+            refused_parameter(500, Some(&serde_json::json!({"error":"stream"}))),
+            None
+        );
         assert!(!rejects_response_format(
             500,
             Some(&serde_json::json!({"error":{"message":"response_format is unsupported"}}))
@@ -775,10 +978,10 @@ mod tests {
         let calls = AtomicUsize::new(0);
         let reject = || {
             calls.fetch_add(1, Ordering::SeqCst);
-            Ok(HttpResponse {
-                status: 400,
-                body: br#"{"error":{"message":"invalid model"}}"#.to_vec(),
-            })
+            Ok(HttpResponse::new(
+                400,
+                br#"{"error":{"message":"invalid model"}}"#.to_vec(),
+            ))
         };
         assert!(
             ledger
@@ -841,10 +1044,7 @@ mod tests {
         );
     }
     fn success() -> std::result::Result<HttpResponse, NetworkFailure> {
-        Ok(HttpResponse {
-            status: 200,
-            body: br#"{"text":"saved"}"#.to_vec(),
-        })
+        Ok(HttpResponse::new(200, br#"{"text":"saved"}"#.to_vec()))
     }
     /// Reads one request, then runs `answer` on its connection. Counts requests.
     fn answering_server(
@@ -997,10 +1197,7 @@ mod tests {
                 },
                 || {
                     if ok {
-                        Ok(HttpResponse {
-                            status: 200,
-                            body: br#"{"ok":true}"#.to_vec(),
-                        })
+                        Ok(HttpResponse::new(200, br#"{"ok":true}"#.to_vec()))
                     } else {
                         Err(NetworkFailure {
                             message: "stalled".into(),
@@ -1045,12 +1242,7 @@ mod tests {
             former: &[],
             resend: Resend::Free,
         };
-        let failed = || {
-            Ok(HttpResponse {
-                status: 502,
-                body: b"bad gateway".to_vec(),
-            })
-        };
+        let failed = || Ok(HttpResponse::new(502, b"bad gateway".to_vec()));
         let first = ledger
             .send_described(&spec, failed, |_| Ok(()))
             .unwrap_err();
@@ -1064,6 +1256,220 @@ mod tests {
         let resent = ledger.send_described(&spec, success, |_| Ok(())).unwrap();
         assert!(!resent.replayed);
         assert_eq!(receipts(dir.path()).unwrap()[0].attempt, 2);
+    }
+
+    #[test]
+    fn automatic_retries_resend_failures_but_never_rejections() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = Ledger::new(dir.path(), None, &Default::default()).unwrap();
+        let payload = |text: &str| serde_json::json!({ "text": text });
+        let send = |payload: &Value,
+                    answer: &dyn Fn() -> std::result::Result<HttpResponse, NetworkFailure>,
+                    valid: bool| {
+            ledger.send_described(
+                &RequestSpec {
+                    service: "llm",
+                    purpose: "proofreading",
+                    description: "segment",
+                    endpoint: "https://example.test",
+                    identity: payload,
+                    former: &[],
+                    resend: Resend::Automatic,
+                },
+                answer,
+                |_| {
+                    anyhow::ensure!(valid, "invalid structure");
+                    Ok(())
+                },
+            )
+        };
+        let state = |text: &str| {
+            let id = receipts(dir.path())
+                .unwrap()
+                .into_iter()
+                .find(|r| {
+                    r.request_id
+                        .starts_with(&ledger_id(&ledger, &payload(text)))
+                })
+                .unwrap();
+            (id.state, id.attempt)
+        };
+        // A lost answer is a failure to send again, never a question.
+        let lost = send(
+            &payload("lost"),
+            &|| {
+                Err(NetworkFailure {
+                    message: "stalled".into(),
+                    definitely_unsent: false,
+                })
+            },
+            true,
+        )
+        .unwrap_err();
+        assert!(lost.retryable && !lost.uncertain());
+        assert_eq!(state("lost"), (State::Failed, 1));
+        // It holds nothing back, and goes out again itself.
+        assert!(send(&payload("other"), &success, true).is_ok());
+        assert!(send(&payload("lost"), &success, true).is_ok());
+        assert_eq!(state("lost"), (State::Completed, 2));
+        // An answer that cannot be used is sent again too.
+        let invalid = send(&payload("invalid"), &success, false).unwrap_err();
+        assert!(invalid.retryable);
+        assert!(send(&payload("invalid"), &success, true).is_ok());
+        assert_eq!(state("invalid"), (State::Completed, 2));
+        // A server error, with the wait the service asked for.
+        let busy = send(
+            &payload("busy"),
+            &|| {
+                Ok(HttpResponse {
+                    retry_after: Some(std::time::Duration::from_secs(3)),
+                    ..HttpResponse::new(503, Vec::new())
+                })
+            },
+            true,
+        )
+        .unwrap_err();
+        assert!(busy.retryable);
+        assert_eq!(busy.retry_after, Some(std::time::Duration::from_secs(3)));
+        assert_eq!(state("busy"), (State::Failed, 1));
+        // A timeout status is temporary; a bad key is not.
+        let timeout = send(
+            &payload("408"),
+            &|| Ok(HttpResponse::new(408, vec![])),
+            true,
+        );
+        assert!(timeout.unwrap_err().retryable);
+        assert!(send(&payload("408"), &success, true).is_ok());
+        let denied = send(
+            &payload("401"),
+            &|| Ok(HttpResponse::new(401, vec![])),
+            true,
+        );
+        assert!(!denied.unwrap_err().retryable);
+        let again = send(
+            &payload("401"),
+            &|| panic!("a rejected request was sent again"),
+            true,
+        );
+        assert!(again.is_err());
+        // A request another process left mid-flight is still the person's to decide.
+        let stable_id = ledger_id(&ledger, &payload("dead"));
+        ledger
+            .save(&Receipt {
+                schema: 1,
+                stable_id: stable_id.clone(),
+                request_id: format!("{stable_id}.1"),
+                purpose: "proofreading".into(),
+                description: "segment".into(),
+                service_version: snapshot_id(&digest(b"https://example.test")),
+                attempt: 1,
+                state: State::Sending,
+                http_status: None,
+                response: None,
+                message: None,
+                unsupported_response_format: false,
+                refused_parameter: None,
+                repeats: false,
+                retry_authorized: None,
+            })
+            .unwrap();
+        let held = send(
+            &payload("dead"),
+            &|| panic!("an unresolved request was sent again unasked"),
+            true,
+        );
+        assert!(held.unwrap_err().uncertain());
+    }
+
+    #[test]
+    fn free_automatic_retries_record_failures_and_an_answer_that_repeats_is_kept_as_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = Ledger::new(dir.path(), None, &Default::default()).unwrap();
+        let spec = |payload: &'static Value, resend| RequestSpec {
+            service: "llm",
+            purpose: "proofreading",
+            description: "segment",
+            endpoint: "https://example.test",
+            identity: payload,
+            former: &[],
+            resend,
+        };
+        static LOST: std::sync::LazyLock<Value> =
+            std::sync::LazyLock::new(|| serde_json::json!({"text": "lost"}));
+        static FULL: std::sync::LazyLock<Value> =
+            std::sync::LazyLock::new(|| serde_json::json!({"text": "full"}));
+        // A free service with automatic retries settles a lost answer as a failure,
+        // as a paid one does, not as a question for the person.
+        let lost = ledger
+            .send_described(
+                &spec(&LOST, Resend::FreeAutomatic),
+                || {
+                    Err(NetworkFailure {
+                        message: "stalled".into(),
+                        definitely_unsent: false,
+                    })
+                },
+                |_| Ok(()),
+            )
+            .unwrap_err();
+        assert!(lost.retryable);
+        let states: Vec<_> = receipts(dir.path())
+            .unwrap()
+            .into_iter()
+            .map(|r| r.state)
+            .collect();
+        assert_eq!(states, [State::Failed]);
+
+        // An answer that would only repeat is recorded so, never sent again, and a
+        // later run gets the same failure back without sending, in every mode.
+        let repeats = || {
+            ledger.send_described(&spec(&FULL, Resend::Automatic), success, |_| {
+                Err(anyhow::Error::new(crate::outcome::Repeats(
+                    "ran out".into(),
+                )))
+            })
+        };
+        let first = repeats().unwrap_err();
+        assert!(first.repeats && !first.retryable);
+        for resend in [Resend::Automatic, Resend::AskUser, Resend::FreeAutomatic] {
+            let again = ledger
+                .send_described(
+                    &spec(&FULL, resend),
+                    || panic!("an answer that repeats was asked for again"),
+                    |_| Ok(()),
+                )
+                .unwrap_err();
+            assert!(again.repeats, "{resend:?}");
+        }
+    }
+
+    fn ledger_id(ledger: &Ledger, payload: &Value) -> String {
+        let version = ledger
+            .service_versions
+            .get("llm")
+            .cloned()
+            .unwrap_or_else(|| snapshot_id(&digest(b"https://example.test")));
+        json_digest(&serde_json::json!({"service_version":version,"purpose":"proofreading","endpoint":"https://example.test","payload":payload})).unwrap()
+    }
+
+    #[test]
+    fn retry_after_is_read_from_the_response() {
+        use std::io::Write;
+        let (url, _) = answering_server(|stream| {
+            let _ = write!(
+                stream,
+                "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 12\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+        });
+        let client = crate::runtime::http_agent_keeping_errors(std::time::Duration::from_secs(5));
+        let response = crate::runtime::receive(client.post(&url).send_json(body()))
+            .ok()
+            .unwrap();
+        assert_eq!(response.status, 429);
+        assert_eq!(
+            response.retry_after,
+            Some(std::time::Duration::from_secs(12))
+        );
     }
 
     /// Lost responses leave several paid batches uncertain. Authorizing all of them
@@ -1119,10 +1525,7 @@ mod tests {
             assert_eq!(uncertain.len(), count);
             let ok = |calls: &AtomicUsize| {
                 calls.fetch_add(1, Ordering::SeqCst);
-                Ok(HttpResponse {
-                    status: 200,
-                    body: b"{}".to_vec(),
-                })
+                Ok(HttpResponse::new(200, b"{}".to_vec()))
             };
             // Without the decision nothing goes out, a never-sent batch included.
             let ledger = Ledger::new(dir.path(), Some(&control), &Default::default()).unwrap();
@@ -1332,10 +1735,7 @@ mod tests {
             &payload,
             || {
                 assert_eq!(receipts(dir.path()).unwrap()[0].state, State::Sending);
-                Ok(HttpResponse {
-                    status: 200,
-                    body: br#"{"error":"invalid"}"#.to_vec(),
-                })
+                Ok(HttpResponse::new(200, br#"{"error":"invalid"}"#.to_vec()))
             },
             |_| anyhow::bail!("协议错误"),
         );
@@ -1432,7 +1832,7 @@ mod ephemeral_tests {
                 former: &[],
                 resend,
             },
-            move || Ok(HttpResponse { status, body }),
+            move || Ok(HttpResponse::new(status, body)),
             |_| Ok(()),
         )
     }

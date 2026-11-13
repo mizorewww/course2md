@@ -117,7 +117,34 @@ impl Outcomes {
 pub struct HttpResponse {
     pub status: u16,
     pub body: Vec<u8>,
+    /// How long the service asked to be left alone (`Retry-After` in seconds).
+    pub retry_after: Option<std::time::Duration>,
 }
+
+impl HttpResponse {
+    /// An answer that asks for no particular wait.
+    pub fn new(status: u16, body: Vec<u8>) -> Self {
+        Self {
+            status,
+            body,
+            retry_after: None,
+        }
+    }
+}
+
+/// Why an answer is unusable, when sending the same request again would only
+/// bring back the same: an automatic retry leaves it to the caller to ask
+/// differently. The receipt still records a failure, so nothing replays it.
+#[derive(Debug)]
+pub struct Repeats(pub String);
+
+impl std::fmt::Display for Repeats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Repeats {}
 
 /// A request that got no complete answer, and whether it provably never left.
 pub struct NetworkFailure {
@@ -322,7 +349,16 @@ pub struct Failure {
     pub retryable: bool,
     pub message: String,
     pub unsupported_response_format: bool,
+    /// An optional request parameter the service named when it refused the
+    /// request (`stream_options`, `stream`, `reasoning`): sent without it, the
+    /// request may be accepted.
+    pub refused_parameter: Option<String>,
+    /// The answer was unusable in a way the same request would only repeat
+    /// ([`Repeats`]); the caller has to ask differently.
+    pub repeats: bool,
     pub kind: FailureKind,
+    /// The wait the service asked for before another attempt, if it named one.
+    pub retry_after: Option<std::time::Duration>,
 }
 
 impl std::fmt::Display for Failure {
@@ -341,7 +377,10 @@ impl Failure {
             retryable: false,
             message: error.to_string(),
             unsupported_response_format: false,
+            refused_parameter: None,
+            repeats: false,
             kind: FailureKind::Local,
+            retry_after: None,
         }
     }
     pub fn with_status(status: Option<u16>, retryable: bool, message: impl Into<String>) -> Self {

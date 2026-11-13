@@ -4315,6 +4315,8 @@ mod tests {
             response: completed.then(|| serde_json::json!({"choices": []})),
             message: None,
             unsupported_response_format: false,
+            refused_parameter: None,
+            repeats: false,
             retry_authorized: None,
         };
         std::fs::create_dir_all(task.work_dir.join("requests")).unwrap();
@@ -4638,6 +4640,8 @@ mod tests {
             response: None,
             message: Some("连接断开 / connection lost".into()),
             unsupported_response_format: false,
+            refused_parameter: None,
+            repeats: false,
             retry_authorized: None,
         };
         std::fs::create_dir_all(task.work_dir.join("requests")).unwrap();
@@ -4704,6 +4708,8 @@ mod tests {
             response: None,
             message: Some("未完整收到服务响应".into()),
             unsupported_response_format: false,
+            refused_parameter: None,
+            repeats: false,
             retry_authorized: None,
         };
         std::fs::create_dir_all(task.work_dir.join("requests")).unwrap();
@@ -5066,6 +5072,8 @@ mod tests {
                 response: None,
                 message: None,
                 unsupported_response_format: false,
+                refused_parameter: None,
+                repeats: false,
                 retry_authorized: None,
             };
             std::fs::write(

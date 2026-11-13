@@ -2264,7 +2264,10 @@ impl Desktop {
                 let task_id = id.clone();
                 action("retry", ButtonVariant::Tonal)
                     .icon(symbols::refresh())
-                    .child(desktop_tasks::task_view::retry_components_label(&labels))
+                    .child(desktop_tasks::task_view::task_retry_components_label(
+                        Some(&task),
+                        &labels,
+                    ))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         let parts = partial_components.clone();
                         this.reprocess_task(task_id.clone(), parts, Vec::new(), cx);

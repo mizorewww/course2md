@@ -498,6 +498,32 @@ pub fn retry_component_label(component: &str) -> &'static str {
     }
 }
 
+/// [`retry_component_label`] for `task`'s note. Proofreading and translation go in
+/// batches; when only some of them failed, retrying sends just those, which the
+/// label says, so nobody expects the whole text to be redone.
+pub fn task_retry_label(task: &TaskRecord, component: &str) -> &'static str {
+    let partial = task_note_failures(task).iter().any(|(key, _, outcome)| {
+        key == component && outcome.status == c2m_artifact::artifact::Status::Partial
+    });
+    match Component::parse(component) {
+        Some(Component::Proofreading) if partial => c2m_i18n::tr!("重试未完成的校对部分"),
+        Some(Component::Translation) if partial => c2m_i18n::tr!("重试未完成的翻译部分"),
+        _ => retry_component_label(component),
+    }
+}
+
+/// [`retry_components_label`] for `task`'s note, naming a partly finished part as
+/// [`task_retry_label`] does.
+pub fn task_retry_components_label(
+    task: Option<&TaskRecord>,
+    components: &[String],
+) -> &'static str {
+    match (task, components) {
+        (Some(task), [component]) => task_retry_label(task, component),
+        _ => retry_components_label(components),
+    }
+}
+
 /// Retry button label: one component is named; several read as 「补全未完成部分」.
 pub fn retry_components_label(components: &[String]) -> &'static str {
     if components.len() == 1 {
@@ -1902,6 +1928,24 @@ mod tests {
         );
         assert_eq!(failures[0].2.status, Status::Partial);
         assert_eq!(failures[0].2.completed, Some(1));
+        // A partly proofread note retries only what is unfinished, and says so.
+        assert_eq!(
+            super::task_retry_label(&task, "proofreading"),
+            c2m_i18n::tr!("重试未完成的校对部分")
+        );
+        assert_eq!(
+            super::task_retry_label(&task, "exports"),
+            super::retry_component_label("exports")
+        );
+        // The reader and the library name it the same way.
+        assert_eq!(
+            super::task_retry_components_label(Some(&task), &["proofreading".into()]),
+            c2m_i18n::tr!("重试未完成的校对部分")
+        );
+        assert_eq!(
+            super::task_retry_components_label(None, &["proofreading".into()]),
+            super::retry_component_label("proofreading")
+        );
         assert_eq!(failures[1].2.message.as_deref(), Some("HTML 写入失败"));
 
         for (message, kind, requires_repair) in [

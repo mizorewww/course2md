@@ -572,6 +572,8 @@ pub fn print_effective(cfg: &settings::ConfigFile) -> Result<()> {
     println!("  {:<17}: {model}", "model");
     println!("  {:<17}: {}", "vision", cfg.llm.vision);
     println!("  {:<17}: {}", "concurrency", cfg.llm.concurrency);
+    println!("  {:<17}: {}", "auto_retry", cfg.llm.auto_retry);
+    println!("  {:<17}: {}", "retry_attempts", cfg.llm.retry_attempts);
     println!("  {:<17}: {}", "summarize", cfg.llm.summarize);
     println!(
         "  {:<17}: {}",
