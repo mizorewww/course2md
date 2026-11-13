@@ -2290,6 +2290,57 @@ mod tests {
     }
 
     #[test]
+    fn only_the_persons_retry_sends_an_answer_that_ran_out_again() {
+        for authorize in [true, false] {
+            let healthy = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let answers = healthy.clone();
+            let (url, bodies) = scripted_service(move |_, items| {
+                if answers.load(std::sync::atomic::Ordering::SeqCst) {
+                    streamed(&proofread(items), "stop")
+                } else {
+                    streamed("", "length")
+                }
+            });
+            let settings = LlmSettings {
+                auto_retry: false,
+                ..polish_settings(url, 1)
+            };
+            let work = tempfile::tempdir().unwrap();
+            let run = || {
+                let control =
+                    crate::dispatch::TaskControl::open(work.path(), Default::default()).unwrap();
+                let mut sections = one_section(&["一", "二", "三", "四"]);
+                polish_sections_report(&mut sections, Path::new(""), &settings, &control)
+                    .unwrap()
+                    .succeeded
+            };
+            assert_eq!(run(), 0);
+            // The batch, its full budget, then two rounds of halves.
+            assert_eq!(bodies.lock().unwrap().len(), 8);
+            if authorize {
+                // As a retry from the task page, reader or library imports them.
+                for entry in std::fs::read_dir(work.path().join("requests")).unwrap() {
+                    let path = entry.unwrap().path();
+                    let mut receipt: serde_json::Value =
+                        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                    if receipt["state"] == "failed" {
+                        receipt["retry_authorized"] = receipt["request_id"].clone();
+                    }
+                    std::fs::write(&path, serde_json::to_vec(&receipt).unwrap()).unwrap();
+                }
+            }
+            healthy.store(true, std::sync::atomic::Ordering::SeqCst);
+            let succeeded = run();
+            let sent = bodies.lock().unwrap().len() - 8;
+            if authorize {
+                assert_eq!((succeeded, sent), (4, 1), "the person's retry is sent");
+            } else {
+                assert_eq!((succeeded, sent), (0, 0), "nothing is sent unasked");
+            }
+        }
+    }
+
+    #[test]
     fn a_later_run_goes_straight_to_the_full_budget_answer() {
         for auto_retry in [true, false] {
             let (url, bodies) = scripted_service_with_body(|body, items| {

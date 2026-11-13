@@ -594,7 +594,14 @@ impl Ledger {
                 || (matches!(receipt.state, State::Failed | State::Rejected)
                     && receipt.retry_authorized.as_ref() == Some(&receipt.request_id))
         });
-        if let Some(old) = old.as_ref().filter(|old| old.repeats) {
+        // An answer that would only repeat is not sent again on its own, automatic
+        // retries included; only the person's own retry of that request sends it
+        // (a thinking model may finish another time).
+        let asked_again = old.as_ref().is_some_and(|receipt| {
+            control.resend.contains(&receipt.request_id)
+                || receipt.retry_authorized.as_ref() == Some(&receipt.request_id)
+        });
+        if let Some(old) = old.as_ref().filter(|old| old.repeats && !asked_again) {
             return Err(Failure {
                 repeats: true,
                 ..Failure::local(old.message.clone().unwrap_or_default())
@@ -770,13 +777,12 @@ impl Ledger {
             }
         };
         if let Err(error) = validate(&value) {
-            receipt.state = State::Failed;
-            receipt.message = Some(format!("{error:#}"));
-            self.save(&receipt)?;
             // An unusable answer may come out usable the next time; sending it
             // again is what the person allowed with automatic retries. One that
             // would only come back the same is left for the caller to change.
             let repeats = error.downcast_ref::<crate::outcome::Repeats>().is_some();
+            receipt.state = State::Failed;
+            receipt.message = Some(format!("{error:#}"));
             receipt.repeats = repeats;
             self.save(&receipt)?;
             return Err(Failure {
