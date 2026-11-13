@@ -146,6 +146,8 @@ struct Desktop {
     settings_origin: Option<(Page, Option<FocusHandle>)>,
     settings_tab: settings_ui::SettingsTab,
     environment: Option<environment::Environment>,
+    /// How long queued tasks still wait for `environment`.
+    detection_wait: desktop_tasks::plan::DetectionWait,
     scrolls: [ScrollHandle; 5],
     inputs: BTreeMap<Field, Entity<InputState>>,
     config: course2md::settings::ConfigFile,
@@ -479,6 +481,7 @@ impl Desktop {
             settings_origin: None,
             settings_tab: settings_ui::SettingsTab::Appearance,
             environment: None,
+            detection_wait: desktop_tasks::plan::DetectionWait::new(Instant::now()),
             scrolls: std::array::from_fn(|_| ScrollHandle::new()),
             inputs,
             desktop_settings: config.desktop.clone(),
@@ -587,11 +590,25 @@ impl Desktop {
     }
     fn refresh_environment(&mut self, cx: &mut Context<Self>) {
         self.environment = None;
+        self.detection_wait = desktop_tasks::plan::DetectionWait::new(Instant::now());
+        // Queued tasks wait for the check only so long; then the queue goes on.
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(desktop_tasks::plan::DETECTION_WAIT)
+                .await;
+            let _ = this.update(cx, |this, cx| this.start_next_task(cx));
+        })
+        .detach();
         // Environment detection starts subprocesses synchronously (Metal enumeration can exceed ten seconds),
         // so it runs off the executor; see spawn_blocking_io.
         let task = spawn_blocking_io(environment::Environment::detect);
         cx.spawn(async move |this, cx| {
             let Some(environment) = task.await else {
+                // The check failed: queued tasks start with the fallback engine.
+                let _ = this.update(cx, |this, cx| {
+                    this.detection_wait.fail();
+                    this.start_next_task(cx);
+                });
                 return;
             };
             let _ = this.update(cx, |this, cx| {

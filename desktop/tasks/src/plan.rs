@@ -288,6 +288,39 @@ pub fn recommended_local_provider(environment: Option<&Environment>) -> AsrProvi
     }
 }
 
+/// How long queued tasks wait for this machine's check before starting without it.
+pub const DETECTION_WAIT: std::time::Duration = std::time::Duration::from_secs(12);
+
+/// Queued tasks wait for this machine's check, so an automatic speech engine is
+/// resolved from it rather than guessed, but never for long: once the check
+/// failed or `DETECTION_WAIT` passed they start with the fallback engine
+/// (`recommended_local_provider(None)`), and the speech progress a task saved
+/// decides by its own identity whether it can be reused.
+#[derive(Clone, Copy, Debug)]
+pub struct DetectionWait {
+    started: std::time::Instant,
+    failed: bool,
+}
+
+impl DetectionWait {
+    pub fn new(started: std::time::Instant) -> Self {
+        Self {
+            started,
+            failed: false,
+        }
+    }
+
+    /// The check ended without a result.
+    pub fn fail(&mut self) {
+        self.failed = true;
+    }
+
+    /// Whether queued tasks may start: the check finished, failed, or took too long.
+    pub fn may_start(&self, detected: bool, now: std::time::Instant) -> bool {
+        detected || self.failed || now.duration_since(self.started) >= DETECTION_WAIT
+    }
+}
+
 /// What a plan is built from.
 pub struct PlanInputs<'a> {
     pub preferences: &'a preferences::Store,
@@ -594,6 +627,28 @@ pub mod tests {
             .err()
             .unwrap();
         assert!(waiting.downcast_ref::<PlanPending>().is_some());
+    }
+
+    #[test]
+    fn queued_tasks_wait_for_the_machine_check_but_never_for_long() {
+        use super::{DETECTION_WAIT, DetectionWait};
+        let started = std::time::Instant::now();
+        let mut wait = DetectionWait::new(started);
+        // While the check runs, tasks wait for it.
+        assert!(!wait.may_start(false, started));
+        assert!(!wait.may_start(false, started + DETECTION_WAIT / 2));
+        // Finished, they start.
+        assert!(wait.may_start(true, started));
+        // Taking too long, they start with the fallback engine.
+        assert!(wait.may_start(false, started + DETECTION_WAIT));
+        // Failed outright, they start at once.
+        wait.fail();
+        assert!(wait.may_start(false, started));
+        // Without a check, the fallback engine is fixed for this machine.
+        assert_eq!(
+            super::recommended_local_provider(None),
+            super::recommended_local_provider(None)
+        );
     }
 
     #[test]

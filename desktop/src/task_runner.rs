@@ -504,8 +504,12 @@ impl Desktop {
             return;
         }
         // Until this machine is checked, an automatic speech engine would be a guess,
-        // and a wrong one would discard the speech progress saved with the right one.
-        if self.environment.is_none() {
+        // and a wrong one would discard the speech progress saved with the right one;
+        // a check that failed or takes too long no longer holds the queue.
+        if !self
+            .detection_wait
+            .may_start(self.environment.is_some(), Instant::now())
+        {
             return;
         }
         let Some(task) = self
