@@ -2012,7 +2012,8 @@ impl Desktop {
     }
 
     /// Capture builds only: `COURSE2MD_CAPTURE_SOURCE` fills the link field
-    /// once at startup and previews it, so preview states can be rendered.
+    /// once at startup and previews it, so preview states can be rendered. A path
+    /// to a file is taken as a local video, as if dropped on the window.
     #[cfg(feature = "capture")]
     fn capture_source(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use std::sync::atomic::Ordering;
@@ -2021,6 +2022,10 @@ impl Desktop {
             return;
         };
         if DONE.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        if std::path::Path::new(&link).is_file() {
+            self.drop_source_files(&[PathBuf::from(link)], window, cx);
             return;
         }
         self.inputs[&Field::Source].update(cx, |state, cx| state.set_value(link, window, cx));
