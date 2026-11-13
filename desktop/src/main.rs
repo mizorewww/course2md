@@ -41,7 +41,7 @@ use desktop_tasks::{backend, source};
 
 use desktop_ui::{note_text, symbols, ui};
 
-use desktop_prefs::conversion::{provider_from_id, provider_label, providers};
+use desktop_prefs::conversion::provider_label;
 use desktop_reader_core::reader::note_read_failure;
 use desktop_reader_core::reader::settle_reader_notice;
 use desktop_store::library::FolderFilter;
@@ -67,7 +67,6 @@ use std::{
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Field {
     Source,
-    Title,
     /// The name dialog's field: a folder's or a note's name.
     Name,
     Search,
@@ -79,7 +78,7 @@ impl Field {
         match self {
             Self::Source => course2md::tr!("粘贴 YouTube 或 Bilibili 视频链接"),
             Self::Search => course2md::tr!("搜索笔记标题"),
-            Self::Title | Self::Name => "",
+            Self::Name => "",
         }
     }
 }
@@ -132,7 +131,6 @@ struct Desktop {
     tasks: Entity<task_ui::TasksPage>,
     theme_frame: views::ThemeFrame,
     library_ui: library_ui::LibraryUi,
-    preference_defaults_pending: bool,
     /// The Bilibili and YouTube sign-ins.
     accounts: Entity<account_ui::AccountsView>,
     codex: desktop_accounts::codex::CodexUi,
@@ -313,7 +311,7 @@ impl Desktop {
         i18n::apply(preferences.application().language);
         let mut config = preferences.defaults_config();
         config.defaults.out = Some(output.clone());
-        let inputs: BTreeMap<_, _> = [Field::Source, Field::Title, Field::Search, Field::Name]
+        let inputs: BTreeMap<_, _> = [Field::Source, Field::Search, Field::Name]
             .into_iter()
             .map(|field| {
                 (
@@ -326,7 +324,7 @@ impl Desktop {
             .iter()
             .map(|(field, input)| {
                 let field = *field;
-                cx.observe_in(input, window, move |this: &mut Self, _, window, cx| {
+                cx.observe_in(input, window, move |this: &mut Self, _, _, cx| {
                     if field == Field::Source {
                         let value = this.value(Field::Source, cx);
                         // The draft records the input once autosave or a
@@ -340,22 +338,15 @@ impl Desktop {
                                     }
                                 });
                             }
-                            if !this.prepare_next_import(&value, window, cx) {
+                            if !this.prepare_next_import(&value, cx) {
                                 return;
                             }
                             this.invalidate_source();
                         }
                     }
-                    if matches!(field, Field::Source | Field::Title) {
+                    if field == Field::Source {
                         this.work
                             .update(cx, |work, _| work.save_draft_later(Instant::now()));
-                    }
-                    if field == Field::Title
-                        && !this.value(Field::Title, cx).is_empty()
-                        && this.import.title_required
-                    {
-                        this.import.source_validation = None;
-                        this.import.title_required = false;
                     }
                     if field == Field::Search {
                         this.library_ui.list.scroll_to(ListOffset {
@@ -427,14 +418,13 @@ impl Desktop {
                 }
             }
         });
-        let (workspace, workspace_error) =
-            match workspace::Workspace::open(output.clone(), options.clone()) {
-                Ok(workspace) => (Some(workspace), None),
-                Err(error) => (
-                    None,
-                    Some(course2md::tr!("任务记录读取失败：{}", format!("{error:#}"))),
-                ),
-            };
+        let (workspace, workspace_error) = match workspace::Workspace::open(output.clone()) {
+            Ok(workspace) => (Some(workspace), None),
+            Err(error) => (
+                None,
+                Some(course2md::tr!("任务记录读取失败：{}", format!("{error:#}"))),
+            ),
+        };
         let work = cx.new(|_| Work::new());
         if let Some(workspace) = &workspace {
             workspace.set_wake_sender(work.read(cx).waker());
@@ -478,7 +468,6 @@ impl Desktop {
             theme_frame: Default::default(),
             library_ui: library_ui::LibraryUi::new(),
             storage_records: None,
-            preference_defaults_pending: false,
             page: Page::New,
             workspace_reconciling: false,
             import_submit_focus: cx.focus_handle(),
@@ -503,8 +492,6 @@ impl Desktop {
             _subscriptions: subscriptions,
             _poll: poll,
         };
-        // Preferences and workspace records are saved separately. Reconcile
-        // inherited options after an interrupted save before restoring input.
         this.refresh_preference_defaults(cx);
         this.restore_draft(window, cx);
         this.prepare_workbench_input(window, cx);
@@ -643,13 +630,7 @@ impl Desktop {
         root
     }
 
-    fn prepare_next_import(
-        &mut self,
-        value: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let defaults = ConversionOptions::from_config(&self.preferences.defaults_config());
+    fn prepare_next_import(&mut self, value: &str, cx: &mut Context<Self>) -> bool {
         let Some(workspace) = &self.records.read(cx).workspace else {
             return false;
         };
@@ -661,13 +642,12 @@ impl Desktop {
             return true;
         }
         let prepared = self.with_workspace(cx, |workspace| {
-            workspace.transaction(|state| Ok(state.prepare_next_import(value, defaults)))
+            workspace.transaction(|state| Ok(state.prepare_next_import(value)))
         });
         match prepared.unwrap_or(Ok(false)) {
             Ok(true) => {
                 self.invalidate_source();
                 self.message = None;
-                self.inputs[&Field::Title].update(cx, |state, cx| state.set_value("", window, cx));
                 self.scrolls[Page::New as usize].set_offset(point(px(0.), px(0.)));
                 true
             }

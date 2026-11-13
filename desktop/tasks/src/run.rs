@@ -4,57 +4,137 @@
 use crate::{backend::Done, source, task_view};
 use anyhow::{Context as _, Result};
 use c2m_artifact::artifact::Manifest;
-use c2m_config::{config::TranscriptSource, settings::ConfigFile};
-use c2m_engine::execution::{Component, Request};
-use desktop_prefs::preferences::{self, ServiceRefs};
+use c2m_config::{
+    config::{AsrProvider, TranscriptSource},
+    settings::ConfigFile,
+};
+use c2m_engine::execution::{Component, Operation, Request};
+use desktop_prefs::{conversion::ConversionOptions, preferences};
 use desktop_store::{
     organize,
-    workspace::{self, Intent, LibraryLocation, LibraryWrites, TaskRecord, TaskState},
+    workspace::{
+        self, Intent, LibraryLocation, LibraryWrites, RunSettings, TaskPlan, TaskRecord, TaskState,
+    },
 };
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
 };
 
-/// The services a task's plan names.
-fn service_refs(task: &TaskRecord) -> ServiceRefs {
-    ServiceRefs {
-        asr: task.plan.asr_service.clone(),
-        llm: task.plan.ai_service.clone(),
+/// The text a generated note is made from: the video's own choice on its card,
+/// otherwise `settings`. A subtitle confirmed for the video is used unless speech
+/// recognition is chosen, and a video found to have none at preview goes straight
+/// to speech recognition.
+pub fn text_source(plan: &TaskPlan, settings: TranscriptSource) -> TranscriptSource {
+    use c2m_source::subtitle::SubtitleEvidence;
+    let mode = plan.text_source.unwrap_or(settings);
+    let source = &plan.source;
+    if mode == TranscriptSource::Asr {
+        TranscriptSource::Asr
+    } else if source.selected_subtitle.is_some() || plan.subtitle.is_some() {
+        TranscriptSource::Subtitle
+    } else if mode == TranscriptSource::Auto
+        && matches!(
+            source.subtitles,
+            SubtitleEvidence::NoneFound
+                | SubtitleEvidence::Unsupported { .. }
+                | SubtitleEvidence::Failed { .. }
+        )
+    {
+        TranscriptSource::Asr
+    } else {
+        mode
     }
 }
 
-/// Whether a service the task needs is no longer saved or was deleted, so that
-/// starting it again could only stop with the same reason.
-pub fn services_missing(preferences: &preferences::Store, task: &TaskRecord) -> bool {
-    preferences.services_missing(&task.plan.config, &service_refs(task))
+/// The configuration `plan` runs with now: Settings as they are, with what the
+/// plan itself decides (its video's text, the parts a repair redoes), and the
+/// recognition engine and its model filled in where Settings leave them
+/// automatic, `fallback` being this machine's engine. Its services are
+/// `preferences.default_refs()`.
+pub fn current_config(
+    preferences: &preferences::Store,
+    plan: &TaskPlan,
+    fallback: AsrProvider,
+) -> ConfigFile {
+    let mut config = preferences.defaults_config();
+    // Settings keep only what takes effect (vision only with proofreading), as a run reads it.
+    ConversionOptions::from_config(&config).apply_to(&mut config);
+    config.defaults.model_dir = Some(c2m_config::config::model_dir_from(
+        config.defaults.model_dir.as_deref(),
+    ));
+    match &plan.operation {
+        Operation::Generate => {
+            let settings = config.defaults.transcript_source.unwrap_or_default();
+            config.defaults.transcript_source = Some(text_source(plan, settings));
+        }
+        Operation::Reprocess { components, .. } => {
+            // The note's own text, with proofreading, translation and summary as the repair asks.
+            let repair = plan.repair.clone().unwrap_or_default();
+            config.defaults.transcript_source = Some(TranscriptSource::Subtitle);
+            config.llm.enabled = components.contains(&Component::Proofreading);
+            config.llm.summarize = components.contains(&Component::Summary);
+            config.llm.vision &= config.llm.enabled;
+            config.llm.translate = repair.translate;
+            if let Some(formats) = repair.formats {
+                config.defaults.formats = Some(formats);
+            }
+        }
+    }
+    if config.defaults.transcript_source != Some(TranscriptSource::Subtitle) {
+        let provider = config.defaults.provider.unwrap_or(fallback);
+        config.defaults.provider = Some(provider);
+        crate::plan::fill_default_asr_model(&mut config, provider);
+    }
+    config
+}
+
+/// Whether a service the task would run with now is no longer saved or was deleted,
+/// so that starting it again could only stop with the same reason.
+pub fn services_missing(
+    preferences: &preferences::Store,
+    task: &TaskRecord,
+    fallback: AsrProvider,
+) -> bool {
+    preferences.services_missing(
+        &current_config(preferences, &task.plan, fallback),
+        &preferences.default_refs(),
+    )
 }
 
 /// The credential references a task needs resolved before it can start.
 pub fn needed_credentials(
     preferences: &preferences::Store,
     task: &TaskRecord,
+    fallback: AsrProvider,
 ) -> Result<Vec<String>> {
-    preferences.credential_references_for(&task.plan.config, &service_refs(task))
+    preferences.credential_references_for(
+        &current_config(preferences, &task.plan, fallback),
+        &preferences.default_refs(),
+    )
 }
 
-/// The engine request a task runs as, with its services resolved and `secrets` in place.
-/// A local source that moved is read from where the reader last found it.
+/// The engine request a task runs as, with the current settings and services resolved
+/// and `secrets` in place, and what it runs with for the record. A local source that
+/// moved is read from where the reader last found it.
 pub fn execution_request(
     preferences: &preferences::Store,
     state: &workspace::State,
     task: &TaskRecord,
     secrets: &HashMap<String, String>,
-) -> Result<Request> {
+    fallback: AsrProvider,
+) -> Result<(Request, RunSettings)> {
     let location = state
         .library(&task.plan.library_id)
         .context(c2m_i18n::tr!("任务保存位置暂时不可用"))?;
-    let refs = service_refs(task);
+    let refs = preferences.default_refs();
+    let base = current_config(preferences, &task.plan, fallback);
     let config = preferences
-        .resolve_for_execution_with_secrets(&task.plan.config, &refs, secrets)?
+        .resolve_for_execution_with_secrets(&base, &refs, secrets)?
         .into_config();
+    let ran_with = RunSettings::new(&config, refs.asr.clone(), refs.llm.clone());
     let course_id = workspace::course_dir_name(&task.plan.source_id);
-    let service_versions = [("asr", refs.asr), ("llm", refs.llm)]
+    let service_versions = [("asr", refs.asr.clone()), ("llm", refs.llm)]
         .into_iter()
         .filter_map(|(purpose, reference)| reference.map(|r| (purpose.to_owned(), r)))
         .collect();
@@ -65,44 +145,54 @@ pub fn execution_request(
         .map(|path| path.to_string_lossy().into_owned())
         .filter(|_| !task.plan.source.online && !Path::new(&task.plan.source.input).is_file())
         .unwrap_or_else(|| task.plan.source.input.clone());
-    Ok(Request {
-        schema: 1,
-        operation: task.plan.operation.clone(),
-        task_id: task.id.clone(),
-        version_id: None,
-        course_dir: location.root.join(&course_id),
-        course_id,
-        source,
-        source_id: task.plan.source_id.clone(),
-        title: task.plan.title.clone(),
-        author: task.plan.source.author.clone(),
-        duration: task.plan.source.duration,
-        subtitle: if task.plan.options().source_mode != TranscriptSource::Asr {
-            task.plan.subtitle.clone()
-        } else {
-            None
+    let subtitle = (config.defaults.transcript_source != Some(TranscriptSource::Asr))
+        .then(|| task.plan.subtitle.clone())
+        .flatten();
+    Ok((
+        Request {
+            schema: 1,
+            operation: task.plan.operation.clone(),
+            task_id: task.id.clone(),
+            version_id: None,
+            course_dir: location.root.join(&course_id),
+            course_id,
+            source,
+            source_id: task.plan.source_id.clone(),
+            title: task.plan.title.clone(),
+            author: task.plan.source.author.clone(),
+            duration: task.plan.source.duration,
+            subtitle,
+            subtitle_events: None,
+            config,
+            work_dir: task.work_dir.clone(),
+            allow_unauthenticated_asr: refs
+                .asr
+                .as_deref()
+                .and_then(|id| preferences.version(id))
+                .is_some_and(|version| {
+                    version.config.authentication == preferences::Authentication::None
+                }),
+            control_path: Some(task.work_dir.join("control.json")),
+            service_versions,
         },
-        subtitle_events: None,
-        config,
-        work_dir: task.work_dir.clone(),
-        allow_unauthenticated_asr: task
-            .plan
-            .asr_service
-            .as_deref()
-            .and_then(|id| preferences.version(id))
-            .is_some_and(|version| {
-                version.config.authentication == preferences::Authentication::None
-            }),
-        control_path: Some(task.work_dir.join("control.json")),
-        service_versions,
-    })
+        ran_with,
+    ))
 }
 
 /// What a task's control file should say: the engine reads it at every safe boundary.
-/// A service removed or retired since the plan was made is stopped.
+/// A service the run started with that was removed or retired since is stopped.
 pub fn task_control(preferences: &preferences::Store, task: &TaskRecord) -> Result<Vec<u8>> {
-    let stopped: Vec<_> = [&task.plan.asr_service, &task.plan.ai_service]
+    control_for(preferences, task, task.ran_with.as_ref())
+}
+
+fn control_for(
+    preferences: &preferences::Store,
+    task: &TaskRecord,
+    ran_with: Option<&RunSettings>,
+) -> Result<Vec<u8>> {
+    let stopped: Vec<_> = ran_with
         .into_iter()
+        .flat_map(|ran_with| [&ran_with.asr_service, &ran_with.ai_service])
         .flatten()
         .filter(|id| {
             preferences
@@ -119,6 +209,8 @@ pub fn task_control(preferences: &preferences::Store, task: &TaskRecord) -> Resu
 /// Everything a start needs from the record, taken before the library is read.
 pub struct StartRequest {
     pub request: Request,
+    /// What the run starts with, for `mark_running`.
+    pub ran_with: RunSettings,
     control: Vec<u8>,
     location: LibraryLocation,
     writes: LibraryWrites,
@@ -130,10 +222,12 @@ pub fn start_request(
     workspace: Option<&workspace::Workspace>,
     task: &TaskRecord,
     secrets: &HashMap<String, String>,
+    fallback: AsrProvider,
 ) -> Result<StartRequest> {
     let workspace = workspace.context(c2m_i18n::tr!("任务记录不可用"))?;
-    let request = execution_request(preferences, &workspace.state, task, secrets)?;
-    let control = task_control(preferences, task)?;
+    let (request, ran_with) =
+        execution_request(preferences, &workspace.state, task, secrets, fallback)?;
+    let control = control_for(preferences, task, Some(&ran_with))?;
     let location = workspace
         .state
         .library(&task.plan.library_id)
@@ -141,6 +235,7 @@ pub fn start_request(
         .context(c2m_i18n::tr!("任务保存位置尚未恢复"))?;
     Ok(StartRequest {
         request,
+        ran_with,
         control,
         location,
         writes: workspace.library_writes(),
@@ -150,22 +245,24 @@ pub fn start_request(
 impl StartRequest {
     /// Checks the library and puts the task's subtitles and control file in place.
     /// Blocking: all of it touches the library's disk, which may be slow.
-    pub fn prepare(self, task: &TaskRecord) -> Result<Request> {
+    pub fn prepare(self, task: &TaskRecord) -> Result<(Request, RunSettings)> {
         let Self {
             mut request,
+            ran_with,
             control,
             location,
             writes,
         } = self;
         workspace::check_library(&location)?;
-        if task.plan.options().source_mode != TranscriptSource::Asr && task.plan.subtitle.is_none()
+        if request.config.defaults.transcript_source != Some(TranscriptSource::Asr)
+            && task.plan.subtitle.is_none()
         {
             request.subtitle_events = workspace::task_subtitle_events(task)?;
         }
         workspace::store_task_subtitles(task)?;
         writes.write_control_now(&task.work_dir.join("control.json"), &control)?;
         request.validate()?;
-        Ok(request)
+        Ok((request, ran_with))
     }
 }
 
@@ -176,10 +273,11 @@ pub fn still_runnable(state: &workspace::State, id: &str) -> bool {
         .is_some_and(|record| record.state == TaskState::Queued && record.intent == Intent::Run)
 }
 
-/// The record of a task whose engine is about to start.
-pub fn mark_running(state: &mut workspace::State, id: &str) -> Result<()> {
+/// The record of a task whose engine is about to start with `ran_with`.
+pub fn mark_running(state: &mut workspace::State, id: &str, ran_with: RunSettings) -> Result<()> {
     let record = state.task_mut(id).context(c2m_i18n::tr!("任务不存在"))?;
     record.state = TaskState::Running;
+    record.ran_with = Some(ran_with);
     record.events.begin_run();
     workspace::forget_task_subtitles(record);
     record.updated = workspace::now();
@@ -376,31 +474,6 @@ pub fn repairable_components(task: &TaskRecord) -> Vec<Component> {
         .collect()
 }
 
-/// The configuration a repair of `components` runs with on `ai_service`: the note's own
-/// text, with proofreading, translation and summary as the repair asks.
-pub fn reprocess_config(
-    preferences: &preferences::Store,
-    task: &TaskRecord,
-    components: &[Component],
-    ai_service: &str,
-) -> Result<ConfigFile> {
-    let mut base = task.plan.config.clone();
-    base.defaults.transcript_source = Some(TranscriptSource::Subtitle);
-    base.llm.enabled = components.contains(&Component::Proofreading);
-    base.llm.summarize = components.contains(&Component::Summary);
-    // Translation is redone on its own, or follows the proofread paragraphs it is redone with.
-    if !base.llm.enabled && !components.contains(&Component::Translation) {
-        base.llm.translate = None;
-    }
-    preferences.config_for_refs(
-        &base,
-        &ServiceRefs {
-            asr: None,
-            llm: Some(ai_service.to_owned()),
-        },
-    )
-}
-
 /// Where a task's exports are, when they are still there.
 pub fn task_export_destination(state: &workspace::State, id: &str) -> Result<PathBuf> {
     let task = state.task(id).context(c2m_i18n::tr!("任务记录不存在"))?;
@@ -419,13 +492,10 @@ mod tests {
         let mut workspace = workspace::Workspace::open_at_inline(
             root.path().join("workspace.json"),
             root.path().join("library"),
-            Default::default(),
         )
         .unwrap();
         let state = &mut workspace.state;
         let source = crate::plan::tests::source("https://www.bilibili.com/video/BVrun", "课程");
-        let mut config = c2m_config::settings::ConfigFile::default();
-        desktop_prefs::conversion::ConversionOptions::default().apply_to(&mut config);
         let plan = workspace::TaskPlan {
             operation: Default::default(),
             source_id: source.identity.clone(),
@@ -434,9 +504,8 @@ mod tests {
             library_id: state.default_library.clone(),
             folder: None,
             subtitle: None,
-            config,
-            asr_service: None,
-            ai_service: None,
+            text_source: None,
+            repair: None,
         };
         let (id, _) = state.enqueue(plan, None).unwrap();
         (root, workspace, id)
@@ -447,9 +516,16 @@ mod tests {
         let (_root, mut workspace, id) = queued_task();
         assert!(still_runnable(&workspace.state, &id));
         workspace
-            .transaction(|state| mark_running(state, &id))
+            .transaction(|state| {
+                mark_running(
+                    state,
+                    &id,
+                    RunSettings::new(&Default::default(), None, None),
+                )
+            })
             .unwrap();
         assert_eq!(workspace.state.task(&id).unwrap().state, TaskState::Running);
+        assert!(workspace.state.task(&id).unwrap().ran_with.is_some());
         assert!(!still_runnable(&workspace.state, &id));
         fail_before_start(&mut workspace, &id, &anyhow::anyhow!("凭据读取失败")).unwrap();
         let task = workspace.state.task(&id).unwrap();
@@ -483,7 +559,11 @@ mod tests {
     fn a_control_file_stops_a_service_that_is_gone() {
         let (_root, workspace, id) = queued_task();
         let mut task = workspace.state.task(&id).unwrap().clone();
-        task.plan.ai_service = Some("removed".into());
+        task.ran_with = Some(RunSettings::new(
+            &Default::default(),
+            None,
+            Some("removed".into()),
+        ));
         let preferences = desktop_prefs::preferences::Store::open(
             _root.path().join("preferences"),
             std::sync::Arc::new(desktop_prefs::credentials::MemoryCredentialVault::new()),
@@ -494,131 +574,203 @@ mod tests {
         assert_eq!(control["intent"], serde_json::json!("run"));
     }
 
-    /// A task planned with a service that is no longer saved stops before it starts,
-    /// offers no resume that could only stop again, leads with adjusting it, and the
-    /// new attempt follows the current default while the task keeps its own version.
-    #[test]
-    fn a_task_whose_service_is_gone_goes_on_as_a_new_attempt_with_the_default() {
-        use crate::task_view::{TaskAction, TaskFacts, TaskSurface, lead_action, task_actions_for};
+    fn preferences_with_ai_service(
+        root: &std::path::Path,
+        model: &str,
+    ) -> (desktop_prefs::preferences::Store, String) {
         use desktop_prefs::preferences::{
             Authentication, BindingScope, ServiceDraft, ServiceProtocol, ServicePurpose, Store,
         };
-        let (root, mut workspace, id) = queued_task();
         let mut preferences = Store::open(
-            root.path().join("preferences"),
+            root.join("preferences"),
             std::sync::Arc::new(desktop_prefs::credentials::MemoryCredentialVault::new()),
         );
         let mut draft = ServiceDraft::new(ServicePurpose::Ai);
         draft.protocol = ServiceProtocol::OllamaChat;
         draft.authentication = Authentication::None;
         draft.address = "http://127.0.0.1:9".into();
-        draft.model = "default-model".into();
+        draft.model = model.into();
         let draft = preferences.commit_service_draft(draft, None).unwrap();
         let verified = Store::verify_credential(
             preferences.vault().as_ref(),
             preferences.publication_credential(&draft.id).unwrap(),
         )
         .unwrap();
-        let default = preferences
+        let version = preferences
             .commit_publication(&draft.id, BindingScope::Defaults, verified)
             .unwrap();
+        (preferences, version.id)
+    }
 
-        workspace
-            .transaction(|state| {
-                let task = state.task_mut(&id).unwrap();
-                task.plan.config.llm.enabled = true;
-                task.plan.ai_service = Some("service-version-gone".into());
-                Ok(())
-            })
-            .unwrap();
+    /// Settings `model` for local speech recognition and proofreading on.
+    fn save_speech_model(preferences: &mut desktop_prefs::preferences::Store, model: &str) {
+        let mut next = preferences.generation().clone();
+        next.options.provider = Some(AsrProvider::Cpu);
+        next.options.transcript_source = Some(TranscriptSource::Asr);
+        next.options.asr_model = Some(model.into());
+        next.ai.enabled = true;
+        preferences.save_generation(next).unwrap();
+    }
+
+    /// The reported bug: a task queued before the model was changed in Settings
+    /// still ran with the old one. A task holds no settings of its own: it runs
+    /// with the speech model and AI service Settings name when it starts, and its
+    /// record then says what that run used.
+    #[test]
+    fn a_task_queued_before_a_settings_change_runs_with_the_new_model() {
+        use desktop_prefs::preferences::{BindingScope, ServiceDraft};
+        let (root, mut workspace, id) = queued_task();
+        let (mut preferences, old_service) = preferences_with_ai_service(root.path(), "old-ai");
+        save_speech_model(&mut preferences, "old-speech");
         let task = workspace.state.task(&id).unwrap().clone();
-        let error = needed_credentials(&preferences, &task).unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            c2m_i18n::tr!("任务使用的服务已从设置中删除")
-        );
-        assert!(services_missing(&preferences, &task));
-        fail_before_start(&mut workspace, &id, &error).unwrap();
-        let task = workspace.state.task(&id).unwrap().clone();
-        let facts = TaskFacts {
-            active: false,
-            expanded: false,
-            library: None,
-            needs_reassociation: false,
-            queue: Vec::new(),
-        };
-        for surface in [TaskSurface::Home, TaskSurface::Card, TaskSurface::Menu] {
-            let actions = task_actions_for(&task, surface, &facts, true);
-            assert!(!actions.contains(&TaskAction::Resume));
-            assert!(actions.contains(&TaskAction::Adjust));
-        }
-        let home = task_actions_for(&task, TaskSurface::Home, &facts, true);
-        assert_eq!(
-            lead_action(&home, &task, TaskSurface::Home),
-            Some(&TaskAction::Adjust)
-        );
-        // With another way to recover offered too, the workbench keeps adjusting.
-        let mut model = task.clone();
-        model.events.model_required = true;
-        let home = task_actions_for(&model, TaskSurface::Home, &facts, true);
-        assert!(home.contains(&TaskAction::PrepareModel));
-        assert!(home.contains(&TaskAction::Adjust));
-        // With its service there, continuing stays the way on.
-        let home = task_actions_for(&task, TaskSurface::Home, &facts, false);
-        assert_eq!(
-            lead_action(&home, &task, TaskSurface::Home),
-            Some(&TaskAction::Resume)
-        );
-
-        crate::plan::adjust_task(&mut workspace.state, &preferences, &id, None).unwrap();
-        let input = workspace.state.draft().unwrap();
-        assert_eq!(input.retry_of.as_deref(), Some(id.as_str()));
-        assert_eq!(input.ai_service, None);
-        assert_eq!(
-            preferences
-                .plan_refs(&desktop_prefs::preferences::ServiceRefs {
-                    asr: input.asr_service.clone(),
-                    llm: input.ai_service.clone(),
-                })
-                .llm,
-            Some(default.id.clone())
-        );
-        assert_eq!(
-            workspace
-                .state
-                .task(&id)
-                .unwrap()
-                .plan
-                .ai_service
-                .as_deref(),
-            Some("service-version-gone"),
-            "the task keeps the version its requests were made with"
-        );
-
-        // While the services record cannot be read, nothing is forgotten.
-        let services = root.path().join("preferences").join("services.json");
-        std::fs::write(&services, b"{damaged").unwrap();
-        std::fs::write(desktop_prefs::store::backup_path(&services), b"{damaged").unwrap();
-        let unreadable = Store::open(
-            root.path().join("preferences"),
-            std::sync::Arc::new(desktop_prefs::credentials::MemoryCredentialVault::new()),
-        );
-        let mut input = workspace.state.draft().unwrap().clone();
-        input.ai_service = Some("service-version-gone".into());
-        assert!(!crate::plan::forget_missing_draft_services(
-            &unreadable,
-            &mut input
-        ));
-        assert_eq!(input.ai_service.as_deref(), Some("service-version-gone"));
-
-        // A choice still saved is kept.
-        let mut input = workspace.state.draft().unwrap().clone();
-        input.ai_service = Some(default.id.clone());
-        assert!(!crate::plan::forget_missing_draft_services(
+        let (before, _) = execution_request(
             &preferences,
-            &mut input
-        ));
-        assert_eq!(input.ai_service, Some(default.id));
+            &workspace.state,
+            &task,
+            &HashMap::new(),
+            AsrProvider::Cpu,
+        )
+        .unwrap();
+        assert_eq!(
+            before.config.defaults.asr_model.as_deref(),
+            Some("old-speech")
+        );
+        assert_eq!(before.config.llm.model, "old-ai");
+
+        // Settings change while the task waits: another speech model, and the AI
+        // service edited to another model.
+        save_speech_model(&mut preferences, "new-speech");
+        let mut edit = ServiceDraft::from_version(preferences.version(&old_service).unwrap());
+        edit.model = "new-ai".into();
+        let edit = preferences.commit_service_draft(edit, None).unwrap();
+        let verified = desktop_prefs::preferences::Store::verify_credential(
+            preferences.vault().as_ref(),
+            preferences.publication_credential(&edit.id).unwrap(),
+        )
+        .unwrap();
+        let new_service = preferences
+            .commit_publication(&edit.id, BindingScope::Defaults, verified)
+            .unwrap()
+            .id;
+        let task = workspace.state.task(&id).unwrap().clone();
+        let start = start_request(
+            &preferences,
+            Some(&workspace),
+            &task,
+            &HashMap::new(),
+            AsrProvider::Cpu,
+        )
+        .unwrap();
+        assert_eq!(
+            start.request.config.defaults.asr_model.as_deref(),
+            Some("new-speech")
+        );
+        assert_eq!(start.request.config.llm.model, "new-ai");
+        assert_eq!(
+            start.request.service_versions.get("llm"),
+            Some(&new_service)
+        );
+        let ran_with = start.ran_with.clone();
+        workspace
+            .transaction(|state| mark_running(state, &id, ran_with))
+            .unwrap();
+        let ran_with = workspace.state.task(&id).unwrap().ran_with.clone().unwrap();
+        assert_eq!(
+            ran_with.config.defaults.asr_model.as_deref(),
+            Some("new-speech")
+        );
+        assert_eq!(ran_with.ai_service.as_deref(), Some(new_service.as_str()));
+        assert!(ran_with.config.llm.api_key.is_empty());
+
+        // A retry or resume runs with Settings as they are by then, too.
+        save_speech_model(&mut preferences, "third-speech");
+        let task = workspace.state.task(&id).unwrap().clone();
+        let (again, _) = execution_request(
+            &preferences,
+            &workspace.state,
+            &task,
+            &HashMap::new(),
+            AsrProvider::Cpu,
+        )
+        .unwrap();
+        assert_eq!(
+            again.config.defaults.asr_model.as_deref(),
+            Some("third-speech")
+        );
+    }
+
+    /// A task an older version queued fixed the model it would use; it now runs with
+    /// the one Settings name.
+    #[test]
+    fn a_task_an_older_version_queued_runs_with_the_current_settings() {
+        let (root, workspace, id) = queued_task();
+        let (mut preferences, _) = preferences_with_ai_service(root.path(), "current-ai");
+        save_speech_model(&mut preferences, "current-speech");
+        let mut record = serde_json::to_value(workspace.state.task(&id).unwrap()).unwrap();
+        let mut old = c2m_config::settings::ConfigFile::default();
+        old.defaults.asr_model = Some("old-speech".into());
+        old.defaults.provider = Some(AsrProvider::Cpu);
+        old.llm.model = "old-ai".into();
+        record["plan"]["config"] = serde_json::to_value(&old).unwrap();
+        record["plan"]["ai_service"] = "service-version-old".into();
+        let mut task: TaskRecord = serde_json::from_value(record).unwrap();
+        task.work_dir = workspace.state.task(&id).unwrap().work_dir.clone();
+        let (request, _) = execution_request(
+            &preferences,
+            &workspace.state,
+            &task,
+            &HashMap::new(),
+            AsrProvider::Cpu,
+        )
+        .unwrap();
+        assert_eq!(
+            request.config.defaults.asr_model.as_deref(),
+            Some("current-speech")
+        );
+        assert_eq!(request.config.llm.model, "current-ai");
+    }
+
+    /// The video's own text choice and its confirmed subtitle decide the text
+    /// source; otherwise Settings do, and a repair works from the note's text.
+    #[test]
+    fn the_text_source_follows_the_video_choice_then_settings() {
+        use c2m_source::subtitle::SubtitleEvidence;
+        let (_root, workspace, id) = queued_task();
+        let mut plan = workspace.state.task(&id).unwrap().plan.clone();
+        assert_eq!(
+            text_source(&plan, TranscriptSource::Auto),
+            TranscriptSource::Auto
+        );
+        assert_eq!(
+            text_source(&plan, TranscriptSource::Asr),
+            TranscriptSource::Asr
+        );
+        plan.source.subtitles = SubtitleEvidence::NoneFound;
+        assert_eq!(
+            text_source(&plan, TranscriptSource::Auto),
+            TranscriptSource::Asr
+        );
+        plan.subtitle = Some("captions.srt".into());
+        assert_eq!(
+            text_source(&plan, TranscriptSource::Auto),
+            TranscriptSource::Subtitle
+        );
+        // Settings that say speech recognition only win over a subtitle found.
+        assert_eq!(
+            text_source(&plan, TranscriptSource::Asr),
+            TranscriptSource::Asr
+        );
+        // The person's choice on the card wins over Settings.
+        plan.text_source = Some(TranscriptSource::Subtitle);
+        assert_eq!(
+            text_source(&plan, TranscriptSource::Asr),
+            TranscriptSource::Subtitle
+        );
+        plan.text_source = Some(TranscriptSource::Asr);
+        assert_eq!(
+            text_source(&plan, TranscriptSource::Subtitle),
+            TranscriptSource::Asr
+        );
     }
 
     /// A note the person had edited is replaced; the task's result tells them where

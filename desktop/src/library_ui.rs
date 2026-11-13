@@ -5,9 +5,8 @@ use gpui_kit_material::{
     color::ColorRole,
     icons::Icon,
     prelude::{
-        ButtonVariant, ExposedDropdown, ListDensity, ListItem, ListLeading, MaterialDialog,
-        TextField, TextFieldShape, TextFieldVariant, TileScale, material_button, rem,
-        segmented_list,
+        ButtonVariant, ListDensity, ListItem, ListLeading, MaterialDialog, TextField,
+        TextFieldShape, TileScale, material_button, rem, segmented_list,
     },
 };
 use std::{
@@ -21,12 +20,11 @@ use std::{
 /// What the name dialog names.
 #[derive(Clone)]
 pub(crate) enum NameTarget {
-    /// A new folder inside `parent`, chosen for `draft` when it was asked for from one,
-    /// and receiving `then_move` when the move dialog had nowhere else to offer.
+    /// A new folder inside `parent`, receiving `then_move` when the move dialog had
+    /// nowhere else to offer.
     NewFolder {
         root: PathBuf,
         parent: Option<u64>,
-        draft: Option<String>,
         then_move: Option<Moving>,
     },
     Folder {
@@ -70,7 +68,6 @@ pub(crate) struct ArrangeKey {
 pub(crate) struct LibraryUi {
     pub name_dialog: Option<NameDialog>,
     pub move_dialog: Option<MoveDialog>,
-    pub folder_picker_open: bool,
     /// The folder navigation's sheet on narrow windows.
     pub places_open: bool,
     /// Tree nodes the person toggled: opened folders, or closed library tops (id 0).
@@ -117,7 +114,6 @@ impl LibraryUi {
         Self {
             name_dialog: None,
             move_dialog: None,
-            folder_picker_open: false,
             places_open: false,
             folder_tree_open: HashSet::new(),
             folder_tree_scroll: ScrollHandle::new(),
@@ -183,7 +179,7 @@ impl Desktop {
 
     pub fn inspect_source(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut input = self.value(Field::Source, cx);
-        if !self.prepare_next_import(&input, window, cx) {
+        if !self.prepare_next_import(&input, cx) {
             return;
         }
         if self.import.preview_cancel.is_some()
@@ -297,9 +293,6 @@ impl Desktop {
                             if let course2md::subtitle::SubtitleEvidence::Found { tracks, .. } = &mut source.subtitles {
                                 course2md::subtitle::sort_tracks(tracks, &this.preferences.generation().preferred_subtitle_languages, course2md::i18n::lang().code(), source.original_language.as_deref());
                             }
-                            let title = this.workspace(cx).and_then(|workspace| workspace.state.draft())
-                                .filter(|draft| draft.custom_title).map(|draft| draft.title.clone()).unwrap_or_else(|| source.title.clone());
-                            this.inputs[&Field::Title].update(cx, |state, cx| state.set_value(title, window, cx));
                             let previous_source = previous_source.as_ref().filter(|previous| previous.identity == source.identity);
                             let wanted = previous_source.and_then(|previous| previous.subtitle_request.as_ref().map(|track| track.id.clone()).or_else(|| previous.selected_subtitle.as_ref().map(|subtitle| subtitle.track_id.clone())));
                             let default_track = match &wanted {
@@ -314,7 +307,7 @@ impl Desktop {
                             }
                             this.import.source_preview = Some(source);
                             this.save_current_draft(cx);
-                            if this.task_options(cx).source_mode != course2md::config::TranscriptSource::Asr && let Some(track) = default_track {
+                            if this.text_mode(cx) != course2md::config::TranscriptSource::Asr && let Some(track) = default_track {
                                 if wanted.is_none() { this.confirm_default_subtitle(track, cx); } else { this.confirm_subtitle(track, false, cx); }
                             }
                         }
@@ -430,27 +423,14 @@ impl Desktop {
         .detach();
     }
 
-    /// The library a new folder goes in, and the draft it is for on the workbench.
-    fn current_folder_origin(&self, cx: &App) -> (PathBuf, Option<String>) {
-        if self.page == Page::New
-            && let Some(workspace) = &self.records.read(cx).workspace
-            && let Some(draft) = workspace.state.draft()
-            && let Some(library) = workspace.state.library(&draft.library_id)
-        {
-            return (library.root.clone(), Some(draft.id.clone()));
-        }
-        (self.library(cx).root.clone(), None)
-    }
-
-    /// A new top-level folder in the current library, for the workbench's draft there.
+    /// Capture builds: a new top-level folder in the current library.
+    #[cfg(feature = "capture")]
     pub fn begin_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (root, draft) = self.current_folder_origin(cx);
-        let parent = None;
+        let root = self.library(cx).root.clone();
         self.begin_naming(
             NameTarget::NewFolder {
                 root,
-                parent,
-                draft,
+                parent: None,
                 then_move: None,
             },
             window,
@@ -472,7 +452,6 @@ impl Desktop {
             None => NameTarget::NewFolder {
                 root,
                 parent,
-                draft: None,
                 then_move: None,
             },
         };
@@ -674,34 +653,6 @@ impl Desktop {
                     Moving::Folder(id) => self.move_folder_into(root, id, Some(saved), cx),
                 }
                 return;
-            }
-            NameTarget::NewFolder {
-                root,
-                draft: Some(draft_id),
-                ..
-            } => {
-                if let Some(Err(error)) = self.with_workspace(cx, |workspace| {
-                    workspace.transaction(|state| {
-                        if let Some(draft) =
-                            state.drafts.iter_mut().find(|draft| &draft.id == draft_id)
-                        {
-                            draft.folder = Some(saved);
-                        }
-                        Ok(())
-                    })
-                }) && let Some(dialog) = &mut self.library_ui.name_dialog
-                {
-                    dialog.error = Some(course2md::tr!(
-                        "文件夹已创建，保存位置尚未更新：{}",
-                        format!("{error:#}")
-                    ));
-                    dialog.target = NameTarget::Folder {
-                        root: root.clone(),
-                        id: saved,
-                    };
-                    cx.notify();
-                    return;
-                }
             }
             NameTarget::NewFolder { root, .. } | NameTarget::Folder { root, .. } => {
                 self.select_library_scope(root.clone(), FolderFilter::Folder(saved), cx);
@@ -944,7 +895,6 @@ impl Desktop {
                             NameTarget::NewFolder {
                                 root: root.clone(),
                                 parent: None,
-                                draft: None,
                                 then_move: Some(moving.clone()),
                             },
                             window,
@@ -1036,60 +986,9 @@ impl Desktop {
         );
     }
 
-    pub(crate) fn folder_context(&self, course: Option<PathBuf>, cx: &App) -> FolderContext {
-        let place = match &course {
-            Some(path) => FolderPlace::Note(path),
-            None => {
-                let (root, draft_id) = self.current_folder_origin(cx);
-                FolderPlace::Draft {
-                    root,
-                    draft_id,
-                    folder: self.target_folder(cx),
-                }
-            }
-        };
-        self.records.read(cx).folder_context(place)
-    }
-
-    /// Where the workbench's next note is saved: one of many folders, by name.
-    pub fn folder_picker(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let context = self.folder_context(None, cx);
-        let mut destinations = vec![None];
-        destinations.extend(context.folders.iter().map(|(id, _)| Some(*id)));
-        let selected = destinations.iter().position(|id| *id == context.folder);
-        let draft_id = context.draft_id;
-        ExposedDropdown::new("folder-picker", course2md::tr!("保存到"))
-            .variant(TextFieldVariant::Outlined)
-            // A form's field rounds with its surfaces (G8).
-            .shape(TextFieldShape::Rounded)
-            .leading_icon(Icon::from(symbols::folder()))
-            .options(
-                std::iter::once(course2md::tr!("未分类").to_owned())
-                    .chain(context.folders.into_iter().map(|(_, path)| path)),
-            )
-            .selected(selected)
-            .full_width()
-            .open(self.library_ui.folder_picker_open)
-            .disabled(self.library(cx).loading || context.load_error.is_some())
-            .error(context.load_error.is_some())
-            .when_some(context.load_error, |picker, error| {
-                picker.supporting_text(error)
-            })
-            .on_open_change(cx.listener(|this, open: &bool, _, cx| {
-                this.library_ui.folder_picker_open = *open;
-                cx.notify();
-            }))
-            .on_select(cx.listener(move |this, index: &usize, _, cx| {
-                this.library_ui.folder_picker_open = false;
-                let current = this
-                    .workspace(cx)
-                    .and_then(|workspace| workspace.state.draft())
-                    .is_some_and(|draft| Some(&draft.id) == draft_id.as_ref());
-                if current {
-                    let id = destinations[*index];
-                    this.update_draft(|draft| draft.folder = id, cx);
-                }
-                cx.notify();
-            }))
+    pub(crate) fn folder_context(&self, course: PathBuf, cx: &App) -> FolderContext {
+        self.records
+            .read(cx)
+            .folder_context(FolderPlace::Note(&course))
     }
 }

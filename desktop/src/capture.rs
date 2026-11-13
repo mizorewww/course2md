@@ -2,7 +2,7 @@
 //! so native layout can be reviewed without screen-recording permission.
 //!
 //! `COURSE2MD_CAPTURE` lists `page=path.png` pairs separated by `;`. Pages are
-//! `onboarding[:<ai|account|model|cloud>]`, `home[:<state>]` (states `options-hidden`, `options-shown`, `submit`, `next`, `candidates`), `size:<w>x<h>` (resizes the window, in points), `library`, `tasks`, `settings:<category>` (appearance, generation,
+//! `onboarding[:<ai|account|model|cloud>]`, `home[:<state>]` (states `submit`, `candidates`), `size:<w>x<h>` (resizes the window, in points), `library`, `tasks`, `settings:<category>` (appearance, generation,
 //! services, storage, application) and `reader[:<title text>][~shots][~shot:<n>][~end]`
 //! (the newest note, or the first whose title contains the text; it opens at
 //! the top, ignoring saved reading positions; `~shots` opens the screenshot
@@ -25,7 +25,7 @@
 //! window as it is (see `simulate_input`), steps joined by `+`, then
 //! captures; it neither navigates nor closes dialogs.
 //!
-//! Dialogs open over their page: `service-editor:<ai|speech|speech~qwen|speech~qwen-address|dialog|confirm>`
+//! Dialogs open over their page: `service-editor:<ai|speech|speech~qwen|speech~qwen-address|confirm>`
 //! over Settings › 服务与账号, and `dialog:<name>` for `palette`, `rename`,
 //! `delete`, `move`, `confirm` (a `ui::Confirm`) and `image` (the newest note; give it a longer
 //! `COURSE2MD_CAPTURE_DELAY_MS`), `folder`, `storage`, `login` and `youtube`.
@@ -67,8 +67,6 @@ thread_local! {
     /// The saved library presentation (cards, grouped), restored before each
     /// library shot so one shot's state does not leak into the next.
     static LIBRARY_PRESENTATION: Cell<Option<(bool, bool)>> = const { Cell::new(None) };
-    /// The saved processing-options visibility, restored before each home shot.
-    static HOME_OPTIONS: Cell<Option<bool>> = const { Cell::new(None) };
 }
 
 thread_local! {
@@ -541,7 +539,7 @@ impl Desktop {
                     "folder" => this.begin_folder(window, cx),
                     "move" => {
                         if let Some(course) = newest {
-                            let root = this.folder_context(Some(course.dir.clone()), cx).root;
+                            let root = this.folder_context(course.dir.clone(), cx).root;
                             this.begin_move(
                                 root,
                                 crate::library_ui::Moving::Note(course.dir.clone()),
@@ -577,26 +575,15 @@ impl Desktop {
     }
 
     /// Home enters the workbench the way the app bar does. `home:<state>`
-    /// takes `,`-separated states, applied without saving: `options-hidden`
-    /// and `options-shown` set the processing options' visibility, `submit`
-    /// presses 开始转换 for the previewed video (`COURSE2MD_CAPTURE_SOURCE`),
-    /// and `next` presses 设置下一个视频.
+    /// takes `,`-separated states, applied without saving: `submit` presses
+    /// 开始转换 for the previewed video (`COURSE2MD_CAPTURE_SOURCE`).
     fn capture_home(&mut self, states: &str, window: &mut Window, cx: &mut gpui::Context<Self>) {
-        let current = self.desktop_settings.home_options;
-        self.desktop_settings.home_options = HOME_OPTIONS.with(|cell| {
-            let saved = cell.get().unwrap_or(current);
-            cell.set(Some(saved));
-            saved
-        });
         if self.prepare_workbench_input(window, cx) {
             self.navigate(Page::New, cx);
         }
         for state in states.split(',').filter(|state| !state.is_empty()) {
             match state {
-                "options-hidden" => self.desktop_settings.home_options = false,
-                "options-shown" => self.desktop_settings.home_options = true,
                 "submit" => self.start_conversion(window, cx),
-                "next" => self.set_up_next_video(window, cx),
                 // An online collection's list, with fixture videos all selected; no
                 // request is made.
                 "candidates" => {

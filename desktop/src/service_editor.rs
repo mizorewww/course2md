@@ -3,20 +3,9 @@ use super::*;
 use desktop_prefs::service_binding::*;
 
 impl Desktop {
-    pub fn selected_task_service(
-        &self,
-        purpose: ServicePurpose,
-        cx: &App,
-    ) -> Option<ServiceVersion> {
-        let draft = self.workspace(cx).and_then(|w| w.state.draft());
-        // The draft's own choice while it is still saved, otherwise the default, as its
-        // plan resolves them.
-        let refs = self
-            .preferences
-            .plan_refs(&crate::preferences::ServiceRefs {
-                asr: draft.and_then(|draft| draft.asr_service.clone()),
-                llm: draft.and_then(|draft| draft.ai_service.clone()),
-            });
+    /// The service Settings use for `purpose`: what every conversion runs with.
+    pub fn default_service(&self, purpose: ServicePurpose) -> Option<ServiceVersion> {
+        let refs = self.preferences.default_refs();
         let id = match purpose {
             ServicePurpose::Speech => refs.asr,
             ServicePurpose::Ai => refs.llm,
@@ -30,17 +19,12 @@ impl Desktop {
     fn service_choices(
         &self,
         purpose: ServicePurpose,
-        current_task: bool,
         cx: &mut Context<Self>,
     ) -> (Option<ServiceVersion>, Option<SharedString>, MaterialMenu) {
         let refs = self.preferences.default_refs();
-        let current = if current_task {
-            self.selected_task_service(purpose, cx).map(|v| v.id)
-        } else {
-            match purpose {
-                ServicePurpose::Speech => refs.asr,
-                ServicePurpose::Ai => refs.llm,
-            }
+        let current = match purpose {
+            ServicePurpose::Speech => refs.asr,
+            ServicePurpose::Ai => refs.llm,
         };
         let latest: BTreeMap<String, ServiceVersion> = self
             .preferences
@@ -95,9 +79,9 @@ impl Desktop {
             });
             if let Some(old) = old {
                 let label = course2md::tr!("修改前的配置").to_owned();
-                items.push(self.service_choice_item(old, Some(label), &current, current_task, cx));
+                items.push(self.service_choice_item(old, Some(label), &current, cx));
             }
-            items.push(self.service_choice_item(&version, state, &current, current_task, cx));
+            items.push(self.service_choice_item(&version, state, &current, cx));
         }
         let group = MenuGroup::new()
             .label(course2md::tr!("已添加的服务"))
@@ -120,7 +104,6 @@ impl Desktop {
         version: &ServiceVersion,
         state: Option<String>,
         current: &Option<String>,
-        current_task: bool,
         cx: &mut Context<Self>,
     ) -> MaterialMenuItem {
         let id = version.id.clone();
@@ -145,18 +128,9 @@ impl Desktop {
                         && !this.preferences.is_service_retired(&version.service_id)
                 });
                 if selectable {
-                    this.bind_service(purpose, Some(id.clone()), current_task, cx);
+                    this.bind_service(purpose, Some(id.clone()), cx);
                 }
             }))
-    }
-
-    pub(crate) fn has_services(&self, purpose: ServicePurpose) -> bool {
-        self.preferences.latest_versions().values().any(|version| {
-            version.config.protocol.purpose() == purpose
-                && !self
-                    .preferences
-                    .service_retired_in_snapshot(&version.service_id)
-        })
     }
 
     /// The default service of a purpose, as a row of the generation page.
@@ -191,7 +165,7 @@ impl Desktop {
                 ServicePurpose::Speech => course2md::tr!("尚未添加，请先添加一个语音服务"),
             });
         }
-        let (version, detail, menu) = self.service_choices(purpose, false, cx);
+        let (version, detail, menu) = self.service_choices(purpose, cx);
         let name: SharedString = version.as_ref().map_or_else(
             || course2md::tr!("选择服务").into(),
             |version| version.config.name.clone().into(),
@@ -217,88 +191,6 @@ impl Desktop {
             .hint(failure.unwrap_or(hint))
     }
 
-    /// The service of the current input, with a way back to the default.
-    pub fn task_service_picker(
-        &self,
-        purpose: ServicePurpose,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let index = purpose as usize;
-        let mut view = v_flex().w_full().min_w_0().gap(rem(8.));
-        if self.has_services(purpose) {
-            let (version, detail, menu) = self.service_choices(purpose, true, cx);
-            let scale = TileScale::Compact;
-            let popup = ElementId::from(("task-service-choice", index));
-            let name: SharedString = version.as_ref().map_or_else(
-                || course2md::tr!("选择服务").into(),
-                |version| version.config.name.clone().into(),
-            );
-            let support: SharedString = match detail {
-                Some(detail) => format!("{name} · {detail}").into(),
-                None => name,
-            };
-            let label = purpose_label(purpose);
-            let trigger = scale
-                .button(("task-service-trigger", index), [true; 4])
-                .accessibility_label(label)
-                .on_click(ui::menu_key_toggle(&popup, window, cx))
-                .child(
-                    scale
-                        .row()
-                        .children(version.map(|version| {
-                            Icon::from(service_form::protocol_icon(version.config.protocol))
-                        }))
-                        .child(scale.text(("task-service-text", index), label, Some(support)))
-                        .child(tile_chevron()),
-                );
-            view = view.child(ui::menu(popup, trigger, menu, window, cx));
-        } else {
-            view = view.child(
-                material_button(("configure-task-service", index), ButtonVariant::Outlined)
-                    .tone(ButtonTone::Accent)
-                    .icon(symbols::add())
-                    .child(add_service_label(purpose))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_task_service_editor(purpose, window, cx)
-                    })),
-            );
-        }
-        let bound = self
-            .workspace(cx)
-            .and_then(|w| w.state.draft())
-            .and_then(|draft| match purpose {
-                ServicePurpose::Speech => draft.asr_service.as_deref(),
-                ServicePurpose::Ai => draft.ai_service.as_deref(),
-            })
-            // A choice no longer saved follows the default, so it is not this note's own.
-            .is_some_and(|id| self.preferences.usable_in_snapshot(id));
-        view.when(bound, |view| {
-            view.child(
-                h_flex()
-                    .gap(rem(8.))
-                    .items_center()
-                    .child(TileScale::Compact.support(
-                        ("service-only-this-note", index),
-                        course2md::tr!("仅用于这次笔记"),
-                    ))
-                    .child(
-                        material_button(("inherit-default-service", index), ButtonVariant::Text)
-                            .tone(ButtonTone::Neutral)
-                            .icon(symbols::refresh())
-                            .child(course2md::tr!("恢复默认"))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.bind_service(purpose, None, true, cx);
-                            })),
-                    ),
-            )
-        })
-        .when_some(
-            self.settings_ui.failures.get(&PreferenceGroup::Services),
-            |view, message| view.child(error_text(("task-service-error", index), message.clone())),
-        )
-    }
-
     /// The services list is where services are added, tested and removed.
     fn manage_services(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.page == Page::Settings {
@@ -312,27 +204,9 @@ impl Desktop {
         &mut self,
         purpose: ServicePurpose,
         id: Option<String>,
-        current_task: bool,
         cx: &mut Context<Self>,
     ) -> bool {
-        let result = if current_task {
-            self.with_workspace(cx, |workspace| {
-                workspace.transaction(|state| {
-                    let draft = state
-                        .draft_mut()
-                        .context(course2md::tr!("找不到当前笔记"))?;
-                    match purpose {
-                        ServicePurpose::Speech => draft.asr_service = id,
-                        ServicePurpose::Ai => draft.ai_service = id,
-                    };
-                    Ok(())
-                })
-            })
-            .ok_or_else(|| anyhow!(course2md::tr!("当前笔记信息暂时不可用")))
-            .and_then(|saved| saved)
-        } else {
-            self.preferences.set_default_service(purpose, id.as_deref())
-        };
+        let result = self.preferences.set_default_service(purpose, id.as_deref());
         match result {
             Ok(()) => {
                 self.clear_settings_failure(PreferenceGroup::Services);
@@ -351,33 +225,6 @@ impl Desktop {
         }
     }
 
-    pub(crate) fn open_task_service_editor(
-        &mut self,
-        purpose: ServicePurpose,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.save_current_draft(cx) {
-            return;
-        }
-        let Some(target) = self
-            .workspace(cx)
-            .and_then(|w| w.state.draft())
-            .map(|d| d.id.clone())
-        else {
-            return;
-        };
-        let draft = self
-            .selected_task_service(purpose, cx)
-            .filter(|version| {
-                !self
-                    .preferences
-                    .service_retired_in_snapshot(&version.service_id)
-            })
-            .map(|v| ServiceDraft::from_version(&v))
-            .unwrap_or_else(|| ServiceDraft::new(purpose));
-        self.open_service_draft(draft, Some(target), None, window, cx);
-    }
     pub(crate) fn open_reprocess_service_editor(
         &mut self,
         task_id: String,
@@ -385,28 +232,26 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(task) = self
+        if !self
             .workspace(cx)
-            .and_then(|workspace| workspace.state.tasks.iter().find(|task| task.id == task_id))
-        else {
+            .is_some_and(|workspace| workspace.state.tasks.iter().any(|task| task.id == task_id))
+        {
             self.workspace_error =
                 Some(course2md::tr!("原任务已不可用，尚未修改服务或创建补做任务").into());
             cx.notify();
             return;
-        };
-        let draft = task
-            .plan
-            .ai_service
-            .as_deref()
-            .and_then(|id| self.preferences.version(id))
+        }
+        // The repair runs with the default AI service: that is the one to fix.
+        let draft = self
+            .default_service(ServicePurpose::Ai)
             .filter(|version| {
                 !self
                     .preferences
                     .service_retired_in_snapshot(&version.service_id)
             })
-            .map(ServiceDraft::from_version)
+            .map(|version| ServiceDraft::from_version(&version))
             .unwrap_or_else(|| ServiceDraft::new(ServicePurpose::Ai));
-        self.open_service_draft(draft, None, Some((task_id, components)), window, cx);
+        self.open_service_draft(draft, Some((task_id, components)), window, cx);
     }
     pub(crate) fn open_settings_service_editor(
         &mut self,
@@ -420,14 +265,13 @@ impl Desktop {
             .and_then(|id| self.preferences.version(id))
             .map(ServiceDraft::from_version)
             .unwrap_or_else(|| ServiceDraft::new(purpose));
-        self.open_service_draft(draft, None, None, window, cx)
+        self.open_service_draft(draft, None, window, cx)
     }
     /// Opens the editor over whatever the person is doing. It closes back to that place,
     /// and only its save action publishes anything.
     pub(crate) fn open_service_draft(
         &mut self,
         draft: ServiceDraft,
-        target: Option<String>,
         repair_task: Option<(String, Vec<Component>)>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -477,7 +321,6 @@ impl Desktop {
         self.settings_ui.closed_editor = None;
         self.settings_ui.editor = Some(ServiceEditor {
             form,
-            target,
             repair_task,
             scroll: ScrollHandle::new(),
             also_default,
@@ -523,18 +366,9 @@ impl Desktop {
                 } else {
                     draft.address = preferences::QWEN_ADDRESS_EXAMPLE.into();
                 }
-                self.open_service_draft(draft, None, None, window, cx);
+                self.open_service_draft(draft, None, window, cx);
             }
             "confirm" => self.confirm_delete_service("capture".into(), window, cx),
-            "dialog" => {
-                self.open_service_draft(
-                    ServiceDraft::new(ServicePurpose::Ai),
-                    Some("capture".into()),
-                    None,
-                    window,
-                    cx,
-                );
-            }
             _ => {
                 self.open_settings_service_editor(ServicePurpose::Ai, None, window, cx);
             }
@@ -569,12 +403,6 @@ impl Desktop {
         let editing = editor.form.draft.based_on.is_some();
         let title = if editor.repair_task.is_some() {
             course2md::tr!("修复服务并补做")
-        } else if editor.target.is_some() {
-            if speech {
-                course2md::tr!("为这次笔记设置语音识别服务")
-            } else {
-                course2md::tr!("为这次笔记设置 AI 服务")
-            }
         } else {
             match (speech, editing) {
                 (true, false) => course2md::tr!("添加语音服务"),
@@ -623,7 +451,7 @@ impl Desktop {
                         this.publish_service_editor(false, window, cx)
                     }))
             });
-        let adding = editor.target.is_none() && !repairing && !editing;
+        let adding = !repairing && !editing;
         let save = material_button("save-service", ButtonVariant::Filled)
             .icon(symbols::check())
             .child(if repairing {
@@ -1238,21 +1066,13 @@ impl Desktop {
         cx: &App,
     ) -> Option<(TestKind, preferences::ServiceTestEvidence)> {
         let editor = self.settings_ui.editor.as_ref()?;
-        let (task_id, components) = editor.repair_task.as_ref()?;
+        let (_, components) = editor.repair_task.as_ref()?;
         if !editor.form.typed_key(cx).trim().is_empty() {
             return None;
         }
         let config = editor.form.current_draft(cx).configuration().ok()?;
-        let uses_vision = self
-            .workspace(cx)
-            .and_then(|workspace| {
-                workspace
-                    .state
-                    .tasks
-                    .iter()
-                    .find(|task| task.id == *task_id)
-            })
-            .is_some_and(|task| task.plan.options().vision);
+        // The repair runs with Settings as they are.
+        let uses_vision = self.settings_options.llm && self.settings_options.vision;
         let required: Vec<_> = [TestKind::Proofread, TestKind::Summary, TestKind::Vision]
             .into_iter()
             .filter(|kind| match kind {
@@ -1293,7 +1113,6 @@ impl Desktop {
         let Some(editor) = &self.settings_ui.editor else {
             return;
         };
-        let target = editor.target.clone();
         let repair_task = editor.repair_task.clone();
         let repairing = repair_task.is_some();
         if repairing && editor.test_running.is_some() {
@@ -1303,10 +1122,9 @@ impl Desktop {
             cx.notify();
             return;
         }
-        let scope = publish_scope(repairing, target.is_some(), editor.also_default);
+        let scope = publish_scope(repairing, editor.also_default);
         let plan = PublishPlan {
             continue_repair,
-            target,
             repair_task,
             scope,
         };
@@ -1387,9 +1205,7 @@ impl Desktop {
     ) {
         let PublishPlan {
             continue_repair,
-            target,
             repair_task,
-            scope,
             ..
         } = plan;
         let repairing = repair_task.is_some();
@@ -1416,41 +1232,8 @@ impl Desktop {
             cx.notify();
             return;
         }
-        if let Some(target) = target {
-            let binding = self
-                .with_workspace(cx, |workspace| {
-                    workspace.transaction(|state| {
-                        let draft = state
-                            .drafts
-                            .iter_mut()
-                            .find(|draft| draft.id == target)
-                            .context(course2md::tr!(
-                                "原笔记已关闭；服务正在保存，但未用于其他笔记"
-                            ))?;
-                        let selected = draft_service(scope, &version.id);
-                        match version.config.protocol.purpose() {
-                            ServicePurpose::Speech => draft.asr_service = selected,
-                            ServicePurpose::Ai => draft.ai_service = selected,
-                        };
-                        Ok(())
-                    })
-                })
-                .ok_or_else(|| anyhow!(course2md::tr!("当前笔记信息暂时不可用")))
-                .and_then(|saved| saved);
-            if let Err(error) = binding {
-                if let Some(editor) = &mut self.settings_ui.editor {
-                    editor.pending_binding = Some(version);
-                    editor.status = Some(course2md::tr!(
-                        "服务正在保存，本次选择尚未保存：{}",
-                        format!("{error:#}")
-                    ));
-                }
-                cx.notify();
-                return;
-            }
-        }
         if let Some((task_id, components)) = repair_task
-            && !self.reprocess_task_with_service(task_id, components, version.id.clone(), cx)
+            && !self.reprocess_task_after_service(task_id, components, cx)
         {
             if let Some(editor) = &mut self.settings_ui.editor {
                 editor.pending_binding = Some(version);
@@ -1571,7 +1354,9 @@ impl Desktop {
                 .iter()
                 .filter(|task| {
                     !task.state.finished()
-                        && (uses(&task.plan.asr_service) || uses(&task.plan.ai_service))
+                        && task.ran_with.as_ref().is_some_and(|ran_with| {
+                            uses(&ran_with.asr_service) || uses(&ran_with.ai_service)
+                        })
                 })
                 .count()
         });
@@ -1598,7 +1383,6 @@ impl Desktop {
                     Ok(released) => {
                         this.forget_credentials(released);
                         this.clear_settings_failure(PreferenceGroup::Services);
-                        this.forget_missing_draft_services(cx);
                     }
                     Err(error) => {
                         // The retire marker is written before the group is persisted,
@@ -1642,9 +1426,7 @@ impl Desktop {
                 self.clear_settings_failure(PreferenceGroup::Generation);
                 self.refresh_preference_defaults(cx);
                 self.clear_resolved_generation_errors(previous);
-                if !self.preference_defaults_pending {
-                    self.advance_conversion_when_ready(cx);
-                }
+                self.advance_conversion_when_ready(cx);
                 true
             }
             Err(error) => {
@@ -1661,34 +1443,8 @@ impl Desktop {
         self.config.defaults.out = out;
         self.settings_options = ConversionOptions::from_config(&self.config);
         self.desktop_settings = self.preferences.application().desktop.clone();
-        let defaults = self.settings_options.clone();
-        let inherited = self.with_workspace(cx, |workspace| {
-            workspace.transaction(|state| {
-                for draft in &mut state.drafts {
-                    if draft.submitted_task.is_none() {
-                        draft.inherit(&defaults);
-                    }
-                }
-                Ok(())
-            })
-        });
-        if let Some(result) = inherited {
-            match result {
-                Ok(()) => {
-                    if self.preference_defaults_pending {
-                        self.preference_defaults_pending = false;
-                        self.workspace_error = None;
-                    }
-                }
-                Err(error) => {
-                    self.preference_defaults_pending = true;
-                    self.workspace_error = Some(course2md::tr!(
-                        "默认设置已保存，当前视频的选项尚未同步：{}",
-                        format!("{error:#}")
-                    ))
-                }
-            }
-        }
+        // A preview checked against the old settings is checked again.
+        self.import.preview_plan_cache = None;
         cx.notify();
     }
 }

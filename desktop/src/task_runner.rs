@@ -12,10 +12,6 @@ use desktop_tasks::run;
 use desktop_tasks::task_view::{TaskAction, TaskGroup, request_scope, resumable, task_group};
 use std::collections::HashMap;
 
-/// Options shown before the workspace has restored a draft.
-static NO_DRAFT_OPTIONS: std::sync::LazyLock<ConversionOptions> =
-    std::sync::LazyLock::new(ConversionOptions::default);
-
 impl Desktop {
     /// The current input form. It is the only copy of its choices: views read
     /// it and option controls write through `update_draft`.
@@ -29,14 +25,22 @@ impl Desktop {
         self.draft(cx).is_none_or(|draft| draft.online)
     }
 
-    pub(crate) fn task_options<'a>(&self, cx: &'a App) -> &'a ConversionOptions {
+    /// Where this video's text comes from: the person's choice on its card, or
+    /// Settings' 文字来源.
+    pub(crate) fn text_mode(&self, cx: &App) -> course2md::config::TranscriptSource {
         self.draft(cx)
-            .map(|draft| &draft.options)
-            .unwrap_or(&NO_DRAFT_OPTIONS)
+            .and_then(|draft| draft.text_source)
+            .or(self.preferences.generation().options.transcript_source)
+            .unwrap_or_default()
     }
 
-    pub(crate) fn target_folder(&self, cx: &App) -> Option<u64> {
-        self.draft(cx).and_then(|draft| draft.folder)
+    /// Records the text source the person chose on the video's card.
+    pub(crate) fn set_text_source(
+        &mut self,
+        mode: course2md::config::TranscriptSource,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.update_draft(|draft| draft.text_source = Some(mode), cx)
     }
 
     /// One saved change to the workspace. A failure shows in the shell as `failure`,
@@ -93,22 +97,6 @@ impl Desktop {
         }
     }
 
-    /// Change this task's processing options; changed choices become overrides.
-    pub(crate) fn update_task_options(
-        &mut self,
-        edit: impl FnOnce(&mut ConversionOptions),
-        cx: &mut Context<Self>,
-    ) -> bool {
-        self.update_draft(
-            |draft| {
-                let mut options = draft.options.clone();
-                edit(&mut options);
-                apply_draft_options(draft, options);
-            },
-            cx,
-        )
-    }
-
     fn workspace_root(&self) -> PathBuf {
         self.config
             .defaults
@@ -139,14 +127,10 @@ impl Desktop {
                 self.report(course2md::tr!("记录仍未保存：{}"), error);
             }
         } else {
-            let options = ConversionOptions::from_config(&self.preferences.defaults_config());
-            match workspace::Workspace::open(self.workspace_root(), options) {
+            match workspace::Workspace::open(self.workspace_root()) {
                 Ok(workspace) => self.install_workspace(workspace, window, cx),
                 Err(error) => self.report(course2md::tr!("记录仍无法读取，原件已保留：{}"), error),
             }
-        }
-        if self.preference_defaults_pending {
-            self.refresh_preference_defaults(cx);
         }
         if self.workspace_error.is_none() {
             self.advance_conversion_when_ready(cx);
@@ -164,11 +148,10 @@ impl Desktop {
             return;
         }
         let root = self.workspace_root();
-        let options = ConversionOptions::from_config(&self.preferences.defaults_config());
         let result = if let Some(workspace) = &self.records.read(cx).workspace {
-            workspace::Workspace::rebuild_at(workspace.storage_path().to_owned(), root, options)
+            workspace::Workspace::rebuild_at(workspace.storage_path().to_owned(), root)
         } else {
-            workspace::Workspace::rebuild(root, options)
+            workspace::Workspace::rebuild(root)
         };
         match result {
             Ok(workspace) => self.install_workspace(workspace, window, cx),
@@ -198,9 +181,9 @@ impl Desktop {
     /// Record the text fields, preview and scroll position of the visible form.
     pub fn save_current_draft(&mut self, cx: &mut Context<Self>) -> bool {
         let input = self.value(Field::Source, cx);
-        // A source edit must establish the next form's defaults before autosave
-        // can detach the submitted task. Failed preparation cannot fall through
-        // to saving the previous video's title and overrides against a new URL.
+        // A source edit must establish the next input before autosave can detach
+        // the submitted task. Failed preparation cannot fall through to saving the
+        // previous video's choices against a new URL.
         if self
             .workspace(cx)
             .and_then(|workspace| workspace.state.draft())
@@ -208,13 +191,12 @@ impl Desktop {
         {
             return false;
         }
-        let title = self.value(Field::Title, cx);
         let source = self.import.source_preview.clone();
         let scroll = f32::from(self.scrolls[Page::New as usize].offset().y);
         self.work.update(cx, |work, _| work.draft_saved());
         self.update_draft(
             |draft| {
-                update_draft_source_title(draft, input, title, source);
+                update_draft_source(draft, input, source);
                 draft.scroll = scroll;
             },
             cx,
@@ -228,7 +210,6 @@ impl Desktop {
         self.import.source_preview = draft.source.clone();
         self.import.preview_error = None;
         self.import.source_validation = None;
-        self.import.title_required = false;
         self.import.source_candidates.clear();
         self.import.source_collection_title = None;
         self.import.source_collection_name = None;
@@ -250,7 +231,6 @@ impl Desktop {
             && draft.source.is_none()
             && std::path::Path::new(draft.input.trim()).is_file();
         self.inputs[&Field::Source].update(cx, |s, cx| s.set_value(draft.input, window, cx));
-        self.inputs[&Field::Title].update(cx, |s, cx| s.set_value(draft.title, window, cx));
         self.scrolls[Page::New as usize].set_offset(point(px(0.), px(draft.scroll)));
         self.work.update(cx, |work, _| work.draft_saved());
         // A local file chosen but not read yet is read now: reading it is local
@@ -273,11 +253,10 @@ impl Desktop {
         if !self.save_current_draft(cx) {
             return;
         }
-        let defaults = ConversionOptions::from_config(&self.preferences.defaults_config());
         let switched = self.transact(
             course2md::tr!("无法切换来源：{}"),
             |state| {
-                state.switch_source_kind(online, defaults);
+                state.switch_source_kind(online);
                 Ok(())
             },
             cx,
@@ -299,7 +278,6 @@ impl Desktop {
             import: &self.import,
             library: self.library(cx),
             locations: &self.storage_ui.location_checks,
-            defaults_pending: self.preference_defaults_pending,
             preferences_issue: self
                 .ordinary_preferences_submit_issue()
                 .map(|issue| issue.message),
@@ -322,12 +300,6 @@ impl Desktop {
     /// Queue the selected candidates at once, reusing per-candidate deduplication (an identical task in
     /// progress is not created again), in one transaction; then select the first task and start the queue.
     pub fn enqueue_selected_candidates(&mut self, cx: &mut Context<Self>) {
-        // The batch would send every video to the default in a deleted service's
-        // place: the person chooses first, in the list's notice.
-        if self.dropped_draft_service(cx).is_some() {
-            cx.notify();
-            return;
-        }
         let selected: Vec<(usize, source::SourceCandidate)> = self
             .import
             .source_candidates
@@ -436,40 +408,14 @@ impl Desktop {
         if !self.save_current_draft(cx) {
             return;
         }
-        // Every way a single draft is queued passes here: a deleted service is
-        // replaced only when the person says so, in the card's notice.
-        if self.dropped_draft_service(cx).is_some() {
-            self.import.pending_conversion = None;
-            cx.notify();
-            return;
-        }
         self.message = None;
         let plan = match self.build_plan(PlanValidation::Submission, cx) {
             Ok(plan) => plan,
             Err(error) => {
-                self.import.title_required = error.downcast_ref::<TitleRequired>().is_some();
                 self.import.source_validation = Some(format!("{error:#}"));
                 self.import.validation_attempt = self.import.validation_attempt.wrapping_add(1);
-                let subtitle_attention = self.subtitle_attention_required(cx);
-                let field = if self.import.source_preview.is_some()
-                    && !subtitle_attention
-                    && self.value(Field::Title, cx).trim().is_empty()
-                {
-                    Some(Field::Title)
-                } else if self.import.source_preview.is_none() && self.online(cx) {
-                    Some(Field::Source)
-                } else {
-                    None
-                };
-                if let Some(field) = field {
-                    if field == Field::Title {
-                        // The name field is in the processing options; show
-                        // them for this fix without changing the saved choice.
-                        self.desktop_settings.home_options = true;
-                        self.import.pending_conversion = None;
-                        self.import.following_conversion = None;
-                    }
-                    let input = self.inputs[&field].clone();
+                if self.import.source_preview.is_none() && self.online(cx) {
+                    let input = self.inputs[&Field::Source].clone();
                     window.on_next_frame(move |window, cx| {
                         input.update(cx, |input, cx| input.focus(window, cx));
                     });
@@ -505,7 +451,6 @@ impl Desktop {
         ) {
             self.import.pending_conversion = None;
             self.import.source_validation = None;
-            self.import.title_required = false;
             self.message =
                 (!created).then(|| course2md::tr!("这份笔记已有进行中的任务，已为你打开").into());
             if created {
@@ -569,7 +514,8 @@ impl Desktop {
         if !self.work.update(cx, |work, _| work.claim_start(&task.id)) {
             return;
         }
-        let needed = match run::needed_credentials(&self.preferences, &task) {
+        let fallback = self.recommended_local_provider();
+        let needed = match run::needed_credentials(&self.preferences, &task, fallback) {
             Ok(needed) => needed,
             Err(error) => return self.fail_task_before_start(&task.id, error, cx),
         };
@@ -624,8 +570,13 @@ impl Desktop {
             self.work.update(cx, |work, _| work.end_start(task_id));
             return;
         };
-        let start = match run::start_request(&self.preferences, self.workspace(cx), &task, &secrets)
-        {
+        let start = match run::start_request(
+            &self.preferences,
+            self.workspace(cx),
+            &task,
+            &secrets,
+            self.recommended_local_provider(),
+        ) {
             Ok(start) => start,
             Err(error) => return self.fail_task_before_start(&task.id, error, cx),
         };
@@ -634,7 +585,7 @@ impl Desktop {
         cx.spawn(async move |this, cx| {
             let read = read.await;
             let _ = this.update(cx, |this, cx| match read {
-                Ok(request) => this.start_task_request(task, request, cx),
+                Ok((request, ran_with)) => this.start_task_request(task, request, ran_with, cx),
                 Err(error) => this.fail_task_before_start(&task.id, error, cx),
             });
         })
@@ -646,6 +597,7 @@ impl Desktop {
         &mut self,
         task: TaskRecord,
         request: course2md::execution::Request,
+        ran_with: workspace::RunSettings,
         cx: &mut Context<Self>,
     ) {
         // What the task is now, not the copy taken before the library was read.
@@ -659,7 +611,7 @@ impl Desktop {
         }
         let running = self
             .with_workspace(cx, |workspace| {
-                workspace.transaction(|state| run::mark_running(state, &task.id))
+                workspace.transaction(|state| run::mark_running(state, &task.id, ran_with))
             })
             .context(course2md::tr!("任务记录不可用"))
             .and_then(|running| running);
@@ -903,11 +855,12 @@ impl Desktop {
         self.open_reprocess_service_editor(id, components, window, cx);
     }
 
-    pub(crate) fn reprocess_task_with_service(
+    /// Repairs the AI parts of a task's note once its service is saved as the default,
+    /// which is what the repair runs with.
+    pub(crate) fn reprocess_task_after_service(
         &mut self,
         id: String,
         components: Vec<Component>,
-        ai_service: String,
         cx: &mut Context<Self>,
     ) -> bool {
         let result = (|| -> Result<String> {
@@ -915,19 +868,8 @@ impl Desktop {
                 !self.is_running_task(&id, cx),
                 course2md::tr!("正在保存当前结果，请等待任务停止后再补做")
             );
-            let task = self
-                .task(&id, cx)
-                .context(course2md::tr!("原任务记录暂时不可用"))?;
-            let config = run::reprocess_config(&self.preferences, task, &components, &ai_service)?;
             self.with_workspace(cx, |workspace| {
-                workspace.transaction(|state| {
-                    state.reprocess_with_service(
-                        &id,
-                        components,
-                        Vec::new(),
-                        Some((ai_service, config)),
-                    )
-                })
+                workspace.transaction(|state| state.reprocess(&id, components, Vec::new()))
             })
             .context(course2md::tr!("任务记录暂时不可用"))?
         })();
@@ -948,36 +890,6 @@ impl Desktop {
         }
     }
 
-    /// After a service leaves the settings (deleted, or the group reset), the current
-    /// draft stops naming it and follows the default, as its plan already does.
-    pub(crate) fn forget_missing_draft_services(&mut self, cx: &mut Context<Self>) {
-        let preferences = &self.preferences;
-        let stale = self
-            .workspace(cx)
-            .and_then(|workspace| workspace.state.draft())
-            .is_some_and(|draft| {
-                [&draft.asr_service, &draft.ai_service]
-                    .into_iter()
-                    .flatten()
-                    .any(|id| !preferences.usable_in_snapshot(id))
-            });
-        if !stale {
-            return;
-        }
-        let result = self.records.change(cx, |records, _| {
-            Some(records.workspace.as_mut()?.transaction(|state| {
-                if let Some(draft) = state.draft_mut() {
-                    desktop_tasks::plan::forget_missing_draft_services(preferences, draft);
-                }
-                Ok(())
-            }))
-        });
-        if let Some(Err(error)) = result {
-            self.report(course2md::tr!("当前输入尚未保存：{}"), error);
-        }
-        cx.notify();
-    }
-
     pub fn adjust_task(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         if self.is_running_task(&id, cx) {
             self.message =
@@ -996,14 +908,15 @@ impl Desktop {
         cx.spawn_in(window, async move |this, cx| {
             let events = events.await.flatten();
             let _ = this.update_in(cx, |this, window, cx| {
-                // A service the task named that is gone gives way to the default.
-                let preferences = &this.preferences;
                 let adjusted = this
                     .records
                     .change(cx, |records, _| {
-                        Some(records.workspace.as_mut()?.transaction(|state| {
-                            desktop_tasks::plan::adjust_task(state, preferences, &id, events)
-                        }))
+                        Some(
+                            records
+                                .workspace
+                                .as_mut()?
+                                .transaction(|state| state.adjust_task(&id, events)),
+                        )
                     })
                     .and_then(|result| {
                         result
@@ -1368,7 +1281,6 @@ impl Desktop {
                 self.select_task(&id, cx);
                 self.navigate(Page::Task, cx);
             }
-            TaskAction::NextVideo => self.set_up_next_video(window, cx),
         }
     }
 
@@ -1414,7 +1326,7 @@ impl Desktop {
             .workspace
             .iter()
             .flat_map(|workspace| &workspace.state.tasks)
-            .filter_map(|task| task.plan.ai_service.as_ref())
+            .filter_map(|task| task.ran_with.as_ref()?.ai_service.as_ref())
             .filter_map(|id| {
                 let version = self.preferences.version(id)?;
                 Some((id.clone(), version.config.name.clone()))
@@ -1440,7 +1352,9 @@ impl Desktop {
             .flat_map(|workspace| &workspace.state.tasks)
             .filter(|task| task.state == TaskState::NeedsAttention && task.events.model_required)
             .filter_map(|task| {
-                let key = desktop_tasks::task_view::task_model_request(task, provider).key();
+                let key =
+                    desktop_tasks::task_view::task_model_request(&self.preferences, task, provider)
+                        .key();
                 let preparation = if state.preparing_for_tasks
                     && state
                         .preparing
@@ -1462,9 +1376,9 @@ impl Desktop {
             .workspace
             .iter()
             .flat_map(|workspace| &workspace.state.tasks)
-            // A paused task resumes with the services it names, so it is affected too.
+            // A paused task resumes with the default services, so it is affected too.
             .filter(|task| matches!(task.state, TaskState::NeedsAttention | TaskState::Paused))
-            .filter(|task| desktop_tasks::run::services_missing(&self.preferences, task))
+            .filter(|task| desktop_tasks::run::services_missing(&self.preferences, task, provider))
             .map(|task| task.id.clone())
             .collect();
         task_ui::ShellFacts {

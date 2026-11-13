@@ -302,8 +302,11 @@ impl Desktop {
         task: &crate::workspace::TaskRecord,
         cx: &mut Context<Self>,
     ) {
-        let request =
-            desktop_tasks::task_view::task_model_request(task, self.recommended_local_provider());
+        let request = desktop_tasks::task_view::task_model_request(
+            &self.preferences,
+            task,
+            self.recommended_local_provider(),
+        );
         self.begin_model_preparation(request, true, cx);
     }
     fn begin_model_preparation(
@@ -376,6 +379,7 @@ impl Desktop {
             .workspace(cx)
             .map(|workspace| {
                 desktop_tasks::task_view::tasks_awaiting_model(
+                    &self.preferences,
                     &workspace.state.tasks,
                     request,
                     fallback,
@@ -443,24 +447,6 @@ impl Desktop {
             cx,
         )
         .unwrap_or_else(div)
-    }
-
-    /// The workbench's model status: one chip and the action that moves it on.
-    pub(crate) fn model_status_line(
-        &self,
-        provider: AsrProvider,
-        model: Option<&str>,
-        root: &Path,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let request = Request::new(provider, model, root);
-        match self.engine_issue(provider) {
-            Some(issue) => {
-                self.engine_obstacle(&format!("import-engine-{}", request.key()), issue, true, cx)
-            }
-            None => self.model_surface(&request, false, window, cx),
-        }
     }
 
     /// The one report of a model. `full` adds its name, engine and details, for a

@@ -2,11 +2,7 @@
 use crate::{backend::Done, import::ImportSession, source};
 use anyhow::{Context as _, Result, ensure};
 use c2m_config::config::{AsrProvider, TranscriptSource};
-use desktop_prefs::{
-    conversion::ConversionOptions,
-    environment::Environment,
-    preferences::{self, ServiceRefs},
-};
+use desktop_prefs::{environment::Environment, preferences};
 use desktop_store::{
     library::LibraryState,
     locations::{LocationCheck, LocationChecks},
@@ -16,32 +12,15 @@ use desktop_store::{
 };
 use std::{path::PathBuf, rc::Rc};
 
-/// A stable validation identity for the missing-title case. Rendering compares
-/// the typed error instead of the displayed sentence, which changes with the
-/// interface language.
-#[derive(Debug)]
-pub struct TitleRequired;
-
-impl std::fmt::Display for TitleRequired {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(c2m_i18n::tr!("笔记还没有名称"))
-    }
-}
-
-impl std::error::Error for TitleRequired {}
-
-/// The name a draft's note is saved under: the one typed, or the video's own when the
-/// field is empty. `None` only when both are empty.
+/// The name a draft's note is saved under: the video's own, or its link or file
+/// where it has none. `None` only before anything was entered.
 pub fn note_title(draft: &workspace::Draft) -> Option<String> {
-    let typed = draft.title.trim();
-    if !typed.is_empty() {
-        return Some(typed.to_owned());
-    }
     draft
         .source
         .as_ref()
         .map(|source| source.title.trim())
         .filter(|title| !title.is_empty())
+        .or_else(|| Some(draft.input.trim()).filter(|input| !input.is_empty()))
         .map(str::to_owned)
 }
 
@@ -119,113 +98,16 @@ pub(crate) fn validate_plan_storage(
     Ok(())
 }
 
-pub fn update_draft_source_title(
+/// Records the form's link or file, and what was read from it.
+pub fn update_draft_source(
     draft: &mut workspace::Draft,
     input: String,
-    title: String,
     source: Option<source::Source>,
 ) {
-    // A source edit can clear Draft::title while the input still contains the
-    // previous automatic title. Capture its provenance before changing sources;
-    // repeated autosaves while the new metadata is pending must retain it too.
-    let unchanged_automatic_title = !draft.custom_title && draft.title == title;
     draft.change_source(input);
     if let Some(source) = source {
         draft.source = Some(source);
     }
-    if unchanged_automatic_title {
-        draft.title = title;
-    } else if draft.title != title {
-        draft.custom_title = !title.is_empty()
-            && draft
-                .source
-                .as_ref()
-                .is_none_or(|source| source.title != title);
-        draft.title = title;
-    }
-}
-
-/// Replace the draft's processing options, recording each changed choice as an
-/// explicit override so later default changes no longer reach it.
-pub fn apply_draft_options(draft: &mut workspace::Draft, options: ConversionOptions) {
-    use workspace::Override;
-    for (changed, field) in [
-        (
-            draft.options.provider != options.provider,
-            Override::Provider,
-        ),
-        (
-            draft.options.source_mode != options.source_mode,
-            Override::TextSource,
-        ),
-        (draft.options.llm != options.llm, Override::Proofread),
-        (
-            draft.options.summarize != options.summarize,
-            Override::Summary,
-        ),
-        (draft.options.vision != options.vision, Override::Vision),
-        (
-            draft.options.translate != options.translate,
-            Override::Translate,
-        ),
-        (
-            draft.options.keep_video != options.keep_video,
-            Override::KeepVideo,
-        ),
-        (draft.options.formats != options.formats, Override::Formats),
-    ] {
-        if changed {
-            draft.overrides.insert(field);
-        }
-    }
-    if !options.uses_cloud_provider() {
-        draft.local_provider = options.provider;
-    } else if !draft.options.uses_cloud_provider() {
-        draft.local_provider = draft.options.provider;
-    }
-    draft.options = options;
-}
-
-/// Forgets the draft's own service choices that are no longer saved or whose service
-/// was deleted, so it follows the default as its plan already does
-/// (`preferences::Store::plan_refs`). Returns whether anything changed. A choice
-/// still saved stays, an older version of a service included. While the services
-/// record cannot be read, nothing is known to be gone, so nothing is forgotten.
-pub fn forget_missing_draft_services(
-    preferences: &preferences::Store,
-    draft: &mut workspace::Draft,
-) -> bool {
-    if preferences.is_blocked(preferences::PreferenceGroup::Services) {
-        return false;
-    }
-    let mut changed = false;
-    for choice in [&mut draft.asr_service, &mut draft.ai_service] {
-        if choice
-            .as_deref()
-            .is_some_and(|id| !preferences.usable_in_snapshot(id))
-        {
-            *choice = None;
-            changed = true;
-        }
-    }
-    changed
-}
-
-/// A new attempt at task `id`: the form takes its options as `State::adjust_task`
-/// does, and a service it named that is no longer saved or was deleted gives way to
-/// the current default. The task itself, and the versions its requests were made
-/// with, are unchanged; the new attempt is a task of its own with its own requests.
-pub fn adjust_task(
-    state: &mut workspace::State,
-    preferences: &preferences::Store,
-    id: &str,
-    subtitle_events: Option<Vec<c2m_core::timeline::TranscriptEvent>>,
-) -> Result<()> {
-    state.adjust_task(id, subtitle_events)?;
-    if let Some(draft) = state.draft_mut() {
-        forget_missing_draft_services(preferences, draft);
-    }
-    Ok(())
 }
 
 /// The single write path for the current draft: apply `edit` to a copy and
@@ -414,23 +296,17 @@ pub struct PlanInputs<'a> {
     pub import: &'a ImportSession,
     pub library: &'a LibraryState,
     pub locations: &'a LocationChecks,
-    /// Saved defaults have not reached the current input yet.
-    pub defaults_pending: bool,
     /// Why ordinary preferences stop a submission.
     pub preferences_issue: Option<String>,
 }
 
 impl PlanInputs<'_> {
-    /// What both plan builders require first: no unsynced or invalid preferences, then
-    /// the workspace and its draft. `unsynced` is the builder's own wording.
-    fn plan_draft(
-        &self,
-        unsynced: &'static str,
-    ) -> Result<(&workspace::Workspace, &workspace::Draft)> {
+    /// What both plan builders require first: no unreadable preferences, then the
+    /// workspace and its draft.
+    fn plan_draft(&self) -> Result<(&workspace::Workspace, &workspace::Draft)> {
         if let Some(issue) = &self.preferences_issue {
             anyhow::bail!("{issue}");
         }
-        ensure!(!self.defaults_pending, unsynced);
         let workspace = self
             .workspace
             .context(c2m_i18n::tr!("输入与任务记录尚未恢复"))?;
@@ -458,114 +334,76 @@ impl PlanInputs<'_> {
         Ok(environment)
     }
 
-    /// The destination is still a registered, writable library; then the configuration
-    /// the draft's options make of its base, with the model directory normalized.
-    fn plan_storage_and_config(
+    /// The default library, still registered and writable: where a new note goes.
+    fn plan_library<'w>(
         &self,
-        workspace: &workspace::Workspace,
-        draft: &workspace::Draft,
+        workspace: &'w workspace::Workspace,
         validation: PlanValidation,
-    ) -> Result<c2m_config::settings::ConfigFile> {
+    ) -> Result<&'w workspace::LibraryLocation> {
         let library = workspace
             .state
-            .library(&draft.library_id)
+            .library(&workspace.state.default_library)
             .context(c2m_i18n::tr!("保存位置已不在笔记库中，请选择保存位置"))?;
         validate_plan_storage(
             validation,
             library,
-            draft.folder,
+            None,
             self.locations.get(library),
             self.library.indexes.get(&library.root),
         )?;
-        let mut config = draft
-            .base_config
-            .clone()
-            .unwrap_or_else(|| self.preferences.defaults_config());
-        draft.options.apply_to(&mut config);
-        config.defaults.model_dir = Some(c2m_config::config::model_dir_from(
-            config.defaults.model_dir.as_deref(),
-        ));
-        Ok(config)
+        Ok(library)
     }
 
-    /// Local recognition: the engine checked (with `fallback` as the reason it is
-    /// needed, when it is only a fallback) and its default model filled in.
-    fn plan_asr(
-        &self,
-        config: &mut c2m_config::settings::ConfigFile,
-        environment: &Environment,
-        fallback: Option<&'static str>,
-    ) -> Result<()> {
-        let provider = config
-            .defaults
-            .provider
-            .unwrap_or_else(|| recommended_local_provider(self.environment));
-        let capability = ensure_asr_capability(environment, provider);
-        match fallback {
-            Some(reason) => capability.context(reason)?,
-            None => capability?,
-        }
-        config.defaults.provider = Some(provider);
-        fill_default_asr_model(config, provider);
-        Ok(())
-    }
-
-    /// What both builders end with: the draft's services (or the defaults) resolved
-    /// into the configuration, which is then validated for `source`.
+    /// What both builders end with: the plan, checked against the settings it
+    /// would run with now (with `fallback` as the reason local recognition is
+    /// needed, when it is only a fallback). The plan does not keep them: the
+    /// task runs with the settings current when it starts.
     fn finish_plan(
         &self,
-        draft: &workspace::Draft,
-        config: c2m_config::settings::ConfigFile,
+        plan: TaskPlan,
         validation: PlanValidation,
-        source: source::Source,
-        title: String,
+        environment: &Environment,
+        fallback: Option<&'static str>,
     ) -> Result<TaskPlan> {
-        let refs = self.preferences.plan_refs(&ServiceRefs {
-            asr: draft.asr_service.clone(),
-            llm: draft.ai_service.clone(),
-        });
+        let config = crate::run::current_config(
+            self.preferences,
+            &plan,
+            recommended_local_provider(self.environment),
+        );
+        if config.defaults.transcript_source != Some(TranscriptSource::Subtitle)
+            && let Some(provider) = config.defaults.provider
+        {
+            let capability = ensure_asr_capability(environment, provider);
+            match fallback {
+                Some(reason) => capability.context(reason)?,
+                None => capability?,
+            }
+        }
+        let refs = self.preferences.default_refs();
         let config = match validation {
             PlanValidation::Preview => self.preferences.config_for_preview(&config, &refs)?,
             PlanValidation::Submission => self.preferences.config_for_refs(&config, &refs)?,
         };
-        let mut validation_config = config.clone();
-        validation_config
-            .defaults
-            .provider
-            .get_or_insert_with(|| recommended_local_provider(self.environment));
-        validate_plan_config(&source.input, &validation_config)?;
+        validate_plan_config(&plan.source.input, &config)?;
         // A note a newer app wrote cannot take a new version: say so before anything
         // is downloaded or sent, not when publishing refuses after paid requests.
         if let Some(location) = self
             .workspace
-            .and_then(|workspace| workspace.state.library(&draft.library_id))
+            .and_then(|workspace| workspace.state.library(&plan.library_id))
         {
-            refuse_newer_note(self.library, &location.root, &source.identity, validation)?;
+            refuse_newer_note(self.library, &location.root, &plan.source_id, validation)?;
         }
-        if validation == PlanValidation::Submission && !source.online {
+        if validation == PlanValidation::Submission && !plan.source.online {
             ensure!(
-                std::path::Path::new(&source.input).is_file(),
+                std::path::Path::new(&plan.source.input).is_file(),
                 c2m_i18n::tr!("原视频已移动或无法读取，请重新选择视频")
             );
         }
-        Ok(TaskPlan {
-            operation: Default::default(),
-            source_id: source.identity.clone(),
-            source,
-            title,
-            library_id: draft.library_id.clone(),
-            folder: draft.folder,
-            subtitle: None,
-            config,
-            asr_service: refs.asr,
-            ai_service: refs.llm,
-        })
+        Ok(plan)
     }
 
     pub fn build_plan(&self, validation: PlanValidation) -> Result<TaskPlan> {
-        let (workspace, draft) = self.plan_draft(c2m_i18n::tr!(
-            "默认设置已保存，当前视频的选项尚未同步。请重试。"
-        ))?;
+        let (workspace, draft) = self.plan_draft()?;
         ensure!(
             !draft.input.is_empty(),
             if draft.online {
@@ -591,8 +429,15 @@ impl PlanInputs<'_> {
             .clone()
             .context(c2m_i18n::tr!("请先读取并确认视频"))?;
         let environment = self.ensure_plan_environment(source.online)?;
+        let mode = draft.text_source.unwrap_or_else(|| {
+            self.preferences
+                .generation()
+                .options
+                .transcript_source
+                .unwrap_or_default()
+        });
         ensure!(
-            draft.options.source_mode == TranscriptSource::Asr
+            mode == TranscriptSource::Asr
                 || (source.subtitle_request.is_none() && source.subtitle_read_error.is_none()),
             c2m_i18n::tr!("所选字幕还未确认，请继续读取或明确选择其他文字来源。")
         );
@@ -600,11 +445,9 @@ impl PlanInputs<'_> {
             !source.identity.is_empty(),
             c2m_i18n::tr!("无法识别这个视频，请重新预览")
         );
-        let Some(title) = note_title(draft) else {
-            return Err(TitleRequired.into());
-        };
-        let mut config = self.plan_storage_and_config(workspace, draft, validation)?;
-        let using_subtitle = draft.options.source_mode != TranscriptSource::Asr
+        let title = note_title(draft).context(c2m_i18n::tr!("还没读取到视频信息，请重新预览"))?;
+        let library = self.plan_library(workspace, validation)?;
+        let using_subtitle = mode != TranscriptSource::Asr
             && (source.selected_subtitle.is_some() || draft.subtitle.is_some());
         if using_subtitle {
             if let Some(subtitle) = &source.selected_subtitle {
@@ -613,12 +456,11 @@ impl PlanInputs<'_> {
                     c2m_i18n::tr!("所选字幕与当前视频不匹配，请重新读取字幕")
                 );
             }
-            config.defaults.transcript_source = Some(TranscriptSource::Subtitle);
         } else {
             use c2m_source::subtitle::SubtitleEvidence;
             ensure!(
-                draft.options.source_mode == TranscriptSource::Asr
-                    || (draft.options.source_mode == TranscriptSource::Auto
+                mode == TranscriptSource::Asr
+                    || (mode == TranscriptSource::Auto
                         && matches!(
                             source.subtitles,
                             SubtitleEvidence::NoneFound
@@ -627,17 +469,22 @@ impl PlanInputs<'_> {
                         )),
                 c2m_i18n::tr!("字幕还未确认。请读取字幕，或明确选择语音识别。")
             );
-            config.defaults.transcript_source = Some(TranscriptSource::Asr);
-            self.plan_asr(&mut config, environment, None)?;
         }
-        let plan = self.finish_plan(draft, config, validation, source, title)?;
-        Ok(TaskPlan {
+        let plan = TaskPlan {
+            operation: Default::default(),
+            source_id: source.identity.clone(),
+            source,
+            title,
+            library_id: library.id.clone(),
+            folder: None,
             subtitle: draft.subtitle.clone(),
-            ..plan
-        })
+            text_source: draft.text_source,
+            repair: None,
+        };
+        self.finish_plan(plan, validation, environment, None)
     }
 
-    /// The batch plan for selected candidates. Tools, destination and config resolve as in build_plan;
+    /// The batch plan for selected candidates. Tools and destination resolve as in build_plan;
     /// subtitles are found when each task runs (the pipeline probes by transcript_source), so the desktop
     /// need not read every video first. Titles are the episode titles shown in the candidate rows.
     pub fn build_batch_plan(
@@ -645,21 +492,11 @@ impl PlanInputs<'_> {
         candidate: &source::SourceCandidate,
         title: String,
     ) -> Result<TaskPlan> {
-        let (workspace, draft) =
-            self.plan_draft(c2m_i18n::tr!("默认设置已保存，当前选项尚未同步。请重试。"))?;
+        let (workspace, _) = self.plan_draft()?;
         let identity = c2m_source::fetch::candidate_identity(candidate)
             .context(c2m_i18n::tr!("还无法确认这个视频的身份，请单独打开后转换"))?;
         let environment = self.ensure_plan_environment(true)?;
-        let mut config =
-            self.plan_storage_and_config(workspace, draft, PlanValidation::Submission)?;
-        // Subtitles-only never reaches speech recognition; other modes may fall back to ASR at run time,
-        // so, as in build_plan, check local recognition and fill in the default model first.
-        if draft.options.source_mode != TranscriptSource::Subtitle {
-            let fallback = (draft.options.source_mode == TranscriptSource::Auto).then_some(
-                c2m_i18n::tr!("部分视频可能没有字幕，需要语音识别能力作为后备"),
-            );
-            self.plan_asr(&mut config, environment, fallback)?;
-        }
+        let library = self.plan_library(workspace, PlanValidation::Submission)?;
         let source = source::Source {
             input: candidate.input.clone(),
             title: title.clone(),
@@ -676,15 +513,35 @@ impl PlanInputs<'_> {
             online: true,
             ..source::Source::default()
         };
-        self.finish_plan(draft, config, PlanValidation::Submission, source, title)
+        let plan = TaskPlan {
+            operation: Default::default(),
+            source_id: source.identity.clone(),
+            source,
+            title,
+            library_id: library.id.clone(),
+            folder: None,
+            subtitle: None,
+            text_source: None,
+            repair: None,
+        };
+        // Subtitles-only never reaches speech recognition; other modes may fall back to it
+        // when a video has none, so local recognition is checked as well.
+        self.finish_plan(
+            plan,
+            PlanValidation::Submission,
+            environment,
+            Some(c2m_i18n::tr!(
+                "部分视频可能没有字幕，需要语音识别能力作为后备"
+            )),
+        )
     }
 }
 
 #[cfg(test)]
 pub mod tests {
     use super::{
-        PlanValidation, apply_draft_options, batch_note_title, edit_current_draft,
-        update_draft_source_title, validate_plan_config, validate_plan_storage,
+        PlanValidation, batch_note_title, edit_current_draft, note_title, update_draft_source,
+        validate_plan_config, validate_plan_storage,
     };
 
     #[test]
@@ -701,12 +558,8 @@ pub mod tests {
             std::sync::Arc::new(MemoryCredentialVault::new()),
         );
         let root = dir.path().join("library");
-        let mut workspace = Workspace::open_at_inline(
-            dir.path().join("workspace.json"),
-            root.clone(),
-            Default::default(),
-        )
-        .unwrap();
+        let mut workspace =
+            Workspace::open_at_inline(dir.path().join("workspace.json"), root.clone()).unwrap();
         workspace
             .transaction(|state| {
                 let draft = state.draft_mut().unwrap();
@@ -728,7 +581,6 @@ pub mod tests {
             import: &import,
             library: &library,
             locations: &locations,
-            defaults_pending: false,
             preferences_issue: preferences_issue.map(str::to_owned),
         };
         let error = inputs(Some("生成选项暂时无法读取"))
@@ -754,42 +606,6 @@ pub mod tests {
         config.defaults.asr_model = Some("qwen3-1.7b".into());
         super::fill_default_asr_model(&mut config, AsrProvider::Cpu);
         assert_eq!(config.defaults.asr_model.as_deref(), Some("qwen3-1.7b"));
-    }
-
-    #[test]
-    fn a_changed_option_is_the_draft_without_a_separate_save() {
-        use desktop_store::workspace::{Override, Workspace};
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("workspace.json");
-        let root = dir.path().join("library");
-        let mut workspace =
-            Workspace::open_at_inline(file.clone(), root.clone(), Default::default()).unwrap();
-        let updated = workspace.state.draft().unwrap().updated;
-        let keep_video = !workspace.state.draft().unwrap().options.keep_video;
-
-        // Re-applying the same options neither writes nor counts as an override.
-        let same = workspace.state.draft().unwrap().options.clone();
-        assert!(!edit_current_draft(&mut workspace, |d| apply_draft_options(d, same)).unwrap());
-        assert!(workspace.state.draft().unwrap().overrides.is_empty());
-
-        let wrote = edit_current_draft(&mut workspace, |draft| {
-            let mut options = draft.options.clone();
-            options.keep_video = keep_video;
-            apply_draft_options(draft, options);
-        })
-        .unwrap();
-        assert!(wrote);
-        let draft = workspace.state.draft().unwrap();
-        assert_eq!(draft.options.keep_video, keep_video);
-        assert!(draft.overrides.contains(&Override::KeepVideo));
-        assert!(draft.updated >= updated);
-        workspace.save().unwrap();
-        drop(workspace);
-
-        let reopened = Workspace::open_at_inline(file, root, Default::default()).unwrap();
-        let draft = reopened.state.draft().unwrap();
-        assert_eq!(draft.options.keep_video, keep_video);
-        assert!(draft.overrides.contains(&Override::KeepVideo));
     }
 
     #[test]
@@ -910,68 +726,6 @@ pub mod tests {
         assert!(old.manifest.as_ref().unwrap().partial);
     }
 
-    #[test]
-    fn unchanged_form_values_leave_the_draft_as_it_was() {
-        let mut input =
-            desktop_store::workspace::Draft::new(true, "library".into(), Default::default());
-        let source = source("https://example.test/a", "课程 A");
-        update_draft_source_title(
-            &mut input,
-            source.input.clone(),
-            source.title.clone(),
-            Some(source),
-        );
-        input.updated = 123;
-        let expected = input.clone();
-        for _ in 0..8 {
-            update_draft_source_title(
-                &mut input,
-                expected.input.clone(),
-                expected.title.clone(),
-                expected.source.clone(),
-            );
-            apply_draft_options(&mut input, expected.options.clone());
-            assert_eq!(input, expected);
-        }
-        let mut options = expected.options.clone();
-        options.formats[0] = !options.formats[0];
-        options.translate = Some("en".into());
-        apply_draft_options(&mut input, options.clone());
-        assert_eq!(input.options, options);
-        for field in [
-            desktop_store::workspace::Override::Formats,
-            desktop_store::workspace::Override::Translate,
-        ] {
-            assert!(input.overrides.contains(&field));
-        }
-    }
-
-    #[test]
-    fn temporary_speech_service_keeps_the_explicit_local_engine_for_the_same_input() {
-        let mut draft =
-            desktop_store::workspace::Draft::new(true, "library".into(), Default::default());
-        draft.change_source("video".into());
-        let mut options = draft.options.clone();
-        options.provider = Some(c2m_config::config::AsrProvider::Cpu);
-        apply_draft_options(&mut draft, options.clone());
-        assert_eq!(
-            draft.local_provider,
-            Some(c2m_config::config::AsrProvider::Cpu)
-        );
-        options.provider = Some(c2m_config::config::AsrProvider::Api);
-        apply_draft_options(&mut draft, options);
-        assert_eq!(
-            draft.options.provider,
-            Some(c2m_config::config::AsrProvider::Api)
-        );
-        assert_eq!(
-            draft.local_provider,
-            Some(c2m_config::config::AsrProvider::Cpu)
-        );
-        let next = desktop_store::workspace::Draft::new(true, "library".into(), Default::default());
-        assert_eq!(next.local_provider, None);
-    }
-
     /// A note a newer app wrote is refused when the plan is made, before any
     /// download or request, in the interface language.
     #[test]
@@ -1083,22 +837,20 @@ pub mod tests {
     }
 
     #[test]
-    fn changing_source_keeps_automatic_title_provenance_and_frozen_task() {
+    fn a_note_is_named_after_its_video_and_a_new_source_keeps_the_submitted_task() {
         use desktop_store::workspace::{TaskPlan, Workspace};
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("workspace.json");
         let root = dir.path().join("library");
-        let mut workspace =
-            Workspace::open_at_inline(file.clone(), root.clone(), Default::default()).unwrap();
+        let mut workspace = Workspace::open_at_inline(file.clone(), root.clone()).unwrap();
         let a = source("https://example.test/video-a", "课程 A");
         let b = source("https://example.test/video-b", "课程 B");
         let id = workspace
             .transaction(|state| {
-                update_draft_source_title(
-                    state.draft_mut().unwrap(),
-                    a.input.clone(),
-                    a.title.clone(),
-                    Some(a.clone()),
+                update_draft_source(state.draft_mut().unwrap(), a.input.clone(), Some(a.clone()));
+                assert_eq!(
+                    note_title(state.draft().unwrap()).as_deref(),
+                    Some("课程 A")
                 );
                 state.enqueue(
                     TaskPlan {
@@ -1109,71 +861,48 @@ pub mod tests {
                         library_id: state.default_library.clone(),
                         folder: None,
                         subtitle: None,
-                        config: Default::default(),
-                        asr_service: None,
-                        ai_service: None,
+                        text_source: None,
+                        repair: None,
                     },
                     None,
                 )
             })
             .unwrap()
             .0;
-        // The visible title input still contains A until B's metadata arrives.
-        // More than one autosave, and a restart in between, must not make it custom.
-        for _ in 0..3 {
-            workspace
-                .transaction(|state| {
-                    update_draft_source_title(
-                        state.draft_mut().unwrap(),
-                        b.input.clone(),
-                        a.title.clone(),
-                        None,
-                    );
-                    Ok(())
-                })
-                .unwrap();
-        }
-        workspace =
-            Workspace::open_at_inline(file.clone(), root.clone(), Default::default()).unwrap();
-        assert!(!workspace.state.draft().unwrap().custom_title);
-        assert!(workspace.state.draft().unwrap().source.is_none());
+        // Until B's metadata arrives the note would take its link as its name.
         workspace
             .transaction(|state| {
-                update_draft_source_title(
-                    state.draft_mut().unwrap(),
-                    b.input.clone(),
-                    b.title.clone(),
-                    Some(b.clone()),
+                update_draft_source(state.draft_mut().unwrap(), b.input.clone(), None);
+                assert_eq!(
+                    note_title(state.draft().unwrap()).as_deref(),
+                    Some(b.input.as_str())
                 );
                 Ok(())
             })
             .unwrap();
-        let restored = Workspace::open_at_inline(file, root, Default::default()).unwrap();
+        let mut workspace = Workspace::open_at_inline(file.clone(), root.clone()).unwrap();
+        assert!(workspace.state.draft().unwrap().source.is_none());
+        let unchanged = workspace.state.draft().unwrap().clone();
+        assert!(
+            !edit_current_draft(&mut workspace, |draft| {
+                update_draft_source(draft, b.input.clone(), None)
+            })
+            .unwrap()
+        );
+        assert_eq!(workspace.state.draft().unwrap(), &unchanged);
+        workspace
+            .transaction(|state| {
+                update_draft_source(state.draft_mut().unwrap(), b.input.clone(), Some(b.clone()));
+                Ok(())
+            })
+            .unwrap();
+        let restored = Workspace::open_at_inline(file, root).unwrap();
         let draft = restored.state.draft().unwrap();
-        assert_eq!(draft.title, "课程 B");
-        assert!(!draft.custom_title);
+        assert_eq!(note_title(draft).as_deref(), Some("课程 B"));
         assert_eq!(draft.source.as_ref().unwrap(), &b);
         let task = restored.state.task(&id).unwrap();
         assert_eq!(task.plan.source, a);
         assert_eq!(task.plan.title, "课程 A");
-    }
-
-    #[test]
-    fn manual_title_survives_a_source_change_and_late_metadata() {
-        let mut draft =
-            desktop_store::workspace::Draft::new(true, "library".into(), Default::default());
-        let a = source("https://example.test/a", "课程 A");
-        let b = source("https://example.test/b", "课程 B");
-        update_draft_source_title(&mut draft, a.input.clone(), a.title.clone(), Some(a));
-        // Source and title may both change before the autosave deadline.
-        update_draft_source_title(&mut draft, b.input.clone(), "我的复习笔记".into(), None);
-        assert!(draft.custom_title);
-        let revision = draft.revision;
-        assert!(desktop_store::workspace::accept_source(
-            &mut draft, revision, b
-        ));
-        assert_eq!(draft.title, "我的复习笔记");
-        assert!(draft.custom_title);
     }
 
     #[test]

@@ -5,7 +5,6 @@ use crate::{
     ConversionOptions, Desktop, Field, Page, notes::Course, preferences::ServicePurpose, source,
     symbols, task_ui::CardPlace, ui, workspace,
 };
-use anyhow::Context as _;
 use course2md::config::TranscriptSource;
 use course2md::subtitle::{SubtitleEvidence, SubtitleReadError, SubtitleTrack};
 use desktop_accounts::youtube::GuideOrigin;
@@ -20,7 +19,7 @@ use std::{
 
 /// The workbench's one column.
 const WORKBENCH_WIDTH: Rems = rem(760.);
-/// Rhythm inside the column: title, link, video and options.
+/// Rhythm inside the column: title, link and video.
 /// The hero title to the link field (H4).
 const HERO_GAP: Rems = rem(20.);
 /// The link field to the line under it: the drop hint or the source switch (H4).
@@ -162,7 +161,7 @@ impl Desktop {
         }
         let input = self.value(Field::Source, cx);
         if self.draft(cx).is_some_and(|draft| draft.input != input) {
-            if !self.prepare_next_import(&input, window, cx) {
+            if !self.prepare_next_import(&input, cx) {
                 return;
             }
             self.import.following_conversion = None;
@@ -187,11 +186,6 @@ impl Desktop {
         // including callers returning from login or selecting a local file.
         if self.import.source_preview.is_none() {
             self.inspect_source(window, cx);
-            return;
-        }
-        // A deleted service is replaced only when the person says so.
-        if self.dropped_draft_service(cx).is_some() {
-            cx.notify();
             return;
         }
         self.import.pending_conversion = Some(self.import.preview_generation);
@@ -220,7 +214,7 @@ impl Desktop {
             return;
         };
         let reading = self.import.reading();
-        let source_mode = self.task_options(cx).source_mode;
+        let source_mode = self.text_mode(cx);
         if generation == self.import.preview_generation
             && !reading
             && let Some(source) = &mut self.import.source_preview
@@ -253,13 +247,6 @@ impl Desktop {
             }
             ConversionGate::Submit => self.enqueue_current(window, cx),
         }
-    }
-
-    fn import_base_config(&self, cx: &App) -> course2md::settings::ConfigFile {
-        self.workspace(cx)
-            .and_then(|workspace| workspace.state.draft())
-            .and_then(|draft| draft.base_config.clone())
-            .unwrap_or_else(|| self.preferences.defaults_config())
     }
 
     fn subtitle_read_is_current(&self, read: &SubtitleRead, cx: &App) -> bool {
@@ -358,7 +345,7 @@ impl Desktop {
                 if explicit {
                     // The requested text source takes effect before I/O. A failed
                     // caption read must never silently keep the previous ASR choice.
-                    this.update_task_options(|o| o.source_mode = TranscriptSource::Subtitle, cx);
+                    this.set_text_source(TranscriptSource::Subtitle, cx);
                 }
                 if let Some(source) = &mut this.import.source_preview {
                     source.subtitle_request = Some(requested);
@@ -386,10 +373,7 @@ impl Desktop {
                             source.subtitle_read_error = None;
                         }
                         if explicit {
-                            this.update_task_options(
-                                |o| o.source_mode = TranscriptSource::Subtitle,
-                                cx,
-                            );
+                            this.set_text_source(TranscriptSource::Subtitle, cx);
                         }
                     }
                     Err(SubtitleReadError::Cancelled) => {
@@ -574,7 +558,7 @@ impl Desktop {
     fn settle_text_source(&mut self, mode: TranscriptSource, cx: &mut Context<Self>) {
         self.abort_subtitle_read();
         self.import.subtitle_error = None;
-        self.update_task_options(|o| o.source_mode = mode, cx);
+        self.set_text_source(mode, cx);
         self.advance_conversion_when_ready(cx);
         cx.notify();
     }
@@ -642,32 +626,11 @@ impl Desktop {
     pub(super) fn subtitle_attention_required(&self, cx: &App) -> bool {
         self.import.subtitle_loading
             || self.import.subtitle_error.is_some()
-            || self.import.source_preview.as_ref().is_some_and(|source| {
-                subtitle_needs_confirmation(source, self.task_options(cx).source_mode)
-            })
-    }
-
-    /// The shared path for every processing-option control: record the change
-    /// in the draft, check the model it now needs, and continue a confirmed
-    /// conversion that was waiting for it.
-    fn set_task_option(
-        &mut self,
-        edit: impl FnOnce(&mut ConversionOptions),
-        cx: &mut Context<Self>,
-    ) {
-        let saved = self.update_task_options(edit, cx);
-        if !self.task_options(cx).uses_cloud_provider()
-            // The options panel shows this model's status.
-            && (self.import_uses_speech(cx)
-                || self.task_options(cx).source_mode != TranscriptSource::Subtitle)
-        {
-            let (provider, model, root) = self.import_model_request(cx);
-            self.ensure_model_diagnostic(provider, Some(&model), &root, cx);
-        }
-        if saved {
-            self.advance_conversion_when_ready(cx);
-        }
-        cx.notify();
+            || self
+                .import
+                .source_preview
+                .as_ref()
+                .is_some_and(|source| subtitle_needs_confirmation(source, self.text_mode(cx)))
     }
 
     /// The link and what can be done with it, or the local file in its place.
@@ -722,7 +685,7 @@ impl Desktop {
         let preview_label = course2md::tr!("预览视频");
         let preview_disabled = self.import.preview_cancel.is_some()
             || self.value(Field::Source, cx).is_empty()
-            || self.owning_task(cx).is_some();
+            || self.workbench_linked_task(cx).is_some();
         let preview_click = cx.listener(|this, _, window, cx| this.inspect_source(window, cx));
         // The action keeps its label while the field still leaves the link room to
         // read; only when it would not does it fold to its icon, named by its tooltip.
@@ -813,7 +776,7 @@ impl Desktop {
                         .w_full()
                         .min_w_0()
                         .bg(color(ColorRole::SURFACE))
-                        // A panel on its own, as the options panel below it.
+                        // A panel on its own, as the video card that takes its place.
                         .rounded(RADIUS_HERO)
                         .flex()
                         .flex_col()
@@ -1020,12 +983,6 @@ impl Desktop {
             .iter()
             .any(|candidate| candidate.identity.is_some());
         let selected_count = self.import.selected_candidates.len();
-        // Every selected video would use the draft's services: a deleted one is asked
-        // about here, before any of them is queued.
-        let dropped = batch.then(|| self.dropped_draft_service(cx)).flatten();
-        let dropped_notice = dropped
-            .as_ref()
-            .map(|(purpose, replacement)| self.dropped_service_notice(*purpose, replacement, cx));
         let all_selected = selectable > 0 && selectable_selected == selectable;
         let rows = self
             .import
@@ -1052,7 +1009,6 @@ impl Desktop {
                     .child(section_title("import-collection-title", title.to_owned())),
             )
             .child(list)
-            .children(dropped_notice.filter(|_| any_batchable))
             .when(batch && any_batchable, |view| {
                 view.child(
                     h_flex()
@@ -1105,13 +1061,8 @@ impl Desktop {
                                 } else {
                                     course2md::tr!("整理选中的视频").to_owned()
                                 })
-                                // The component check decides whether these can run at all,
-                                // and a deleted service waits for the person's choice.
-                                .disabled(
-                                    selected_count == 0
-                                        || self.environment.is_none()
-                                        || dropped.is_some(),
-                                )
+                                // The component check decides whether these can run at all.
+                                .disabled(selected_count == 0 || self.environment.is_none())
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.enqueue_selected_candidates(cx)
                                 })),
@@ -1286,18 +1237,6 @@ impl Desktop {
         ))
     }
 
-    /// Opens the processing options for this fix, without changing the saved choice,
-    /// and puts the cursor in the name field.
-    fn fill_in_title(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.import.title_required = true;
-        self.desktop_settings.home_options = true;
-        let input = self.inputs[&Field::Title].clone();
-        window.on_next_frame(move |window, cx| {
-            input.update(cx, |input, cx| input.focus(window, cx));
-        });
-        cx.notify();
-    }
-
     fn toggle_preview_details(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.import.show_preview_details = !self.import.show_preview_details;
         cx.notify();
@@ -1416,7 +1355,7 @@ impl Desktop {
                             .flex_1()
                             .min_w_0()
                             .gap(rem(4.))
-                            // The name the note is saved under, as 处理选项 sets it.
+                            // The name the note is saved under.
                             .child(video_title(
                                 "import-selected-title".to_owned(),
                                 self.draft(cx)
@@ -1464,8 +1403,8 @@ impl Desktop {
             .children(recovery.facts);
         Some(motion::state_enter(
             "import-selected-source-enter",
-            tile([true, true, false, false])
-                .rounded_t(RADIUS_HERO)
+            tile([true; 4])
+                .rounded(RADIUS_HERO)
                 .id("import-selected-source")
                 .flex()
                 .flex_col()
@@ -1503,7 +1442,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> Div {
         let speech = self.import_uses_speech(cx);
-        let mode = self.task_options(cx).source_mode;
+        let mode = self.text_mode(cx);
         // A read error of this input, or the source's own failed read.
         let read_error = self.import.subtitle_error.as_deref();
         let source_failure = match &source.subtitles {
@@ -1799,321 +1738,26 @@ impl Desktop {
             })
     }
 
-    /// 文字来源: the route, and the speech recognition route beneath it when speech
-    /// may be used. The hint describes the mode; the video card says what this video
-    /// will actually use.
-    fn import_text_mode_options(
-        &self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> ui::FieldTable {
-        let mode = self.task_options(cx).source_mode;
-        let hint = match mode {
-            TranscriptSource::Subtitle => course2md::tr!("只使用视频自带的字幕"),
-            TranscriptSource::Asr => course2md::tr!("将使用语音识别"),
-            TranscriptSource::Auto => {
-                course2md::tr!("有字幕时直接用字幕，没有字幕时使用语音识别")
-            }
-        };
-        // The home column, inside its narrow gutters, less the panel's insets.
-        let unit = f32::from(rem(1.).to_pixels(window.rem_size()));
-        let room = (crate::views::shell_content_width(Page::New, window) / unit).min(760.) - 40.;
-        let labels: Vec<&str> = text_source_choices()
-            .iter()
-            .map(|(_, label)| *label)
-            .collect();
-        let fits = ui::segmented_fits(&labels, true, room, window);
-        let selector =
-            // The same control as Settings › 生成笔记's 文字来源: icons, as wide as its
-            // options while they fit, stacked whole when they do not.
-            ConnectedButtonGroup::new("conversion-text-mode", course2md::tr!("文字来源方式"))
-                .tone(ButtonTone::Neutral)
-                .segmented()
-                .when(fits, |group| group.fit_content())
-                .vertical(!fits)
-                .button_size(ButtonSize::Small)
-                .options(text_source_choices().map(|(mode, label)| (text_source_id(mode), label)))
-                .icon("auto", symbols::auto_fix_high())
-                .icon("subtitle", symbols::subtitles())
-                .icon("asr", symbols::mic())
-                .selected(text_source_id(mode))
-                .on_change(cx.listener(|this, value: &SharedString, _, cx| {
-                    let Some(mode) = text_source_choices()
-                        .iter()
-                        .map(|(mode, _)| *mode)
-                        .find(|mode| text_source_id(*mode) == value.as_ref())
-                    else {
-                        return;
-                    };
-                    if mode == TranscriptSource::Asr {
-                        this.use_speech(cx);
-                    } else {
-                        this.set_task_option(|o| o.source_mode = mode, cx);
-                    }
-                }));
-        // Speech settings matter only when this video may need speech:
-        // a previewed video whose subtitles will be used does not.
-        let speech_relevant = mode == TranscriptSource::Asr
-            || (mode == TranscriptSource::Auto
-                && self.import.source_preview.as_ref().is_none_or(|source| {
-                    self.import.subtitle_loading || subtitle_needs_confirmation(source, mode)
-                }));
-        let mut fields = vec![ui::Field::content(
-            "conversion-text-mode-field",
-            v_flex()
-                .w_full()
-                .min_w_0()
-                .gap(rem(8.))
-                .child(div().when(fits, |row| row.flex()).child(selector))
-                .child(supporting_info("conversion-text-mode-hint", hint)),
-        )];
-        if speech_relevant {
-            fields.extend(self.import_speech_options(window, cx));
-        }
-        ui::field_table(
-            "conversion-text-mode-label",
-            course2md::tr!("文字来源"),
-            fields,
-        )
-    }
-
-    /// AI 处理: one switch per step, then the translation target and the service
-    /// the text is sent to.
-    fn import_ai_options(&self, window: &mut Window, cx: &mut Context<Self>) -> ui::FieldTable {
-        let custom_rule = self.task_options(cx).llm
-            && self
-                .import_base_config(cx)
-                .llm
-                .prompt
-                .as_ref()
-                .is_some_and(|prompt| !prompt.trim().is_empty());
-        let mut fields: Vec<ui::Field> = [
-            ConversionAiOption::Proofread,
-            ConversionAiOption::Summary,
-            ConversionAiOption::Vision,
-        ]
-        .into_iter()
-        .map(|option| {
-            let vision_off = option == ConversionAiOption::Vision && !self.task_options(cx).llm;
-            let hint = if option == ConversionAiOption::Proofread && custom_rule {
-                course2md::tr!("使用自定义校对规则")
-            } else if vision_off {
-                // Disabled, it says why, as on the settings page.
-                course2md::tr!("打开「校对文字和标点」后可用")
-            } else {
-                ""
-            };
-            ui::Field::switch(
-                format!("import-ai-option-{option:?}"),
-                conversion_ai_option_label(option),
-                conversion_ai_option_enabled(self.task_options(cx), option),
-                cx.listener(move |this, enabled: &bool, _, cx| {
-                    let enabled = *enabled;
-                    this.set_task_option(|o| apply_conversion_ai_option(o, option, enabled), cx);
-                }),
-            )
-            .hint(hint)
-            .disabled(vision_off)
-        })
-        .collect();
-        // Bilingual translation is a per-task choice; the global default is only
-        // the starting value inherited by this input.
-        let translated = self
-            .task_options(cx)
-            .translate
-            .as_deref()
-            .and_then(course2md::language::target);
-        let targets = std::iter::once((None, course2md::tr!("不翻译"))).chain(
-            course2md::language::TARGETS
-                .iter()
-                .map(|(code, _)| (Some(*code), course2md::language::native_name(code))),
-        );
-        fields.push(
-            ui::Field::menu(
-                "import-ai-translate",
-                course2md::tr!("双语翻译"),
-                translated
-                    .map(course2md::language::native_name)
-                    .unwrap_or(course2md::tr!("不翻译")),
-                MaterialMenu::new("import-ai-translate-items").items(ui::choice_items(
-                    targets,
-                    &translated,
-                    cx.listener(|this, code: &Option<&'static str>, _, cx| {
-                        let code = *code;
-                        this.set_task_option(|o| o.translate = code.map(str::to_owned), cx);
-                    }),
-                )),
-            )
-            .hint(if translated.is_some() {
-                course2md::tr!("每段文字下方附上译文；已是该语言的视频不翻译")
-            } else {
-                ""
-            }),
-        );
-        if self.task_uses_ai(cx) {
-            let consequence = self
-                .selected_task_service(ServicePurpose::Ai, cx)
-                .map(|selected| {
-                    course2md::tr!(
-                        "{}会发送到 {}",
-                        if self.task_options(cx).llm && self.task_options(cx).vision {
-                            course2md::tr!("文字及对应截图")
-                        } else {
-                            course2md::tr!("文字")
-                        },
-                        selected.config.host()
-                    )
-                });
-            // With none saved, adding one is an add row, as in Settings.
-            fields.push(if self.has_services(ServicePurpose::Ai) {
-                ui::Field::below(
-                    "import-ai-service",
-                    course2md::tr!("AI 服务"),
-                    self.task_service_picker(ServicePurpose::Ai, window, cx),
-                )
-                .hint(consequence.unwrap_or_default())
-            } else {
-                ui::Field::add(
-                    "import-ai-service",
-                    desktop_prefs::service_binding::add_service_label(ServicePurpose::Ai),
-                    cx.listener(|this, _, window, cx| {
-                        this.open_task_service_editor(ServicePurpose::Ai, window, cx)
-                    }),
-                )
-            });
-        }
-        // A quiet reset that names itself once: ink, not the primary of the panel's
-        // actions (G4), at the group's foot.
-        fields.push(ui::Field::content(
-            "reset-task-overrides-field",
-            h_flex().w_full().child(
-                material_button("reset-task-overrides", ButtonVariant::Text)
-                    .tone(ButtonTone::Neutral)
-                    .icon(symbols::restart_alt())
-                    .child(course2md::tr!("恢复 AI 默认"))
-                    .on_click(cx.listener(|this, _, _, cx| this.reset_task_ai_overrides(cx))),
-            ),
-        ));
-        ui::field_table("import-ai-label", course2md::tr!("AI 处理"), fields)
-    }
-
-    fn reset_task_ai_overrides(&mut self, cx: &mut Context<Self>) {
-        if !self.save_current_draft(cx) {
-            return;
-        }
-        let defaults = ConversionOptions::from_config(&self.preferences.defaults_config());
-        if self
-            .transact(
-                course2md::tr!("本次选项尚未恢复默认：{}"),
-                |state| {
-                    state
-                        .draft_mut()
-                        .context(course2md::tr!("当前视频输入暂时不可用"))?
-                        .reset_ai_overrides(&defaults);
-                    Ok(())
-                },
-                cx,
-            )
-            .is_some()
-        {
-            self.advance_conversion_when_ready(cx);
-        }
-        cx.notify();
-    }
-
-    /// Where speech recognition runs, and the service or model that takes.
-    fn import_speech_options(&self, window: &mut Window, cx: &mut Context<Self>) -> Vec<ui::Field> {
-        use course2md::config::AsrProvider;
-        let cloud = self.task_options(cx).uses_cloud_provider();
-        let (provider, model, root) = self.import_model_request(cx);
-        let shown = if cloud {
-            course2md::tr!("语音识别服务").to_owned()
-        } else {
-            format!(
-                "{} · {}",
-                course2md::tr!("本机 · {}", course2md::config::model_label(&model)),
-                self.local_engine_name(cx)
-            )
-        };
-        let current = self.task_options(cx).provider;
-        let locations: Vec<_> = crate::providers()
-            .iter()
-            .filter_map(|(id, label)| {
-                let provider = crate::provider_from_id(id);
-                // Automatic, CPU and the cloud service are always offered.
-                (matches!(provider, None | Some(AsrProvider::Cpu | AsrProvider::Api))
-                    || provider == current
-                    || provider
-                        .zip(self.environment.as_ref())
-                        .is_some_and(|(provider, environment)| environment.supports(provider)))
-                .then_some((provider, *label))
-            })
-            .collect();
-        let location = ui::Field::menu(
-            "import-speech-location",
-            course2md::tr!("语音识别"),
-            shown,
-            MaterialMenu::new("import-speech-location-items").items(ui::choice_items(
-                locations,
-                &current,
-                cx.listener(|this, provider: &Option<AsrProvider>, _, cx| {
-                    let provider = *provider;
-                    this.set_task_option(|o| o.provider = provider, cx);
-                }),
-            )),
-        );
-        let route = if cloud {
-            ui::Field::below(
-                "import-speech-service",
-                course2md::tr!("语音识别服务"),
-                self.task_service_picker(ServicePurpose::Speech, window, cx),
-            )
-            .hint(course2md::tr!("音频会发送到所选语音识别服务"))
-        } else {
-            // One quiet status line and its action; Settings keeps the table.
-            ui::Field::below(
-                "import-speech-model",
-                course2md::config::model_label(&model).to_owned(),
-                v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .gap(rem(8.))
-                    .child(self.model_status_line(provider, Some(&model), &root, window, cx))
-                    .child(
-                        material_button("import-model-settings", ButtonVariant::Text)
-                            .self_start()
-                            .icon(symbols::settings())
-                            .child(course2md::tr!("模型设置"))
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.open_settings(window, cx)),
-                            ),
-                    ),
-            )
-        };
-        vec![location, route]
-    }
-
     fn import_uses_speech(&self, cx: &App) -> bool {
         self.import
             .source_preview
             .as_ref()
-            .is_some_and(|source| uses_speech(source, self.task_options(cx).source_mode))
+            .is_some_and(|source| uses_speech(source, self.text_mode(cx)))
     }
 
-    /// Proofreading, a summary or a bilingual translation sends text to the AI service.
-    fn task_uses_ai(&self, cx: &App) -> bool {
-        self.task_options(cx).llm
-            || self.task_options(cx).summarize
-            || self
-                .task_options(cx)
+    /// The service Settings' conversion needs for this video and does not have: the
+    /// speech service when this video is recognized in the cloud, the AI service when
+    /// proofreading, a summary or a translation is on.
+    fn missing_import_service(&self, cx: &App) -> Option<ServicePurpose> {
+        let settings = ConversionOptions::from_config(&self.preferences.defaults_config());
+        let uses_ai = settings.llm
+            || settings.summarize
+            || settings
                 .translate
                 .as_deref()
                 .and_then(course2md::language::target)
-                .is_some()
-    }
-
-    fn missing_import_service(&self, cx: &App) -> Option<ServicePurpose> {
-        let separate_subtitle = self.task_options(cx).source_mode != TranscriptSource::Asr
+                .is_some();
+        let separate_subtitle = self.text_mode(cx) != TranscriptSource::Asr
             && self
                 .workspace(cx)
                 .and_then(|workspace| workspace.state.draft())
@@ -2121,208 +1765,19 @@ impl Desktop {
         [
             (
                 ServicePurpose::Speech,
-                self.task_options(cx).uses_cloud_provider()
-                    && self.import_uses_speech(cx)
-                    && !separate_subtitle,
+                settings.uses_cloud_provider() && self.import_uses_speech(cx) && !separate_subtitle,
             ),
-            (ServicePurpose::Ai, self.task_uses_ai(cx)),
+            (ServicePurpose::Ai, uses_ai),
         ]
         .into_iter()
         .find_map(|(purpose, required)| {
             (required
-                && self
-                    .selected_task_service(purpose, cx)
-                    .is_none_or(|version| {
-                        self.preferences
-                            .service_retired_in_snapshot(&version.service_id)
-                    }))
+                && self.default_service(purpose).is_none_or(|version| {
+                    self.preferences
+                        .service_retired_in_snapshot(&version.service_id)
+                }))
             .then_some(purpose)
         })
-    }
-
-    fn import_model_request(&self, cx: &App) -> (course2md::config::AsrProvider, String, PathBuf) {
-        let provider = self.actual_local_provider(cx);
-        let mut config = self.import_base_config(cx);
-        // The plan builders' rule: an empty model takes the engine's default (NPU resolves its own).
-        desktop_tasks::plan::fill_default_asr_model(&mut config, provider);
-        let model = config.defaults.asr_model.unwrap_or_default();
-        let root = course2md::config::model_dir_from(config.defaults.model_dir.as_deref());
-        (provider, model, root)
-    }
-
-    fn actual_local_provider(&self, cx: &App) -> course2md::config::AsrProvider {
-        use course2md::config::AsrProvider;
-        self.task_options(cx)
-            .provider
-            .filter(|provider| *provider != AsrProvider::Api)
-            .unwrap_or_else(|| self.recommended_local_provider())
-    }
-
-    fn local_engine_name(&self, cx: &App) -> &'static str {
-        crate::provider_label(Some(self.actual_local_provider(cx)))
-    }
-
-    /// 保存: the library, the note's name and folder, extra exports and
-    /// whether the original video is kept.
-    fn import_destination(&self, cx: &mut Context<Self>) -> ui::FieldTable {
-        let current = self.draft(cx).map(|draft| draft.library_id.clone());
-        let libraries = self
-            .workspace(cx)
-            .map(|workspace| workspace.state.libraries.clone())
-            .unwrap_or_default();
-        let library_name = libraries
-            .iter()
-            .find(|library| Some(&library.id) == current.as_ref())
-            .map(|library| library.label())
-            .unwrap_or_else(|| course2md::tr!("选择保存位置").to_owned());
-        let library_items = libraries.iter().map(|library| {
-            (
-                Some(library.id.clone()),
-                format!("{} · {}", library.label(), library.root.display()),
-            )
-        });
-        // One library is a fact, not a choice: its name, not a dropdown that cannot open.
-        let mut fields = vec![if libraries.len() < 2 {
-            ui::Field::inline(
-                "import-library",
-                course2md::tr!("笔记库"),
-                TileScale::Regular.support(
-                    "import-library-name",
-                    // The name and where it is: the name alone may repeat the label.
-                    libraries
-                        .first()
-                        .map(|library| format!("{} · {}", library.label(), library.root.display()))
-                        .unwrap_or(library_name),
-                ),
-            )
-        } else {
-            ui::Field::menu(
-                "import-library",
-                course2md::tr!("笔记库"),
-                library_name,
-                MaterialMenu::new("import-library-items").items(ui::choice_items(
-                    library_items,
-                    &current,
-                    cx.listener(|this, id: &Option<String>, _, cx| {
-                        if let Some(id) = id {
-                            this.set_import_library(id.clone(), cx);
-                        }
-                    }),
-                )),
-            )
-        }];
-        if self.import.source_preview.is_some() {
-            fields.push(ui::Field::below(
-                "import-title",
-                course2md::tr!("笔记名称"),
-                RevealFocus::new(
-                    ("import-title-focus", self.import.validation_attempt),
-                    TextField::new("import-title-field", &self.inputs[&Field::Title])
-                        .w_full()
-                        .outlined()
-                        .shape(TextFieldShape::Rounded)
-                        // Empty, the note takes the video's own name, shown here.
-                        .when_some(
-                            self.import
-                                .source_preview
-                                .as_ref()
-                                .map(|source| source.title.clone()),
-                            |field, title| field.placeholder(title),
-                        )
-                        .error(self.import.title_required)
-                        .when_some(
-                            self.import
-                                .source_validation
-                                .clone()
-                                .filter(|_| self.import.title_required),
-                            |field, message| field.supporting_text(message),
-                        ),
-                    self.scrolls[Page::New as usize].clone(),
-                ),
-            ));
-        }
-        fields.push(ui::Field::below(
-            "import-folder",
-            course2md::tr!("文件夹"),
-            h_flex()
-                .w_full()
-                .min_w_0()
-                .gap(rem(8.))
-                .items_center()
-                .child(div().flex_1().min_w_0().child(self.folder_picker(cx)))
-                .child(ui::tip_button(
-                    "import-new-folder",
-                    symbols::create_new_folder(),
-                    course2md::tr!("新建文件夹"),
-                    |button| {
-                        button
-                            .variant(IconButtonVariant::Tonal)
-                            .tone(ButtonTone::Neutral)
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.begin_folder(window, cx)),
-                            )
-                    },
-                )),
-        ));
-        let chips = ["Markdown", course2md::tr!("网页"), "JSON"]
-            .into_iter()
-            .enumerate()
-            .map(|(index, label)| {
-                ChipSetItem::new(
-                    ("import-export-item", index),
-                    FilterChip::new(("import-export", index), label)
-                        .selected(self.task_options(cx).formats[index])
-                        .on_toggle(cx.listener(move |this, on: &bool, _, cx| {
-                            let on = *on;
-                            this.update_task_options(|o| o.formats[index] = on, cx);
-                            cx.notify();
-                        })),
-                )
-            });
-        fields.push(ui::Field::below(
-            "import-exports",
-            course2md::tr!("同时导出"),
-            ChipSet::new("import-export-chips", course2md::tr!("同时导出")).items(chips),
-        ));
-        if self.online(cx) {
-            fields.push(
-                ui::Field::switch(
-                    "import-keep-video",
-                    course2md::tr!("保留原视频"),
-                    self.task_options(cx).keep_video,
-                    cx.listener(|this, value: &bool, _, cx| {
-                        let value = *value;
-                        this.update_task_options(|o| o.keep_video = value, cx);
-                        cx.notify();
-                    }),
-                )
-                .hint(course2md::tr!("供离线播放，会占用更多磁盘空间")),
-            );
-        }
-        ui::field_table("import-save-label", course2md::tr!("保存位置"), fields)
-    }
-
-    fn set_import_library(&mut self, id: String, cx: &mut Context<Self>) {
-        if !self.save_current_draft(cx) {
-            return;
-        }
-        if self
-            .transact(
-                course2md::tr!("保存位置尚未更新：{}"),
-                |state| {
-                    if let Some(draft) = state.draft_mut() {
-                        draft.library_id = id;
-                        draft.folder = None;
-                    }
-                    Ok(())
-                },
-                cx,
-            )
-            .is_some()
-        {
-            self.advance_conversion_when_ready(cx);
-        }
-        cx.notify();
     }
 
     /// The preview card is on screen (not replaced by reading or a task).
@@ -2332,236 +1787,13 @@ impl Desktop {
             && self.workbench_linked_task(cx).is_none()
     }
 
-    /// Show or hide the processing options and remember the choice.
-    pub(super) fn set_home_options(&mut self, open: bool, cx: &mut Context<Self>) {
-        self.desktop_settings.home_options = open;
-        let mut preferences = self.application_edit_base();
-        preferences.desktop.home_options = open;
-        self.commit_application(preferences, cx);
-        cx.notify();
-    }
-
-    /// Clear the submitted link so the next video starts from the saved
-    /// defaults. The submitted task keeps running.
-    pub(super) fn set_up_next_video(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // The link field's observer prepares the next input and stops
-        // following the submitted task.
-        self.inputs[&Field::Source].update(cx, |input, cx| {
-            input.set_value("", window, cx);
-            input.focus(window, cx);
-        });
-        self.scrolls[Page::New as usize].set_offset(point(px(0.), px(0.)));
-        cx.notify();
-    }
-
-    /// The submitted task that owns the current input: still in flight, or
-    /// shown in the video card's place (its result opening, or a result that
-    /// needs attention). Its options were fixed when it was submitted.
-    fn owning_task<'a>(&'a self, cx: &'a App) -> Option<&'a workspace::TaskRecord> {
-        let state = &self.workspace(cx)?.state;
-        let input = self.value(Field::Source, cx);
-        state
-            .draft()
-            .and_then(|draft| locked_input_task(draft, &state.tasks, &input))
-            .or_else(|| self.workbench_linked_task(cx))
-    }
-
-    /// The processing options: a header tile that shows or hides them, joined to the
-    /// video card above so they read as that video's, then one section per subject.
-    /// A submitted task's options are its saved plan, read-only.
-    fn workbench_options(
-        &self,
-        attached: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let open = self.desktop_settings.home_options;
-        let owner = self.owning_task(cx).cloned();
-        let applies_to: SharedString = match (&owner, &self.import.source_preview) {
-            (Some(_), _) => course2md::tr!("提交时已确定，不能再更改").into(),
-            (None, Some(source)) if attached => {
-                let title = self
-                    .draft(cx)
-                    .and_then(desktop_tasks::plan::note_title)
-                    .unwrap_or_else(|| source.title.clone());
-                course2md::tr!("仅对「{}」生效", title).into()
-            }
-            _ => course2md::tr!("仅对下一个视频生效").into(),
-        };
-        let top = !attached;
-        let scale = TileScale::Regular;
-        let header = scale
-            .button("generation-options-toggle", [top, top, false, false])
-            .accessibility_label(if open {
-                course2md::tr!("收起处理选项")
-            } else {
-                course2md::tr!("展开处理选项")
-            })
-            .on_click(cx.listener(move |this, _, _, cx| this.set_home_options(!open, cx)))
-            .child(
-                scale
-                    .row()
-                    .child(Icon::from(symbols::tune()).color(color(ColorRole::ON_SURFACE_VARIANT)))
-                    .child(scale.text(
-                        "generation-options-title",
-                        course2md::tr!("处理选项"),
-                        Some(applies_to),
-                    ))
-                    .child(disclosure_chevron(open)),
-            );
-        let hairline = |id: &'static str| {
-            MaterialDivider::new(id)
-                .variant(DividerVariant::MiddleInset)
-                .inset_start(ITEM_INSET)
-                .inset_end(ITEM_INSET)
-        };
-        // The way to the next video stays visible whether or not the plan is open: a
-        // running task's card carries it; otherwise it sits right under this header.
-        let next = owner
-            .as_ref()
-            .filter(|task| !desktop_tasks::task_view::runs_in_card(task))
-            .map(|_| {
-                v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .child(hairline("options-next-divider"))
-                    .child(
-                        scale
-                            .button("set-up-next-video", [false, false, false, false])
-                            .accessibility_label(course2md::tr!("设置下一个视频"))
-                            .on_click(
-                                cx.listener(|this, _, window, cx| {
-                                    this.set_up_next_video(window, cx)
-                                }),
-                            )
-                            .child(
-                                scale
-                                    .row()
-                                    .child(
-                                        Icon::from(symbols::add()).color(color(ColorRole::PRIMARY)),
-                                    )
-                                    .child(scale.text(
-                                        "set-up-next-video-label",
-                                        course2md::tr!("设置下一个视频"),
-                                        Some(course2md::tr!("清空链接，选项恢复为默认设置").into()),
-                                    )),
-                            ),
-                    )
-            });
-        // One surface: a hairline under the header, then quiet sections inside it.
-        let body = v_flex()
-            .w_full()
-            .min_w_0()
-            .child(hairline("options-header-divider"))
-            .child(match &owner {
-                Some(task) => v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .gap(rem(12.))
-                    .p(ITEM_INSET)
-                    .children(self.tasks.read(cx).task_plan_rows(task, true, cx)),
-                None => v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .pt(rem(8.))
-                    .pb(rem(12.))
-                    .gap(rem(16.))
-                    .child(self.import_text_mode_options(window, cx))
-                    .child(self.import_ai_options(window, cx))
-                    .child(self.import_destination(cx)),
-            });
-        tile([top, top, true, true])
-            .flex()
-            .flex_col()
-            .overflow_hidden()
-            .rounded_b(RADIUS_HERO)
-            .when(top, |panel| panel.rounded_t(RADIUS_HERO))
-            .child(header)
-            .children(next)
-            .child(motion::disclosure("generation-options-body", open, body))
-    }
-
     fn existing_source_note<'a>(&self, cx: &'a App) -> Option<&'a Course> {
         let source = self.import.source_preview.as_ref()?;
         let preferred = self
             .workspace(cx)
-            .and_then(|workspace| {
-                workspace
-                    .state
-                    .draft()
-                    .and_then(|draft| workspace.state.library(&draft.library_id))
-            })
+            .and_then(|workspace| workspace.state.library(&workspace.state.default_library))
             .map(|library| library.root.as_path());
         self.library(cx).preferred_note(&source.identity, preferred)
-    }
-
-    /// A deleted service the draft chose, and its two ways on: use the default it
-    /// names, or choose another. The card and the candidate list show the same one.
-    fn dropped_service_notice(
-        &self,
-        purpose: ServicePurpose,
-        replacement: &crate::preferences::ServiceVersion,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let name = replacement.config.name.clone();
-        let id = replacement.id.clone();
-        notice_banner(
-            "draft-service-dropped",
-            NoticeKind::Warning,
-            course2md::tr!("所选服务已从设置中删除"),
-        )
-        .rounded(RADIUS_LARGE)
-        // Two choices: on their own line under the message, so neither squeezes it
-        // at any width.
-        .child(
-            h_flex()
-                .w_full()
-                .justify_end()
-                .gap(rem(8.))
-                .flex_wrap()
-                .child(
-                    material_button("use-default-service", ButtonVariant::Tonal)
-                        .icon(symbols::check())
-                        .child(course2md::tr!("使用默认服务「{}」", name))
-                        // Binds the version it names, not whatever the default is by
-                        // the time the task runs.
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.bind_service(purpose, Some(id.clone()), true, cx);
-                        })),
-                )
-                .child(
-                    material_button("choose-task-service", ButtonVariant::Text)
-                        .icon(symbols::tune())
-                        .child(course2md::tr!("选择服务"))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            // The choice is in the processing options.
-                            this.desktop_settings.home_options = true;
-                            cx.notify();
-                        })),
-                ),
-        )
-    }
-
-    /// A service the current draft chose, among those its options use, that is no
-    /// longer saved, with the version that would take its place (the AI service
-    /// first). Nothing while the services cannot be read: then nothing is known gone.
-    pub(crate) fn dropped_draft_service(
-        &self,
-        cx: &App,
-    ) -> Option<(ServicePurpose, crate::preferences::ServiceVersion)> {
-        let draft = self.workspace(cx)?.state.draft()?;
-        let mut config = draft
-            .base_config
-            .clone()
-            .unwrap_or_else(|| self.preferences.defaults_config());
-        draft.options.apply_to(&mut config);
-        self.preferences.dropped_choice(
-            &crate::preferences::ServiceRefs {
-                asr: draft.asr_service.clone(),
-                llm: draft.ai_service.clone(),
-            },
-            &config,
-        )
     }
 
     fn can_start_input(&self, cx: &App) -> bool {
@@ -2662,7 +1894,6 @@ impl Desktop {
         if !self.save_current_draft(cx) {
             return false;
         }
-        let defaults = ConversionOptions::from_config(&self.preferences.defaults_config());
         let online = self.online(cx);
         let Some(workspace) = &self.records.read(cx).workspace else {
             return true;
@@ -2673,17 +1904,10 @@ impl Desktop {
         if retired_input_task(draft, &workspace.state.tasks, &input).is_none() {
             return true;
         }
-        let destination = (draft.library_id == workspace.state.default_library)
-            .then(|| {
-                draft
-                    .folder
-                    .map(|folder| (draft.library_id.clone(), folder))
-            })
-            .flatten();
         let reset = self.transact(
             course2md::tr!("新的视频输入尚未建立：{}"),
             |state| {
-                state.reset_input(online, defaults, destination);
+                state.reset_input(online);
                 Ok(())
             },
             cx,
@@ -2733,16 +1957,12 @@ impl Desktop {
             .preview_cancel
             .is_some()
             .then(|| self.source_reading(window, cx));
-        let attached = card.is_some();
-        let options = motion::state_enter(
-            "generation-options-panel",
-            self.workbench_options(attached, window, cx),
-        );
         let candidates = self
             .import
             .source_collection_title
             .clone()
             .map(|title| self.candidate_list(&title, cx));
+        let something_below = card.is_some() || reading.is_some() || candidates.is_some();
         let title = TypeRole::DisplaySmall.scale();
         let hero = workbench_column()
             .gap(HERO_GAP)
@@ -2758,29 +1978,7 @@ impl Desktop {
             .children(reading)
             .children(candidates)
             .children(self.source_preview_error(cx))
-            .child(
-                // The options belong to one input: with its video card (the preview or
-                // the task in its place) they are one surface, the card, a hairline,
-                // then the options; otherwise the panel stands alone.
-                v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .when(attached, |unit| {
-                        unit.rounded(RADIUS_HERO)
-                            .overflow_hidden()
-                            .bg(color(ColorRole::SURFACE))
-                    })
-                    .children(card)
-                    .when(attached, |unit| {
-                        unit.child(
-                            MaterialDivider::new("video-unit-divider")
-                                .variant(DividerVariant::MiddleInset)
-                                .inset_start(ITEM_INSET)
-                                .inset_end(ITEM_INSET),
-                        )
-                    })
-                    .child(options),
-            )
+            .children(card)
             .when_some(cancelled, |view, id| {
                 view.child(info_callout(
                     SharedString::from(format!("cancelled-input-task-{id}")),
@@ -2792,7 +1990,7 @@ impl Desktop {
             .recent_notes_section(cx)
             .map(|recent| motion::enter("home-recent-notes", recent));
         // With nothing below it, the input moves toward the optical center.
-        let quiet = recent.is_none() && active.is_none() && !self.desktop_settings.home_options;
+        let quiet = !something_below && recent.is_none() && active.is_none();
         let top = motion::value("home-hero-top", hero_top(quiet, compact), window, cx);
         v_flex()
             .w_full()
@@ -2821,7 +2019,8 @@ impl Desktop {
         let id = &task.id;
         motion::state_enter(
             SharedString::from(format!("task-opening-result-{id}")),
-            tile([true, true, false, false])
+            tile([true; 4])
+                .rounded(RADIUS_HERO)
                 .flex()
                 .flex_col()
                 .gap(rem(12.))
@@ -2893,7 +2092,6 @@ impl Desktop {
             services_blocked: self
                 .preferences
                 .is_blocked(crate::preferences::PreferenceGroup::Services),
-            defaults_pending: self.preference_defaults_pending,
             source: self.import.preview_generation,
             reading: self.import.reading(),
             subtitle_failed: self.import.subtitle_error.is_some(),
@@ -3022,33 +2220,9 @@ impl Desktop {
                 })),
             );
         }
-        // A service this note chose that is no longer saved: the person decides
-        // whether the default takes its place, before anything is sent to it.
-        let dropped_service = self.dropped_draft_service(cx);
-        // A note needs a name: the field is in the processing options.
-        let title_missing = self.import.source_preview.is_some()
-            && self
-                .workspace(cx)
-                .and_then(|workspace| workspace.state.draft())
-                .is_some_and(|draft| desktop_tasks::plan::note_title(draft).is_none());
-        if title_missing {
-            repairs.push(
-                button(
-                    "fill-in-note-title",
-                    ButtonVariant::Tonal,
-                    symbols::edit(),
-                    course2md::tr!("填写名称"),
-                )
-                .on_click(cx.listener(|this, _, window, cx| this.fill_in_title(window, cx))),
-            );
-        }
         if let Some(library) = self
             .workspace(cx)
-            .and_then(|workspace| {
-                workspace
-                    .state
-                    .library(&workspace.state.draft()?.library_id)
-            })
+            .and_then(|workspace| workspace.state.library(&workspace.state.default_library))
             .filter(|library| {
                 self.cached_location_check(library)
                     .is_some_and(|check| check.needs_reassociation)
@@ -3139,8 +2313,7 @@ impl Desktop {
                     reading
                         || checking
                         || self.records.read(cx).workspace.is_none()
-                        || preferences_blocked
-                        || dropped_service.is_some(),
+                        || preferences_blocked,
                 )
                 .on_click(cx.listener(move |_, _, window, cx| {
                     // The note is replaced, not kept beside the new one: ask first.
@@ -3170,11 +2343,12 @@ impl Desktop {
                     "configure-conversion-service",
                     ButtonVariant::Tonal,
                     symbols::add(),
-                    // The one name the app gives this action, in the panel and Settings.
+                    // The one name the app gives this action, here and in Settings.
                     desktop_prefs::service_binding::add_service_label(purpose),
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    this.open_task_service_editor(purpose, window, cx);
+                    // Saved as the default: that is the service the conversion uses.
+                    this.open_settings_service_editor(purpose, None, window, cx);
                 })),
             );
         }
@@ -3240,11 +2414,6 @@ impl Desktop {
                 self.workbench_notice = Some(message);
             }
             None => {}
-        }
-        if notice.is_none()
-            && let Some((purpose, replacement)) = dropped_service
-        {
-            notice = Some(self.dropped_service_notice(purpose, &replacement, cx));
         }
         // Without an obstacle to explain them, repairs wait with the card's actions.
         actions.splice(0..0, repairs);

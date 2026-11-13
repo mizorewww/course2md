@@ -497,7 +497,7 @@ impl Desktop {
                 course2md::tr!("移动到…"),
                 symbols::drive_file_move(),
                 |this, course, _, cx| {
-                    let root = this.folder_context(Some(course.dir.clone()), cx).root;
+                    let root = this.folder_context(course.dir.clone(), cx).root;
                     this.begin_move(root, Moving::Note(course.dir.clone()), cx)
                 },
             ),

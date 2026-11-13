@@ -1,6 +1,6 @@
 //! Durable user work. Views never supply the identity or settings of a retry.
 use anyhow::{Context, Result, bail, ensure};
-use c2m_config::settings::ConfigFile;
+use c2m_config::{config::TranscriptSource, settings::ConfigFile};
 use c2m_engine::execution::Component;
 use c2m_protocol::progress::BlockReason;
 use desktop_prefs::conversion::ConversionOptions;
@@ -92,21 +92,11 @@ fn label_in(name: &str, lang: c2m_i18n::i18n::Lang) -> String {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-#[serde(rename_all = "snake_case")]
-pub enum Override {
-    Provider,
-    TextSource,
-    Proofread,
-    Summary,
-    Vision,
-    Translate,
-    KeepVideo,
-    Formats,
-}
-
-/// The single current input form. Its serialized type/field names are retained
-/// so existing workspaces can be upgraded without changing task records.
+/// The single current input form: the link or file, and what was read from it.
+/// Processing choices are not part of it: every task runs with the settings
+/// current when it starts. Its serialized type/field names are retained so
+/// existing workspaces can be upgraded; fields older versions wrote (per-input
+/// options, services, title and folder) are ignored when it is read.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Draft {
     pub id: String,
@@ -116,27 +106,14 @@ pub struct Draft {
     /// Subtitle events live in a separate file beside the workspace record.
     #[serde(default, serialize_with = "serialize_draft_source")]
     pub source: Option<Source>,
-    pub title: String,
-    pub custom_title: bool,
-    pub library_id: String,
-    pub folder: Option<u64>,
-    pub options: ConversionOptions,
-    /// Remember the local branch when temporarily choosing a speech service.
-    #[serde(default)]
-    #[serde(with = "desktop_prefs::provider_serde")]
-    pub local_provider: Option<c2m_config::config::AsrProvider>,
-    #[serde(default)]
-    pub overrides: BTreeSet<Override>,
+    /// The text source the person chose on this video's card: one of its
+    /// subtitles, or speech recognition. `None` follows Settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_source: Option<TranscriptSource>,
     #[serde(default)]
     pub subtitle: Option<PathBuf>,
     #[serde(default)]
-    pub asr_service: Option<String>,
-    #[serde(default)]
-    pub ai_service: Option<String>,
-    #[serde(default)]
     pub retry_of: Option<String>,
-    #[serde(default, serialize_with = "serialize_optional_public_config")]
-    pub base_config: Option<ConfigFile>,
     #[serde(default)]
     pub submitted_task: Option<String>,
     #[serde(default)]
@@ -145,27 +122,16 @@ pub struct Draft {
 }
 
 impl Draft {
-    pub fn new(online: bool, library_id: String, defaults: ConversionOptions) -> Self {
+    pub fn new(online: bool) -> Self {
         Self {
             id: new_id("input"),
             revision: 0,
             online,
             input: String::new(),
             source: None,
-            title: String::new(),
-            custom_title: false,
-            library_id,
-            folder: None,
-            local_provider: (!defaults.uses_cloud_provider())
-                .then_some(defaults.provider)
-                .flatten(),
-            options: defaults,
-            overrides: BTreeSet::new(),
+            text_source: None,
             subtitle: None,
-            asr_service: None,
-            ai_service: None,
             retry_of: None,
-            base_config: None,
             submitted_task: None,
             scroll: 0.,
             updated: now(),
@@ -180,55 +146,9 @@ impl Draft {
         self.input = input;
         self.source = None;
         self.subtitle = None;
+        self.text_source = None;
         self.submitted_task = None;
         self.updated = now();
-        if !self.custom_title {
-            self.title.clear();
-        }
-    }
-
-    pub fn inherit(&mut self, defaults: &ConversionOptions) {
-        let v = &mut self.options;
-        if !self.overrides.contains(&Override::Provider) {
-            v.provider = defaults.provider;
-        }
-        if !self.overrides.contains(&Override::TextSource) {
-            v.source_mode = defaults.source_mode;
-        }
-        if !self.overrides.contains(&Override::Proofread) {
-            v.llm = defaults.llm;
-        }
-        if !self.overrides.contains(&Override::Summary) {
-            v.summarize = defaults.summarize;
-        }
-        if !self.overrides.contains(&Override::Vision) {
-            v.vision = defaults.vision;
-        }
-        if !self.overrides.contains(&Override::Translate) {
-            v.translate = defaults.translate.clone();
-        }
-        if !self.overrides.contains(&Override::KeepVideo) {
-            v.keep_video = defaults.keep_video;
-        }
-        if !self.overrides.contains(&Override::Formats) {
-            v.formats = defaults.formats;
-        }
-    }
-
-    /// Resume inheriting AI processing choices without changing other task choices.
-    pub fn reset_ai_overrides(&mut self, defaults: &ConversionOptions) {
-        self.options.llm = defaults.llm;
-        self.options.summarize = defaults.summarize;
-        self.options.vision = defaults.vision;
-        self.options.translate = defaults.translate.clone();
-        for field in [
-            Override::Proofread,
-            Override::Summary,
-            Override::Vision,
-            Override::Translate,
-        ] {
-            self.overrides.remove(&field);
-        }
     }
 }
 
@@ -247,9 +167,6 @@ impl Draft {
         }
         if let Some(path) = &mut self.subtitle {
             relocate_path(path, old, new);
-        }
-        if let Some(config) = &mut self.base_config {
-            relocate_config(config, old, new);
         }
     }
 }
@@ -326,13 +243,6 @@ fn serialize_draft_source<S: serde::Serializer>(
         source => source.serialize(serializer),
     }
 }
-fn serialize_optional_public_config<S: serde::Serializer>(
-    config: &Option<ConfigFile>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    config.as_ref().map(public_config).serialize(serializer)
-}
-
 pub(crate) fn public_config(config: &ConfigFile) -> ConfigFile {
     let mut config = config.clone();
     config.asr_api.api_key.clear();
@@ -340,6 +250,9 @@ pub(crate) fn public_config(config: &ConfigFile) -> ConfigFile {
     config
 }
 
+/// What a task is about: the video, where its note goes, and, for a repair, what
+/// it redoes. How the note is made is not part of it: a task runs with the
+/// settings current when it starts (see `RunSettings`).
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub struct TaskPlan {
     #[serde(default)]
@@ -350,19 +263,77 @@ pub struct TaskPlan {
     pub library_id: String,
     pub folder: Option<u64>,
     pub subtitle: Option<PathBuf>,
+    /// The text source the person chose on the video's card: one of its subtitles,
+    /// or speech recognition. `None` follows Settings when the task runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_source: Option<TranscriptSource>,
+    /// What a repair keeps of the note it repairs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repair: Option<RepairScope>,
+}
+
+/// What a repair keeps of the note it repairs, whatever Settings say now: the
+/// language its translation is in, and the exports it redoes.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct RepairScope {
+    #[serde(default)]
+    pub translate: Option<String>,
+    #[serde(default)]
+    pub formats: Option<Vec<c2m_config::config::OutputFormat>>,
+}
+
+/// What a task's latest run started with: the settings current then, with the
+/// service versions they named. Written when a run starts, so a task that has
+/// not run has none; the next run replaces it.
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
+pub struct RunSettings {
     #[serde(serialize_with = "serialize_public_config")]
     pub config: ConfigFile,
+    #[serde(default)]
     pub asr_service: Option<String>,
+    #[serde(default)]
     pub ai_service: Option<String>,
 }
 
-impl TaskPlan {
-    /// The processing choices this plan's configuration carries. Records
-    /// written before this was derived also stored an `options` copy, which
-    /// loading now ignores.
+impl RunSettings {
+    pub fn new(
+        config: &ConfigFile,
+        asr_service: Option<String>,
+        ai_service: Option<String>,
+    ) -> Self {
+        Self {
+            config: public_config(config),
+            asr_service,
+            ai_service,
+        }
+    }
+
     pub fn options(&self) -> ConversionOptions {
         ConversionOptions::from_config(&self.config)
     }
+}
+
+/// A task plan as any version wrote it. Versions before 3.0.0-alpha.8 fixed each
+/// task's whole configuration and services when it was submitted; that is read
+/// only to keep what a task that already ran used.
+#[derive(Deserialize)]
+struct TaskPlanWire {
+    #[serde(flatten)]
+    plan: TaskPlan,
+    #[serde(default, deserialize_with = "lenient_config")]
+    config: Option<ConfigFile>,
+    #[serde(default)]
+    asr_service: Option<String>,
+    #[serde(default)]
+    ai_service: Option<String>,
+}
+
+/// An older plan's configuration, or none where it no longer reads.
+fn lenient_config<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<ConfigFile>, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).ok())
 }
 
 pub use c2m_dispatch::dispatch::Intent;
@@ -401,6 +372,7 @@ impl TaskState {
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
+#[serde(from = "TaskRecordWire")]
 pub struct TaskRecord {
     pub id: String,
     pub plan: TaskPlan,
@@ -420,6 +392,9 @@ pub struct TaskRecord {
     /// task regenerated or repaired the note since.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replaced_by: Option<String>,
+    /// What the latest run started with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ran_with: Option<RunSettings>,
     /// The later attempt that replaced this one: the task whose `parent` this is.
     #[serde(skip)]
     pub handled_by: Option<String>,
@@ -433,6 +408,80 @@ pub struct TaskRecord {
     pub work_dir: PathBuf,
     #[serde(flatten)]
     pub events: JobEvents,
+}
+
+/// A task record as any version wrote it; see `TaskPlanWire`.
+#[derive(Deserialize)]
+struct TaskRecordWire {
+    id: String,
+    plan: TaskPlanWire,
+    state: TaskState,
+    intent: Intent,
+    created: u64,
+    updated: u64,
+    parent: Option<String>,
+    #[serde(default)]
+    artifact: Option<PathBuf>,
+    #[serde(default)]
+    unread: bool,
+    #[serde(default)]
+    resend: Vec<String>,
+    #[serde(default)]
+    replaced_by: Option<String>,
+    #[serde(default)]
+    ran_with: Option<RunSettings>,
+    #[serde(flatten)]
+    events: JobEvents,
+}
+
+impl From<TaskRecordWire> for TaskRecord {
+    fn from(wire: TaskRecordWire) -> Self {
+        let TaskPlanWire {
+            mut plan,
+            config,
+            asr_service,
+            ai_service,
+        } = wire.plan;
+        // A repair an older version planned kept the note's translation and the
+        // exports it redoes in its configuration.
+        if plan.repair.is_none()
+            && matches!(
+                plan.operation,
+                c2m_engine::execution::Operation::Reprocess { .. }
+            )
+            && let Some(config) = &config
+        {
+            plan.repair = Some(RepairScope {
+                translate: config.llm.translate.clone(),
+                formats: config.defaults.formats.clone(),
+            });
+        }
+        // What a task that already ran was made with stays known; one still waiting
+        // to start runs with the settings current then instead.
+        let ran_with = wire.ran_with.or_else(|| {
+            config
+                .filter(|_| wire.state != TaskState::Queued)
+                .map(|config| RunSettings::new(&config, asr_service, ai_service))
+        });
+        Self {
+            id: wire.id,
+            plan,
+            state: wire.state,
+            intent: wire.intent,
+            created: wire.created,
+            updated: wire.updated,
+            parent: wire.parent,
+            artifact: wire.artifact,
+            unread: wire.unread,
+            resend: wire.resend,
+            replaced_by: wire.replaced_by,
+            ran_with,
+            handled_by: None,
+            held: false,
+            work_dir: PathBuf::new(),
+            events: wire.events,
+        }
+    }
 }
 
 impl TaskRecord {
@@ -506,7 +555,10 @@ impl TaskRecord {
         // uncertain proofreading or translation before it kept from starting: a
         // first send the person asked for with the note. Any summary attempt has its
         // own recovery; permission to repeat it is never inferred from this decision.
-        let held_back = self.plan.config.llm.summarize
+        let held_back = self
+            .ran_with
+            .as_ref()
+            .is_some_and(|ran_with| ran_with.config.llm.summarize)
             && !components.contains(&Component::Summary)
             && components
                 .iter()
@@ -573,7 +625,11 @@ impl TaskRecord {
         let translation = &outcomes.translation;
         if components.contains(&Component::Proofreading)
             && !components.contains(&Component::Translation)
-            && self.plan.config.llm.translation_target().is_some()
+            && self
+                .ran_with
+                .as_ref()
+                .and_then(|ran_with| ran_with.config.llm.translation_target())
+                .is_some()
         {
             // Translation follows the proofread paragraphs. What it had made is made
             // again only where proofreading changes the text; what it had not yet made
@@ -607,7 +663,9 @@ impl TaskRecord {
             relocate_path(path, old, new);
         }
         self.plan.source.relocate(old, new);
-        relocate_config(&mut self.plan.config, old, new);
+        if let Some(ran_with) = &mut self.ran_with {
+            relocate_config(&mut ran_with.config, old, new);
+        }
         if let c2m_engine::execution::Operation::Reprocess {
             note_dir,
             prior_work_dir,
@@ -743,14 +801,14 @@ pub struct State {
 }
 
 impl State {
-    fn initial(root: PathBuf, options: ConversionOptions) -> Self {
+    fn initial(root: PathBuf) -> Self {
         let library = LibraryLocation {
             id: new_id("library"),
             name: c2m_i18n::tr!("笔记库").into(),
             root,
             previous_roots: Vec::new(),
         };
-        let draft = Draft::new(true, library.id.clone(), options);
+        let draft = Draft::new(true);
         Self {
             schema: SCHEMA,
             revision: 0,
@@ -777,7 +835,6 @@ impl State {
         if c2m_engine::execution::valid_id(marker.trim()) {
             self.default_library = marker.trim().into();
             self.libraries[0].id = self.default_library.clone();
-            self.drafts[0].library_id = self.default_library.clone();
         }
         true
     }
@@ -844,57 +901,26 @@ impl State {
         })
     }
 
-    /// Replace the current input; submitted task plans stay frozen.
-    pub fn reset_input(
-        &mut self,
-        online: bool,
-        options: ConversionOptions,
-        destination: Option<(String, u64)>,
-    ) -> String {
-        let mut draft = Draft::new(online, self.default_library.clone(), options);
-        if let Some((library, folder)) = destination {
-            draft.library_id = library;
-            draft.folder = Some(folder);
-        }
-        self.replace_input(draft);
+    /// Replace the current input; submitted tasks are unchanged.
+    pub fn reset_input(&mut self, online: bool) -> String {
+        self.replace_input(Draft::new(online));
         self.current_draft.clone()
     }
 
-    pub fn switch_source_kind(&mut self, online: bool, options: ConversionOptions) {
-        let Some(previous) = self.draft() else {
-            self.reset_input(online, options, None);
-            return;
-        };
-        if previous.online == online {
-            return;
+    pub fn switch_source_kind(&mut self, online: bool) {
+        if self
+            .draft()
+            .is_none_or(|previous| previous.online != online)
+        {
+            // Source modes belong to the same form; the incompatible source and any
+            // submitted or retried task association are cleared.
+            self.reset_input(online);
         }
-        if previous.submitted_task.is_some() {
-            let mut input = Draft::new(online, self.default_library.clone(), options);
-            if previous.library_id == input.library_id {
-                input.folder = previous.folder;
-            }
-            self.replace_input(input);
-            return;
-        }
-        // Source modes belong to the same form. Keep common choices, clear the
-        // incompatible source and detach any submitted/retry task association.
-        let mut input = Draft::new(
-            online,
-            previous.library_id.clone(),
-            previous.options.clone(),
-        );
-        input.folder = previous.folder;
-        input.overrides = previous.overrides.clone();
-        input.asr_service = previous.asr_service.clone();
-        input.ai_service = previous.ai_service.clone();
-        input.base_config = previous.base_config.clone();
-        input.local_provider = previous.local_provider;
-        self.replace_input(input);
     }
 
-    /// Replacing a submitted source starts another conversion with saved defaults.
-    /// Edits to an unsubmitted source keep the user's in-progress choices.
-    pub fn prepare_next_import(&mut self, value: &str, defaults: ConversionOptions) -> bool {
+    /// Replacing a submitted source starts another input. Edits to an unsubmitted
+    /// source keep it.
+    pub fn prepare_next_import(&mut self, value: &str) -> bool {
         let Some(previous) = self.draft() else {
             return false;
         };
@@ -902,10 +928,7 @@ impl State {
             return false;
         }
         let submitted = previous.submitted_task.clone();
-        let mut input = Draft::new(previous.online, self.default_library.clone(), defaults);
-        if previous.library_id == input.library_id {
-            input.folder = previous.folder;
-        }
+        let mut input = Draft::new(previous.online);
         input.change_source(value.to_owned());
         if let Some(task) = submitted.as_deref().and_then(|id| self.task_mut(id))
             && task.state == TaskState::Complete
@@ -917,9 +940,9 @@ impl State {
         true
     }
 
-    /// Replace the current form with a task's options without mutating that task.
-    /// `subtitle_events` comes from `task_subtitle_events`; without it the form
-    /// asks for the subtitle to be read again.
+    /// Put a task's video back in the current form, as a new attempt at it, without
+    /// mutating that task. `subtitle_events` comes from `task_subtitle_events`;
+    /// without it the form asks for the subtitle to be read again.
     pub fn adjust_task(
         &mut self,
         id: &str,
@@ -937,11 +960,7 @@ impl State {
             ) && !task.held,
             c2m_i18n::tr!("当前任务还在处理，请先暂停并等候当前步骤结束")
         );
-        let mut draft = Draft::new(
-            task.plan.source.online,
-            task.plan.library_id.clone(),
-            task.plan.options(),
-        );
+        let mut draft = Draft::new(task.plan.source.online);
         draft.input = task.plan.source.input.clone();
         let mut source = task.plan.source;
         match subtitle_events.filter(|events| !events.is_empty()) {
@@ -953,25 +972,9 @@ impl State {
             None => source.selected_subtitle = None,
         }
         draft.source = Some(source);
-        draft.title = task.plan.title;
-        draft.custom_title = true;
-        draft.folder = task.plan.folder;
+        draft.text_source = task.plan.text_source;
         draft.subtitle = task.plan.subtitle;
-        draft.asr_service = task.plan.asr_service;
-        draft.ai_service = task.plan.ai_service;
         draft.retry_of = Some(id.to_owned());
-        draft.overrides = [
-            Override::Provider,
-            Override::TextSource,
-            Override::Proofread,
-            Override::Summary,
-            Override::Vision,
-            Override::KeepVideo,
-            Override::Formats,
-        ]
-        .into_iter()
-        .collect();
-        draft.base_config = Some(task.plan.config);
         self.replace_input(draft);
         Ok(())
     }
@@ -1046,6 +1049,7 @@ impl State {
             unread: false,
             resend: Vec::new(),
             replaced_by: None,
+            ran_with: None,
             // A new task has said nothing yet.
             events: JobEvents {
                 loaded: true,
@@ -1240,23 +1244,14 @@ impl State {
         Ok(())
     }
 
+    /// Repair creates a new attempt that redoes `components` of the task's note with
+    /// the settings current when it runs. The original task and the unrelated
+    /// current input remain unchanged.
     pub fn reprocess(
-        &mut self,
-        id: &str,
-        components: Vec<Component>,
-        resend: Vec<String>,
-    ) -> Result<String> {
-        self.reprocess_with_service(id, components, resend, None)
-    }
-
-    /// Repair creates a new attempt with an explicitly chosen service. The
-    /// original task and the unrelated current input remain unchanged.
-    pub fn reprocess_with_service(
         &mut self,
         id: &str,
         mut components: Vec<Component>,
         resend: Vec<String>,
-        ai_service: Option<(String, ConfigFile)>,
     ) -> Result<String> {
         let mut original = self.task(id).context(c2m_i18n::tr!("任务不存在"))?.clone();
         if let Some(next) = &original.handled_by {
@@ -1336,29 +1331,22 @@ impl State {
                 c2m_i18n::tr!("仍有请求结果尚未确认，请先查看请求范围")
             );
         }
-        let mut plan = original.plan;
-        if let Some((service, config)) = ai_service {
-            ensure!(
-                components.iter().all(|part| part.is_ai()),
-                c2m_i18n::tr!("服务修复只能用于未完成的校对、翻译或摘要")
-            );
-            plan.ai_service = Some(service);
-            plan.config.llm = config.llm;
-        }
         let only_exports = components
             .iter()
             .all(|component| *component == Component::Exports);
-        plan.config.llm.enabled = components.contains(&Component::Proofreading);
-        plan.config.llm.summarize = components.contains(&Component::Summary);
-        plan.config.llm.vision &= plan.config.llm.enabled;
-        // Translation is redone on its own or after the proofreading it follows.
-        if !components
+        // Translation is redone on its own or after the proofreading it follows, into
+        // the language the note is in.
+        let translate = components
             .iter()
             .any(|part| matches!(part, Component::Proofreading | Component::Translation))
-        {
-            plan.config.llm.translate = None;
-        }
-        if only_exports {
+            .then(|| {
+                original
+                    .ran_with
+                    .as_ref()
+                    .and_then(|ran_with| ran_with.config.llm.translate.clone())
+            })
+            .flatten();
+        let formats = if only_exports {
             use c2m_config::config::OutputFormat;
             let formats: Vec<_> = [OutputFormat::Md, OutputFormat::Html, OutputFormat::Json]
                 .into_iter()
@@ -1373,16 +1361,18 @@ impl State {
                 !formats.is_empty(),
                 c2m_i18n::tr!("需要补做的导出格式记录不完整，请从笔记中重新选择导出格式")
             );
-            plan.config.defaults.formats = Some(formats);
-        }
+            Some(formats)
+        } else {
+            None
+        };
+        let mut plan = original.plan;
+        plan.repair = Some(RepairScope { translate, formats });
         plan.operation = c2m_engine::execution::Operation::Reprocess {
             note_dir: base,
             base_task_id: manifest.task_id.clone(),
             components,
             prior_work_dir: Some(original.work_dir),
         };
-        plan.config.defaults.transcript_source =
-            Some(c2m_config::config::TranscriptSource::Subtitle);
         let (next, created) = self.enqueue(plan, Some(id.to_owned()))?;
         if created && let Some(task) = self.task_mut(&next) {
             task.resend = resend;
@@ -2419,15 +2409,14 @@ fn salvage<T: serde::de::DeserializeOwned>(records: &[serde_json::Value], key: &
 impl Workspace {
     /// Explicit repair: originals are archived, then the state comes back from the last
     /// record that reads, plus what each library carries. No restored task may dispatch work.
-    pub fn rebuild(root: PathBuf, options: ConversionOptions) -> Result<Self> {
+    pub fn rebuild(root: PathBuf) -> Result<Self> {
         Self::rebuild_at(
             c2m_config::config::config_dir().join("desktop-workspace.json"),
             root,
-            options,
         )
     }
 
-    pub fn rebuild_at(path: PathBuf, root: PathBuf, options: ConversionOptions) -> Result<Self> {
+    pub fn rebuild_at(path: PathBuf, root: PathBuf) -> Result<Self> {
         let parent = path
             .parent()
             .context(c2m_i18n::tr!("任务记录缺少保存目录"))?;
@@ -2464,7 +2453,7 @@ impl Workspace {
             c2m_core::fsio::atomic_write(&archive.join(name), bytes)
                 .context(c2m_i18n::tr!("原始记录备份未完成，尚未重建"))?;
         }
-        let mut initial = State::initial(root.clone(), options);
+        let mut initial = State::initial(root.clone());
         initial.adopt_marker(&root);
         let mut state = Self::read(&path)
             .or_else(|_| Self::read(&backup))
@@ -2591,20 +2580,15 @@ impl Workspace {
         }
     }
 
-    pub fn open(root: PathBuf, options: ConversionOptions) -> Result<Self> {
+    pub fn open(root: PathBuf) -> Result<Self> {
         Self::open_at(
             c2m_config::config::config_dir().join("desktop-workspace.json"),
             root,
-            options,
         )
     }
     /// Opens the record without reconciling it with the libraries; call
     /// `reconciliation` and `apply_reconciliation` before work is dispatched.
-    pub(crate) fn open_at(
-        path: PathBuf,
-        root: PathBuf,
-        options: ConversionOptions,
-    ) -> Result<Self> {
+    pub(crate) fn open_at(path: PathBuf, root: PathBuf) -> Result<Self> {
         let mut recovery = None;
         let schema = desktop_prefs::store::read(&path)
             .ok()
@@ -2653,7 +2637,7 @@ impl Workspace {
                 },
             }
         } else {
-            let mut initial = State::initial(root.clone(), options.clone());
+            let mut initial = State::initial(root.clone());
             match std::fs::create_dir_all(&root) {
                 Ok(()) => {
                     if !initial.adopt_marker(&root)
@@ -2679,13 +2663,6 @@ impl Workspace {
             initial
         };
         state.recover();
-        // Defaults may have changed while the app was closed, and drafts saved
-        // before an option existed carry no choice of their own for it.
-        for draft in &mut state.drafts {
-            if draft.submitted_task.is_none() {
-                draft.inherit(&options);
-            }
-        }
         hydrate_draft_subtitles(&mut state, &path);
         Ok(Self::assemble(state, recovery, path))
     }
@@ -2886,11 +2863,7 @@ impl Workspace {
     /// another writer has them open. So each opening first waits for those of the
     /// openings before it.
     #[cfg(any(test, feature = "test-support"))]
-    pub fn open_at_inline(
-        path: PathBuf,
-        root: PathBuf,
-        options: ConversionOptions,
-    ) -> Result<Self> {
+    pub fn open_at_inline(path: PathBuf, root: PathBuf) -> Result<Self> {
         static OPENED: Mutex<Vec<(PathBuf, LibraryWrites)>> = Mutex::new(Vec::new());
         let earlier: Vec<_> = c2m_process::runtime::lock_recover(&OPENED)
             .iter()
@@ -2900,7 +2873,7 @@ impl Workspace {
         for writes in earlier {
             writes.drain();
         }
-        let mut workspace = Self::open_at(path.clone(), root, options)?;
+        let mut workspace = Self::open_at(path.clone(), root)?;
         c2m_process::runtime::lock_recover(&OPENED).push((path, workspace.library_writes()));
         workspace.reconcile_now();
         Ok(workspace)
@@ -3145,9 +3118,6 @@ pub fn accept_source(draft: &mut Draft, revision: u64, source: Source) -> bool {
     if draft.revision != revision {
         return false;
     }
-    if !draft.custom_title {
-        draft.title = source.title.clone();
-    }
     draft.source = Some(source);
     draft.updated = now();
     true
@@ -3187,14 +3157,13 @@ mod tests {
             library_id: library.into(),
             folder: None,
             subtitle: None,
-            config: ConfigFile::default(),
-            asr_service: None,
-            ai_service: None,
+            text_source: None,
+            repair: None,
         }
     }
     #[test]
     fn moving_a_queued_task_changes_which_runs_next() {
-        let mut state = State::initial(PathBuf::from("/library"), ConversionOptions::default());
+        let mut state = State::initial(PathBuf::from("/library"));
         let library = state.default_library.clone();
         for title in ["a", "b", "c", "d"] {
             let mut plan = plan(&library);
@@ -3241,12 +3210,7 @@ mod tests {
     fn failed_commit_does_not_publish_an_unpersisted_task() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("state");
-        let mut ws = Workspace::open_at_inline(
-            target.clone(),
-            dir.path().join("library"),
-            Default::default(),
-        )
-        .unwrap();
+        let mut ws = Workspace::open_at_inline(target.clone(), dir.path().join("library")).unwrap();
         std::fs::create_dir(&target).unwrap();
         let task = plan(&ws.state.default_library);
         assert!(ws.transaction(|state| state.enqueue(task, None)).is_err());
@@ -3256,21 +3220,26 @@ mod tests {
     fn frozen_task_survives_input_changes_without_storing_credentials() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("state.json");
-        let mut ws =
-            Workspace::open_at_inline(file.clone(), dir.path().join("library"), Default::default())
-                .unwrap();
-        let mut task = plan(&ws.state.default_library);
-        task.config.asr_api.api_key = "asr-secret-do-not-store".into();
-        task.config.llm.api_key = "ai-secret-do-not-store".into();
+        let mut ws = Workspace::open_at_inline(file.clone(), dir.path().join("library")).unwrap();
+        let task = plan(&ws.state.default_library);
+        let mut config = ConfigFile::default();
+        config.asr_api.api_key = "asr-secret-do-not-store".into();
+        config.llm.api_key = "ai-secret-do-not-store".into();
         let id = ws.transaction(|state| state.enqueue(task, None)).unwrap().0;
         ws.transaction(|s| {
             s.draft_mut().unwrap().change_source("B.mp4".into());
-            s.task_mut(&id).unwrap().state = TaskState::Running;
+            let task = s.task_mut(&id).unwrap();
+            task.state = TaskState::Running;
+            // Even a run record handed the resolved keys does not write them.
+            task.ran_with = Some(RunSettings {
+                config,
+                asr_service: None,
+                ai_service: None,
+            });
             Ok(())
         })
         .unwrap();
-        let restored =
-            Workspace::open_at_inline(file.clone(), dir.path().into(), Default::default()).unwrap();
+        let restored = Workspace::open_at_inline(file.clone(), dir.path().into()).unwrap();
         assert_eq!(
             restored.state.task(&id).unwrap().plan.source.input,
             "lecture.mp4"
@@ -3494,7 +3463,7 @@ mod tests {
         let _ = std::fs::remove_file(&backup);
         let root = ws.state.libraries[0].root.clone();
         for _ in 0..2 {
-            let error = Workspace::open_at_inline(path.clone(), root.clone(), Default::default())
+            let error = Workspace::open_at_inline(path.clone(), root.clone())
                 .err()
                 .expect("an old record is not opened");
             let message = format!("{error:#}");
@@ -3522,7 +3491,7 @@ mod tests {
         ]);
         let bytes = serde_json::to_vec(&old).unwrap();
         std::fs::write(&path, &bytes).unwrap();
-        let rebuilt = Workspace::rebuild_at(path.clone(), root, Default::default()).unwrap();
+        let rebuilt = Workspace::rebuild_at(path.clone(), root).unwrap();
         assert_eq!(rebuilt.state.schema, SCHEMA);
         let restored = rebuilt.state.library("library-two").unwrap();
         assert_eq!(
@@ -3633,7 +3602,6 @@ mod tests {
         let mut other = Workspace::open_at_inline(
             elsewhere.join("workspace.json"),
             elsewhere.join("own-library"),
-            Default::default(),
         )
         .unwrap();
         other
@@ -3713,47 +3681,8 @@ mod tests {
     }
 
     #[test]
-    fn reopened_drafts_follow_defaults_for_options_they_never_chose() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("state.json");
-        let mut ws =
-            Workspace::open_at_inline(file.clone(), dir.path().join("library"), Default::default())
-                .unwrap();
-        ws.transaction(|state| {
-            state
-                .draft_mut()
-                .unwrap()
-                .overrides
-                .insert(Override::Summary);
-            state.draft_mut().unwrap().options.summarize = true;
-            Ok(())
-        })
-        .unwrap();
-        // A draft saved before per-task translation existed has no such field.
-        let mut legacy: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
-        legacy["drafts"][0]["options"]
-            .as_object_mut()
-            .unwrap()
-            .remove("translate");
-        std::fs::write(&file, serde_json::to_vec(&legacy).unwrap()).unwrap();
-        let _ = std::fs::remove_file(desktop_prefs::store::backup_path(&file));
-
-        let defaults = ConversionOptions {
-            summarize: false,
-            translate: Some("en".into()),
-            ..Default::default()
-        };
-        let reopened =
-            Workspace::open_at_inline(file, dir.path().join("library"), defaults).unwrap();
-        let options = &reopened.state.draft().unwrap().options;
-        assert_eq!(options.translate.as_deref(), Some("en"));
-        assert!(options.summarize);
-    }
-
-    #[test]
     fn only_recent_cancelled_attempts_without_notes_are_kept() {
-        let mut state = State::initial("/library".into(), Default::default());
+        let mut state = State::initial("/library".into());
         let library = state.default_library.clone();
         for n in 0..KEPT_CANCELLED_TASKS + 5 {
             let mut task = plan(&library);
@@ -3772,223 +3701,70 @@ mod tests {
     }
 
     #[test]
-    fn source_revisions_and_default_overrides_are_independent() {
-        let mut draft = Draft::new(true, "lib".into(), Default::default());
+    fn source_revisions_decide_which_preview_is_accepted() {
+        let mut draft = Draft::new(true);
         draft.change_source("A".into());
         let old = draft.revision;
         draft.change_source("B".into());
         assert!(!accept_source(&mut draft, old, source("A", "title-a")));
         let revision = draft.revision;
         assert!(accept_source(&mut draft, revision, source("B", "title-b")));
-        draft.options.llm = true;
-        draft.overrides.insert(Override::Proofread);
-        let defaults = ConversionOptions {
-            summarize: true,
-            ..Default::default()
-        };
-        draft.inherit(&defaults);
-        assert!(draft.options.llm && draft.options.summarize);
+        // A new link forgets the previous video's text choice.
+        draft.text_source = Some(c2m_config::config::TranscriptSource::Asr);
+        draft.change_source("C".into());
+        assert_eq!(draft.text_source, None);
     }
 
     #[test]
-    fn resetting_ai_choices_resumes_inheritance_without_changing_other_overrides_or_services() {
-        let mut draft = Draft::new(true, "lib".into(), Default::default());
-        draft.change_source("current-video".into());
-        draft.title = "Current note".into();
-        draft.custom_title = true;
-        draft.folder = Some(42);
-        draft.options.provider = Some(c2m_config::config::AsrProvider::Gpu);
-        draft.options.source_mode = c2m_config::config::TranscriptSource::Subtitle;
-        draft.options.keep_video = true;
-        draft.options.formats = [true, false, true];
-        draft.options.llm = true;
-        draft.options.summarize = false;
-        draft.options.vision = true;
-        draft.options.translate = Some("ja".into());
-        draft.asr_service = Some("fixed-speech-service".into());
-        draft.ai_service = Some("fixed-ai-service".into());
-        draft.overrides = [
-            Override::Provider,
-            Override::TextSource,
-            Override::Proofread,
-            Override::Summary,
-            Override::Vision,
-            Override::Translate,
-            Override::KeepVideo,
-            Override::Formats,
-        ]
-        .into_iter()
-        .collect();
-        let defaults = ConversionOptions {
-            llm: false,
-            summarize: true,
-            vision: false,
-            translate: Some("de".into()),
-            ..Default::default()
-        };
-        let mut expected = draft.clone();
-        expected.options.llm = false;
-        expected.options.summarize = true;
-        expected.options.vision = false;
-        expected.options.translate = Some("de".into());
-        expected.overrides = [
-            Override::Provider,
-            Override::TextSource,
-            Override::KeepVideo,
-            Override::Formats,
-        ]
-        .into_iter()
-        .collect();
-        draft.reset_ai_overrides(&defaults);
-        assert_eq!(draft, expected);
-
-        let later_defaults = ConversionOptions {
-            llm: true,
-            summarize: false,
-            vision: true,
-            translate: Some("fr".into()),
-            ..Default::default()
-        };
-        draft.inherit(&later_defaults);
-        expected.options.llm = true;
-        expected.options.summarize = false;
-        expected.options.vision = true;
-        expected.options.translate = Some("fr".into());
-        assert_eq!(draft, expected);
-    }
-
-    #[test]
-    fn a_second_video_uses_defaults_without_mutating_the_submitted_plan() {
+    fn a_second_video_starts_a_fresh_input_without_touching_the_submitted_task() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
         let submitted = plan(&ws.state.default_library);
         let task = ws.state.enqueue(submitted.clone(), None).unwrap().0;
         let input = ws.state.draft_mut().unwrap();
         input.input = "first.mp4".into();
-        input.title = "Only this video".into();
-        input.custom_title = true;
-        input.folder = Some(42);
-        input.options.llm = true;
-        input.overrides.insert(Override::Proofread);
-        input.ai_service = Some("task-specific-service".into());
-        input.base_config = Some(ConfigFile::default());
+        input.text_source = Some(c2m_config::config::TranscriptSource::Asr);
         input.submitted_task = Some(task.clone());
         let first_id = input.id.clone();
-        let defaults = ConversionOptions::default();
-        assert!(!ws.state.prepare_next_import("first.mp4", defaults.clone()));
+        assert!(!ws.state.prepare_next_import("first.mp4"));
         assert_eq!(ws.state.draft().unwrap().id, first_id);
-        assert!(ws.state.prepare_next_import("second.mp4", defaults.clone()));
+        assert!(ws.state.prepare_next_import("second.mp4"));
         let input = ws.state.draft().unwrap();
         assert_ne!(input.id, first_id);
         assert_eq!(input.input, "second.mp4");
-        assert_eq!(input.options, defaults);
-        assert_eq!(input.folder, Some(42));
-        assert!(input.overrides.is_empty());
-        assert!(input.ai_service.is_none() && input.base_config.is_none());
-        assert!(input.title.is_empty() && !input.custom_title);
+        assert_eq!(input.text_source, None);
         assert!(ws.state.task(&task).unwrap().plan == submitted);
-        let input = ws.state.draft_mut().unwrap();
-        input.options.llm = true;
-        input.overrides.insert(Override::Proofread);
-        assert!(!ws.state.prepare_next_import("revised-second.mp4", defaults));
-        assert!(ws.state.draft().unwrap().options.llm);
+        // An unsubmitted input is edited in place.
+        assert!(!ws.state.prepare_next_import("revised-second.mp4"));
     }
 
     #[test]
-    fn submitted_input_routes_use_the_new_default_without_moving_existing_tasks() {
-        let original_root = tempfile::tempdir().unwrap();
-        let next_root = tempfile::tempdir().unwrap();
-        let mut ws = test_workspace(original_root.path());
-        let original_library = ws.state.default_library.clone();
-        let mut submitted = plan(&original_library);
-        submitted.folder = Some(42);
-        let task = ws.state.enqueue(submitted.clone(), None).unwrap().0;
-        let input = ws.state.draft_mut().unwrap();
-        input.input = "first.mp4".into();
-        input.folder = Some(42);
-        input.submitted_task = Some(task.clone());
-        let next_library = ws
-            .register_library(next_root.path().to_owned(), "Next library".into(), true)
-            .unwrap();
-        let unchanged_input = ws.state.draft().unwrap().clone();
-        assert!(
-            !ws.state
-                .prepare_next_import("first.mp4", Default::default())
-        );
-        assert_eq!(ws.state.draft().unwrap(), &unchanged_input);
-
-        for switch_kind in [false, true] {
-            let mut state = ws.state.clone();
-            if switch_kind {
-                state.switch_source_kind(!unchanged_input.online, Default::default());
-            } else {
-                assert!(state.prepare_next_import("second.mp4", Default::default()));
-            }
-            let next = state.draft().unwrap();
-            assert_eq!(next.library_id, next_library);
-            assert_eq!(next.folder, None, "folder IDs belong to their library");
-            assert!(state.task(&task).unwrap().plan == submitted);
-        }
-    }
-
-    #[test]
-    fn changing_the_default_keeps_an_unsubmitted_destination_and_folder() {
-        let original_root = tempfile::tempdir().unwrap();
-        let next_root = tempfile::tempdir().unwrap();
-        let mut ws = test_workspace(original_root.path());
-        let original_library = ws.state.default_library.clone();
-        let input = ws.state.draft_mut().unwrap();
-        input.input = "current.mp4".into();
-        input.folder = Some(42);
-        let online = input.online;
-        ws.register_library(next_root.path().to_owned(), "Next library".into(), true)
-            .unwrap();
-        assert!(
-            !ws.state
-                .prepare_next_import("revised.mp4", Default::default())
-        );
-        assert_eq!(ws.state.draft().unwrap().library_id, original_library);
-        assert_eq!(ws.state.draft().unwrap().folder, Some(42));
-        ws.state.switch_source_kind(!online, Default::default());
-        assert_eq!(ws.state.draft().unwrap().library_id, original_library);
-        assert_eq!(ws.state.draft().unwrap().folder, Some(42));
-    }
-
-    #[test]
-    fn replacing_the_form_keeps_submitted_task_plans() {
+    fn replacing_the_form_and_switching_source_kind_start_a_fresh_input() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let library = ws.state.default_library.clone();
-        let submitted = plan(&library);
+        let submitted = plan(&ws.state.default_library);
         let id = ws.state.enqueue(submitted.clone(), None).unwrap().0;
         let original_input = ws.state.current_draft.clone();
         let input = ws.state.draft_mut().unwrap();
         input.change_source("old-video.mp4".into());
-        input.title = "旧输入名称".into();
-        input.custom_title = true;
-        input.folder = Some(42);
         input.subtitle = Some("old.srt".into());
         input.submitted_task = Some(id.clone());
-        input.options.llm = true;
-        input.overrides.insert(Override::Proofread);
-        let defaults = ConversionOptions::default();
-        for _ in 0..8 {
-            ws.state.reset_input(true, defaults.clone(), None);
+        let online = input.online;
+        for _ in 0..4 {
+            ws.state.reset_input(true);
             let input = ws.state.draft().unwrap();
             assert_ne!(input.id, original_input);
             assert_eq!(ws.state.drafts.len(), 1);
-            assert!(input.input.is_empty() && input.title.is_empty());
-            assert!(input.source.is_none() && input.subtitle.is_none());
+            assert!(input.input.is_empty() && input.source.is_none() && input.subtitle.is_none());
             assert!(input.submitted_task.is_none() && input.retry_of.is_none());
-            assert!(input.overrides.is_empty());
-            assert_eq!(input.options, defaults);
-            assert_eq!(input.folder, None);
             assert!(ws.state.task(&id).unwrap().plan == submitted);
         }
-        ws.state
-            .reset_input(false, defaults, Some((library.clone(), 7)));
-        assert_eq!(ws.state.draft().unwrap().folder, Some(7));
-        assert_eq!(ws.state.draft().unwrap().library_id, library);
+        let before = ws.state.draft().unwrap().clone();
+        ws.state.switch_source_kind(online);
+        assert_eq!(ws.state.draft().unwrap(), &before);
+        ws.state.switch_source_kind(!online);
+        assert_ne!(ws.state.draft().unwrap().id, before.id);
+        assert_eq!(ws.state.draft().unwrap().online, !online);
         ws.transaction(|_| Ok(())).unwrap();
         let restored = test_workspace(dir.path());
         assert_eq!(restored.state.drafts.len(), 1);
@@ -3997,63 +3773,205 @@ mod tests {
     }
 
     #[test]
-    fn source_mode_switch_preserves_unsubmitted_choices_but_resets_submitted_overrides() {
-        let mut state = State::initial("/tmp/library".into(), Default::default());
-        let input = state.draft_mut().unwrap();
-        input.change_source("https://example.test/online-a".into());
-        input.title = "在线课程 A".into();
-        input.custom_title = true;
-        input.source = Some(source("https://example.test/online-a", "A"));
-        input.subtitle = Some("captions.srt".into());
-        input.folder = Some(42);
-        input.options.formats = [false, true, true];
-        input.options.llm = true;
-        input.overrides.insert(Override::Formats);
-        input.ai_service = Some("ai-service".into());
-        input.retry_of = Some("older-task".into());
-        let before = input.clone();
-        state.switch_source_kind(true, Default::default());
-        assert_eq!(state.draft().unwrap(), &before);
-        state.switch_source_kind(false, Default::default());
-        let local = state.draft().unwrap();
-        assert_ne!(local.id, before.id);
-        assert!(!local.online);
-        assert!(local.input.is_empty() && local.title.is_empty());
-        assert!(local.source.is_none() && local.subtitle.is_none());
-        assert!(local.retry_of.is_none() && local.submitted_task.is_none());
-        assert_eq!(local.options, before.options);
-        assert_eq!(local.folder, before.folder);
-        assert_eq!(local.ai_service, before.ai_service);
-        assert_eq!(local.overrides, before.overrides);
-        state
-            .draft_mut()
+    fn adjusting_a_failed_task_puts_its_video_back_and_preserves_the_task_after_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let mut original = plan(&ws.state.default_library);
+        original.title = "A 的名称".into();
+        original.subtitle = Some(dir.path().join("french.srt"));
+        original.text_source = Some(c2m_config::config::TranscriptSource::Subtitle);
+        let id = ws.state.enqueue(original.clone(), None).unwrap().0;
+        ws.state.task_mut(&id).unwrap().state = TaskState::Running;
+        ws.state.reset_input(true);
+        let b = ws.state.draft_mut().unwrap();
+        b.change_source("online-B".into());
+        let b = b.clone();
+        assert!(ws.state.adjust_task(&id, None).is_err());
+        assert_eq!(ws.state.draft().unwrap(), &b);
+
+        ws.state.task_mut(&id).unwrap().state = TaskState::NeedsAttention;
+        ws.state.set_intent(&id, Intent::Run).unwrap();
+        assert!(ws.state.next_task().unwrap().plan == original);
+        ws.state.set_intent(&id, Intent::Pause).unwrap();
+        ws.transaction(|state| state.adjust_task(&id, None))
+            .unwrap();
+        let revised = ws.state.draft().unwrap();
+        assert_eq!(revised.input, original.source.input);
+        assert_eq!(revised.source.as_ref(), Some(&original.source));
+        assert_eq!(revised.subtitle, original.subtitle);
+        assert_eq!(revised.text_source, original.text_source);
+        assert_eq!(revised.retry_of.as_deref(), Some(id.as_str()));
+        let revision = revised.clone();
+        drop(ws);
+        let mut reopened = test_workspace(dir.path());
+        assert_eq!(reopened.state.draft().unwrap(), &revision);
+        assert!(reopened.state.task(&id).unwrap().plan == original);
+        assert_eq!(reopened.state.task(&id).unwrap().state, TaskState::Paused);
+        let (followup, created) = reopened
+            .state
+            .enqueue(original.clone(), Some(id.clone()))
+            .unwrap();
+        assert!(created);
+        assert_eq!(
+            reopened.state.enqueue(original, Some(id.clone())).unwrap(),
+            (followup, false)
+        );
+        assert!(reopened.state.adjust_task(&id, None).is_err());
+    }
+
+    /// Records written before tasks ran with the current settings carry each
+    /// input's and task's own options, services and a full configuration. They
+    /// still open: the input drops them, a task that waits to start runs with the
+    /// settings current then, and one that ran keeps what it ran with.
+    #[test]
+    fn a_record_with_per_task_options_and_plans_still_opens() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("state.json");
+        let library = dir.path().join("library");
+        let mut ws = Workspace::open_at_inline(file.clone(), library.clone()).unwrap();
+        let library_id = ws.state.default_library.clone();
+        let queued = ws
+            .transaction(|state| state.enqueue(plan(&library_id), None))
             .unwrap()
-            .change_source("local-b.mp4".into());
-        state.switch_source_kind(true, Default::default());
-        assert_eq!(state.drafts.len(), 1);
-        assert!(state.draft().unwrap().online);
-        assert!(state.draft().unwrap().input.is_empty());
-        assert_eq!(state.draft().unwrap().options, before.options);
-        state.draft_mut().unwrap().submitted_task = Some("submitted-task".into());
-        let defaults = ConversionOptions::default();
-        state.switch_source_kind(false, defaults.clone());
-        let fresh = state.draft().unwrap();
-        assert_eq!(fresh.options, defaults);
-        assert!(fresh.overrides.is_empty() && fresh.ai_service.is_none());
-        assert!(fresh.retry_of.is_none() && fresh.submitted_task.is_none());
-        assert_eq!(fresh.folder, before.folder);
+            .0;
+        let mut finished = plan(&library_id);
+        finished.source_id = "video-b".into();
+        let finished = ws
+            .transaction(|state| state.enqueue(finished, None))
+            .unwrap()
+            .0;
+        ws.transaction(|state| {
+            state.task_mut(&finished).unwrap().state = TaskState::Complete;
+            Ok(())
+        })
+        .unwrap();
+        drop(ws);
+        let mut old_config = ConfigFile::default();
+        old_config.defaults.asr_model = Some("old-model".into());
+        old_config.defaults.keep_video = Some(true);
+        old_config.llm.enabled = true;
+        old_config.llm.model = "old-ai-model".into();
+        let mut legacy: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        for task in legacy["tasks"].as_array_mut().unwrap() {
+            let plan = task["plan"].as_object_mut().unwrap();
+            plan.insert("config".into(), serde_json::to_value(&old_config).unwrap());
+            plan.insert("asr_service".into(), serde_json::Value::Null);
+            plan.insert("ai_service".into(), "ai-version-old".into());
+            plan.insert("options".into(), serde_json::json!({"llm": true}));
+        }
+        let draft = &mut legacy["drafts"][0];
+        for (key, value) in [
+            ("title", serde_json::json!("custom title")),
+            ("custom_title", serde_json::json!(true)),
+            ("library_id", serde_json::json!(library_id)),
+            ("folder", serde_json::json!(7)),
+            (
+                "options",
+                serde_json::json!({"provider": "", "source_mode": 2, "llm": true, "keep_video": false, "formats": [true, true, false]}),
+            ),
+            ("overrides", serde_json::json!(["proofread", "text_source"])),
+            ("asr_service", serde_json::json!("asr-version-old")),
+            ("ai_service", serde_json::json!("ai-version-old")),
+            ("base_config", serde_json::to_value(&old_config).unwrap()),
+            ("local_provider", serde_json::json!("cpu")),
+        ] {
+            draft[key] = value;
+        }
+        std::fs::write(&file, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        let _ = std::fs::remove_file(desktop_prefs::store::backup_path(&file));
+
+        let reopened = Workspace::open_at_inline(file.clone(), library).unwrap();
+        let draft = reopened.state.draft().unwrap();
+        assert_eq!(draft.text_source, None);
+        let waiting = reopened.state.task(&queued).unwrap();
+        assert!(
+            waiting.ran_with.is_none(),
+            "a waiting task runs with the current settings"
+        );
+        let ran = reopened.state.task(&finished).unwrap();
+        let ran_with = ran.ran_with.as_ref().unwrap();
+        assert_eq!(
+            ran_with.config.defaults.asr_model.as_deref(),
+            Some("old-model")
+        );
+        assert_eq!(ran_with.ai_service.as_deref(), Some("ai-version-old"));
+        assert!(ran_with.options().keep_video);
+        // Written again, the record carries none of the old per-task fields.
+        let mut reopened = reopened;
+        reopened.transaction(|_| Ok(())).unwrap();
+        reopened.save().unwrap();
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        for task in written["tasks"].as_array().unwrap() {
+            for key in ["config", "asr_service", "ai_service", "options"] {
+                assert!(task["plan"].get(key).is_none(), "{key}: {task}");
+            }
+        }
+        for key in [
+            "options",
+            "overrides",
+            "base_config",
+            "title",
+            "folder",
+            "library_id",
+        ] {
+            assert!(written["drafts"][0].get(key).is_none(), "{key}");
+        }
+    }
+
+    /// An older repair kept the note's translation and the exports it redoes in
+    /// its configuration; they are what it repairs, whatever Settings say now.
+    #[test]
+    fn an_older_repair_keeps_its_translation_and_exports() {
+        let mut config = ConfigFile::default();
+        config.llm.translate = Some("en".into());
+        config.defaults.formats = Some(vec![c2m_config::config::OutputFormat::Json]);
+        let record = serde_json::json!({
+            "id": "task-repair",
+            "plan": {
+                "operation": {
+                    "kind": "reprocess",
+                    "note_dir": "/library/course-x",
+                    "base_task_id": "task-base",
+                    "components": ["translation"],
+                },
+                "source": source("lecture.mp4", "课程"),
+                "source_id": "video-a",
+                "title": "课程",
+                "library_id": "library",
+                "folder": null,
+                "subtitle": null,
+                "config": config,
+                "asr_service": null,
+                "ai_service": "ai-version-old",
+            },
+            "state": "queued",
+            "intent": "run",
+            "created": 1,
+            "updated": 1,
+            "parent": "task-base",
+        });
+        let task: TaskRecord = serde_json::from_value(record).unwrap();
+        let repair = task.plan.repair.unwrap();
+        assert_eq!(repair.translate.as_deref(), Some("en"));
+        assert_eq!(
+            repair.formats,
+            Some(vec![c2m_config::config::OutputFormat::Json])
+        );
+        assert!(task.ran_with.is_none());
     }
 
     #[test]
     fn delayed_results_cannot_cross_new_note_or_mode_changes_even_with_the_same_revision() {
-        let mut state = State::initial("/tmp/library".into(), Default::default());
+        let mut state = State::initial("/tmp/library".into());
         state
             .draft_mut()
             .unwrap()
             .change_source("same-input".into());
         let pending = state.draft().unwrap().clone();
         assert!(state.matches_input(&pending.id, pending.revision));
-        state.reset_input(true, Default::default(), None);
+        state.reset_input(true);
         state
             .draft_mut()
             .unwrap()
@@ -4061,7 +3979,7 @@ mod tests {
         assert_eq!(state.draft().unwrap().revision, pending.revision);
         assert!(!state.matches_input(&pending.id, pending.revision));
         let after_new = state.draft().unwrap().clone();
-        state.switch_source_kind(false, Default::default());
+        state.switch_source_kind(false);
         state
             .draft_mut()
             .unwrap()
@@ -4075,13 +3993,16 @@ mod tests {
             current.revision,
             source("same-input", "当前读取结果"),
         ));
-        assert_eq!(state.draft().unwrap().title, "当前读取结果");
+        assert_eq!(
+            state.draft().unwrap().source.as_ref().unwrap().title,
+            "当前读取结果"
+        );
         assert_eq!(state.drafts.len(), 1);
     }
 
     #[test]
     fn explicit_stop_survives_restart_while_duplicate_names_do_not_create_work() {
-        let mut state = State::initial("/tmp/library".into(), Default::default());
+        let mut state = State::initial("/tmp/library".into());
         let mut task = plan(&state.default_library);
         let id = state.enqueue(task.clone(), None).unwrap().0;
         task.title = "另一个显示名".into();
@@ -4092,77 +4013,6 @@ mod tests {
         state.recover();
         assert_eq!(state.task(&id).unwrap().state, TaskState::Paused);
         assert!(state.next_task().is_none());
-    }
-
-    #[test]
-    fn adjusting_a_failed_task_replaces_the_form_and_preserves_the_task_after_restart() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut ws = test_workspace(dir.path());
-        let mut original = plan(&ws.state.default_library);
-        original.title = "A 的手工名称".into();
-        original.folder = Some(42);
-        original.subtitle = Some(dir.path().join("french.srt"));
-        original.config.llm.enabled = true;
-        original.config.llm.vision = true;
-        original.config.defaults.formats = Some(vec![c2m_config::config::OutputFormat::Json]);
-        original.asr_service = Some("asr-version-a".into());
-        original.ai_service = Some("ai-version-a".into());
-        original.config.defaults.asr_model = Some("qwen3-0.6b".into());
-        let id = ws.state.enqueue(original.clone(), None).unwrap().0;
-        ws.state.task_mut(&id).unwrap().state = TaskState::Running;
-        ws.state.reset_input(true, Default::default(), None);
-        let b = ws.state.draft_mut().unwrap();
-        b.change_source("online-B".into());
-        b.title = "B 的未提交计划".into();
-        b.folder = Some(7);
-        b.options.summarize = true;
-        let b = b.clone();
-        assert!(ws.state.adjust_task(&id, None).is_err());
-        assert_eq!(ws.state.draft().unwrap(), &b);
-
-        ws.state.task_mut(&id).unwrap().state = TaskState::NeedsAttention;
-        ws.state.set_intent(&id, Intent::Run).unwrap();
-        assert!(ws.state.next_task().unwrap().plan == original);
-        assert_eq!(ws.state.draft().unwrap(), &b);
-        ws.state.set_intent(&id, Intent::Pause).unwrap();
-        ws.transaction(|state| state.adjust_task(&id, None))
-            .unwrap();
-        let revised = ws.state.draft_mut().unwrap();
-        let options = revised.options.clone();
-        revised.inherit(&ConversionOptions::default());
-        assert_eq!(revised.options, options);
-        assert_eq!(revised.input, original.source.input);
-        assert_eq!(revised.source.as_ref(), Some(&original.source));
-        assert_eq!(revised.title, original.title);
-        assert_eq!(revised.folder, original.folder);
-        assert_eq!(revised.library_id, original.library_id);
-        assert_eq!(revised.subtitle, original.subtitle);
-        assert_eq!(revised.asr_service, original.asr_service);
-        assert_eq!(revised.ai_service, original.ai_service);
-        assert_eq!(revised.retry_of.as_deref(), Some(id.as_str()));
-        assert!(revised.base_config.as_ref() == Some(&original.config));
-        let revision = revised.clone();
-        drop(ws);
-        let mut reopened = test_workspace(dir.path());
-        assert_eq!(reopened.state.draft().unwrap(), &revision);
-        assert_eq!(reopened.state.drafts.len(), 1);
-        assert!(reopened.state.drafts.iter().all(|input| input.id != b.id));
-        assert!(reopened.state.task(&id).unwrap().plan == original);
-        assert_eq!(reopened.state.task(&id).unwrap().state, TaskState::Paused);
-        let mut adjusted = original;
-        adjusted.config.llm.summarize = true;
-        let (followup, created) = reopened
-            .state
-            .enqueue(adjusted.clone(), Some(id.clone()))
-            .unwrap();
-        assert!(created);
-        assert_eq!(
-            reopened.state.enqueue(adjusted, Some(id.clone())).unwrap(),
-            (followup, false)
-        );
-        assert!(reopened.state.adjust_task(&id, None).is_err());
-        assert_eq!(reopened.state.drafts.len(), 1);
-        assert!(reopened.state.drafts.iter().all(|input| input.id != b.id));
     }
 
     #[test]
@@ -4492,12 +4342,8 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("other")).unwrap();
         // Saved as typed, with a `..` component: not the canonical spelling.
         let saved = dir.path().join("other").join("..").join("library");
-        let mut ws = Workspace::open_at_inline(
-            dir.path().join("workspace.json"),
-            saved.clone(),
-            Default::default(),
-        )
-        .unwrap();
+        let mut ws =
+            Workspace::open_at_inline(dir.path().join("workspace.json"), saved.clone()).unwrap();
         let id = ws.state.default_library.clone();
         assert_eq!(ws.state.library(&id).unwrap().root, saved);
         let roots: Vec<_> = ws.state.libraries.iter().map(|l| l.root.clone()).collect();
@@ -4544,12 +4390,7 @@ mod tests {
     }
 
     fn test_workspace(dir: &Path) -> Workspace {
-        Workspace::open_at_inline(
-            dir.join("workspace.json"),
-            dir.join("library"),
-            Default::default(),
-        )
-        .unwrap()
+        Workspace::open_at_inline(dir.join("workspace.json"), dir.join("library")).unwrap()
     }
 
     fn publish_note(state: &State, task_id: &str, partial: bool) -> PathBuf {
@@ -4653,15 +4494,24 @@ mod tests {
         id
     }
 
+    /// Records that task `id`'s run used `edit` of the default settings.
+    fn ran_with(ws: &mut Workspace, id: &str, edit: impl FnOnce(&mut ConfigFile)) {
+        let mut config = ConfigFile::default();
+        edit(&mut config);
+        ws.state.task_mut(id).unwrap().ran_with = Some(RunSettings::new(&config, None, None));
+    }
+
     fn uncertain_proofreading_note(
         ws: &mut Workspace,
         summarize: bool,
         summary: c2m_artifact::artifact::Outcome,
     ) -> (String, String) {
-        let mut snapshot = plan(&ws.state.default_library);
-        snapshot.config.llm.enabled = true;
-        snapshot.config.llm.summarize = summarize;
+        let snapshot = plan(&ws.state.default_library);
         let id = ws.state.enqueue(snapshot, None).unwrap().0;
+        ran_with(ws, &id, |config| {
+            config.llm.enabled = true;
+            config.llm.summarize = summarize;
+        });
         let outcomes = c2m_artifact::artifact::Outcomes {
             transcript: c2m_artifact::artifact::Outcome::succeeded(),
             proofreading: c2m_artifact::artifact::Outcome::failed("校对请求结果尚不确定"),
@@ -4684,11 +4534,13 @@ mod tests {
         purpose: &str,
         outcomes: c2m_artifact::artifact::Outcomes,
     ) -> (String, String) {
-        let mut snapshot = plan(&ws.state.default_library);
-        snapshot.config.llm.enabled = true;
-        snapshot.config.llm.summarize = true;
-        snapshot.config.llm.translate = Some("zh-Hans".into());
+        let snapshot = plan(&ws.state.default_library);
         let id = ws.state.enqueue(snapshot, None).unwrap().0;
+        ran_with(ws, &id, |config| {
+            config.llm.enabled = true;
+            config.llm.summarize = true;
+            config.llm.translate = Some("zh-Hans".into());
+        });
         let version = publish_note_with_outcomes(&ws.state, &id, outcomes.clone());
         let task = ws.state.task_mut(&id).unwrap();
         task.state = TaskState::Uncertain;
@@ -4783,9 +4635,11 @@ mod tests {
             panic!("expected component recovery");
         };
         assert_eq!(components, &[Component::Translation]);
-        let llm = &child.plan.config.llm;
-        assert!(!llm.enabled && !llm.summarize && !llm.vision);
-        assert_eq!(llm.translate.as_deref(), Some("zh-Hans"));
+        // The translation is redone into the language the note is in.
+        assert_eq!(
+            child.plan.repair.as_ref().unwrap().translate.as_deref(),
+            Some("zh-Hans")
+        );
         assert_eq!(child.resend, vec![request]);
     }
 
@@ -4999,8 +4853,6 @@ mod tests {
         assert_eq!(components, &[Component::Proofreading, Component::Summary]);
         assert_eq!(Some(note_dir), original.artifact.as_ref());
         assert_eq!(prior_work_dir.as_ref(), Some(&original.work_dir));
-        assert!(child.plan.config.llm.enabled && child.plan.config.llm.summarize);
-        assert!(child.plan.options().llm && child.plan.options().summarize);
         assert_eq!(child.resend, vec![request.clone()]);
         assert!(ws.state.task(&id).unwrap().plan == original.plan);
         assert!(ws.state.draft().unwrap() == &draft);
@@ -5036,7 +4888,6 @@ mod tests {
                 panic!("expected component recovery");
             };
             assert_eq!(components, &[Component::Proofreading]);
-            assert!(!child.plan.config.llm.summarize && !child.plan.options().summarize);
         }
     }
 
@@ -5103,7 +4954,6 @@ mod tests {
                     panic!("expected component recovery");
                 };
                 assert_eq!(components, &[Component::Proofreading], "{receipt_state:?}");
-                assert!(!child.plan.config.llm.summarize && !child.plan.options().summarize);
             }
         }
     }
@@ -5187,7 +5037,6 @@ mod tests {
             Workspace::open_at(
                 dir.path().join("workspace.json"),
                 dir.path().join("library"),
-                Default::default(),
             )
             .unwrap()
         };
@@ -5252,97 +5101,25 @@ mod tests {
         let child = ws.state.task(&followup).unwrap();
         assert_eq!(child.parent.as_deref(), Some(id.as_str()));
         assert_eq!(child.plan.source.input, "lecture.mp4");
-        assert_eq!(
-            child.plan.config.defaults.transcript_source,
-            Some(c2m_config::config::TranscriptSource::Subtitle)
-        );
-    }
-
-    #[test]
-    fn service_repair_creates_a_scoped_attempt_and_preserves_the_old_plan_and_input() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut ws = test_workspace(dir.path());
-        let mut snapshot = plan(&ws.state.default_library);
-        snapshot.ai_service = Some("old-ai-version".into());
-        snapshot.config.llm.base_url = "https://old.example.test/v1".into();
-        snapshot.config.llm.model = "old-model".into();
-        let id = ws.state.enqueue(snapshot.clone(), None).unwrap().0;
-        let version = publish_note(&ws.state, &id, true);
-        let outcomes = c2m_artifact::artifact::read_manifest(&version.join("manifest.json"))
-            .unwrap()
-            .outcomes;
-        let original = ws.state.task_mut(&id).unwrap();
-        original.state = TaskState::Partial;
-        original.artifact = Some(version.clone());
-        original.events.outcomes = Some(outcomes.clone());
-        ws.state
-            .draft_mut()
-            .unwrap()
-            .change_source("another-video.mp4".into());
-        let input = ws.state.draft().unwrap().clone();
-        let mut repaired = ConfigFile::default();
-        repaired.llm.base_url = "https://repaired.example.test/v1".into();
-        repaired.llm.model = "repaired-model".into();
-        // A service repair cannot silently rerun successful work or non-AI stages.
-        assert!(
-            ws.state
-                .reprocess_with_service(
-                    &id,
-                    vec![Component::Screenshots],
-                    vec![],
-                    Some(("new-ai-version".into(), repaired.clone()))
-                )
-                .is_err()
-        );
-        let followup = ws
-            .state
-            .reprocess_with_service(
-                &id,
-                vec![Component::Proofreading],
-                vec![],
-                Some(("new-ai-version".into(), repaired.clone())),
-            )
-            .unwrap();
-        assert!(ws.state.task(&id).unwrap().plan == snapshot);
-        assert_eq!(
-            ws.state.task(&id).unwrap().artifact.as_ref(),
-            Some(&version)
-        );
-        assert!(ws.state.draft().unwrap() == &input);
-        let child = ws.state.task(&followup).unwrap();
-        assert_eq!(child.plan.ai_service.as_deref(), Some("new-ai-version"));
-        assert_eq!(child.plan.config.llm.model, "repaired-model");
-        assert_eq!(
-            child.plan.config.llm.base_url,
-            "https://repaired.example.test/v1"
-        );
-        assert!(child.plan.config.llm.enabled);
-        assert!(!child.plan.config.llm.summarize);
-        assert!(matches!(
-            &child.plan.operation,
-            c2m_engine::execution::Operation::Reprocess { note_dir, components, .. }
-                if note_dir == &version && components == &[Component::Proofreading]
-        ));
-        let again = ws
-            .state
-            .reprocess_with_service(
-                &id,
-                vec![Component::Proofreading],
-                vec![],
-                Some(("new-ai-version".into(), repaired)),
-            )
-            .unwrap();
-        assert_eq!(again, followup);
-        assert_eq!(ws.state.tasks.len(), 2);
     }
 
     #[test]
     fn damaged_primary_and_backup_are_preserved_before_paused_mirror_rebuild() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let mut snapshot = plan(&ws.state.default_library);
-        snapshot.config.llm.api_key = "fake-test-credential".into();
+        let snapshot = plan(&ws.state.default_library);
         let id = ws.state.enqueue(snapshot, None).unwrap().0;
+        ws.state.task_mut(&id).unwrap().ran_with = Some(RunSettings {
+            config: ConfigFile {
+                llm: c2m_config::llm_settings::LlmSettings {
+                    api_key: "fake-test-credential".into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            asr_service: None,
+            ai_service: None,
+        });
         ws.state.task_mut(&id).unwrap().state = TaskState::Running;
         ws.state.task_mut(&id).unwrap().resend = vec!["old-attempt.1".into()];
         ws.save().unwrap();
@@ -5361,20 +5138,8 @@ mod tests {
             b"{broken backup",
         )
         .unwrap();
-        assert!(
-            Workspace::open_at_inline(
-                ws.path.clone(),
-                dir.path().join("library"),
-                Default::default()
-            )
-            .is_err()
-        );
-        let rebuilt = Workspace::rebuild_at(
-            ws.path.clone(),
-            dir.path().join("library"),
-            Default::default(),
-        )
-        .unwrap();
+        assert!(Workspace::open_at_inline(ws.path.clone(), dir.path().join("library")).is_err());
+        let rebuilt = Workspace::rebuild_at(ws.path.clone(), dir.path().join("library")).unwrap();
         assert_eq!(rebuilt.state.task(&id).unwrap().state, TaskState::Paused);
         assert_eq!(rebuilt.state.task(&id).unwrap().intent, Intent::Pause);
         assert!(rebuilt.state.task(&id).unwrap().resend.is_empty());
@@ -5406,12 +5171,8 @@ mod tests {
             std::fs::read(archive.join("workspace.json.bak")).unwrap(),
             b"{broken backup"
         );
-        let reopened = Workspace::open_at_inline(
-            ws.path.clone(),
-            dir.path().join("library"),
-            Default::default(),
-        )
-        .unwrap();
+        let reopened =
+            Workspace::open_at_inline(ws.path.clone(), dir.path().join("library")).unwrap();
         assert!(reopened.state.next_task().is_none());
         assert_eq!(reopened.state.tasks.len(), 1);
     }
@@ -5458,7 +5219,6 @@ mod tests {
         ws.state.task_mut(&parent).unwrap().state = TaskState::NeedsAttention;
         let mut changed = plan(&ws.state.default_library);
         changed.title = "changed display title".into();
-        changed.config.llm.summarize = true;
         let next = ws.state.enqueue(changed, Some(parent.clone())).unwrap().0;
         ws.state.task_mut(&parent).unwrap().handled_by = None;
         ws.state.task_mut(&parent).unwrap().state = TaskState::Running;
@@ -5480,9 +5240,6 @@ mod tests {
         let original = ws.state.task_mut(&id).unwrap();
         original.state = TaskState::Partial;
         original.artifact = Some(version);
-        original.plan.config.llm.enabled = true;
-        original.plan.config.llm.summarize = true;
-        original.plan.config.defaults.formats = Some(vec![OutputFormat::Md, OutputFormat::Html]);
         original.events.outcomes = Some(c2m_artifact::artifact::Outcomes {
             exports: BTreeMap::from([
                 ("md".into(), c2m_artifact::artifact::Outcome::succeeded()),
@@ -5498,17 +5255,9 @@ mod tests {
             .reprocess(&id, vec![Component::Exports], vec![])
             .unwrap();
         let child = ws.state.task(&next).unwrap();
-        assert!(!child.plan.config.llm.enabled && !child.plan.config.llm.summarize);
-        assert_eq!(
-            child.plan.config.defaults.formats,
-            Some(vec![OutputFormat::Html])
-        );
-        let refs = desktop_prefs::preferences::ServiceRefs {
-            asr: Some("stopped-asr".into()),
-            llm: Some("stopped-ai".into()),
-        };
-        let needed = refs.required_for(&child.plan.config);
-        assert!(needed.asr.is_none() && needed.llm.is_none());
+        let repair = child.plan.repair.as_ref().unwrap();
+        assert_eq!(repair.formats, Some(vec![OutputFormat::Html]));
+        assert_eq!(repair.translate, None);
     }
 
     #[test]
@@ -5653,7 +5402,7 @@ mod tests {
         let retry = missing.state.task(&retry).unwrap();
         assert!(retry.exports_only());
         assert_eq!(
-            retry.plan.config.defaults.formats,
+            retry.plan.repair.as_ref().unwrap().formats,
             Some(vec![OutputFormat::Html])
         );
         assert_eq!(std::fs::read(old_markdown).unwrap(), old_bytes);
@@ -5697,22 +5446,8 @@ mod tests {
         future["schema"] = serde_json::json!(SCHEMA + 1);
         let bytes = serde_json::to_vec(&future).unwrap();
         std::fs::write(ws.storage_path(), &bytes).unwrap();
-        assert!(
-            Workspace::open_at_inline(
-                ws.path.clone(),
-                dir.path().join("library"),
-                Default::default()
-            )
-            .is_err()
-        );
-        assert!(
-            Workspace::rebuild_at(
-                ws.path.clone(),
-                dir.path().join("library"),
-                Default::default()
-            )
-            .is_err()
-        );
+        assert!(Workspace::open_at_inline(ws.path.clone(), dir.path().join("library")).is_err());
+        assert!(Workspace::rebuild_at(ws.path.clone(), dir.path().join("library")).is_err());
         assert_eq!(std::fs::read(ws.storage_path()).unwrap(), bytes);
     }
 
@@ -5918,7 +5653,6 @@ mod tests {
         let mut ws = Workspace::open_at(
             fixture.dir.path().join("workspace.json"),
             fixture.dir.path().join("library"),
-            Default::default(),
         )
         .unwrap();
         let version_a = fixture.note.join("versions").join(&fixture.a);
@@ -6017,7 +5751,6 @@ mod tests {
         let mut ws = Workspace::open_at(
             fixture.dir.path().join("workspace.json"),
             fixture.dir.path().join("library"),
-            Default::default(),
         )
         .unwrap();
         let mut repairs = Vec::new();
@@ -6067,7 +5800,6 @@ mod tests {
         let mut ws = Workspace::open_at(
             fixture.dir.path().join("workspace.json"),
             fixture.dir.path().join("library"),
-            Default::default(),
         )
         .unwrap();
         let library = ws.state.default_library.clone();
@@ -6118,7 +5850,7 @@ mod tests {
         // Other options for the same video are still the same note.
         let mut other = plan(&library);
         other.title = "另一个名字".into();
-        other.config.llm.summarize = !other.config.llm.summarize;
+        other.text_source = Some(c2m_config::config::TranscriptSource::Asr);
         assert_eq!(
             ws.state.duplicate_of(&other, None).map(|t| t.id.clone()),
             Some(first.clone())
