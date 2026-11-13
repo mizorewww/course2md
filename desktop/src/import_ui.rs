@@ -236,6 +236,7 @@ impl Desktop {
             reading,
             has_source: self.import.source_preview.is_some(),
             needs_text_choice: self.subtitle_attention_required(cx),
+            missing_text_source: self.text_source_missing(cx),
             environment_ready: self.environment.is_some(),
             library_ready: !self.library(cx).loading,
             existing_note: self.existing_source_note(cx).is_some(),
@@ -656,6 +657,19 @@ impl Desktop {
                 cx.notify();
             }
         }
+    }
+
+    /// Settings' 文字来源 is 仅字幕 and this video has no subtitle to use, with no read
+    /// on its way: the card names the obstacle and its repairs, and nothing starts.
+    pub(super) fn text_source_missing(&self, cx: &App) -> bool {
+        !self.import.subtitle_loading
+            && self.import.source_preview.as_ref().is_some_and(|source| {
+                subtitles_required_but_missing(
+                    source,
+                    self.text_mode(cx),
+                    self.import.subtitle_error.is_some(),
+                )
+            })
     }
 
     pub(super) fn subtitle_attention_required(&self, cx: &App) -> bool {
@@ -1371,7 +1385,8 @@ impl Desktop {
                                     recovery.blocked
                                         || self.import.pending_conversion.is_some()
                                         || self.import.preview_cancel.is_some()
-                                        || self.subtitle_choice_missing(cx),
+                                        || self.subtitle_choice_missing(cx)
+                                        || self.text_source_missing(cx),
                                 )
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.start_conversion(window, cx)
@@ -2204,6 +2219,14 @@ impl Desktop {
                     .err()
                     .filter(|_| settled)
                     .map(|(message, _)| message.clone())
+            })
+            // A Start the plan refused: its reason stands on the card beside 取消转换 and
+            // 重试转换, not under the link field the card has replaced.
+            .or_else(|| {
+                self.import
+                    .source_validation
+                    .clone()
+                    .filter(|_| self.import.pending_conversion.is_some() && !reading)
             });
         // Waiting for the component or location checks is progress, not a failure.
         let checking = !preferences_blocked && (self.environment.is_none() || plan_pending);
@@ -2400,7 +2423,8 @@ impl Desktop {
                     reading
                         || checking
                         || self.records.read(cx).workspace.is_none()
-                        || preferences_blocked,
+                        || preferences_blocked
+                        || self.text_source_missing(cx),
                 )
                 .on_click(cx.listener(move |_, _, window, cx| {
                     // The note is replaced, not kept beside the new one: ask first.

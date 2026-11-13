@@ -147,6 +147,24 @@ pub fn default_track_to_read(
     .flatten()
 }
 
+/// Settings' 文字来源 asks for subtitles only, and this video has none it can use:
+/// none chosen and none to read, or its read failed (`read_failed` is the
+/// workbench's own failed read). Nothing the app does on its own changes that, so 开始转换
+/// waits for the person to attach a subtitle file, read again or change the setting.
+/// A read in flight is not this: the caller checks it.
+pub fn subtitles_required_but_missing(
+    source: &source::Source,
+    source_mode: TranscriptSource,
+    read_failed: bool,
+) -> bool {
+    source_mode == TranscriptSource::Subtitle
+        && (read_failed
+            || source.subtitle_read_error.is_some()
+            || (source.selected_subtitle.is_none()
+                && source.subtitle_request.is_none()
+                && source.subtitles.tracks().is_empty()))
+}
+
 pub fn subtitle_needs_confirmation(source: &source::Source, source_mode: TranscriptSource) -> bool {
     !uses_speech(source, source_mode)
         && (source.selected_subtitle.is_none()
@@ -403,6 +421,9 @@ pub struct GateInputs {
     pub reading: bool,
     pub has_source: bool,
     pub needs_text_choice: bool,
+    /// Settings require subtitles and this video has none to use: no check that
+    /// finishes later supplies one (`subtitles_required_but_missing`).
+    pub missing_text_source: bool,
     pub environment_ready: bool,
     pub library_ready: bool,
     pub existing_note: bool,
@@ -413,7 +434,7 @@ pub fn conversion_gate(gate: GateInputs) -> ConversionGate {
         ConversionGate::Stop
     } else if gate.reading {
         ConversionGate::Wait
-    } else if !gate.has_source {
+    } else if !gate.has_source || gate.missing_text_source {
         ConversionGate::Stop
     } else if gate.needs_text_choice || !gate.environment_ready || !gate.library_ready {
         ConversionGate::Wait
@@ -523,6 +544,21 @@ impl ImportSession {
         self.subtitle_issue_open = false;
     }
 
+    /// The plan refused a Start. A missing text source ends the intent: the card
+    /// states the obstacle with its repairs, and 开始转换 waits until it is resolved,
+    /// instead of a Start that hangs on 取消转换. Any other refusal stays with its
+    /// message, to be retried or cancelled.
+    pub fn refuse_start(&mut self, message: String, missing_text_source: bool) {
+        self.validation_attempt = self.validation_attempt.wrapping_add(1);
+        if missing_text_source {
+            self.pending_conversion = None;
+            self.following_conversion = None;
+            self.source_validation = None;
+        } else {
+            self.source_validation = Some(message);
+        }
+    }
+
     /// Stops a subtitle read; its late result no longer counts. Returns the new generation.
     pub fn stop_subtitle_read(&mut self) -> u64 {
         if let Some(cancel) = self.subtitle_cancel.take() {
@@ -569,7 +605,7 @@ mod tests {
     use super::{
         ConversionFollow, ConversionGate, GateInputs, PlanKey, automatic_subtitle_fallback,
         completed_input_task, conversion_gate, locked_input_task, submitted_input_task,
-        subtitle_needs_confirmation, uses_speech,
+        subtitle_needs_confirmation, subtitles_required_but_missing, uses_speech,
     };
     use crate::source;
     use c2m_config::config::TranscriptSource;
@@ -584,6 +620,7 @@ mod tests {
             reading: false,
             has_source: true,
             needs_text_choice: false,
+            missing_text_source: false,
             environment_ready: true,
             library_ready: true,
             existing_note: false,
@@ -691,6 +728,117 @@ mod tests {
             }),
             ConversionGate::Stop
         );
+    }
+
+    /// Subtitles only, and the video has none: no check that finishes later brings
+    /// one, so a Start does not wait on it (it stopped behind 取消转换 before).
+    #[test]
+    fn a_start_without_a_text_source_stops_instead_of_waiting() {
+        let missing = GateInputs {
+            needs_text_choice: true,
+            missing_text_source: true,
+            ..ready()
+        };
+        assert_eq!(conversion_gate(missing), ConversionGate::Stop);
+        // A read in flight may still find one.
+        assert_eq!(
+            conversion_gate(GateInputs {
+                reading: true,
+                ..missing
+            }),
+            ConversionGate::Wait
+        );
+    }
+
+    #[test]
+    fn subtitles_only_without_subtitles_has_no_text_source() {
+        let track = c2m_source::subtitle::file_track("lesson.srt".into(), None);
+        let none = source::Source {
+            subtitles: SubtitleEvidence::NoneFound,
+            ..Default::default()
+        };
+        let missing = |source: &source::Source, mode, failed| {
+            subtitles_required_but_missing(source, mode, failed)
+        };
+        // Only subtitles only: automatic recognizes speech, speech needs none.
+        assert!(missing(&none, TranscriptSource::Subtitle, false));
+        assert!(!missing(&none, TranscriptSource::Auto, false));
+        assert!(!missing(&none, TranscriptSource::Asr, false));
+        for subtitles in [
+            SubtitleEvidence::Unchecked,
+            SubtitleEvidence::Unsupported {
+                message: "不支持".into(),
+            },
+            SubtitleEvidence::Failed {
+                message: "请求失败".into(),
+            },
+        ] {
+            let source = source::Source {
+                subtitles,
+                ..Default::default()
+            };
+            assert!(missing(&source, TranscriptSource::Subtitle, false));
+        }
+        // Tracks to read: the card asks which, as before.
+        let found = source::Source {
+            subtitles: SubtitleEvidence::Found {
+                tracks: vec![track.clone()],
+                warning: None,
+            },
+            ..Default::default()
+        };
+        assert!(!missing(&found, TranscriptSource::Subtitle, false));
+        // A read on its way may still bring one.
+        let reading = source::Source {
+            subtitle_request: Some(track.clone()),
+            ..none.clone()
+        };
+        assert!(!missing(&reading, TranscriptSource::Subtitle, false));
+        // A failed read leaves none until the person acts.
+        let failed = source::Source {
+            subtitle_read_error: Some(SubtitleReadError::Failed {
+                message: "字幕文件无法读取".into(),
+            }),
+            ..reading
+        };
+        assert!(missing(&failed, TranscriptSource::Subtitle, false));
+        assert!(missing(&found, TranscriptSource::Subtitle, true));
+        // An attached subtitle file is a text source.
+        let attached = source::Source {
+            subtitles: SubtitleEvidence::Found {
+                tracks: vec![track.clone()],
+                warning: None,
+            },
+            selected_subtitle: Some(CachedSubtitle {
+                source_identity: String::new(),
+                track_id: track.id.clone(),
+                label: "lesson.srt".into(),
+                path: "lesson.srt".into(),
+                events: Vec::new(),
+            }),
+            ..Default::default()
+        };
+        assert!(!missing(&attached, TranscriptSource::Subtitle, false));
+    }
+
+    /// A Start the plan refuses for a missing text source returns the card to its
+    /// obstacle; any other refusal keeps its message to retry or cancel.
+    #[test]
+    fn a_refused_start_without_a_text_source_does_not_stay_pending() {
+        use super::ImportSession;
+        let mut session = ImportSession {
+            pending_conversion: Some(3),
+            following_conversion: Some(ConversionFollow::Preparing(3)),
+            ..Default::default()
+        };
+        session.refuse_start("保存位置不可用".into(), false);
+        assert_eq!(session.pending_conversion, Some(3));
+        assert_eq!(session.source_validation.as_deref(), Some("保存位置不可用"));
+        session.refuse_start("字幕还未确认".into(), true);
+        assert_eq!(session.pending_conversion, None);
+        assert_eq!(session.following_conversion, None);
+        assert_eq!(session.source_validation, None);
+        assert_eq!(session.validation_attempt, 2);
     }
 
     #[test]
