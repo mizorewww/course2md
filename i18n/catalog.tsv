@@ -1383,7 +1383,7 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 没有 JSON	没有 JSON	No JSON	沒有 JSON	JSONなし
 没有匹配的笔记	没有匹配的笔记	No matching notes	沒有匹配的筆記	一致するノートがありません
 没有可保存的输入	没有可保存的输入	No input to save	沒有可儲存的輸入	保存する入力がありません
-没有字幕时会提示选择字幕文件或改用语音识别	没有字幕时会提示选择字幕文件或改用语音识别	If there are no subtitles, you will be prompted to select a subtitle file or use speech recognition instead.	沒有字幕時會提示選擇字幕檔案或改用語音辨識	字幕がない場合は、字幕ファイルを選択するか、代わりに音声認識を使用するように求められます。
+视频没有字幕时，视频卡片会说明；本地视频可选择字幕文件，否则需更改文字来源	视频没有字幕时，视频卡片会说明；本地视频可选择字幕文件，否则需更改文字来源	When a video has no subtitles, its video card says so; a local video can use a subtitle file, otherwise change the transcript source	影片沒有字幕時，影片卡片會說明；本機影片可選擇字幕檔案，否則需更改文字來源	動画に字幕がない場合は動画カードに表示されます。ローカル動画は字幕ファイルを選択でき、それ以外は文字起こしのソースを変更してください
 没有对应的截图	没有对应的截图	There is no corresponding screenshot	沒有對應的截圖	対応するスクリーンショットはありません
 没有提取到截图	没有提取到截图	No screenshots were extracted	沒有提取到截圖	スクリーンショットは抽出されませんでした
 没有数组	没有数组	No array	沒有陣列	配列がありません

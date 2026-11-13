@@ -68,7 +68,9 @@ impl Desktop {
             }));
         let source_hint = match source {
             Some(TranscriptSource::Subtitle) => {
-                course2md::tr!("没有字幕时会提示选择字幕文件或改用语音识别")
+                course2md::tr!(
+                    "视频没有字幕时，视频卡片会说明；本地视频可选择字幕文件，否则需更改文字来源"
+                )
             }
             Some(TranscriptSource::Asr) => course2md::tr!("语音识别，不使用现有字幕"),
             _ => course2md::tr!("有字幕时直接用字幕，没有字幕时使用语音识别"),
