@@ -492,7 +492,13 @@ pub(crate) fn bind_work_dir(
         let old: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?).context(
             tr!("任务进度身份损坏，原文件已保留 / Task identity is damaged"),
         )?;
-        if former == Some(&old) || (settings_may_change && same_task(&old, binding)) {
+        if former == Some(&old) {
+            return crate::fsio::atomic_write(&path, &serde_json::to_vec_pretty(binding)?);
+        }
+        if settings_may_change && same_task(&old, binding) {
+            // What the earlier settings made is redone under the current ones, never
+            // mixed with them; the binding then names the current settings.
+            discard_outdated_work(work_dir, &old, binding)?;
             return crate::fsio::atomic_write(&path, &serde_json::to_vec_pretty(binding)?);
         }
         anyhow::ensure!(
@@ -513,18 +519,93 @@ pub(crate) fn bind_work_dir(
     Ok(())
 }
 
+/// The parts of a binding that follow the settings a desktop task runs with: its
+/// configuration, services, and the subtitles its text source takes.
+const SETTINGS_KEYS: [&str; 5] = [
+    "config",
+    "service_versions",
+    "allow_unauthenticated_asr",
+    "subtitle_digest",
+    "subtitle_events",
+];
+
 /// Whether two bindings are of one task, whatever settings each was bound with.
 fn same_task(old: &serde_json::Value, new: &serde_json::Value) -> bool {
     let without_settings = |binding: &serde_json::Value| {
         let mut binding = binding.clone();
         if let Some(object) = binding.as_object_mut() {
-            for key in ["config", "service_versions", "allow_unauthenticated_asr"] {
+            for key in SETTINGS_KEYS {
                 object.remove(key);
             }
         }
         binding
     };
     old.get("task_id").is_some() && without_settings(old) == without_settings(new)
+}
+
+/// Saved work in `work_dir` that the settings of `old` made and `new` would make
+/// differently, by the parts of the binding each depends on.
+fn outdated_work(old: &serde_json::Value, new: &serde_json::Value) -> Vec<&'static str> {
+    let differs = |paths: &[&[&str]]| {
+        paths.iter().any(|path| {
+            let at = |binding: &serde_json::Value| {
+                path.iter()
+                    .try_fold(binding, |value, key| value.get(*key))
+                    .cloned()
+            };
+            at(old) != at(new)
+        })
+    };
+    let mut outdated = Vec::new();
+    // The downloaded video: its height.
+    let media = differs(&[&["config", "max_height"]]);
+    if media {
+        outdated.extend(["media.mp4", "media.sha256"]);
+    }
+    // The screenshots: the video and how slides are found in it.
+    if media
+        || differs(&[
+            &["config", "similarity"],
+            &["config", "sample_interval"],
+            &["config", "cooldown"],
+            &["config", "slide_mode"],
+            &["config", "stable_secs"],
+            &["config", "roi"],
+        ])
+    {
+        outdated.push("screenshots.json");
+    }
+    // The transcript: the text source, its subtitles, and the recognition that
+    // made it (speech progress keeps its own identity, see `c2m_asr::checkpoint`).
+    if differs(&[
+        &["config", "transcript_source"],
+        &["config", "provider"],
+        &["config", "asr_model"],
+        &["config", "max_speech"],
+        &["config", "asr_api"],
+        &["service_versions", "asr"],
+        &["subtitle_digest"],
+        &["subtitle_events"],
+    ]) {
+        outdated.push("transcript.json");
+    }
+    outdated
+}
+
+fn discard_outdated_work(
+    work_dir: &Path,
+    old: &serde_json::Value,
+    new: &serde_json::Value,
+) -> Result<()> {
+    for name in outdated_work(old, new) {
+        match std::fs::remove_file(work_dir.join(name)) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                return Err(error.into());
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Runs a request obtained from [`Request::read`], which validated it. The task
@@ -619,6 +700,72 @@ mod tests {
         }
         assert!(valid_id("task-0123456789abcdef"));
         assert!(valid_id("a.b"));
+    }
+
+    /// Resumed under other settings, a desktop task redoes what those settings change
+    /// (the transcript, the screenshots, the download) and keeps the rest: nothing in
+    /// one note is made with two settings.
+    #[test]
+    fn a_resumed_task_discards_only_the_work_its_changed_settings_make_differently() {
+        let dir = tempfile::tempdir().unwrap();
+        let bound = |config: serde_json::Value, subtitle: Option<&str>| {
+            serde_json::json!({
+                "task_id": "task", "source_id": "video", "config": config,
+                "service_versions": {"llm": "v1"}, "subtitle_digest": subtitle,
+            })
+        };
+        let base = serde_json::json!({
+            "transcript_source": "auto", "provider": "cpu", "asr_model": "a",
+            "max_height": 1080, "similarity": 0.9, "llm": {"model": "m"},
+        });
+        let saved = [
+            "transcript.json",
+            "screenshots.json",
+            "media.mp4",
+            "media.sha256",
+            "audio.wav",
+        ];
+        let reset = |dir: &Path| {
+            for name in saved {
+                std::fs::write(dir.join(name), "saved").unwrap();
+            }
+        };
+        let left = |dir: &Path| -> Vec<&str> {
+            saved
+                .into_iter()
+                .filter(|name| dir.join(name).exists())
+                .collect()
+        };
+        bind_work_dir(dir.path(), &bound(base.clone(), Some("subs")), None, true).unwrap();
+        reset(dir.path());
+        // Another speech model: only the transcript is redone.
+        let mut model = base.clone();
+        model["asr_model"] = "b".into();
+        bind_work_dir(dir.path(), &bound(model.clone(), Some("subs")), None, true).unwrap();
+        assert_eq!(
+            left(dir.path()),
+            ["screenshots.json", "media.mp4", "media.sha256", "audio.wav"]
+        );
+        // Another text source, which drops the selected subtitles: the transcript again,
+        // and the paused task resumes instead of being refused.
+        reset(dir.path());
+        let mut speech = model.clone();
+        speech["transcript_source"] = "asr".into();
+        bind_work_dir(dir.path(), &bound(speech.clone(), None), None, true).unwrap();
+        assert!(!dir.path().join("transcript.json").exists());
+        bind_work_dir(dir.path(), &bound(model.clone(), Some("subs")), None, true).unwrap();
+        // Another video height: the download and its screenshots.
+        reset(dir.path());
+        let mut height = model.clone();
+        height["max_height"] = 720.into();
+        bind_work_dir(dir.path(), &bound(height.clone(), Some("subs")), None, true).unwrap();
+        assert_eq!(left(dir.path()), ["transcript.json", "audio.wav"]);
+        // Only the AI model: everything saved stays (its requests carry their own identity).
+        reset(dir.path());
+        let mut ai = height.clone();
+        ai["llm"]["model"] = "other".into();
+        bind_work_dir(dir.path(), &bound(ai, Some("subs")), None, true).unwrap();
+        assert_eq!(left(dir.path()).len(), saved.len());
     }
 
     /// A desktop task runs with the settings current when it starts: resumed with

@@ -1041,13 +1041,10 @@ impl Task<'_> {
                             && has(Component::Proofreading)
                             && self.cfg.llm.translation_target().is_some()))
             });
-            let matching_service = request.service_versions.get("llm").map_or(
-                receipt
-                    .service_version
-                    .starts_with(crate::dispatch::SNAPSHOT_PREFIX),
-                |version| version == &receipt.service_version,
-            );
-            if needed && matching_service && execution::valid_id(&receipt.stable_id) {
+            if needed
+                && imports_prior_receipt(&receipt, request.service_versions.get("llm"))
+                && execution::valid_id(&receipt.stable_id)
+            {
                 let destination = ledger_dir.join(format!("{}.json", receipt.stable_id));
                 if !destination.exists() {
                     // This new task explicitly requests another attempt at selected
@@ -1532,6 +1529,22 @@ fn build_sections(
 
 /// 读取转写缓存；全空的缓存是上次失败运行的残留（端点持续返回空文本却
 /// 无报错），丢弃并重新识别，而不是用"所选字幕没有可读文字"误导用户。
+/// Whether a repair takes a request record of the work it repairs. A finished
+/// request comes along whichever version of the service answered it: a repair runs
+/// with the current service, and the same request to the same endpoint replays its
+/// answer instead of being paid for again (see the ledger's earlier versions). An
+/// unfinished one belongs to the version it was made with, whose retry it
+/// authorizes.
+fn imports_prior_receipt(receipt: &crate::dispatch::Receipt, current: Option<&String>) -> bool {
+    receipt.state == crate::dispatch::State::Completed
+        || current.map_or(
+            receipt
+                .service_version
+                .starts_with(crate::dispatch::SNAPSHOT_PREFIX),
+            |version| version == &receipt.service_version,
+        )
+}
+
 fn cached_transcript(cache_path: &Path) -> Result<Option<TranscriptCache>> {
     if !cache_path.is_file() {
         return Ok(None);
@@ -1623,6 +1636,45 @@ fn should_delete_media(
 #[cfg(test)]
 mod tests {
     use super::{run, should_delete_media};
+
+    /// A repair after the AI service was edited (a new key or name) takes the
+    /// finished requests of the note it repairs, so their answers are replayed rather
+    /// than paid for again; an unfinished one stays with its own version.
+    #[test]
+    fn a_repair_takes_finished_requests_of_another_service_version() {
+        use crate::dispatch::{Receipt, State};
+        let receipt = |state: State| Receipt {
+            schema: 1,
+            stable_id: "id".into(),
+            request_id: "id.1".into(),
+            purpose: "proofreading".into(),
+            description: String::new(),
+            service_version: "version-1".into(),
+            attempt: 1,
+            state,
+            http_status: None,
+            response: None,
+            message: None,
+            unsupported_response_format: false,
+            refused_parameter: None,
+            repeats: false,
+            retry_authorized: None,
+        };
+        let current = "version-2".to_string();
+        assert!(super::imports_prior_receipt(
+            &receipt(State::Completed),
+            Some(&current)
+        ));
+        assert!(!super::imports_prior_receipt(
+            &receipt(State::Failed),
+            Some(&current)
+        ));
+        let same = "version-1".to_string();
+        assert!(super::imports_prior_receipt(
+            &receipt(State::Failed),
+            Some(&same)
+        ));
+    }
 
     #[test]
     fn batch_tasks_discover_subtitles_at_runtime_only_without_confirmed_text() {
