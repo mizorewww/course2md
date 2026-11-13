@@ -921,7 +921,7 @@ impl Desktop {
                     .and_then(|result| {
                         result
                             .map_err(|error| {
-                                this.report(course2md::tr!("尚未打开任务调整选项：{}"), error)
+                                this.report(course2md::tr!("尚未在主页重新打开这个视频：{}"), error)
                             })
                             .ok()
                     });

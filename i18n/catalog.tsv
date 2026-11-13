@@ -624,7 +624,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 将排在当前任务之后	将排在当前任务之后	Will be queued after the current task	將排在目前任務之後	現在のタスクの後にキューに入れられます
 将课程视频转换为图文笔记 / Turn course videos into illustrated notes	将课程视频转换为图文笔记 / Turn course videos into illustrated notes	Turn course videos into illustrated notes	將課程影片轉換為圖文筆記	コース動画を図解ノートに変換
 尚未删除此服务	尚未删除此服务	This service has not been deleted yet	尚未刪除此服務	このサービスは削除されていません
-尚未打开任务调整选项：{}	尚未打开任务调整选项：{}	Task adjustment options not opened yet: {}	尚未開啟任務調整選項：{}	タスク調整オプションをまだ開けていません: {}
+尚未在主页重新打开这个视频：{}	尚未在主页重新打开这个视频：{}	This video has not been reopened on Home yet: {}	尚未在首頁重新開啟這個影片：{}	この動画をまだホームで開き直せていません: {}
 尚未放弃这次移动：{}	尚未放弃这次移动：{}	Move not cancelled yet: {}	尚未放棄這次移動：{}	この移動はまだ取り消されていません: {}
 尚未检查字幕，请重新读取视频信息 / Subtitles not checked yet; probe the video info again	尚未检查字幕，请重新读取视频信息	Subtitles not checked yet; probe the video info again	尚未檢查字幕，請重新讀取影片資訊	字幕はまだチェックされていません。動画情報をもう一度読み込んでください。
 尚未检查识别模型	尚未检查识别模型	Recognition model has not been checked yet	尚未檢查辨識模型	認識モデルはまだチェックされていません
@@ -1206,7 +1206,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 本次禁用 AI 校对 / Disable AI proofreading for this run	本次禁用 AI 校对	Disable AI proofreading for this run	本次禁用 AI 校對	今回は AI 校正を無効にする
 本次禁用截图辅助校对 / Disable image-assisted proofreading	本次禁用截图辅助校对	Disable image-assisted proofreading	本次禁用截圖輔助校對	今回はスクリーンショットを使った校正を無効にする
 本次禁用视频摘要 / Disable video summary for this run	本次禁用视频摘要	Disable video summary for this run	本次禁用影片摘要	今回は動画の要約を無効にする
-本次笔记的选择尚未保存	本次笔记的选择尚未保存	The selection for this note has not been saved yet	本次筆記的選擇尚未儲存	このノートの選択内容はまだ保存されていません
 权重偏移无效 / Invalid weight offsets	权重偏移无效	Invalid weight offsets	權重偏移無效	ウェイトオフセットが無効です
 权重头不完整 / Incomplete weight header	权重头不完整	Incomplete weight header	權重標頭不完整	ウェイトヘッダーが不完全です
 权重文件不完整 / Incomplete weight file	权重文件不完整	Incomplete weight file	權重檔案不完整	ウェイト ファイルが不完全です
@@ -1725,7 +1724,7 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 读取超时，请重试	读取超时，请重试	Read timed out. Please try again.	讀取逾時，請重試	読み取りタイムアウトです。もう一度お試しください。
 课件截图	课件截图	Courseware screenshots	課件截圖	講義資料のスクリーンショット
 调整后重试	调整后重试	Adjust and try again	調整後重試	調整して再試行してください
-调整选项	调整选项	Adjust options	調整選項	調整オプション
+在主页重新打开	在主页重新打开	Reopen on Home	在首頁重新開啟	ホームで開き直す
 账号已确认，但保存登录状态失败。请检查本地权限后重新扫码。	账号已确认，但保存登录状态失败。请检查本地权限后重新扫码。	The account has been confirmed, but saving the login status failed. Please check the local permissions and scan the QR code again.	帳號已確認，但儲存登入狀態失敗。請檢查本機權限後重新掃描 QR 碼。	アカウントは確認されましたが、ログイン状態の保存に失敗しました。ローカルの権限を確認し、QR コードを再度スキャンしてください。
 账号状态响应不完整，请稍后重试 / Account status response is incomplete; retry later	账号状态响应不完整，请稍后重试	Account status response is incomplete; retry later	帳號狀態回應不完整，請稍後重試	アカウントステータスの応答が不完全です。後でもう一度試してください。
 资源位置超出此笔记 / Asset escapes note directory	资源位置超出此笔记	Asset escapes note directory	資源位置超出此筆記	リソースの場所がこのノートの外にあります
@@ -1865,12 +1864,11 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 重新运行	重新运行	Run again	重新執行	再実行
 重新选择文件夹…	重新选择文件夹…	Reselect folder…	重新選擇資料夾…	フォルダーを再選択…
 重新预览	重新预览	Re-preview	重新預覽	再プレビュー
-重置处理选项	重置处理选项	Reset processing options	重置處理選項	処理オプションをリセット
+重置生成笔记设置	重置生成笔记设置	Reset note generation settings	重置產生筆記設定	ノート作成の設定をリセット
 重试	重试	Retry	重試	再試行
 重试 AI 校对	重试 AI 校对	Retry AI proofreading	重試 AI 校對	AI校正を再試行する
 重试保存	重试保存	Retry save	重試儲存	保存を再試行
-重试保存处理选项	重试保存处理选项	Retry saving processing options	重試儲存處理選項	処理オプションの保存を再試行
-重试保存本次选择	重试保存本次选择	Retry saving this selection	重試儲存本次選擇	この選択の保存を再試行
+重试保存生成笔记设置	重试保存生成笔记设置	Retry saving note generation settings	重試儲存產生筆記設定	ノート作成の設定の保存を再試行
 重试导出	重试导出	Retry export	重試匯出	エクスポートを再試行します
 重试打开	重试打开	Retry opening	重試開啟	開くのを再試行
 重试补做	重试补做	Retry reprocessing	重試補做	再処理を再試行
@@ -2267,8 +2265,8 @@ macOS 只让有完全磁盘访问权限的应用读取 {} 的数据。course2md 
 这个浏览器中没有登录 YouTube。在浏览器中登录后再检查。	这个浏览器中没有登录 YouTube。在浏览器中登录后再检查。	This browser isn't signed in to YouTube. Sign in there, then check again.	這個瀏覽器中沒有登入 YouTube。在瀏覽器中登入後再檢查。	このブラウザーでは YouTube にログインしていません。ブラウザーでログインしてから、もう一度確認してください。
 缺少 {}	缺少 {}	{} is missing	缺少 {}	{} がありません
 需要语音识别时会先请你下载	需要语音识别时会先请你下载	You'll be asked to download it when speech recognition is needed	需要語音辨識時會先請你下載	音声認識が必要になったときにダウンロードを確認します
-这次笔记还没有可用的语音识别服务	这次笔记还没有可用的语音识别服务	No speech recognition service is available for this note	這次筆記還沒有可用的語音辨識服務	このノートで使える音声認識サービスがありません
-这次笔记还没有可用的 AI 服务	这次笔记还没有可用的 AI 服务	No AI service is available for this note	這次筆記還沒有可用的 AI 服務	このノートで使える AI サービスがありません
+设置中还没有可用的语音识别服务	设置中还没有可用的语音识别服务	Settings have no usable speech recognition service yet	設定中還沒有可用的語音辨識服務	設定に使用できる音声認識サービスがまだありません
+设置中还没有可用的 AI 服务	设置中还没有可用的 AI 服务	Settings have no usable AI service yet	設定中還沒有可用的 AI 服務	設定に使用できる AI サービスがまだありません
 使用的模型	使用的模型	Model to use	使用的模型	使用するモデル
 稍后设置	稍后设置	Set up later	稍後設定	後で設定
 任务使用的服务已从设置中删除	任务使用的服务已从设置中删除	This task's service was deleted	任務使用的服務已從設定中刪除	このタスクで使っていたサービスは設定から削除されました

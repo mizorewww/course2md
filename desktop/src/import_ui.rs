@@ -2236,9 +2236,9 @@ impl Desktop {
                     ButtonVariant::Tonal,
                     symbols::refresh(),
                     if issue.can_retry {
-                        course2md::tr!("重试保存处理选项")
+                        course2md::tr!("重试保存生成笔记设置")
                     } else {
-                        course2md::tr!("重置处理选项")
+                        course2md::tr!("重置生成笔记设置")
                     },
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {

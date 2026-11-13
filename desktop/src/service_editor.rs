@@ -456,8 +456,6 @@ impl Desktop {
             .icon(symbols::check())
             .child(if repairing {
                 repair_submit_label
-            } else if awaiting_binding {
-                course2md::tr!("重试保存本次选择")
             } else if adding {
                 course2md::tr!("添加")
             } else {
@@ -826,12 +824,6 @@ impl Desktop {
                 }))
                 .into_any_element()
         });
-        let binding_unsaved = editor.repair_task.is_none()
-            && editor.pending_binding.is_some()
-            && editor
-                .evidence
-                .as_ref()
-                .is_some_and(|evidence| evidence.outcome == preferences::TestOutcome::Passed);
         Some(
             v_flex()
                 .w_full()
@@ -843,12 +835,6 @@ impl Desktop {
                 ))
                 .children(picker)
                 .children(ui::async_status("service-test-status", &status, toggle, cx))
-                .when(binding_unsaved, |view| {
-                    view.child(TileScale::Regular.support(
-                        "service-tested-save-state",
-                        course2md::tr!("本次笔记的选择尚未保存"),
-                    ))
-                })
                 .when_some(details, |view, evidence| {
                     view.child(motion::disclosure(
                         "service-test-details-content",
