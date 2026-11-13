@@ -13,6 +13,10 @@ pub struct RetryPolicy {
     pub max_attempts: u32,
     pub base: Duration,
     pub cap: Duration,
+    /// Follow what the service says: wait for its `Retry-After` (giving up past
+    /// [`RETRY_AFTER_LIMIT`]) and send again after a 408. Off, only the backoff
+    /// counts and a 408 ends the retries, as before either existed.
+    pub follows_service: bool,
 }
 
 /// The random part of every wait.
@@ -28,6 +32,7 @@ impl RetryPolicy {
         max_attempts: 3,
         base: Duration::from_secs(1),
         cap: Duration::from_secs(64),
+        follows_service: false,
     };
 
     /// The wait after the `attempt`-th failure, with `jitter` in `0.0..1.0` of [`JITTER`].
@@ -42,6 +47,9 @@ impl RetryPolicy {
     /// asked for longer than [`RETRY_AFTER_LIMIT`].
     pub fn wait_after(&self, attempt: u32, failure: &Failure, jitter: f64) -> Option<Duration> {
         let backoff = self.delay(attempt, jitter);
+        if !self.follows_service {
+            return (failure.status != Some(408)).then_some(backoff);
+        }
         match failure.retry_after {
             Some(asked) if asked > RETRY_AFTER_LIMIT => None,
             Some(asked) => Some(asked.max(backoff)),
@@ -194,6 +202,7 @@ mod tests {
             max_attempts: 6,
             base: Duration::from_secs(2),
             cap: Duration::from_secs(10),
+            follows_service: true,
         };
         let waits: Vec<_> = (1..=5).map(|n| policy.delay(n, 0.0).as_secs()).collect();
         assert_eq!(waits, [2, 4, 8, 10, 10]);
@@ -204,7 +213,10 @@ mod tests {
 
     #[test]
     fn retry_after_is_waited_for_unless_it_is_too_long() {
-        let policy = RetryPolicy::DEFAULT;
+        let policy = RetryPolicy {
+            follows_service: true,
+            ..RetryPolicy::DEFAULT
+        };
         let limited = |after: Option<u64>| Failure {
             retry_after: after.map(Duration::from_secs),
             ..Failure::with_status(Some(429), true, "rate limited")
@@ -223,6 +235,15 @@ mod tests {
             Some(Duration::from_secs(1))
         );
         assert_eq!(policy.wait_after(1, &limited(Some(3600)), 0.0), None);
+        // Speech recognition keeps its old schedule: the backoff alone, no 408.
+        let plain = RetryPolicy::DEFAULT;
+        assert_eq!(
+            plain.wait_after(1, &limited(Some(3600)), 0.0),
+            Some(Duration::from_secs(1))
+        );
+        let timeout = Failure::with_status(Some(408), true, "timeout");
+        assert_eq!(plain.wait_after(1, &timeout, 0.0), None);
+        assert!(policy.wait_after(1, &timeout, 0.0).is_some());
     }
 
     #[test]
@@ -232,6 +253,7 @@ mod tests {
             max_attempts: 3,
             base: Duration::ZERO,
             cap: Duration::ZERO,
+            follows_service: true,
         };
         let calls = std::cell::Cell::new(0);
         let rejected = retry_with(&control, &policy, || -> std::result::Result<(), _> {

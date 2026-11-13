@@ -375,17 +375,56 @@ pub fn receive(
     })
 }
 
-/// A `Retry-After` given in seconds. The HTTP-date form is rare from API services
-/// and is read as no particular wait, which falls back to the caller's backoff.
-fn retry_after(headers: &ureq::http::HeaderMap) -> Option<Duration> {
-    headers
+/// The wait a `Retry-After` header asks for: seconds, or an HTTP date (IMF-fixdate,
+/// `Sun, 06 Nov 1994 08:49:37 GMT`) measured from now; a date already past is no wait.
+pub fn retry_after(headers: &ureq::http::HeaderMap) -> Option<Duration> {
+    let value = headers
         .get(ureq::http::header::RETRY_AFTER)?
         .to_str()
-        .ok()?
-        .trim()
-        .parse::<u64>()
-        .ok()
-        .map(Duration::from_secs)
+        .ok()?;
+    parse_retry_after(value, std::time::SystemTime::now())
+}
+
+fn parse_retry_after(value: &str, now: std::time::SystemTime) -> Option<Duration> {
+    let value = value.trim();
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+    let at = http_date(value)?;
+    let now = now.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+    Some(Duration::from_secs(at.saturating_sub(now)))
+}
+
+/// Seconds since the Unix epoch of an IMF-fixdate.
+fn http_date(value: &str) -> Option<u64> {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let (_, rest) = value.split_once(", ")?;
+    let mut parts = rest.split_whitespace();
+    let day: u64 = parts.next()?.parse().ok()?;
+    let month = parts.next()?;
+    let month = MONTHS.iter().position(|name| *name == month)? as u64 + 1;
+    let year: i64 = parts.next()?.parse().ok()?;
+    let mut clock = parts.next()?.split(':').map(|n| n.parse::<u64>().ok());
+    let (hour, minute, second) = (clock.next()??, clock.next()??, clock.next()??);
+    if parts.next()? != "GMT" || !(1..=31).contains(&day) || hour > 23 || minute > 59 {
+        return None;
+    }
+    Some(days_from_civil(year, month, day)? * 86_400 + hour * 3_600 + minute * 60 + second)
+}
+
+/// Days from 1970-01-01 to a proleptic Gregorian date (Howard Hinnant's
+/// algorithm), or None before the epoch.
+fn days_from_civil(year: i64, month: u64, day: u64) -> Option<u64> {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let month = month as i64;
+    let shifted = if month > 2 { month - 3 } else { month + 9 };
+    let day_of_year = (153 * shifted + 2) / 5 + day as i64 - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    u64::try_from(era * 146_097 + day_of_era - 719_468).ok()
 }
 
 /// A menu that Esc cancels with `cancelled` as the error, not accepting the default.
@@ -655,6 +694,29 @@ pub fn random_b64url(bytes: usize) -> anyhow::Result<String> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn retry_after_reads_seconds_and_http_dates() {
+        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(784_111_777);
+        // RFC 9110's example date is 784111777 s after the epoch.
+        assert_eq!(
+            super::parse_retry_after("Sun, 06 Nov 1994 08:49:37 GMT", now),
+            Some(std::time::Duration::ZERO)
+        );
+        assert_eq!(
+            super::parse_retry_after("Sun, 06 Nov 1994 08:50:07 GMT", now),
+            Some(std::time::Duration::from_secs(30))
+        );
+        assert_eq!(
+            super::parse_retry_after(" 12 ", now),
+            Some(std::time::Duration::from_secs(12))
+        );
+        assert_eq!(super::parse_retry_after("soon", now), None);
+        assert_eq!(
+            super::parse_retry_after("Sun, 06 Nov 1994 08:49:37 PST", now),
+            None
+        );
+    }
     /// A lock tells whether its path still names the file it locked.
     #[cfg(unix)]
     #[test]

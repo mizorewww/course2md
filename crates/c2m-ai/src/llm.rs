@@ -155,52 +155,104 @@ fn retry_policy(s: &LlmSettings) -> crate::pool::RetryPolicy {
             max_attempts: s.retry_attempts.clamp(1, MAX_RETRY_ATTEMPTS),
             base: Duration::from_secs(1),
             cap: Duration::from_secs(30),
+            follows_service: true,
         }
     } else {
         crate::pool::RetryPolicy {
             max_attempts: MAX_ATTEMPTS,
+            follows_service: true,
             ..crate::pool::RetryPolicy::DEFAULT
         }
     }
 }
 
 /// Whether a request whose result is unknown may be sent again without asking.
+/// A free service (a ChatGPT plan, a local server) always may, whatever another
+/// process left behind; automatic retries add the answers that could not be used.
 fn resend_rule(s: &LlmSettings) -> crate::dispatch::Resend {
-    if s.auto_retry {
-        crate::dispatch::Resend::Automatic
-    } else if crate::provider::free_to_resend(s) {
-        crate::dispatch::Resend::Free
-    } else {
-        crate::dispatch::Resend::AskUser
+    use crate::dispatch::Resend;
+    match (crate::provider::free_to_resend(s), s.auto_retry) {
+        (true, true) => Resend::FreeAutomatic,
+        (true, false) => Resend::Free,
+        (false, true) => Resend::Automatic,
+        (false, false) => Resend::AskUser,
     }
 }
 
-/// A response that stops arriving for `stall` is abandoned then, instead of holding
-/// the task for the whole request budget. The two shapes stall differently:
-///
-/// - A plain response has nothing to send until the model finishes, which can take
-///   minutes, so only its body is limited: once headers arrive the body follows.
-/// - A stream can legitimately outlast `stall`, but sends something all along, so
-///   the limit applies to each read and not to the stream.
-fn stall_limited_agent(streaming: bool, stall: Duration) -> ureq::Agent {
-    let builder = crate::runtime::agent_builder().http_status_as_error(false);
-    let builder = if streaming {
-        builder
-            .timeout_global(Some(STREAM_BUDGET))
-            .timeout_per_read(Some(stall))
-    } else {
-        builder
-            .timeout_global(Some(REQUEST_BUDGET))
-            .timeout_recv_body(Some(stall))
-    };
-    builder.build().new_agent()
+/// The connection for AI requests. A service may think for minutes before its
+/// first byte (a non-streaming answer only comes once it is finished), so the
+/// transport waits up to `first_byte` for any read; the shorter silence that
+/// ends a stream already flowing is [`receive_streamed`]'s.
+fn stream_agent(first_byte: Duration) -> ureq::Agent {
+    crate::runtime::agent_builder()
+        .http_status_as_error(false)
+        .timeout_global(Some(STREAM_BUDGET))
+        .timeout_per_read(Some(first_byte))
+        .build()
+        .new_agent()
 }
 
-const REQUEST_BUDGET: Duration = Duration::from_secs(300);
+/// Reads a response to its end, abandoning it once its body has been silent for
+/// `idle`: a stream can outlast any total limit, but sends something all along.
+/// The reading thread left behind ends at the transport's own read limit.
+fn receive_streamed(
+    result: std::result::Result<ureq::http::Response<ureq::Body>, ureq::Error>,
+    idle: Duration,
+) -> std::result::Result<crate::dispatch::HttpResponse, crate::dispatch::NetworkFailure> {
+    use std::io::Read as _;
+    let response = match result {
+        Ok(response) => response,
+        Err(error) => return crate::runtime::receive(Err(error)),
+    };
+    let status = response.status().as_u16();
+    let retry_after = crate::runtime::retry_after(response.headers());
+    let mut reader = response.into_body().into_reader();
+    let (chunks, received) = std::sync::mpsc::channel::<std::io::Result<Vec<u8>>>();
+    std::thread::spawn(move || {
+        let mut buffer = vec![0u8; 16 * 1024];
+        loop {
+            let read = reader.read(&mut buffer).map(|n| buffer[..n].to_vec());
+            let end = !matches!(&read, Ok(bytes) if !bytes.is_empty());
+            if chunks.send(read).is_err() || end {
+                return;
+            }
+        }
+    });
+    let interrupted = || crate::dispatch::NetworkFailure {
+        message: tr!("服务响应接收中断 / Service response was interrupted").into(),
+        definitely_unsent: false,
+    };
+    let mut body = Vec::new();
+    loop {
+        match received.recv_timeout(idle) {
+            Ok(Ok(bytes)) if bytes.is_empty() => break,
+            Ok(Ok(bytes)) => body.extend_from_slice(&bytes),
+            Ok(Err(_)) | Err(_) => return Err(interrupted()),
+        }
+        if body.len() > STREAM_BODY_LIMIT {
+            return Err(crate::dispatch::NetworkFailure {
+                message: tr!("服务响应超过接收上限 / Service response exceeds the receiving limit")
+                    .into(),
+                definitely_unsent: false,
+            });
+        }
+    }
+    Ok(crate::dispatch::HttpResponse {
+        status,
+        body,
+        retry_after,
+    })
+}
+
 /// Only a safety net: a stream that keeps sending is alive. Output limits end
 /// every AI request long before this.
 const STREAM_BUDGET: Duration = Duration::from_secs(30 * 60);
+/// The longest wait for a service's first byte.
+const FIRST_BYTE_TIMEOUT: Duration = Duration::from_secs(300);
+/// The longest silence inside an answer that has begun.
 const STALL_TIMEOUT: Duration = Duration::from_secs(90);
+/// The most a streamed answer may hold.
+const STREAM_BODY_LIMIT: usize = 32 * 1024 * 1024;
 
 /// Upper bound on a streamed (SSE) response body read in one connection test.
 const SSE_BODY_LIMIT: u64 = 4 * 1024 * 1024;
@@ -269,13 +321,17 @@ where
 {
     /// Sends `events` as one request and applies the answer. An answer cut off at
     /// its output limit keeps the items it finished, and only the rest is asked
-    /// again: as one smaller request, or split in two when nothing was finished
-    /// (the same request would only stop at the same place). Returns the events
-    /// finished, and why the others were not.
+    /// again as one smaller request. One that finished nothing (the model thought
+    /// or repeated itself through the budget) is asked once more with the full
+    /// budget, then split in two, at most [`MAX_SPLITS`] times: the same request
+    /// would only stop at the same place. Returns the events finished, and why the
+    /// others were not.
     fn send(
         &self,
         image: Option<&str>,
         events: &mut [&mut TranscriptEvent],
+        splits: u32,
+        full_budget: bool,
     ) -> (usize, Option<anyhow::Error>) {
         let (Some(first), Some(last)) = (events.first(), events.last()) else {
             return (0, None);
@@ -302,10 +358,9 @@ where
             )
         };
         let items: Vec<&str> = events.iter().map(|e| e.text.as_str()).collect();
-        let answer = (self.body_for)(&items, image).and_then(|body| {
-            self.chat
-                .segments(&body, &description, items.len(), batch_max_tokens(&items))
-        });
+        let budget = (!full_budget).then(|| batch_max_tokens(&items));
+        let answer = (self.body_for)(&items, image)
+            .and_then(|body| self.chat.segments(&body, &description, items.len(), budget));
         let answer = match answer {
             Ok(answer) => answer,
             Err(error) => return (0, Some(error)),
@@ -333,24 +388,27 @@ where
             return (done, None);
         }
         if done > 0 {
-            let (more, error) = self.send(image, &mut rest);
+            let (more, error) = self.send(image, &mut rest, splits, false);
             return (done + more, error);
         }
-        if rest.len() == 1 {
-            return (
-                0,
-                Some(anyhow::anyhow!(tr!(
-                    "这一段的结果超出了输出上限 / The answer for this paragraph exceeds the output limit"
-                ))),
-            );
+        if !full_budget {
+            return self.send(image, &mut rest, splits, true);
+        }
+        if rest.len() == 1 || splits >= MAX_SPLITS {
+            return (0, Some(anyhow::anyhow!(output_limit_message())));
         }
         let middle = rest.len() / 2;
         let (left, right) = rest.split_at_mut(middle);
-        let (left_done, left_error) = self.send(image, left);
-        let (right_done, right_error) = self.send(image, right);
+        // The full budget did not do for the whole; the halves start with it.
+        let (left_done, left_error) = self.send(image, left, splits + 1, true);
+        let (right_done, right_error) = self.send(image, right, splits + 1, true);
         (left_done + right_done, left_error.or(right_error))
     }
 }
+
+/// How many times a batch that finished nothing is halved: at most 4 parts, so a
+/// batch no answer fits costs at most 1 + 1 + 2 + 4 = 8 requests.
+const MAX_SPLITS: u32 = 2;
 
 /// One AI step over transcript batches, on the shared worker pool. A batch counts
 /// toward progress once taken. A failed batch keeps its text and records the first
@@ -394,7 +452,7 @@ fn run_batches(
             let image = image_path
                 .as_deref()
                 .and_then(|path| section_image_b64(path, &batches.warned));
-            let (done, error) = batches.send(image.as_deref(), &mut chunk);
+            let (done, error) = batches.send(image.as_deref(), &mut chunk, 0, false);
             if let Some(error) = error {
                 let cause = format!("{error:#}");
                 warn_once(
@@ -474,10 +532,10 @@ pub fn polish_sections_report(
 
 /// Translates every paragraph into `target`, kept beside the original.
 /// Failed batches stay untranslated; the note is published either way.
-/// A batch whose paragraphs already carry a translation (a saved note being
-/// completed) is kept as it is and not sent: its receipt may be gone, and a
-/// finished paid batch must not go out again. Batches keep the boundaries they
-/// always had, so the remaining ones are the same requests as before.
+/// A paragraph that already carries a translation (a saved note being completed)
+/// is kept as it is and not sent: its receipt may be gone, and finished paid work
+/// must not go out again. Batches keep the boundaries they always had, so a batch
+/// with nothing translated is the same request as before.
 pub fn translate_sections_report(
     sections: &mut [Section],
     s: &LlmSettings,
@@ -499,10 +557,21 @@ pub fn translate_sections_report(
         .flat_map(|section| section.speech.iter_mut())
         .filter(is_text);
     into_chunks(None, events, &mut chunks);
-    let (done, chunks): (Vec<_>, Vec<_>) = chunks
-        .into_iter()
-        .partition(|(_, chunk)| chunk.iter().any(|event| event.translation.is_some()));
-    let kept: usize = done.iter().map(|(_, chunk)| chunk.len()).sum();
+    // A batch translated in full is kept; one translated in part (an answer cut
+    // off at its output limit, or batches drawn differently by an older version)
+    // sends only its untranslated paragraphs.
+    let mut kept = 0;
+    let mut pending = Vec::new();
+    for (image, chunk) in chunks {
+        let (done, rest): (Vec<_>, Vec<_>) = chunk
+            .into_iter()
+            .partition(|event| event.translation.is_some());
+        kept += done.len();
+        if !rest.is_empty() {
+            pending.push((image, rest));
+        }
+    }
+    let chunks = pending;
     let mut report = run_batches(
         s,
         Purpose::Translation,
@@ -881,6 +950,32 @@ fn salvage_segments(content: &str, expected: usize) -> Vec<(usize, String)> {
         .collect()
 }
 
+/// What the ledger knows a request by: `body`, what it asks, unless a service made
+/// the request change how it is sent. Each change is another request, under its
+/// own receipt; the first form keeps the identity earlier versions saved.
+fn identity_for(
+    body: &serde_json::Value,
+    delivery: crate::provider::Delivery,
+    reasoning_kept: bool,
+    full_budget: bool,
+) -> serde_json::Value {
+    let mut variant = serde_json::Map::new();
+    if reasoning_kept {
+        variant.insert("reasoning".into(), "default".into());
+    }
+    if delivery.stream != crate::provider::Stream::WithUsage {
+        variant.insert("stream".into(), delivery.stream.as_str().into());
+    }
+    if full_budget {
+        variant.insert("budget".into(), "full".into());
+    }
+    if variant.is_empty() {
+        return body.clone();
+    }
+    variant.insert("request".into(), body.clone());
+    serde_json::Value::Object(variant)
+}
+
 impl<'a> Chat<'a> {
     pub(crate) fn new(
         settings: &'a LlmSettings,
@@ -888,7 +983,7 @@ impl<'a> Chat<'a> {
         control: &'a crate::dispatch::TaskControl,
     ) -> Self {
         Self {
-            agent: stall_limited_agent(true, STALL_TIMEOUT),
+            agent: stream_agent(FIRST_BYTE_TIMEOUT),
             settings,
             purpose,
             control,
@@ -901,57 +996,57 @@ impl<'a> Chat<'a> {
     /// 账本里执行：无效响应记为失败，不会被当成已完成复用。它也收到回答是否在输出
     /// 上限处截断：截断的回答可以只有部分内容。
     ///
-    /// 兼容性降级：部分 OpenAI 兼容端点不支持 `response_format: json_object`，
-    /// 仅当服务明确拒绝这个字段（400/422）时去掉该字段重试一次。A service that
-    /// refuses the request for turning thinking off is asked once more without it.
+    /// A service that refuses part of how the request is sent, and names it (a
+    /// 400/422 naming `response_format`, the thinking control, `stream_options` or
+    /// `stream`), gets the request once more without that part; the steps add up.
+    /// Any other rejection is final: an arbitrary 400 never changes the payload.
+    /// `full_budget` marks the larger ask after an answer ran out of room.
     pub(crate) fn send(
         &self,
         body: &serde_json::Value,
         description: &str,
         delivery: crate::provider::Delivery,
+        full_budget: bool,
         validate: &dyn Fn(&str, bool) -> Result<()>,
     ) -> Result<Answer> {
         let s = self.settings;
-        let attempt = |identity: &serde_json::Value, sent: &serde_json::Value| {
-            crate::pool::retry_with(self.control, &self.policy, || {
-                self.once(identity, sent, description, validate)
-            })
-        };
-        let rejected_parameters = |error: &anyhow::Error| {
-            error
-                .downcast_ref::<crate::dispatch::Failure>()
-                .is_some_and(|failure| matches!(failure.status, Some(400 | 422)))
-        };
-        let sent = crate::provider::sent_body(s, body, delivery);
-        let reply = match attempt(body, &sent) {
-            Ok(reply) => reply,
-            Err(first)
-                if crate::provider::controls_reasoning(s, delivery)
-                    && rejected_parameters(&first) =>
+        let mut body = body.clone();
+        let mut delivery = delivery;
+        let mut reasoning_kept = false;
+        let reply = loop {
+            let identity = identity_for(&body, delivery, reasoning_kept, full_budget);
+            let sent = crate::provider::sent_body(s, &body, delivery);
+            let error = match crate::pool::retry_with(self.control, &self.policy, || {
+                self.once(&identity, &sent, description, validate)
+            }) {
+                Ok(reply) => break reply,
+                Err(error) => error,
+            };
+            let failure = error.downcast_ref::<crate::dispatch::Failure>();
+            let refused = failure.and_then(|f| f.refused_parameter.as_deref());
+            let stream = |to| (delivery.stream != to).then_some(to);
+            if failure.is_some_and(|f| f.unsupported_response_format)
+                && crate::provider::has_structured_format(s, &body)
             {
-                // The service does not know how to turn thinking off. The request
-                // without it is another request, under its own receipt.
-                let plain = crate::provider::Delivery {
-                    no_reasoning: false,
-                    ..delivery
-                };
-                let identity = serde_json::json!({"request": body, "reasoning": "default"});
-                attempt(&identity, &crate::provider::sent_body(s, body, plain))?
-            }
-            Err(first) => {
-                let degradable = first
-                    .downcast_ref::<crate::dispatch::Failure>()
-                    .is_some_and(|failure| failure.unsupported_response_format);
-                if !(degradable && crate::provider::has_structured_format(s, body)) {
-                    return Err(first);
-                }
-                let mut relaxed = body.clone();
-                crate::provider::strip_structured_format(s, &mut relaxed);
-                let sent = crate::provider::sent_body(s, &relaxed, delivery);
-                // 原请求已按重试策略重试过，这里只验证兼容性：只试一次
-                let reply = self.once(&relaxed, &sent, description, validate)?;
-                tracing::debug!("端点不支持 response_format，降级重试成功");
-                reply
+                crate::provider::strip_structured_format(s, &mut body);
+                tracing::debug!("端点不支持 response_format，降级重试");
+            } else if refused == Some("reasoning")
+                && crate::provider::controls_reasoning(s, delivery)
+            {
+                delivery.no_reasoning = false;
+                reasoning_kept = true;
+                tracing::debug!("服务不接受关闭思考，改用默认设置重试");
+            } else if let Some(plainer) = match refused {
+                _ if s.provider == LlmProvider::Codex => None,
+                Some("stream_options") => stream(crate::provider::Stream::Bare)
+                    .filter(|_| delivery.stream == crate::provider::Stream::WithUsage),
+                Some("stream") => stream(crate::provider::Stream::Off),
+                _ => None,
+            } {
+                delivery.stream = plainer;
+                tracing::debug!(stream = plainer.as_str(), "服务不接受流式参数，降级重试");
+            } else {
+                return Err(error);
             }
         };
         let resp = reply.value;
@@ -976,8 +1071,7 @@ impl<'a> Chat<'a> {
     }
 
     /// One attempt; validation errors omit provider response bodies which may echo
-    /// credentials. `sent` goes out as a stream; `identity` is what the ledger knows
-    /// the request by.
+    /// credentials. `sent` goes out; `identity` is what the ledger knows it by.
     fn once(
         &self,
         identity: &serde_json::Value,
@@ -1008,7 +1102,8 @@ impl<'a> Chat<'a> {
                 for (name, value) in &headers {
                     request = request.header(name, value);
                 }
-                let response = crate::runtime::receive(crate::runtime::send_json(request, sent))?;
+                let response =
+                    receive_streamed(crate::runtime::send_json(request, sent), STALL_TIMEOUT)?;
                 // 流聚合为 chat/completions 形状，下游校验与解析不变；
                 // 非 2xx 原样上交（重试/降级逻辑要看状态码）。An unfinished stream is a
                 // lost answer: the service may have produced (and charged) it.
@@ -1046,16 +1141,19 @@ impl<'a> Chat<'a> {
         )
     }
 
-    /// A batch's reply as (id, text). A complete reply has one entry per input item;
-    /// a reply cut off at its output limit is kept as it is, a definite answer, and
-    /// yields the items it finished, so asking again for the rest never resends
-    /// what was answered.
+    /// A batch's reply as (id, text), asking for at most `max_tokens` (None: the
+    /// full budget). A complete reply has one entry per input item. A reply cut
+    /// off at its output limit with finished items is kept as it is, a definite
+    /// answer, and yields those items, so asking again for the rest never resends
+    /// what was answered. One cut off with nothing finished (thinking or repetition
+    /// used the budget) is a failure, so it is never read back as an answer, and
+    /// comes back as an empty truncated reply for the caller to ask differently.
     fn segments(
         &self,
         body: &serde_json::Value,
         description: &str,
         expected: usize,
-        max_tokens: u32,
+        max_tokens: Option<u32>,
     ) -> Result<Segments> {
         let proofreading = self.purpose == Purpose::Proofreading;
         let parsed = |content: &str| {
@@ -1066,27 +1164,51 @@ impl<'a> Chat<'a> {
             })
         };
         let delivery = crate::provider::Delivery {
-            max_tokens: Some(max_tokens),
+            max_tokens,
             no_reasoning: true,
+            ..Default::default()
         };
-        let answer = self.send(body, description, delivery, &|content, truncated| {
-            if truncated {
-                return Ok(());
-            }
-            anyhow::ensure!(
-                segment_ids_match(&parsed(content)?, expected),
-                if proofreading {
-                    tr!(
-                        "校对结果与原文段落不对应，已保留原文 / Proofread segments do not match the input"
-                    )
-                } else {
-                    tr!(
-                        "翻译结果与原文段落不对应 / Translated segments do not match the input"
-                    )
+        let ran_out = std::cell::Cell::new(false);
+        let answer = self.send(
+            body,
+            description,
+            delivery,
+            max_tokens.is_none(),
+            &|content, truncated| {
+                if truncated {
+                    if salvage_segments(content, expected).is_empty() {
+                        ran_out.set(true);
+                        return Err(anyhow::Error::new(crate::dispatch::Repeats(
+                            output_limit_message().into(),
+                        )));
+                    }
+                    return Ok(());
                 }
-            );
-            Ok(())
-        })?;
+                anyhow::ensure!(
+                    segment_ids_match(&parsed(content)?, expected),
+                    if proofreading {
+                        tr!(
+                            "校对结果与原文段落不对应，已保留原文 / Proofread segments do not match the input"
+                        )
+                    } else {
+                        tr!(
+                            "翻译结果与原文段落不对应 / Translated segments do not match the input"
+                        )
+                    }
+                );
+                Ok(())
+            },
+        );
+        let answer = match answer {
+            Ok(answer) => answer,
+            Err(_) if ran_out.get() => {
+                return Ok(Segments {
+                    segments: Vec::new(),
+                    truncated: true,
+                });
+            }
+            Err(error) => return Err(error),
+        };
         if answer.truncated {
             return Ok(Segments {
                 segments: salvage_segments(&answer.content, expected),
@@ -1098,6 +1220,10 @@ impl<'a> Chat<'a> {
             truncated: false,
         })
     }
+}
+
+fn output_limit_message() -> &'static str {
+    tr!("这一段的结果超出了输出上限 / The answer for this paragraph exceeds the output limit")
 }
 
 /// 用户自定义校对指令；空白视为未设置，回落到内置提示词。
@@ -1423,9 +1549,12 @@ mod tests {
             stream.flush().unwrap();
             hold(30.0);
         });
-        let agent = stall_limited_agent(false, Duration::from_millis(500));
+        let (agent, idle) = (
+            stream_agent(Duration::from_secs(5)),
+            Duration::from_millis(500),
+        );
         let started = std::time::Instant::now();
-        let failure = crate::runtime::receive(agent.post(&url).send_json(serde_json::json!({})))
+        let failure = receive_streamed(agent.post(&url).send_json(serde_json::json!({})), idle)
             .err()
             .expect("a stalled body is not a response");
         assert!(started.elapsed() < Duration::from_secs(10));
@@ -1435,13 +1564,17 @@ mod tests {
     #[test]
     fn a_slow_model_is_not_a_stalled_response() {
         use std::io::Write as _;
-        // Thinks for longer than the stall limit before the first byte.
+        // Thinks for longer than the stall limit before the first byte, as a
+        // service answering without a stream does.
         let url = stalling_server(|stream| {
             hold(1.5);
             write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok").unwrap();
         });
-        let agent = stall_limited_agent(false, Duration::from_millis(500));
-        let response = crate::runtime::receive(agent.post(&url).send_json(serde_json::json!({})))
+        let (agent, idle) = (
+            stream_agent(Duration::from_secs(5)),
+            Duration::from_millis(500),
+        );
+        let response = receive_streamed(agent.post(&url).send_json(serde_json::json!({})), idle)
             .ok()
             .expect("waiting for the first byte is not a stall");
         assert_eq!(response.body, b"ok");
@@ -1459,9 +1592,9 @@ mod tests {
                 hold(0.4);
             }
         });
-        let agent = stall_limited_agent(true, Duration::from_secs(2));
+        let (agent, idle) = (stream_agent(Duration::from_secs(5)), Duration::from_secs(2));
         let started = std::time::Instant::now();
-        let response = crate::runtime::receive(agent.post(&url).send_json(serde_json::json!({})))
+        let response = receive_streamed(agent.post(&url).send_json(serde_json::json!({})), idle)
             .ok()
             .expect("a stream that keeps sending is alive");
         assert!(started.elapsed() > Duration::from_millis(1500));
@@ -1476,9 +1609,12 @@ mod tests {
             stream.flush().unwrap();
             hold(30.0);
         });
-        let agent = stall_limited_agent(true, Duration::from_millis(500));
+        let (agent, idle) = (
+            stream_agent(Duration::from_secs(5)),
+            Duration::from_millis(500),
+        );
         let started = std::time::Instant::now();
-        let failure = crate::runtime::receive(agent.post(&url).send_json(serde_json::json!({})))
+        let failure = receive_streamed(agent.post(&url).send_json(serde_json::json!({})), idle)
             .err()
             .expect("a silent stream is stalled");
         assert!(started.elapsed() < Duration::from_secs(10));
@@ -1804,17 +1940,29 @@ mod tests {
     /// given the batch it carries. Returns the base URL and every request body.
     fn scripted_service(
         answer: impl Fn(usize, &[String]) -> String + Send + 'static,
-    ) -> (
-        String,
-        std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
-    ) {
+    ) -> (String, Bodies) {
+        let count = std::sync::atomic::AtomicUsize::new(0);
+        scripted_service_with_body(move |_, items| {
+            answer(
+                count.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+                items,
+            )
+        })
+    }
+
+    type Bodies = std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>;
+
+    /// [`scripted_service`] whose `answer` sees the request body instead of its number.
+    fn scripted_service_with_body(
+        answer: impl Fn(&serde_json::Value, &[String]) -> String + Send + 'static,
+    ) -> (String, Bodies) {
         use std::io::{Read as _, Write as _};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/v1", listener.local_addr().unwrap());
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let bodies = seen.clone();
         std::thread::spawn(move || {
-            for (index, stream) in listener.incoming().enumerate() {
+            for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { return };
                 let mut data = Vec::new();
                 let mut chunk = [0u8; 8192];
@@ -1835,15 +1983,18 @@ mod tests {
                     }
                 };
                 let body: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
-                let items: Vec<String> = body["messages"][1]["content"][0]["text"]
+                let user = &body["messages"][1]["content"];
+                let items: Vec<String> = user
                     .as_str()
+                    .or_else(|| user[0]["text"].as_str())
                     .and_then(|text| serde_json::from_str::<Vec<serde_json::Value>>(text).ok())
                     .unwrap_or_default()
                     .iter()
                     .map(|item| item["text"].as_str().unwrap_or_default().to_owned())
                     .collect();
+                let reply = answer(&body, &items);
                 bodies.lock().unwrap().push(body);
-                let _ = stream.write_all(answer(index, &items).as_bytes());
+                let _ = stream.write_all(reply.as_bytes());
             }
         });
         (url, seen)
@@ -2034,7 +2185,8 @@ mod tests {
         .unwrap();
         assert_eq!(report.succeeded, 3);
         assert_eq!(texts(&sections), ["一!", "二!", "三!"]);
-        // [一二三] → [一] + [二三] → [二] + [三]
+        // [一二三] → the full budget → [一] + [二三] → [二] + [三], the halves
+        // with the full budget the whole could not do without.
         let sizes: Vec<usize> = bodies
             .lock()
             .unwrap()
@@ -2046,7 +2198,7 @@ mod tests {
                     .len()
             })
             .collect();
-        assert_eq!(sizes, [3, 1, 2, 1, 1]);
+        assert_eq!(sizes, [3, 3, 1, 2, 1, 1]);
 
         // A single paragraph that cannot fit fails alone, with its text kept.
         let (url, _) = scripted_service(|_, _| streamed("", "length"));
@@ -2060,5 +2212,219 @@ mod tests {
         .unwrap();
         assert_eq!(report.failed, 1);
         assert_eq!(texts(&sections), ["一"]);
+    }
+
+    #[test]
+    fn an_answer_with_room_only_for_thinking_gets_the_full_budget_and_is_not_kept() {
+        // Spends any budget short of the full one on thinking.
+        let full = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = full.clone();
+        let (url, _) = scripted_service_with_body(move |body, items| {
+            seen.lock().unwrap().push(body["max_tokens"].clone());
+            if body["max_tokens"] == CHAT_MAX_TOKENS {
+                streamed(&proofread(items), "stop")
+            } else {
+                streamed("", "length")
+            }
+        });
+        let work = tempfile::tempdir().unwrap();
+        let control = crate::dispatch::TaskControl::open(work.path(), Default::default()).unwrap();
+        let mut sections = one_section(&["一", "二", "三"]);
+        let report = polish_sections_report(
+            &mut sections,
+            Path::new(""),
+            &polish_settings(url, 1),
+            &control,
+        )
+        .unwrap();
+        assert_eq!(report.succeeded, 3);
+        assert_eq!(
+            *full.lock().unwrap(),
+            [
+                serde_json::json!(MIN_BATCH_TOKENS),
+                serde_json::json!(CHAT_MAX_TOKENS)
+            ]
+        );
+        // The empty answer is a failure on record, never an answer to read back.
+        let states: Vec<_> = crate::dispatch::receipts(work.path())
+            .unwrap()
+            .into_iter()
+            .map(|receipt| receipt.state)
+            .collect();
+        assert!(
+            states.contains(&crate::dispatch::State::Failed),
+            "{states:?}"
+        );
+        assert!(
+            states.contains(&crate::dispatch::State::Completed),
+            "{states:?}"
+        );
+    }
+
+    #[test]
+    fn a_batch_no_answer_fits_stops_after_a_bounded_number_of_requests() {
+        let (url, bodies) = scripted_service(|_, _| streamed("", "length"));
+        let texts_in: Vec<String> = (0..20).map(|i| format!("段{i}")).collect();
+        let refs: Vec<&str> = texts_in.iter().map(String::as_str).collect();
+        let mut sections = one_section(&refs);
+        let report = polish_sections_report(
+            &mut sections,
+            Path::new(""),
+            &polish_settings(url, 1),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(report.failed, 20);
+        // The batch, its full-budget ask, then two rounds of halves.
+        assert_eq!(bodies.lock().unwrap().len(), 1 + 1 + 2 + 4);
+    }
+
+    #[test]
+    fn a_service_that_refuses_streaming_options_is_asked_without_them() {
+        let (url, bodies) = scripted_service_with_body(|body, items| {
+            if body.get("stream_options").is_some() {
+                refusal(
+                    400,
+                    r#"{"error":{"message":"Unrecognized request argument supplied: stream_options"}}"#,
+                )
+            } else if body.get("stream").is_some() {
+                refusal(422, r#"{"message":"stream is not supported"}"#)
+            } else {
+                // A plain answer, as from a service that does not stream.
+                let reply = serde_json::json!({"choices": [{"message": {"content": proofread(items)}, "finish_reason": "stop"}]}).to_string();
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                    reply.len()
+                )
+            }
+        });
+        let mut sections = one_section(&["一"]);
+        let report = polish_sections_report(
+            &mut sections,
+            Path::new(""),
+            &polish_settings(url, 1),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(report.succeeded, 1, "{:?}", report.note);
+        assert_eq!(texts(&sections), ["一!"]);
+        assert_eq!(bodies.lock().unwrap().len(), 3);
+
+        // A rejection that names nothing changes nothing: it is final.
+        let (url, bodies) = scripted_service_with_body(|_, _| status(400));
+        let mut sections = one_section(&["一"]);
+        let report = polish_sections_report(
+            &mut sections,
+            Path::new(""),
+            &polish_settings(url, 3),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(report.failed, 1);
+        assert_eq!(bodies.lock().unwrap().len(), 1);
+    }
+
+    /// A refusal with `body`, the service's explanation.
+    fn refusal(code: u16, body: &str) -> String {
+        format!(
+            "HTTP/1.1 {code} Refused\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    #[test]
+    fn refused_thinking_control_and_response_format_fall_back_in_turn() {
+        // Ollama refuses both `reasoning_effort` and `response_format`.
+        let (url, bodies) = scripted_service_with_body(|body, items| {
+            if body.get("response_format").is_some() {
+                let error =
+                    r#"{"error":{"param":"response_format","code":"unsupported_parameter"}}"#;
+                format!(
+                    "HTTP/1.1 400 Bad Request\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{error}",
+                    error.len()
+                )
+            } else if body.get("reasoning_effort").is_some() {
+                refusal(
+                    400,
+                    r#"{"error":{"message":"invalid reasoning value: \"none\""}}"#,
+                )
+            } else {
+                streamed(&proofread(items), "stop")
+            }
+        });
+        let settings = LlmSettings {
+            provider: LlmProvider::Ollama,
+            api_key: String::new(),
+            ..polish_settings(url, 1)
+        };
+        let mut sections = one_section(&["一"]);
+        let report =
+            polish_sections_report(&mut sections, Path::new(""), &settings, &Default::default())
+                .unwrap();
+        assert_eq!(report.succeeded, 1, "{:?}", report.note);
+        let bodies = bodies.lock().unwrap();
+        assert_eq!(bodies.len(), 3);
+        assert!(bodies[1].get("response_format").is_none());
+        assert_eq!(bodies[1]["reasoning_effort"], "none");
+        assert!(bodies[2].get("reasoning_effort").is_none());
+        assert_eq!(bodies[2]["stream"], true, "streaming was never the problem");
+    }
+
+    #[test]
+    fn a_partly_translated_batch_sends_only_its_untranslated_paragraphs() {
+        let (url, bodies) = scripted_service(|_, items| streamed(&proofread(items), "stop"));
+        let mut sections = one_section(&["一", "二", "三"]);
+        sections[0].speech[1].translation = Some("two".into());
+        let settings = polish_settings(url, 1);
+        let report =
+            translate_sections_report(&mut sections, &settings, "en", &Default::default()).unwrap();
+        assert_eq!(
+            (report.attempted, report.succeeded, report.failed),
+            (3, 3, 0)
+        );
+        let speech = &sections[0].speech;
+        let translations: Vec<_> = speech.iter().map(|e| e.translation.as_deref()).collect();
+        assert_eq!(translations, [Some("一!"), Some("two"), Some("三!")]);
+        let bodies = bodies.lock().unwrap();
+        assert_eq!(bodies.len(), 1);
+        let sent = bodies[0]["messages"][1]["content"].as_str().unwrap();
+        assert!(sent.contains("一") && sent.contains("三") && !sent.contains("二"));
+    }
+
+    #[test]
+    fn a_free_service_resends_what_an_earlier_run_left_unresolved() {
+        for (provider, resent) in [
+            (LlmProvider::Ollama, true),
+            (LlmProvider::OpenAiCompatible, false),
+        ] {
+            let (url, bodies) = scripted_service(|_, items| streamed(&proofread(items), "stop"));
+            // Automatic retries on, as by default.
+            let settings = LlmSettings {
+                provider,
+                ..polish_settings(url, 1)
+            };
+            assert!(settings.auto_retry);
+            let work = tempfile::tempdir().unwrap();
+            let control =
+                crate::dispatch::TaskControl::open(work.path(), Default::default()).unwrap();
+            let mut sections = one_section(&["一"]);
+            polish_sections_report(&mut sections, Path::new(""), &settings, &control).unwrap();
+            // The app was killed while that request was in flight.
+            for entry in std::fs::read_dir(work.path().join("requests")).unwrap() {
+                let path = entry.unwrap().path();
+                let mut receipt: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                receipt["state"] = "sending".into();
+                receipt["response"] = serde_json::Value::Null;
+                std::fs::write(&path, serde_json::to_vec(&receipt).unwrap()).unwrap();
+            }
+            let control =
+                crate::dispatch::TaskControl::open(work.path(), Default::default()).unwrap();
+            let mut sections = one_section(&["一"]);
+            let report =
+                polish_sections_report(&mut sections, Path::new(""), &settings, &control).unwrap();
+            assert_eq!(report.succeeded == 1, resent, "{provider:?}");
+            assert_eq!(bodies.lock().unwrap().len(), 1 + usize::from(resent));
+        }
     }
 }

@@ -112,6 +112,7 @@ fn request_summary(
         &body,
         description,
         crate::provider::Delivery::default(),
+        false,
         &|content, _| {
             anyhow::ensure!(
                 parse_summary(content).is_some(),

@@ -1521,7 +1521,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 移除预览	移除预览	Remove preview	移除預覽	プレビューを削除
 稍后下载模型，再重新运行视频命令： / Download the model, then rerun your video command: course2md models download	稍后下载模型，再重新运行视频命令：	Download the model, then rerun your video command: course2md models download	稍後下載模型，再重新執行影片命令：	後でモデルをダウンロードしてから、動画コマンドを再実行してください:
 稳定画面时长	稳定画面时长	Stable frame duration	穩定畫面時長	画面の安定時間
-端点不支持 response_format，降级重试成功	端点不支持 response_format，降级重试成功	The endpoint does not support response_format; retrying without it succeeded.	端點不支援 response_format，降級重試成功	エンドポイントが response_format をサポートしていないため、フォールバックして再試行し成功しました。
 笔记	笔记	Note	筆記	ノート
 笔记不在这个笔记库中	笔记不在这个笔记库中	The note is not in this note library	筆記不在這個筆記庫中	このノートはこのノート ライブラリにありません
 笔记位置无效	笔记位置无效	Invalid note location	筆記位置無效	ノートの場所が無効です

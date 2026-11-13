@@ -68,11 +68,37 @@ pub(crate) struct Delivery {
     pub max_tokens: Option<u32>,
     /// Ask the model not to think first, where the service has a way to say so.
     pub no_reasoning: bool,
+    /// How the answer is asked to arrive.
+    pub stream: Stream,
 }
 
-/// The body as sent: always streamed, so a long answer arrives as it is written and
-/// only a silence can time it out, with `delivery` applied. None of this changes
-/// what is asked, so the ledger keeps identifying the request by `body`.
+/// How an answer is asked to arrive. Each step down is for a service that refused
+/// the one above it by name.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Stream {
+    /// Streamed, with token usage at the end.
+    #[default]
+    WithUsage,
+    /// Streamed, without `stream_options`.
+    Bare,
+    /// One answer at the end.
+    Off,
+}
+
+impl Stream {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::WithUsage => "usage",
+            Self::Bare => "bare",
+            Self::Off => "off",
+        }
+    }
+}
+
+/// The body as sent: streamed, so a long answer arrives as it is written and only
+/// a silence can time it out, with `delivery` applied. None of this changes what
+/// is asked, so the ledger identifies the request by `body` (and by what a
+/// service made it change, see `Chat::send`).
 pub(crate) fn sent_body(s: &LlmSettings, body: &Value, delivery: Delivery) -> Value {
     let mut sent = body.clone();
     // Codex is already a stream, and the ChatGPT backend takes no output limit here.
@@ -82,11 +108,15 @@ pub(crate) fn sent_body(s: &LlmSettings, body: &Value, delivery: Delivery) -> Va
     let Some(object) = sent.as_object_mut() else {
         return sent;
     };
-    object.insert("stream".into(), Value::Bool(true));
-    object.insert(
-        "stream_options".into(),
-        serde_json::json!({"include_usage": true}),
-    );
+    if delivery.stream != Stream::Off {
+        object.insert("stream".into(), Value::Bool(true));
+    }
+    if delivery.stream == Stream::WithUsage {
+        object.insert(
+            "stream_options".into(),
+            serde_json::json!({"include_usage": true}),
+        );
+    }
     if let Some(max_tokens) = delivery.max_tokens {
         object.insert("max_tokens".into(), max_tokens.into());
     }
@@ -96,11 +126,24 @@ pub(crate) fn sent_body(s: &LlmSettings, body: &Value, delivery: Delivery) -> Va
     sent
 }
 
-/// Whether the sent body turns thinking off. Ollama reads `reasoning_effort: "none"`
-/// as think=false; other OpenAI-compatible services differ in what they accept, so
-/// they keep their default.
+/// Whether the sent body turns thinking off. Ollama, local or Ollama Cloud
+/// (`ollama.com`, often set up as an OpenAI-compatible service), reads
+/// `reasoning_effort: "none"` as think=false. Other services differ in what they
+/// accept, so they keep their default.
 pub(crate) fn controls_reasoning(s: &LlmSettings, delivery: Delivery) -> bool {
-    delivery.no_reasoning && s.provider == LlmProvider::Ollama
+    delivery.no_reasoning
+        && match s.provider {
+            LlmProvider::Ollama => true,
+            LlmProvider::OpenAiCompatible => is_ollama_cloud(&s.base_url),
+            LlmProvider::Codex => false,
+        }
+}
+
+fn is_ollama_cloud(base_url: &str) -> bool {
+    url::Url::parse(base_url.trim())
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+        .is_some_and(|host| host == "ollama.com" || host.ends_with(".ollama.com"))
 }
 
 /// A streamed answer, read to its end, as the chat/completions JSON the rest reads.
@@ -496,6 +539,7 @@ data: {"type":"response.incomplete","response":{"incomplete_details":{"reason":"
         let delivery = Delivery {
             max_tokens: Some(4096),
             no_reasoning: true,
+            ..Default::default()
         };
         let s = settings(LlmProvider::OpenAiCompatible);
         let sent = sent_body(&s, &body(&s), delivery);
@@ -514,5 +558,31 @@ data: {"type":"response.incomplete","response":{"incomplete_details":{"reason":"
 
         let s = settings(LlmProvider::Codex);
         assert_eq!(sent_body(&s, &body(&s), delivery), body(&s));
+
+        // Ollama Cloud set up as an OpenAI-compatible service is Ollama too.
+        let mut s = settings(LlmProvider::OpenAiCompatible);
+        s.base_url = "https://ollama.com/v1".into();
+        assert_eq!(
+            sent_body(&s, &body(&s), delivery)["reasoning_effort"],
+            "none"
+        );
+        s.base_url = "https://notollama.com/v1".into();
+        assert!(!controls_reasoning(&s, delivery));
+
+        // A service that refused streaming options, then streaming.
+        let s = settings(LlmProvider::OpenAiCompatible);
+        let bare = Delivery {
+            stream: Stream::Bare,
+            ..delivery
+        };
+        let sent = sent_body(&s, &body(&s), bare);
+        assert_eq!(sent["stream"], true);
+        assert!(sent.get("stream_options").is_none());
+        let off = Delivery {
+            stream: Stream::Off,
+            ..delivery
+        };
+        let sent = sent_body(&s, &body(&s), off);
+        assert!(sent.get("stream").is_none() && sent.get("stream_options").is_none());
     }
 }

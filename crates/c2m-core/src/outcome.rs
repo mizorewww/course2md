@@ -132,6 +132,20 @@ impl HttpResponse {
     }
 }
 
+/// Why an answer is unusable, when sending the same request again would only
+/// bring back the same: an automatic retry leaves it to the caller to ask
+/// differently. The receipt still records a failure, so nothing replays it.
+#[derive(Debug)]
+pub struct Repeats(pub String);
+
+impl std::fmt::Display for Repeats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Repeats {}
+
 /// A request that got no complete answer, and whether it provably never left.
 pub struct NetworkFailure {
     pub message: String,
@@ -335,6 +349,10 @@ pub struct Failure {
     pub retryable: bool,
     pub message: String,
     pub unsupported_response_format: bool,
+    /// An optional request parameter the service named when it refused the
+    /// request (`stream_options`, `stream`, `reasoning`): sent without it, the
+    /// request may be accepted.
+    pub refused_parameter: Option<String>,
     pub kind: FailureKind,
     /// The wait the service asked for before another attempt, if it named one.
     pub retry_after: Option<std::time::Duration>,
@@ -356,6 +374,7 @@ impl Failure {
             retryable: false,
             message: error.to_string(),
             unsupported_response_format: false,
+            refused_parameter: None,
             kind: FailureKind::Local,
             retry_after: None,
         }

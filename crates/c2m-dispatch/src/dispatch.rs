@@ -1,7 +1,7 @@
 //! Durable external-request receipts. A lost response is never permission to resend.
 
 use crate::outcome::FailureKind;
-pub use crate::outcome::{Failure, HttpResponse, NetworkFailure};
+pub use crate::outcome::{Failure, HttpResponse, NetworkFailure, Repeats};
 use crate::{
     digest::{digest, json_digest},
     fsio::atomic_write,
@@ -72,6 +72,10 @@ pub struct Receipt {
     /// A reviewed compatibility rejection; never stores the provider's error body.
     #[serde(default)]
     pub unsupported_response_format: bool,
+    /// An optional parameter the service named when it refused the request, as
+    /// [`refused_parameter`] reads it; never the provider's error body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refused_parameter: Option<String>,
     /// Explicit component reprocessing permits this exact known-failed attempt once.
     /// Sending/uncertain attempts still require Control::resend authorization.
     #[serde(default)]
@@ -158,6 +162,49 @@ fn rejects_response_format(status: u16, value: Option<&Value>) -> bool {
         .any(|term| message.contains(term)))
 }
 
+/// Optional request parameters a service may refuse by name; longer names first,
+/// so `stream_options` is not read as `stream`.
+const OPTIONAL_PARAMETERS: [&str; 3] = ["stream_options", "stream", "reasoning"];
+
+/// The optional parameter a 400/422 names, as its `param`, `code` or message, so the
+/// request may go again without it. Only a name stands as evidence: an arbitrary
+/// rejection never changes the payload. The body itself is not kept.
+pub fn refused_parameter(status: u16, value: Option<&Value>) -> Option<&'static str> {
+    if !matches!(status, 400 | 422) {
+        return None;
+    }
+    let value = value?;
+    let error = value.get("error").unwrap_or(value);
+    let text = [
+        error.get("param"),
+        error.get("code"),
+        error.get("message"),
+        value.get("detail"),
+        value.get("message"),
+        Some(error),
+    ]
+    .into_iter()
+    .flatten()
+    .filter_map(Value::as_str)
+    .collect::<Vec<_>>()
+    .join(" ")
+    .to_ascii_lowercase();
+    OPTIONAL_PARAMETERS
+        .into_iter()
+        .find(|name| names(&text, name))
+}
+
+/// Whether `text` holds `word` as a word of its own (`stream`, not `upstream`;
+/// `reasoning` also as the start of `reasoning_effort`).
+fn names(text: &str, word: &str) -> bool {
+    let part = |c: Option<char>| c.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
+    text.match_indices(word).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + word.len()..].chars().next();
+        !part(before) && (!part(after) || (word == "reasoning" && after == Some('_')))
+    })
+}
+
 struct Ledger {
     /// Where receipts are kept, so a later run sees them. A plain CLI request has none:
     /// a lost response is classified the same way, and nothing outlives the call.
@@ -186,11 +233,24 @@ pub enum Resend {
     /// uncertain result to ask about. What another process left unresolved (it
     /// stopped mid-request) still waits for the person, as for [`Resend::AskUser`].
     Automatic,
+    /// A free service with automatic retries: as [`Resend::Free`], and an answer
+    /// that could not be used is sent again too.
+    FreeAutomatic,
 }
 
 impl Resend {
     fn asks(self) -> bool {
         self == Self::AskUser
+    }
+
+    /// Sending again costs nothing: an unresolved request is resent unasked.
+    fn free(self) -> bool {
+        matches!(self, Self::Free | Self::FreeAutomatic)
+    }
+
+    /// A failed answer may be sent again.
+    fn retries_failures(self) -> bool {
+        matches!(self, Self::Automatic | Self::FreeAutomatic)
     }
 }
 
@@ -519,8 +579,8 @@ impl Ledger {
         }
         let control = self.check_intent(Some(&service_version))?;
         let authorized = old.as_ref().is_some_and(|receipt| {
-            (resend == Resend::Free && matches!(receipt.state, State::Sending | State::Uncertain))
-                || (resend == Resend::Automatic && receipt.state == State::Failed)
+            (resend.free() && matches!(receipt.state, State::Sending | State::Uncertain))
+                || (resend.retries_failures() && receipt.state == State::Failed)
                 || control.resend.contains(&receipt.request_id)
                 || (matches!(receipt.state, State::Failed | State::Rejected)
                     && receipt.retry_authorized.as_ref() == Some(&receipt.request_id))
@@ -544,6 +604,7 @@ impl Ledger {
             {
                 return Err(Failure {
                     unsupported_response_format: old.unsupported_response_format,
+                    refused_parameter: old.refused_parameter.clone(),
                     ..Failure::with_status(
                         old.http_status,
                         false,
@@ -562,7 +623,7 @@ impl Ledger {
         for unresolved in self
             .unresolved_receipts()?
             .into_iter()
-            .filter(|_| resend != Resend::Free)
+            .filter(|_| !resend.free())
             .filter(|unresolved| !control.resend.contains(&unresolved.request_id))
         {
             if unresolved.stable_id != stable_id {
@@ -594,6 +655,7 @@ impl Ledger {
             response: None,
             message: None,
             unsupported_response_format: false,
+            refused_parameter: None,
             retry_authorized: None,
         };
         // This durable write happens before the only call that can send network bytes.
@@ -636,6 +698,9 @@ impl Ledger {
             let message = rejection_message(response.status);
             receipt.state = State::Rejected;
             receipt.unsupported_response_format = unsupported;
+            let refused =
+                refused_parameter(response.status, value.as_ref().ok()).map(str::to_owned);
+            receipt.refused_parameter = refused.clone();
             receipt.message = Some(message.clone());
             // Error bodies may echo credentials. Keep status, not the untrusted body.
             self.save(&receipt)?;
@@ -643,6 +708,7 @@ impl Ledger {
             // a confirmed rejection without requiring uncertain-request authorization.
             return Err(Failure {
                 unsupported_response_format: unsupported,
+                refused_parameter: refused,
                 retry_after: response.retry_after,
                 ..Failure::with_status(
                     Some(response.status),
@@ -682,7 +748,7 @@ impl Ledger {
                 );
                 self.save(&receipt)?;
                 return Err(Failure {
-                    retryable: resend == Resend::Automatic,
+                    retryable: resend.retries_failures(),
                     ..Failure::local(receipt.message.unwrap())
                 });
             }
@@ -692,9 +758,11 @@ impl Ledger {
             receipt.message = Some(format!("{error:#}"));
             self.save(&receipt)?;
             // An unusable answer may come out usable the next time; sending it
-            // again is what the person allowed with automatic retries.
+            // again is what the person allowed with automatic retries. One that
+            // would only come back the same is left for the caller to change.
+            let repeats = error.downcast_ref::<crate::outcome::Repeats>().is_some();
             return Err(Failure {
-                retryable: resend == Resend::Automatic,
+                retryable: resend.retries_failures() && !repeats,
                 ..Failure::local(receipt.message.unwrap())
             });
         }
@@ -806,6 +874,38 @@ mod tests {
                 assert!(!rejects_response_format(status, Some(&error)));
             }
         }
+        let named = |body: Value| refused_parameter(400, Some(&body));
+        assert_eq!(
+            named(
+                serde_json::json!({"error":{"message":"Unrecognized request argument supplied: stream_options"}})
+            ),
+            Some("stream_options")
+        );
+        assert_eq!(
+            named(serde_json::json!({"error":{"param":"stream","code":"unsupported_value"}})),
+            Some("stream")
+        );
+        assert_eq!(
+            named(serde_json::json!({"error":{"message":"invalid reasoning value: \"none\""}})),
+            Some("reasoning")
+        );
+        assert_eq!(
+            named(serde_json::json!({"detail":"reasoning_effort is not permitted"})),
+            Some("reasoning")
+        );
+        // An arbitrary rejection, or one that only contains the word, names nothing.
+        assert_eq!(
+            named(serde_json::json!({"error":{"message":"upstream error"}})),
+            None
+        );
+        assert_eq!(
+            named(serde_json::json!({"error":{"message":"invalid model"}})),
+            None
+        );
+        assert_eq!(
+            refused_parameter(500, Some(&serde_json::json!({"error":"stream"}))),
+            None
+        );
         assert!(!rejects_response_format(
             500,
             Some(&serde_json::json!({"error":{"message":"response_format is unsupported"}}))
@@ -1210,6 +1310,7 @@ mod tests {
                 response: None,
                 message: None,
                 unsupported_response_format: false,
+                refused_parameter: None,
                 retry_authorized: None,
             })
             .unwrap();
