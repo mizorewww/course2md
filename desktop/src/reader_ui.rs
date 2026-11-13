@@ -2689,7 +2689,8 @@ impl ReaderPage {
         if let Some(id) = id {
             if can_retry && !components.is_empty() {
                 let retry = id.clone();
-                let label = desktop_tasks::task_view::retry_components_label(&components);
+                let label =
+                    desktop_tasks::task_view::task_retry_components_label(task, &components);
                 actions = actions.child(
                     material_button("reader-retry-incomplete", ButtonVariant::Outlined)
                         .tone(ButtonTone::Accent)
