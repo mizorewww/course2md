@@ -121,8 +121,6 @@ yt-dlp 已结束，但没有留下视频文件 / yt-dlp finished without leaving
 不支持的浏览器：{}。可用：{} / Unsupported browser: {}. Available: {}	不支持的浏览器：{}。可用：{}	Unsupported browser: {}. Available: {}	不支援的瀏覽器：{}。可用：{}	対応していないブラウザです：{}。使用可能：{}
 人机验证未通过或已过期，请重新验证	人机验证未通过或已过期，请重新验证	The human check failed or expired; verify again	人機驗證未通過或已過期，請重新驗證	人間確認に失敗したか期限切れです。もう一度確認してください
 人机验证超时，请重新开始	人机验证超时，请重新开始	The human check timed out; start again	人機驗證逾時，請重新開始	人間確認がタイムアウトしました。最初からやり直してください
-仅对「{}」生效	仅对「{}」生效	Applies only to “{}”	僅對「{}」生效	「{}」にのみ適用されます
-仅对下一个视频生效	仅对下一个视频生效	Applies only to the next video	僅對下一個影片生效	次の動画にのみ適用されます
 使用 {} 中的登录	使用 {} 中的登录	Uses the sign-in in {}	使用 {} 中的登入	{} のログインを使用
 保存 YouTube 登录设置失败	保存 YouTube 登录设置失败	Could not save the YouTube login setting	儲存 YouTube 登入設定失敗	YouTube のログイン設定を保存できませんでした
 区号	区号	Code	區碼	国番号
@@ -179,7 +177,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {} 视频 {}	{} 视频 {}	{} video {}	{} 影片 {}	{} 動画 {}
 {}。保存位置尚未切换，已复制的内容保留在目标位置。	{}。保存位置尚未切换，已复制的内容保留在目标位置。	{}. The save location has not been switched and the copied content remains at the target location.	{}。儲存位置尚未切換，已複製的內容保留在目標位置。	{}。保存場所はまだ切り替えられていません。コピー済みの内容はコピー先に残っています。
 {}。请备份后删除该文件再重试：{}	{}。请备份后删除该文件再重试：{}	{}. Back up and delete the file, then try again: {}	{}。請備份後刪除該檔案再重試：{}	{}。バックアップ後にファイルを削除して、再試行してください: {}
-{}会发送到 {}	{}会发送到 {}	{} will be sent to {}	{}會傳送到 {}	{}は {} に送信されます
 {}发送到「{}」	{}发送到「{}」	{} is sent to “{}”	{}傳送到「{}」	{}は「{}」に送信されます
 {}尚未完成	{}尚未完成	{} has not been completed yet	{}尚未完成	{}はまだ完了していません
 {}未保存：{}	{}未保存：{}	{} not saved: {}	{}未儲存：{}	{}は保存されていません: {}
@@ -240,8 +237,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 专用转写（如 Whisper）	专用转写（如 Whisper）	Dedicated transcription (e.g. Whisper)	專用轉寫（如 Whisper）	専用の文字起こし（Whisper など）
 中文	中文	Chinese	中文	中国語
 为已有笔记生成 AI 摘要 / Add AI summaries to existing notes	为已有笔记生成 AI 摘要 / Add AI summaries to existing notes	Add AI summaries to existing notes	為既有筆記產生 AI 摘要	既存のノートに AI 要約を追加
-为这次笔记设置 AI 服务	为这次笔记设置 AI 服务	Set up AI service for this note	為這次筆記設定 AI 服務	このノートの AI サービスを設定する
-为这次笔记设置语音识别服务	为这次笔记设置语音识别服务	Set up speech recognition for this note	為這次筆記設定語音辨識服務	このノートの音声認識を設定
 主题	主题	Theme	主題	テーマ
 二维码响应缺少 key / QR code response is missing key	二维码响应缺少 key	QR code response is missing key	QR 碼回應缺少 key	QR コードの応答に key がありません
 二维码响应缺少 url / QR code response is missing url	二维码响应缺少 url	QR code response is missing url	QR 碼回應缺少 url	QR コードの応答に url がありません
@@ -265,7 +260,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 仅字幕	仅字幕	Subtitles only	僅字幕	字幕のみ
 仅影响以后生成的笔记	仅影响以后生成的笔记	Only affects notes generated later	僅影響以後生成的筆記	今後生成されるノートにのみ影響します
 仅用于没有字幕的视频	仅用于没有字幕的视频	Only for videos without subtitles	僅用於沒有字幕的影片	字幕のない動画のみ
-仅用于这次笔记	仅用于这次笔记	Only for this note	僅用於這次筆記	このノートのみ
 今天讲编译原理	今天讲编译原理	Today we'll talk about compiler principles	今天講編譯原理	今日はコンパイラの原理について話します
 仍在处理	仍在处理	Still processing	仍在處理	処理中
 仍有请求结果尚未确认，请先查看请求范围	仍有请求结果尚未确认，请先查看请求范围	Some request results are still unconfirmed. Check the request scope first.	仍有請求結果尚未確認，請先檢視請求範圍	未確認のリクエスト結果があります。先にリクエスト範囲を確認してください。
@@ -325,9 +319,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 使用你的 ChatGPT 订阅	使用你的 ChatGPT 订阅	Use your ChatGPT subscription	使用你的 ChatGPT 訂閱	ChatGPT サブスクリプションを使用する
 使用标准规则	使用标准规则	Use standard rules	使用標準規則	標準ルールを使用する
 使用环境变量 {}	使用环境变量 {}	Use environment variable {}	使用環境變數 {}	環境変数 {} を使用する
-使用自定义校对规则	使用自定义校对规则	Use custom proofing rules	使用自訂校對規則	カスタム校正ルールを使用する
 使用语音服务识别	使用语音服务识别	Recognize with a speech service	使用語音服務辨識	音声サービスで認識する
-供离线播放，会占用更多磁盘空间	供离线播放，会占用更多磁盘空间	For offline playback; uses more disk space	供離線播放，會佔用更多磁碟空間	オフライン再生用。より多くのディスク容量を使用します
 俄语	俄语	Russian	俄語	ロシア語
 保存	保存	Save	儲存	保存
 保存 Bilibili 登录状态失败 / Failed to save Bilibili login state	保存 Bilibili 登录状态失败	Failed to save Bilibili login state	儲存 Bilibili 登入狀態失敗	Bilibili のログイン状態を保存できませんでした
@@ -339,7 +331,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 保存位置不是文件夹	保存位置不是文件夹	The save location is not a folder	儲存位置不是資料夾	保存場所がフォルダーではありません
 保存位置对应其他笔记库，请恢复原位置或在存储设置中重新登记	保存位置对应其他笔记库，请恢复原位置或在存储设置中重新登记	The save location corresponds to other note libraries. Please restore the original location or re-register in the storage settings.	儲存位置對應其他筆記庫，請恢復原位置或在儲存設定中重新登記	保存場所は他のノートライブラリに対応します。元の場所に戻すか、ストレージ設定で再登録してください。
 保存位置尚未准备好：{}。可以在设置的存储中选择其他位置。	保存位置尚未准备好：{}。可以在设置的存储中选择其他位置。	The save location is not ready yet: {}. You can choose a different location in the settings' storage.	儲存位置尚未準備好：{}。可以在設定的儲存中選擇其他位置。	保存場所はまだ準備ができていません: {}。設定のストレージ内の別の場所を選択できます。
-保存位置尚未更新：{}	保存位置尚未更新：{}	The save location has not been updated yet: {}	儲存位置尚未更新：{}	保存場所はまだ更新されていません: {}
 保存位置已不在笔记库中，请选择保存位置	保存位置已不在笔记库中，请选择保存位置	The save location is no longer in the note library, please select a save location.	儲存位置已不在筆記庫中，請選擇儲存位置	保存場所はノート ライブラリにありません。保存場所を選択してください。
 保存位置暂时不可用	保存位置暂时不可用	The save location is temporarily unavailable	儲存位置暫時不可用	保存場所は一時的に利用できません
 保存位置暂时不可访问	保存位置暂时不可访问	The save location is temporarily inaccessible	儲存位置暫時無法存取	保存場所に一時的にアクセスできません
@@ -355,7 +346,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 保留下载的视频	保留下载的视频	Keep downloaded videos	保留下載的影片	ダウンロードした動画を保存しておく
 保留下载的视频 / Keep the downloaded video	保留下载的视频	Keep the downloaded video	保留下載的影片	ダウンロードした動画を保存しておく
 保留原文件并重置这些设置	保留原文件并重置这些设置	Keep the original file and reset these settings	保留原檔案並重設這些設定	元のファイルを保持してこれらの設定をリセット
-保留原视频	保留原视频	Keep original video	保留原影片	元の動画を保存する
 保留原默认	保留原默认	Keep the original default	保留原預設	元のデフォルトのままにする
 保留备份	保留备份	Keep backups	保留備份	バックアップを保持する
 保留并继续	保留并继续	Keep and continue	保留並繼續	保持して続行
@@ -506,7 +496,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 原任务已不可用，尚未修改服务或创建补做任务	原任务已不可用，尚未修改服务或创建补做任务	The original task is no longer available; the service was not changed and no reprocessing task was created.	原任務已不可用，尚未修改服務或建立補做任務	元のタスクは利用できなくなりました。サービスは変更されておらず、再処理タスクも作成されていません。
 原任务记录不存在	原任务记录不存在	The original task record does not exist	原任務記錄不存在	元のタスク レコードが存在しません
 原任务记录不存在，请重新打开应用建立新记录	原任务记录不存在，请重新打开应用建立新记录	The original task record does not exist, please reopen the app to create a new record.	原任務記錄不存在，請重新開啟應用建立新記錄	元のタスク レコードは存在しません。アプリを再度開いて新しいレコードを作成してください。
-原任务记录暂时不可用	原任务记录暂时不可用	The original task record is temporarily unavailable	原任務記錄暫時不可用	元のタスク レコードは一時的に利用できません
 原任务进度位置无效 / Invalid prior work directory	原任务进度位置无效	Invalid prior work directory	原任務進度位置無效	元のタスクの進行位置が無効です
 原保存位置	原保存位置	Original save location	原儲存位置	元の保存場所
 原始记录备份未完成，尚未重建	原始记录备份未完成，尚未重建	The original record backup is not completed and has not been rebuilt.	原始記錄備份未完成，尚未重建	元のレコードのバックアップは完了しておらず、再構築されていません。
@@ -576,7 +565,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 坏项应被跳过	坏项应被跳过	Bad items should be skipped	壞項應被跳過	不正な項目はスキップされる必要があります
 基础检查通过；可选服务未进行联网测试 / Basic checks passed; optional services were not tested online.	基础检查通过；可选服务未进行联网测试	Basic checks passed; optional services were not tested online.	基礎檢查通過；可選服務未進行連網測試	基本検査に合格しました。オプション サービスはオンラインでテストされていません
 处理中	处理中	In progress	處理中	処理中
-处理选项	处理选项	Processing options	處理選項	処理オプション
 备份与核验记录不一致，未清理任何文件	备份与核验记录不一致，未清理任何文件	The backup and verification records are inconsistent and no files have been cleaned.	備份與核驗記錄不一致，未清理任何檔案	バックアップと検証のレコードは矛盾しており、ファイルはクリーンアップされていません。
 备份已删除，但列表尚未更新，请重启应用后检查	备份已删除，但列表尚未更新，请重启应用后检查	The backup has been deleted, but the list has not been updated, please restart the application and check	備份已刪除，但清單尚未更新，請重新啟動應用程式後檢查	バックアップは削除されましたが、リストは更新されていません。アプリケーションを再起動して確認してください。
 备份并重建任务记录	备份并重建任务记录	Back up and rebuild task records	備份並重建任務記錄	バックアップしてタスク記録を再構築
@@ -630,14 +618,13 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 封面格式无法识别	封面格式无法识别	Cover format cannot be recognized	封面格式無法辨識	表紙のフォーマットが認識できません
 封面缓存位置无效	封面缓存位置无效	Cover cache location is invalid	封面快取位置無效	カバーのキャッシュの場所が無効です
 封面超过读取上限	封面超过读取上限	Cover exceeds read limit	封面超過讀取上限	表紙が読み取り制限を超えています
-将使用语音识别	将使用语音识别	Speech recognition will be used	將使用語音辨識	音声認識を使用します
 将全部分段摘要合并为整篇摘要 / Merge all partial summaries into the full summary	将全部分段摘要合并为整篇摘要	Merge all partial summaries into the full summary	將全部分段摘要合併為整篇摘要	すべてのセグメント化されたサマリーを完全なサマリーに結合します
 将删除 {} 中的旧位置备份。当前笔记库仍保留在 {}。	将删除 {} 中的旧位置备份。当前笔记库仍保留在 {}。	The old location backup in {} will be deleted. The current note library remains at {}.	將刪除 {} 中的舊位置備份。目前筆記庫仍保留在 {}。	{} の古い場所のバックアップは削除されます。現在のノート ライブラリは {} のままです。
 将删除此服务配置，已有笔记不受影响。	将删除此服务配置，已有笔记不受影响。	This service configuration will be deleted and existing notes will not be affected.	將刪除此服務設定，已有筆記不受影響。	このサービス構成は削除され、既存のノートは影響を受けません。
 将排在当前任务之后	将排在当前任务之后	Will be queued after the current task	將排在目前任務之後	現在のタスクの後にキューに入れられます
 将课程视频转换为图文笔记 / Turn course videos into illustrated notes	将课程视频转换为图文笔记 / Turn course videos into illustrated notes	Turn course videos into illustrated notes	將課程影片轉換為圖文筆記	コース動画を図解ノートに変換
 尚未删除此服务	尚未删除此服务	This service has not been deleted yet	尚未刪除此服務	このサービスは削除されていません
-尚未打开任务调整选项：{}	尚未打开任务调整选项：{}	Task adjustment options not opened yet: {}	尚未開啟任務調整選項：{}	タスク調整オプションをまだ開けていません: {}
+尚未在主页重新打开这个视频：{}	尚未在主页重新打开这个视频：{}	This video has not been reopened on Home yet: {}	尚未在首頁重新開啟這個影片：{}	この動画をまだホームで開き直せていません: {}
 尚未放弃这次移动：{}	尚未放弃这次移动：{}	Move not cancelled yet: {}	尚未放棄這次移動：{}	この移動はまだ取り消されていません: {}
 尚未检查字幕，请重新读取视频信息 / Subtitles not checked yet; probe the video info again	尚未检查字幕，请重新读取视频信息	Subtitles not checked yet; probe the video info again	尚未檢查字幕，請重新讀取影片資訊	字幕はまだチェックされていません。動画情報をもう一度読み込んでください。
 尚未检查识别模型	尚未检查识别模型	Recognition model has not been checked yet	尚未檢查辨識模型	認識モデルはまだチェックされていません
@@ -652,7 +639,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 尚未验证	尚未验证	Not verified yet	尚未驗證	まだ検証されていません
 就绪 / Ready	就绪	Ready	就緒	準備完了
 展开	展开	Expand	展開	展開
-展开处理选项	展开处理选项	Expand processing options	展開處理選項	処理オプションを展開する
 已 {}没有收到新数据	已 {}没有收到新数据	No new data for {}	已 {}沒有收到新資料	{}間、新しいデータが届いていません
 已下载	已下载	Downloaded	已下載	ダウンロード済み
 已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。	已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。	Inputs and tasks have been restored from backup. Unable to confirm the last operation, the unfinished task has been suspended.	已從備份恢復輸入和任務。無法確認最後一次操作，未完成任務已暫停。	入力とタスクはバックアップから復元されました。最後の操作を確認できず、未完了のタスクは中断されました。
@@ -777,9 +763,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 当前服务暂不可用：{}	当前服务暂不可用：{}	The current service is temporarily unavailable: {}	目前服務暫不可用：{}	現在のサービスは一時的に利用できません: {}
 当前服务编辑已结束，请重新打开服务后再试	当前服务编辑已结束，请重新打开服务后再试	The current service editing has ended, please reopen the service and try again	目前服務編輯已結束，請重新開啟服務後再試	現在のサービスの編集は終了しました。サービスを再度開いて、もう一度お試しください。
 当前未使用	当前未使用	Not currently in use	目前未使用	現在は使用されていません
-当前笔记信息暂时不可用	当前笔记信息暂时不可用	The current note information is temporarily unavailable	目前筆記資訊暫時不可用	現在のノート情報は一時的に利用できません
 当前系统不支持 Apple 芯片识别，请改用其他方式	当前系统不支持 Apple 芯片识别，请改用其他方式	This system does not support recognition on Apple silicon. Please use another method.	目前系統不支援 Apple 晶片辨識，請改用其他方式	このシステムは Apple シリコンでの認識に対応していません。別の方法を使用してください。
-当前视频输入暂时不可用	当前视频输入暂时不可用	The current video input is temporarily unavailable	目前影片輸入暫時不可用	現在の動画入力は一時的に利用できません
 当前识别方式不支持所选模型，请选择其他模型	当前识别方式不支持所选模型，请选择其他模型	The current recognition method does not support the selected model, please choose another model	目前辨識方式不支援所選模型，請選擇其他模型	現在の認識方法は選択したモデルをサポートしていません。別のモデルを選択してください
 当前输入尚未保存：{}	当前输入尚未保存：{}	The current input has not been saved: {}	目前輸入尚未儲存：{}	現在の入力は保存されていません: {}
 当前输入尚未准备好	当前输入尚未准备好	The current input is not ready yet	目前輸入尚未準備好	現在の入力はまだ準備ができていません
@@ -794,12 +778,10 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 待确认请求已变化，请查看最新范围后再选择是否重新发送	待确认请求已变化，请查看最新范围后再选择是否重新发送	The request to be confirmed has changed. Please check the latest range before choosing whether to resend it.	待確認請求已變化，請檢視最新範圍後再選擇是否重新傳送	確認待ちのリクエストが変更されました。再送信するかどうかを選択する前に、最新の範囲を確認してください。
 德语	德语	German	德語	ドイツ語
 快速开始 / Quick start:\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\n转写方式 / Transcripts:\n  默认优先使用平台字幕，无字幕时使用语音识别。\n  Uses platform subtitles first, then speech recognition when needed.\n  --transcript-source subtitle  仅使用字幕 / Subtitles only\n  --transcript-source asr       强制语音识别 / Speech recognition only\n\n下一步 / Next steps:\n  course2md --login bilibili    扫码登录 / Log in with a QR code\n  course2md --login bilibili --method password|sms\n                                密码或短信登录 / Log in with a password or SMS code\n  course2md --login youtube     使用浏览器中的 YouTube 登录 / Use your browser's YouTube session\n  course2md --logout bilibili   清除登录 / Remove saved login\n  course2md doctor              检查依赖与配置 / Check dependencies and settings\n  course2md config init         生成配置模板 / Create a configuration template\n  course2md llm setup           配置可选的 AI 校对 / Set up optional AI proofreading\n  course2md summarize ./notes   为已有笔记生成摘要 / Summarize existing notes\n\n交互终端首次转换会引导配置；脚本请显式传入所需参数。\nFirst conversion in a terminal offers setup; scripts should pass options explicitly.\n使用 <command> --help 查看子命令帮助 / Use <command> --help for details.\n	快速开始：\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\n转写方式：\n  默认优先使用平台字幕，无字幕时使用语音识别。\n  --transcript-source subtitle  仅使用字幕\n  --transcript-source asr       强制语音识别\n\n下一步：\n  course2md --login bilibili    扫码登录\n  course2md --login bilibili --method password|sms\n                                密码或短信登录\n  course2md --login youtube     使用浏览器中的 YouTube 登录\n  course2md --logout bilibili   清除登录\n  course2md doctor              检查依赖与配置\n  course2md config init         生成配置模板\n  course2md llm setup           配置可选的 AI 校对\n  course2md summarize ./notes   为已有笔记生成摘要\n\n交互终端首次转换会引导配置；脚本请显式传入所需参数。\n使用 <command> --help 查看子命令帮助。\n	Quick start:\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\nTranscripts:\n  Platform subtitles are used first; speech recognition runs when none exist.\n  --transcript-source subtitle  Use subtitles only\n  --transcript-source asr       Force speech recognition\n\nNext steps:\n  course2md --login bilibili    Sign in with a QR code\n  course2md --login bilibili --method password|sms\n                                Sign in with a password or SMS code\n  course2md --login youtube     Use your browser's YouTube session\n  course2md --logout bilibili   Remove the saved login\n  course2md doctor              Check dependencies and settings\n  course2md config init         Create a configuration template\n  course2md llm setup           Set up optional AI proofreading\n  course2md summarize ./notes   Summarize existing notes\n\nThe first conversion in a terminal offers setup; scripts should pass options explicitly.\nUse <command> --help for details.\n	快速開始：\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\n轉寫方式：\n  預設優先使用平台字幕，無字幕時使用語音辨識。\n  --transcript-source subtitle  僅使用字幕\n  --transcript-source asr       強制語音辨識\n\n下一步：\n  course2md --login bilibili    掃碼登入\n  course2md --login bilibili --method password|sms\n                                密碼或簡訊登入\n  course2md --login youtube     使用瀏覽器中的 YouTube 登入\n  course2md --logout bilibili   清除登入\n  course2md doctor              檢查依賴與設定\n  course2md config init         產生設定範本\n  course2md llm setup           設定可選的 AI 校對\n  course2md summarize ./notes   為已有筆記產生摘要\n\n互動式終端首次轉換會引導設定；指令碼請明確傳入所需參數。\n使用 <command> --help 查看子命令說明。\n	クイックスタート：\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\n文字起こし：\n  プラットフォームの字幕を優先し、ない場合は音声認識を使います。\n  --transcript-source subtitle  字幕のみ\n  --transcript-source asr       音声認識を強制\n\n次のステップ：\n  course2md --login bilibili    QR コードでログイン\n  course2md --login bilibili --method password|sms\n                                パスワードまたは SMS でログイン\n  course2md --login youtube     ブラウザの YouTube ログインを使う\n  course2md --logout bilibili   保存したログインを削除\n  course2md doctor              依存関係と設定を確認\n  course2md config init         設定テンプレートを作成\n  course2md llm setup           任意の AI 校正を設定\n  course2md summarize ./notes   既存のノートに要約を追加\n\nターミナルでの初回変換では設定を案内します。スクリプトでは必要な引数を明示してください。\n詳細は <command> --help を参照してください。\n
-恢复 AI 默认	恢复 AI 默认	Restore AI defaults	恢復 AI 預設	AI のデフォルトを復元する
 恢复为原始标题	恢复为原始标题	Revert to original title	恢復為原始標題	元のタイトルに戻す
 恢复最近名称备份	恢复最近名称备份	Restore recent name backup	恢復最近名稱備份	最近の名前のバックアップを復元する
 恢复最近备份	恢复最近备份	Restore recent backup	恢復最近備份	最近のバックアップを復元する
 恢复标准规则	恢复标准规则	Restore standard rules	恢復標準規則	標準ルールに戻す
-恢复默认	恢复默认	Restore default	恢復預設	デフォルトに戻す
 意大利语	意大利语	Italian	義大利語	イタリア語
 成功后删除本次下载的视频 / Delete newly downloaded video after success	成功后删除本次下载的视频	Delete newly downloaded video after success	成功後刪除本次下載的影片	成功したらダウンロードした動画を削除します
 或把本地视频拖进窗口	或把本地视频拖进窗口	Or drag a local video into the window	或把本機影片拖進視窗	または、ローカル動画をウィンドウにドラッグします
@@ -861,7 +843,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 扫描画面 / Scanning video frames	扫描画面	Scanning video frames	掃描畫面	フレームをスキャン中
 找不到 course2md 引擎。请将 CLI 放在应用旁，或设置 COURSE2MD_BIN。	找不到 course2md 引擎。请将 CLI 放在应用旁，或设置 COURSE2MD_BIN。	course2md engine not found. Place the CLI next to the app, or set COURSE2MD_BIN.	找不到 course2md 引擎。請將 CLI 放在應用程式旁，或設定 COURSE2MD_BIN。	course2md エンジンが見つかりません。CLI をアプリの隣に配置するか、COURSE2MD_BIN を設定してください。
 找不到已下载的视频，请允许重新下载 / The downloaded video is missing; allow downloading it again	找不到已下载的视频，请允许重新下载	The downloaded video is missing; allow downloading it again	找不到已下載的影片，請允許重新下載	ダウンロードした動画が見つかりません。再ダウンロードを許可してください
-找不到当前笔记	找不到当前笔记	Current note not found	找不到目前筆記	現在のノートが見つかりません
 找不到此服务	找不到此服务	This service cannot be found	找不到此服務	このサービスは見つかりません
 找不到此服务的凭据，请重新保存 API Key	找不到此服务的凭据，请重新保存 API Key	Credentials not found for this service, please save the API Key again	找不到此服務的憑證，請重新儲存 API Key	このサービスの認証情報が見つかりません。API キーを再度保存してください
 找不到视频文件或无法识别链接：{}	找不到视频文件或无法识别链接：{}	Video file not found or URL not recognized: {}	找不到影片檔案或無法辨識連結：{}	動画ファイルが見つからないか、リンクを認識できません: {}
@@ -905,7 +886,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 授权回调路径不受支持 / Unsupported authorization callback path	授权回调路径不受支持	Unsupported authorization callback path	授權回呼路徑不受支援	認可コールバックパスはサポートされていません
 排队中	排队中	Queued	排隊中	待機中
 推荐 · 音频不离开本机	推荐 · 音频不离开本机	Recommended · Audio stays on this device	推薦 · 音訊不離開本機	推奨 · 音声はこのデバイスの外に送信されません
-提交时已确定，不能再更改	提交时已确定，不能再更改	Set when the task was submitted; can't be changed	提交時已確定，不能再更改	タスクの送信時に確定しており、変更できません
 数据分块到达，上一块于 {}前到达	数据分块到达，上一块于 {}前到达	Data arrives in blocks; the last arrived {} ago	資料分塊到達，上一塊於 {}前到達	データはブロック単位で受信中（前回の受信は {}前）
 未安装；模型改为单连接下载：{}	未安装；模型改为单连接下载：{}	Not installed; models download over a single connection: {}	未安裝；模型改為單一連線下載：{}	未インストール。モデルは単一接続でダウンロードされます：{}
 正在等待第一块数据	正在等待第一块数据	Waiting for the first block	正在等待第一塊資料	最初のブロックを待っています
@@ -936,7 +916,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 收尾中…	收尾中…	Wrapping up…	收尾中…	仕上げ中…
 收起	收起	Collapse	收合	折りたたむ
 收起处理详情	收起处理详情	Collapse processing details	收起處理詳情	処理の詳細を折りたたむ
-收起处理选项	收起处理选项	Collapse processing options	收起處理選項	処理オプションを折りたたむ
 收起已完成的处理	收起已完成的处理	Hide finished tasks	收起已完成的處理	完了した処理を折りたたむ
 收起技术详情	收起技术详情	Hide technical details	收合技術詳情	技術的な詳細を隠す
 收起文字	收起文字	Collapse text	收起文字	テキストを折りたたむ
@@ -965,7 +944,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 文件夹尚未恢复：{}	文件夹尚未恢复：{}	Folder has not been restored: {}	資料夾尚未恢復：{}	フォルダーは復元されていません: {}
 文件夹已不存在，请选择其他文件夹	文件夹已不存在，请选择其他文件夹	The folder no longer exists, please choose another folder	資料夾已不存在，請選擇其他資料夾	フォルダーはもう存在しません。別のフォルダーを選択してください
 文件夹已不存在，请重新扫描笔记库	文件夹已不存在，请重新扫描笔记库	The folder no longer exists, please scan the note library again	資料夾已不存在，請重新掃描筆記庫	フォルダーはもう存在しません。ノート ライブラリをもう一度スキャンしてください
-文件夹已创建，保存位置尚未更新：{}	文件夹已创建，保存位置尚未更新：{}	The folder has been created, but the save location has not been updated: {}	資料夾已建立，儲存位置尚未更新：{}	フォルダーは作成されましたが、保存場所は更新されていません: {}
 文件夹已删除。请选择其他文件夹，或保存到未分类。	文件夹已删除。请选择其他文件夹，或保存到未分类。	The folder has been deleted. Please choose another folder or save to Uncategorized.	資料夾已刪除。請選擇其他資料夾，或儲存到未分類。	フォルダーが削除されました。別のフォルダーを選択するか、未分類に保存してください。
 文件夹已删除，请重新选择	文件夹已删除，请重新选择	The folder has been deleted, please select again	資料夾已刪除，請重新選擇	フォルダーが削除されました。もう一度選択してください
 文件夹已恢复，原损坏文件已另存	文件夹已恢复，原损坏文件已另存	The folder has been restored; the original damaged file was saved separately.	資料夾已恢復，原損壞檔案已另存	フォルダーを復元しました。元の破損ファイルは別に保存されています。
@@ -981,11 +959,9 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 文字	文字	Text	文字	テキスト
 文字 · {}	文字 · {}	Text · {}	文字 · {}	テキスト · {}
 文字与截图	文字与截图	Text and screenshots	文字與截圖	テキストとスクリーンショット
-文字及对应截图	文字及对应截图	Text and corresponding screenshots	文字及對應截圖	テキストと対応するスクリーンショット
 文字及对应截图会发送到所选服务	文字及对应截图会发送到所选服务	The text and corresponding screenshots will be sent to the selected service	文字及對應截圖會傳送到所選服務	テキストと対応するスクリーンショットが選択したサービスに送信されます
 文字未生成，已保留可用素材 / No readable text; available materials are retained in the task	文字未生成，已保留可用素材	No readable text; available materials are retained in the task	文字未生成，已保留可用素材	テキストは生成されませんでした。利用可能な素材は保持されています
 文字来源	文字来源	Transcript source	文字來源	文字起こしのソース
-文字来源方式	文字来源方式	Text source method	文字來源方式	テキストソース方式
 文字来源：auto 优先字幕，subtitle 仅字幕，asr 语音识别 / Transcript source: auto, subtitle, asr	文字来源：auto 优先字幕，subtitle 仅字幕，asr 语音识别	Transcript source: auto, subtitle, asr	文字來源：auto 優先字幕，subtitle 僅字幕，asr 語音辨識	テキストソース：auto は字幕を優先、subtitle は字幕のみ、asr は音声認識
 文字转写	文字转写	Transcript	文字轉寫	文字起こし
 新建文件夹	新建文件夹	New folder	新增資料夾	新しいフォルダー
@@ -1135,7 +1111,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 服务	服务	Services	服務	サービス
 服务不接受所选模型，请检查模型 ID 和使用权限	服务不接受所选模型，请检查模型 ID 和使用权限	The service does not accept the selected model. Check the model ID and usage permissions.	服務不接受所選模型，請檢查模型 ID 和使用權限	サービスは選択したモデルを受け入れません。モデル ID と使用許可を確認してください。
 服务与账号	服务与账号	Services & accounts	服務與帳號	サービスとアカウント
-服务修复只能用于未完成的校对、翻译或摘要	服务修复只能用于未完成的校对、翻译或摘要	Service repair can only be used for unfinished proofreading, translation or summaries	服務修復只能用於未完成的校對、翻譯或摘要	サービス修復は、未完了の校正、翻訳または要約にのみ使用できます。
 服务凭据尚未就绪，请重新打开服务设置保存一次	服务凭据尚未就绪，请重新打开服务设置保存一次	Service credentials are not ready yet. Reopen the service settings and save them once.	服務憑證尚未就緒，請重新開啟服務設定儲存一次	サービス資格情報の準備がまだ整っていません。サービス設定をもう一度開いて保存してください
 服务可能已处理这些内容，重新发送可能产生额外费用	服务可能已处理这些内容，重新发送可能产生额外费用	The service may have processed the content and resending may incur additional charges	服務可能已處理這些內容，重新傳送可能產生額外費用	サービスがコンテンツを処理した可能性があり、再送信には追加料金が発生する可能性があります
 服务响应接收中断 / Service response was interrupted	服务响应接收中断	Service response was interrupted	服務回應接收中斷	サービス応答の受信が中断されました
@@ -1221,7 +1196,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 本地识别方式 / Local transcription engine	本地识别方式	Local transcription engine	本機辨識方式	ローカル音声認識エンジン
 本地识别（首次下载模型） / Local transcription (requires a model download)	本地识别（首次下载模型）	Local transcription (requires a model download)	本機辨識（首次需下載模型）	ローカル音声認識（初回はモデルのダウンロードが必要）
 本地语音识别请求失败 / Local transcription request failed	本地语音识别请求失败	Local transcription request failed	本機語音辨識請求失敗	ローカル音声認識リクエストが失敗しました
-本机 · {}	本机 · {}	This computer · {}	本機 · {}	このコンピューター · {}
 本机引擎	本机引擎	Local engine	本機引擎	ローカルエンジン
 本机识别	本机识别	On this device	本機辨識	このデバイスで認識
 本机识别所需的组件尚未安装。可退出后运行 course2md doctor 查看，或改用云端识别。 / Local transcription is unavailable. Exit and run course2md doctor, or use a cloud service.	本机识别所需的组件尚未安装。可退出后运行 course2md doctor 查看，或改用云端识别。	Local transcription is unavailable. Exit and run course2md doctor, or use a cloud service.	本機辨識所需的元件尚未安裝。可結束後執行 course2md doctor 查看，或改用雲端辨識。	ローカル音声認識に必要なコンポーネントがインストールされていません。終了して course2md doctor を実行して確認するか、クラウド音声認識を使用してください。
@@ -1232,8 +1206,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 本次禁用 AI 校对 / Disable AI proofreading for this run	本次禁用 AI 校对	Disable AI proofreading for this run	本次禁用 AI 校對	今回は AI 校正を無効にする
 本次禁用截图辅助校对 / Disable image-assisted proofreading	本次禁用截图辅助校对	Disable image-assisted proofreading	本次禁用截圖輔助校對	今回はスクリーンショットを使った校正を無効にする
 本次禁用视频摘要 / Disable video summary for this run	本次禁用视频摘要	Disable video summary for this run	本次禁用影片摘要	今回は動画の要約を無効にする
-本次笔记的选择尚未保存	本次笔记的选择尚未保存	The selection for this note has not been saved yet	本次筆記的選擇尚未儲存	このノートの選択内容はまだ保存されていません
-本次选项尚未恢复默认：{}	本次选项尚未恢复默认：{}	This run's options have not been reset to defaults: {}	本次選項尚未恢復預設：{}	今回のオプションはまだデフォルトに戻っていません: {}
 权重偏移无效 / Invalid weight offsets	权重偏移无效	Invalid weight offsets	權重偏移無效	ウェイトオフセットが無効です
 权重头不完整 / Incomplete weight header	权重头不完整	Incomplete weight header	權重標頭不完整	ウェイトヘッダーが不完全です
 权重文件不完整 / Incomplete weight file	权重文件不完整	Incomplete weight file	權重檔案不完整	ウェイト ファイルが不完全です
@@ -1317,7 +1289,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 模型目录 / Model directory	模型目录	Model directory	模型目錄	モデルディレクトリ
 模型目录暂不可用，已使用默认模型	模型目录暂不可用，已使用默认模型	The model directory is temporarily unavailable, the default model has been used	模型目錄暫不可用，已使用預設模型	モデル ディレクトリは一時的に使用できません。デフォルトのモデルが使用されています
 模型缓存包含过多文件，检查未完成 / Model cache contains too many files; check incomplete	模型缓存包含过多文件，检查未完成	Model cache contains too many files; check incomplete	模型快取包含過多檔案，檢查未完成	モデル キャッシュに含まれるファイルが多すぎるため、チェックが完了していません
-模型设置	模型设置	Model settings	模型設定	モデル設定
 模型详情	模型详情	Model details	模型詳情	モデル詳細
 模型请求失败 / Model request failed	模型请求失败	Model request failed	模型請求失敗	モデルリクエストが失敗しました
 模型（默认为该识别方式的默认模型）/ Model (defaults to the backend's default)	模型（默认为该识别方式的默认模型）/ Model (defaults to the backend's default)	Model (defaults to the backend's default)	模型（預設為該辨識方式的預設模型）	モデル（既定ではこの認識方式のデフォルトモデル）
@@ -1462,11 +1433,11 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 生成整篇摘要（{}–{}） / Generate the full summary ({}–{})	生成整篇摘要（{}–{}）	Generate the full summary ({}–{})	生成整篇摘要（{}–{}）	要約全体を生成する ({}–{})
 生成笔记	生成笔记	Note generation	產生筆記	ノートを作成
 生成笔记 / Writing notes	生成笔记	Writing notes	生成筆記	ノートを生成中
-生成笔记偏好	生成笔记偏好	Note generation preferences	生成筆記偏好	ノート生成の設定
+生成笔记设置	生成笔记设置	Note generation settings	產生筆記設定	ノート作成の設定
 生成第 {}/{} 部分摘要（{}–{}） / Generate summary part {}/{} ({}–{})	生成第 {}/{} 部分摘要（{}–{}）	Generate summary part {}/{} ({}–{})	生成第 {}/{} 部分摘要（{}–{}）	要約の第 {}/{} 部分を生成（{}–{}）
 生成课程摘要	生成课程摘要	Generate course summary	生成課程摘要	コースの要約を生成する
-生成选项暂时无法读取，原文件与当前输入已保留	生成选项暂时无法读取，原文件与当前输入已保留	The generation options cannot be read temporarily. The original file and current input have been retained.	生成選項暫時無法讀取，原檔案與目前輸入已保留	生成オプションを一時的に読み込むことができません。元のファイルと現在の入力は保持されています。
-生成选项的修改尚未保存，当前输入已保留	生成选项的修改尚未保存，当前输入已保留	Changes to the generation options have not been saved; the current input was retained	生成選項的修改尚未儲存，目前輸入已保留	生成オプションの変更は保存されていません。現在の入力は保持されています。
+生成笔记设置暂时无法读取，原文件与当前输入已保留	生成笔记设置暂时无法读取，原文件与当前输入已保留	Note generation settings can’t be read right now; the original file and the current input are kept	產生筆記設定暫時無法讀取，原檔案與目前輸入已保留	ノート作成の設定を一時的に読み込めません。元のファイルと現在の入力は保持されています。
+生成笔记设置的修改尚未保存，当前输入已保留	生成笔记设置的修改尚未保存，当前输入已保留	Changes to note generation settings have not been saved; the current input is kept	產生筆記設定的修改尚未儲存，目前輸入已保留	ノート作成の設定の変更はまだ保存されていません。現在の入力は保持されています。
 生成配置模板（--force 覆盖已有配置）/ Create a template; --force replaces existing settings	生成配置模板（--force 覆盖已有配置）/ Create a template; --force replaces existing settings	Create a template; --force replaces existing settings	產生設定範本（--force 覆蓋已有設定）	設定テンプレートを生成（--force で既存の設定を上書き）
 用于以后生成	用于以后生成	For later generation	用於以後生成	後で生成するため
 用法：	用法：	Usage:	用法：	使用法:
@@ -1511,7 +1482,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 目标文件夹无法访问，请选择已有的空文件夹	目标文件夹无法访问，请选择已有的空文件夹	The destination folder cannot be accessed. Select an existing empty folder.	目標資料夾無法存取，請選擇已有的空資料夾	宛先フォルダーにアクセスできません。既存の空のフォルダーを選択してください。
 目标文件缺少目录	目标文件缺少目录	Target file is missing directory	目標檔案缺少目錄	ターゲットファイルのディレクトリがありません
 目标缺少这次移动的识别记录，未修改目标内容	目标缺少这次移动的识别记录，未修改目标内容	The destination is missing the identification record for this move; its contents were not modified.	目標缺少這次移動的識別記錄，未修改目標內容	移動先にこの移動の識別記録がないため、内容は変更されていません。
-设置下一个视频	设置下一个视频	Set up the next video	設定下一個影片	次の動画を設定する
 跳过设置	跳过设置	Skip setup	略過設定	セットアップをスキップ
 短文讲述光合作用使用阳光并释放氧气，摘要未保留这些关键信息	短文讲述光合作用使用阳光并释放氧气，摘要未保留这些关键信息	The short text says photosynthesis uses sunlight and releases oxygen; the summary did not keep this key information.	短文講述光合作用使用陽光並釋放氧氣，摘要未保留這些關鍵資訊	短い文章では光合成が太陽光を使い酸素を放出すると述べていますが、要約にはこの重要な情報が残っていません
 移动位置已经变化，原数据和副本已保留	移动位置已经变化，原数据和副本已保留	The move location has changed; the original data and the copy were retained.	移動位置已經變化，原資料和副本已保留	移動先が変わりました。元のデータとコピーは保持されています。
@@ -1753,8 +1723,8 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 读取课程	读取课程	Read course	讀取課程	コースを読み込む
 读取超时，请重试	读取超时，请重试	Read timed out. Please try again.	讀取逾時，請重試	読み取りタイムアウトです。もう一度お試しください。
 课件截图	课件截图	Courseware screenshots	課件截圖	講義資料のスクリーンショット
-调整后重试	调整后重试	Adjust and try again	調整後重試	調整して再試行してください
-调整选项	调整选项	Adjust options	調整選項	調整オプション
+在主页重试	在主页重试	Retry on Home	在首頁重試	ホームで再試行
+在主页重新打开	在主页重新打开	Reopen on Home	在首頁重新開啟	ホームで開き直す
 账号已确认，但保存登录状态失败。请检查本地权限后重新扫码。	账号已确认，但保存登录状态失败。请检查本地权限后重新扫码。	The account has been confirmed, but saving the login status failed. Please check the local permissions and scan the QR code again.	帳號已確認，但儲存登入狀態失敗。請檢查本機權限後重新掃描 QR 碼。	アカウントは確認されましたが、ログイン状態の保存に失敗しました。ローカルの権限を確認し、QR コードを再度スキャンしてください。
 账号状态响应不完整，请稍后重试 / Account status response is incomplete; retry later	账号状态响应不完整，请稍后重试	Account status response is incomplete; retry later	帳號狀態回應不完整，請稍後重試	アカウントステータスの応答が不完全です。後でもう一度試してください。
 资源位置超出此笔记 / Asset escapes note directory	资源位置超出此笔记	Asset escapes note directory	資源位置超出此筆記	リソースの場所がこのノートの外にあります
@@ -1810,7 +1780,7 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 这份笔记的保存位置暂时无法确认，请在笔记库菜单中重新扫描。	这份笔记的保存位置暂时无法确认，请在笔记库菜单中重新扫描。	The storage location of this note cannot be confirmed at the moment. Please scan again in the note library menu.	這份筆記的儲存位置暫時無法確認，請在筆記庫選單中重新掃描。	このノートの保存場所を現在確認できません。ノートライブラリメニューで再度スキャンしてください。
 这张截图没有对应文字	这张截图没有对应文字	This screenshot has no corresponding text	這張截圖沒有對應文字	このスクリーンショットには対応するテキストがありません
 这部分无需补做	这部分无需补做	This part doesn't need reprocessing	這部分無需補做	この部分は再処理の必要がありません
-这里是长期默认值，主页的「处理选项」可以只对单次生效	这里是长期默认值，主页的「处理选项」可以只对单次生效	These are your defaults; “Processing options” on the home page can change them for a single run.	這裡是長期預設值，首頁的「處理選項」可以只對單次生效	ここは長期的な既定値です。ホームの「処理オプション」では今回だけに適用できます。
+每次转换都使用这里的设置；更改会用于之后开始的处理，包括还在等待的任务	每次转换都使用这里的设置；更改会用于之后开始的处理，包括还在等待的任务	Every conversion uses these settings. Changes apply to work that starts afterwards, including tasks still waiting.	每次轉換都使用這裡的設定；更改會用於之後開始的處理，包括還在等待的任務	すべての変換でここの設定を使います。変更は、待機中のタスクを含め、これから始まる処理に適用されます。
 这项任务已有后续处理，请打开对应任务继续	这项任务已有后续处理，请打开对应任务继续	This task already has follow-up processing. Open the corresponding task to continue.	這項任務已有後續處理，請開啟對應任務繼續	このタスクには後続の処理があります。続行するには対応するタスクを開いてください。
 这项任务已有后续处理，请打开对应任务继续。	这项任务已有后续处理，请打开对应任务继续。	This task already has follow-up processing. Open the corresponding task to continue.	這項任務已有後續處理，請開啟對應任務繼續。	このタスクには後続の処理があります。続行するには対応するタスクを開いてください。
 这项任务正在处理当前操作	这项任务正在处理当前操作	This task is processing the current operation	這項任務正在處理目前操作	このタスクは現在の操作を処理しています
@@ -1833,7 +1803,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 选中的视频无法识别，请单独打开后转换	选中的视频无法识别，请单独打开后转换	The selected video cannot be recognized, please open it separately and convert it.	選中的影片無法辨識，請單獨開啟後轉換	選択した動画は認識できません。別途開いて変換してください。
 选择 Codex 模型 / Choose a Codex model	选择 Codex 模型	Choose a Codex model	選擇 Codex 模型	Codexモデルの選択
 选择 SRT 或 VTT 字幕	选择 SRT 或 VTT 字幕	Choose SRT or VTT subtitles	選擇 SRT 或 VTT 字幕	SRT または VTT 字幕を選択します
-选择保存位置	选择保存位置	Select save location	選擇儲存位置	保存場所を選択
 选择原视频	选择原视频	Select original video	選擇原影片	元の動画を選択してください
 选择字幕文件	选择字幕文件	Select subtitle file	選擇字幕檔案	字幕ファイルを選択
 选择文件	选择文件	Choose file	選擇檔案	ファイルを選択
@@ -1895,12 +1864,11 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 重新运行	重新运行	Run again	重新執行	再実行
 重新选择文件夹…	重新选择文件夹…	Reselect folder…	重新選擇資料夾…	フォルダーを再選択…
 重新预览	重新预览	Re-preview	重新預覽	再プレビュー
-重置处理选项	重置处理选项	Reset processing options	重置處理選項	処理オプションをリセット
+重置生成笔记设置	重置生成笔记设置	Reset note generation settings	重置產生筆記設定	ノート作成の設定をリセット
 重试	重试	Retry	重試	再試行
 重试 AI 校对	重试 AI 校对	Retry AI proofreading	重試 AI 校對	AI校正を再試行する
 重试保存	重试保存	Retry save	重試儲存	保存を再試行
-重试保存处理选项	重试保存处理选项	Retry saving processing options	重試儲存處理選項	処理オプションの保存を再試行
-重试保存本次选择	重试保存本次选择	Retry saving this selection	重試儲存本次選擇	この選択の保存を再試行
+重试保存生成笔记设置	重试保存生成笔记设置	Retry saving note generation settings	重試儲存產生筆記設定	ノート作成の設定の保存を再試行
 重试导出	重试导出	Retry export	重試匯出	エクスポートを再試行します
 重试打开	重试打开	Retry opening	重試開啟	開くのを再試行
 重试补做	重试补做	Retry reprocessing	重試補做	再処理を再試行
@@ -1933,7 +1901,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 静默模式，仅报告错误 / Quiet mode: report errors only	静默模式，仅报告错误	Quiet mode: report errors only	靜默模式，僅報告錯誤	サイレントモード: エラーのみ報告
 韩语	韩语	Korean	韓語	韓国語
 音频会发送到所选服务	音频会发送到所选服务	Audio is sent to the selected service	音訊會傳送到所選服務	音声は選択したサービスに送信されます
-音频会发送到所选语音识别服务	音频会发送到所选语音识别服务	Audio is sent to the selected speech recognition service	音訊會傳送到所選語音辨識服務	音声は選択した音声認識サービスに送信されます
 音频编码部分也用 GPU（默认）/ Also run the audio encoder on the GPU (default)	音频编码部分也用 GPU（默认）/ Also run the audio encoder on the GPU (default)	Also run the audio encoder on the GPU (default)	音訊編碼部分也用 GPU（預設）/ Also run the audio encoder on the GPU (default)	GPU 上でオーディオ エンコーダも実行します (デフォルト)
 音频编码部分改用 CPU（显存不足时）/ Run the audio encoder on the CPU (when GPU memory is low)	音频编码部分改用 CPU（显存不足时）/ Run the audio encoder on the CPU (when GPU memory is low)	Run the audio encoder on the CPU (when GPU memory is low)	音訊編碼部分改用 CPU（視訊記憶體不足時）/ Run the audio encoder on the CPU (when GPU memory is low)	CPU 上でオーディオエンコーダーを実行します（GPU メモリが少ない場合）
 项目主页	项目主页	Project homepage	專案首頁	プロジェクトのホームページ
@@ -1958,9 +1925,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 默认服务尚未更改，请重试	默认服务尚未更改，请重试	The default service has not been changed, please try again	預設服務尚未更改，請重試	デフォルトのサービスは変更されていません。もう一度お試しください。
 默认服务版本不存在	默认服务版本不存在	Default service version does not exist	預設服務版本不存在	デフォルトのサービスバージョンが存在しません
 默认服务用途不匹配	默认服务用途不匹配	Default service purpose does not match	預設服務用途不匹配	デフォルトのサービス目的が一致しません
-默认设置已保存，当前视频的选项尚未同步。请重试。	默认设置已保存，当前视频的选项尚未同步。请重试。	Default settings saved. The current video's options were not synced; try again.	預設設定已儲存，目前影片的選項尚未同步。請重試。	デフォルト設定を保存しました。現在の動画のオプションは同期されていません。再試行してください。
-默认设置已保存，当前视频的选项尚未同步：{}	默认设置已保存，当前视频的选项尚未同步：{}	Default settings saved, options for current video not yet synced: {}	預設設定已儲存，目前影片的選項尚未同步：{}	デフォルト設定が保存されました。現在の動画のオプションはまだ同期されていません: {}
-默认设置已保存，当前选项尚未同步。请重试。	默认设置已保存，当前选项尚未同步。请重试。	The default settings have been saved and the current options have not yet been synced. Please try again.	預設設定已儲存，目前選項尚未同步。請重試。	デフォルト設定は保存されていますが、現在のオプションはまだ同期されていません。もう一度試してください。
 默认识别方式	默认识别方式	Default recognition method	預設辨識方式	デフォルトの認識方法
 默认选项尚未保存，可重试	默认选项尚未保存，可重试	The default options have not been saved, you can try again	預設選項尚未儲存，可重試	デフォルトのオプションは保存されていません。もう一度試してください。
 （低功耗，约 1GB / Low power, ~1GB）	（低功耗，约 1GB）	(low power, ~1GB)	（低功耗，約 1GB）	（低消費電力、約 1GB）
@@ -1972,8 +1936,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 （输出 json）	（输出 json）	(output json)	（輸出 json）	（json を出力）
 ，或 Hugging Face 仓库名（如 org/model）	，或 Hugging Face 仓库名（如 org/model）	, or Hugging Face repository name (such as org/model)	，或 Hugging Face 儲存庫名（如 org/model）	、または Hugging Face リポジトリ名（org/model など）
 ；	；	; 	；	;
-原笔记已关闭；服务正在保存，但未用于其他笔记	原笔记已关闭；服务正在保存，但未用于其他笔记	The original note is closed; the service is still being saved and was not used for other notes	原筆記已關閉；服務正在儲存，但未用於其他筆記	元のノートは閉じられています。サービスは保存中で、他のノートには使用されていません
-服务正在保存，本次选择尚未保存：{}	服务正在保存，本次选择尚未保存：{}	The service is still being saved; this selection was not saved: {}	服務正在儲存，本次選擇尚未儲存：{}	サービスは保存中です。今回の選択は保存されていません: {}
 服务正在保存，补做任务尚未创建。请重试补做。	服务正在保存，补做任务尚未创建。请重试补做。	The service is still being saved; the reprocessing task has not been created. Retry reprocessing.	服務正在儲存，補做任務尚未建立。請重試補做。	サービスは保存中です。再処理タスクはまだ作成されていません。再処理を再試行してください。
 上传音频，返回转写文字	上传音频，返回转写文字	Uploads audio and returns a transcript	上傳音訊，傳回轉寫文字	音声をアップロードし、文字起こしを返します
 主页	主页	Home	首頁	ホーム
@@ -2107,7 +2069,6 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 正在保存密钥…	正在保存密钥…	Saving key…	正在儲存金鑰…	キーを保存中…
 {}尚未完成，笔记的其余部分已保存	{}尚未完成，笔记的其余部分已保存	{} not finished; the rest of the note is saved	{}尚未完成，筆記的其餘部分已儲存	{}は完了していません。ノートのほかの部分は保存済みです
 没有未分类的笔记	没有未分类的笔记	No unfiled notes	沒有未分類的筆記	未分類のノートはありません
-只使用视频自带的字幕	只使用视频自带的字幕	Only the video's own subtitles will be used	只使用影片內建的字幕	動画に付属する字幕のみを使用します
 阅读目录	目录	Contents	目錄	目次
 主题、语言、文字大小	主题、语言、文字大小	Theme, language, text size	主題、語言、文字大小	テーマ、言語、文字サイズ
 字幕、语音识别、AI 处理	字幕、语音识别、AI 处理	Subtitles, speech, AI	字幕、語音辨識、AI 處理	字幕、音声認識、AI 処理
@@ -2137,7 +2098,6 @@ Intel NPU 不再支持 Qwen3 模型。可用：{}	Intel NPU 不再支持 Qwen3 �
 AI 用途	AI 用途	What AI is used for	AI 用途	AI の用途
 第 {} 步，共 {} 步	第 {} 步，共 {} 步	Step {} of {}	第 {} 步，共 {} 步	ステップ {} / {}
 音频的处理位置	音频的处理位置	Where audio is processed	音訊的處理位置	音声の処理場所
-清空链接，选项恢复为默认设置	清空链接，选项恢复为默认设置	Clears the link and returns the options to your defaults	清空連結，選項恢復為預設設定	リンクを消去し、オプションを既定の設定に戻します
 已找回上次未生效的应用设置，可以重试保存；当前仍使用原来的有效选项	已找回上次未生效的应用设置，可以重试保存；当前仍使用原来的有效选项	An app settings change that could not be saved last time was found. Save it again to apply it; the previous settings stay in use until then.	已找回上次未生效的應用程式設定，可以重試儲存；目前仍使用原來的有效選項	前回保存できなかったアプリ設定の変更が見つかりました。もう一度保存すると適用されます。それまでは元の設定が使われます。
 已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项	已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项	A settings change that could not be saved last time was found. Save it again to apply it; the previous settings stay in use until then.	已找回上次未生效的設定變更，可以重試儲存；目前仍使用原來的有效選項	前回保存できなかった設定の変更が見つかりました。もう一度保存すると適用されます。それまでは元の設定が使われます。
 打开「校对文字和标点」后可用	打开「校对文字和标点」后可用	Available once “Proofread text and punctuation” is on	開啟「校對文字與標點」後可用	「文章と句読点を校正」をオンにすると使えます
@@ -2242,10 +2202,10 @@ AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not conf
 {} 个已有进行中的任务，未重复加入	{} 个已有进行中的任务，未重复加入	{} already have a task in progress and were not added again	{} 個已有進行中的任務，未重複加入	{} 件は進行中のタスクがあるため、追加しませんでした
 1 个已有进行中的任务，未重复加入	1 个已有进行中的任务，未重复加入	1 already has a task in progress and was not added again	1 個已有進行中的任務，未重複加入	1 件は進行中のタスクがあるため、追加しませんでした
 你改过的文件已另存为 {}	你改过的文件已另存为 {}	Your edited files were kept as {}	你改過的檔案已另存為 {}	編集したファイルは {} として保存しました
-待确认的请求不属于笔记中可补做的部分，请调整后重新生成	待确认的请求不属于笔记中可补做的部分，请调整后重新生成	The unconfirmed requests are not part of the note that can be filled in; adjust the options and regenerate	待確認的請求不屬於筆記中可補做的部分，請調整後重新產生	未確認のリクエストはノートの未完了分ではありません。設定を調整して再生成してください
+待确认的请求不属于笔记中可补做的部分，请在主页重新生成	待确认的请求不属于笔记中可补做的部分，请在主页重新生成	The unconfirmed requests are not part of the note that can be filled in; regenerate it from Home	待確認的請求不屬於筆記中可補做的部分，請在首頁重新產生	未確認のリクエストはノートの補完できる部分ではありません。ホームから再生成してください。
 笔记的旧版本已删除：每个视频现在只保留一份笔记，重新生成或补做会直接更新它。	笔记的旧版本已删除：每个视频现在只保留一份笔记，重新生成或补做会直接更新它。	Older versions of your notes were removed. Each video now keeps one note; regenerating or filling in updates it in place.	筆記的舊版本已刪除：每個影片現在只保留一份筆記，重新產生或補做會直接更新它。	ノートの古いバージョンは削除されました。各動画のノートは 1 つだけになり、再生成や未完了分の処理はそのノートを直接更新します。
 笔记已被另一项任务更新，这项任务不会再运行	笔记已被另一项任务更新，这项任务不会再运行	Another task has updated the note; this task will not run again	筆記已被另一項任務更新，這項任務不會再執行	ノートは別のタスクで更新されたため、このタスクは再実行されません
-调整并重新生成	调整并重新生成	Adjust and regenerate	調整並重新產生	調整して再生成
+在主页重新生成	在主页重新生成	Regenerate on Home	在首頁重新產生	ホームで再生成
 这份笔记仍按旧方式保存，正在等待整理	这份笔记仍按旧方式保存，正在等待整理	This note is still saved the old way and is waiting to be tidied up	這份筆記仍按舊方式儲存，正在等待整理	このノートはまだ古い形式で保存されており、整理を待っています
 这份笔记已有进行中的任务，已为你打开	这份笔记已有进行中的任务，已为你打开	This note already has a task in progress; it is open now	這份筆記已有進行中的任務，已為你開啟	このノートには進行中のタスクがあるため、そのタスクを開きました
 这份笔记已被之后的任务更新，请从最新的任务补做	这份笔记已被之后的任务更新，请从最新的任务补做	A later task has updated this note; fill in missing steps from the latest task	這份筆記已被之後的任務更新，請從最新的任務補做	このノートは後のタスクで更新されています。最新のタスクから未完了分を処理してください
@@ -2288,7 +2248,6 @@ course2md 不在“应用程序”文件夹中。请先退出 course2md，在访
 没有权限打开这份笔记的保存锁 {}，请检查这个文件夹的权限后重试 / No permission to open the note's save lock {}; check the folder's permissions and try again	没有权限打开这份笔记的保存锁 {}，请检查这个文件夹的权限后重试	No permission to open the note's save lock {}; check the folder's permissions and try again	沒有權限開啟這份筆記的儲存鎖 {}，請檢查這個資料夾的權限後重試	このノートの保存ロック {} を開く権限がありません。フォルダの権限を確認してから、もう一度お試しください
 无法打开这份笔记的保存锁 {} / Could not open the note's save lock {}	无法打开这份笔记的保存锁 {}	Could not open the note's save lock {}	無法開啟這份筆記的儲存鎖 {}	このノートの保存ロック {} を開けませんでした
 这份笔记的保存锁不是普通文件：{}，请移走它后重试 / The note's save lock is not a regular file: {}; move it away and try again	这份笔记的保存锁不是普通文件：{}，请移走它后重试	The note's save lock is not a regular file: {}; move it away and try again	這份筆記的儲存鎖不是一般檔案：{}，請移走它後重試	このノートの保存ロックは通常のファイルではありません：{}。移動してからもう一度お試しください
-填写名称	填写名称	Enter a name	填寫名稱	名前を入力
 保存在「{}」	保存在「{}」	Saved in “{}”	儲存在「{}」	「{}」に保存済み
 将保存到「{}」	将保存到「{}」	Will be saved to “{}”	將儲存到「{}」	「{}」に保存予定
 其他任务结束后才能下载模型	其他任务结束后才能下载模型	The model can be downloaded once the current job finishes	其他任務結束後才能下載模型	現在のジョブが終わるとモデルをダウンロードできます
@@ -2306,15 +2265,12 @@ macOS 只让有完全磁盘访问权限的应用读取 {} 的数据。course2md 
 这个浏览器中没有登录 YouTube。在浏览器中登录后再检查。	这个浏览器中没有登录 YouTube。在浏览器中登录后再检查。	This browser isn't signed in to YouTube. Sign in there, then check again.	這個瀏覽器中沒有登入 YouTube。在瀏覽器中登入後再檢查。	このブラウザーでは YouTube にログインしていません。ブラウザーでログインしてから、もう一度確認してください。
 缺少 {}	缺少 {}	{} is missing	缺少 {}	{} がありません
 需要语音识别时会先请你下载	需要语音识别时会先请你下载	You'll be asked to download it when speech recognition is needed	需要語音辨識時會先請你下載	音声認識が必要になったときにダウンロードを確認します
-这次笔记还没有可用的语音识别服务	这次笔记还没有可用的语音识别服务	No speech recognition service is available for this note	這次筆記還沒有可用的語音辨識服務	このノートで使える音声認識サービスがありません
-这次笔记还没有可用的 AI 服务	这次笔记还没有可用的 AI 服务	No AI service is available for this note	這次筆記還沒有可用的 AI 服務	このノートで使える AI サービスがありません
-笔记还没有名称	笔记还没有名称	The note has no name yet	筆記還沒有名稱	ノートにまだ名前がありません
+设置中还没有可用的语音识别服务	设置中还没有可用的语音识别服务	Settings have no usable speech recognition service yet	設定中還沒有可用的語音辨識服務	設定に使用できる音声認識サービスがまだありません
+设置中还没有可用的 AI 服务	设置中还没有可用的 AI 服务	Settings have no usable AI service yet	設定中還沒有可用的 AI 服務	設定に使用できる AI サービスがまだありません
 使用的模型	使用的模型	Model to use	使用的模型	使用するモデル
 稍后设置	稍后设置	Set up later	稍後設定	後で設定
-使用默认服务「{}」	使用默认服务「{}」	Use the default service “{}”	使用預設服務「{}」	既定のサービス「{}」を使う
 任务使用的服务已从设置中删除	任务使用的服务已从设置中删除	This task's service was deleted	任務使用的服務已從設定中刪除	このタスクで使っていたサービスは設定から削除されました
 识别模型「{}」还没有下载	识别模型「{}」还没有下载	Speech model “{}” isn’t downloaded	辨識模型「{}」還沒有下載	音声認識モデル「{}」はまだダウンロードされていません
-所选服务已从设置中删除	所选服务已从设置中删除	The chosen service was deleted from settings	所選服務已從設定中刪除	選んだサービスは設定から削除されました
 我已打开开关	我已打开开关	I've turned it on	我已開啟開關	オンにしました
 仍然连接	仍然连接	Try anyway	仍然連接	それでも接続
 正在等待权限	正在等待权限	Waiting for access	正在等待權限	アクセスを待っています
@@ -2347,3 +2303,15 @@ POST {base_url}/chat/completions（千问语音识别 qwen3-asr-flash，如阿�
 重试未完成的翻译部分	重试未完成的翻译部分	Retry unfinished translation	重試未完成的翻譯部分	未完了のAI翻訳を再試行する
   失败自动重试 / Automatic retries: {}	  失败自动重试：{}	  Automatic retries: {}	  失敗自動重試：{}	  失敗時の自動再試行：{}
 开启，每个请求最多发送 {} 次 / on, up to {} sends per request	开启，每个请求最多发送 {} 次	on, up to {} sends per request	開啟，每個請求最多傳送 {} 次	オン（1 リクエストにつき最大 {} 回送信）
+暂不继续	暂不继续	Not now	暫不繼續	今は続行しない
+AI 处理的设置已更改	AI 处理的设置已更改	The AI processing settings changed	AI 處理的設定已變更	AI 処理の設定が変更されました
+{}：「{}」→「{}」	{}：「{}」→「{}」	{}: “{}” → “{}”	{}：「{}」→「{}」	{}：「{}」→「{}」
+用当前设置继续生成？	用当前设置继续生成？	Continue with the current settings?	用目前的設定繼續產生？	現在の設定で続行しますか？
+继续生成会按当前设置重新处理上次已完成的部分，可能产生额外费用。	继续生成会按当前设置重新处理上次已完成的部分，可能产生额外费用。	Continuing redoes the parts already finished with the current settings, which may cost extra.	繼續產生會按目前的設定重新處理上次已完成的部分，可能產生額外費用。	続行すると、完了済みの部分を現在の設定でやり直すため、追加料金が発生する場合があります。
+设置已更改，继续生成会重新处理上次已完成的部分，可能产生额外费用。请确认后继续。	设置已更改，继续生成会重新处理上次已完成的部分，可能产生额外费用。请确认后继续。	The settings changed: continuing redoes the parts already finished, which may cost extra. Confirm to continue.	設定已變更，繼續產生會重新處理上次已完成的部分，可能產生額外費用。請確認後繼續。	設定が変更されました。続行すると完了済みの部分をやり直すため、追加料金が発生する場合があります。確認してから続行してください。
+语音识别的设置已更改	语音识别的设置已更改	The speech recognition settings changed	語音辨識的設定已變更	音声認識の設定が変更されました
+文字或截图会重新生成，AI 处理随之重新发送	文字或截图会重新生成，AI 处理随之重新发送	The text or screenshots will be made again, and the AI processing sent again with them	文字或截圖會重新產生，AI 處理隨之重新傳送	テキストまたはスクリーンショットが作り直され、それに伴い AI 処理も再送信されます
+开始转换会按当前设置重新生成，并取代暂停的任务《{}》	开始转换会按当前设置重新生成，并取代暂停的任务《{}》	Starting the conversion makes the note again with the current settings and replaces the paused task “{}”	開始轉換會按目前的設定重新產生，並取代暫停的任務《{}》	変換を開始すると現在の設定で作り直し、一時停止中のタスク「{}」を置き換えます
+继续原任务	继续原任务	Continue that task	繼續原任務	元のタスクを続行
+语音识别（文字来源设置）	语音识别（文字来源设置）	Speech recognition (text source setting)	語音辨識（文字來源設定）	音声認識（テキストソースの設定）
+重新生成会按当前设置进行，并取代暂停的任务《{}》	重新生成会按当前设置进行，并取代暂停的任务《{}》	Regenerating uses the current settings and replaces the paused task “{}”	重新產生會按目前的設定進行，並取代暫停的任務《{}》	再生成は現在の設定で行われ、一時停止中のタスク「{}」を置き換えます

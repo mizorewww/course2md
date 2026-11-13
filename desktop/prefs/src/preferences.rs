@@ -106,7 +106,7 @@ pub fn save_failure_message(group: PreferenceGroup, error: &anyhow::Error) -> St
         .unwrap_or(c2m_i18n::tr!("设置变更暂时无法保存"));
     let name = match group {
         PreferenceGroup::Application => c2m_i18n::tr!("应用偏好"),
-        PreferenceGroup::Generation => c2m_i18n::tr!("生成笔记偏好"),
+        PreferenceGroup::Generation => c2m_i18n::tr!("生成笔记设置"),
         PreferenceGroup::Services => c2m_i18n::tr!("服务配置"),
     };
     c2m_i18n::tr!("{}未保存：{}", name, reason)
@@ -682,8 +682,6 @@ impl ServiceRefs {
 pub enum BindingScope {
     /// A save in settings or an explicit "also use by default" choice.
     Defaults,
-    /// The caller binds the returned ID to exactly one generation draft.
-    CurrentTask,
     /// Saved for later choice; defaults and drafts are unchanged.
     Saved,
 }
@@ -1076,56 +1074,9 @@ impl Store {
         self.version(id)
             .is_some_and(|version| !self.service_retired_in_snapshot(&version.service_id))
     }
-    /// The services a new plan uses: each of the input's own choices while that version
-    /// is still saved and its service not deleted, otherwise the default. A choice whose
-    /// service was deleted, or that a services reset or an older backup no longer holds,
-    /// falls back instead of leaving the input unable to start. A task already planned
-    /// keeps the versions it names, which its requests are identified by.
-    ///
-    /// While the services record cannot be read, nothing is known to be gone: the
-    /// input's own choices stay as they are, and dispatch reports the record.
-    pub fn plan_refs(&self, chosen: &ServiceRefs) -> ServiceRefs {
-        if self.is_blocked(PreferenceGroup::Services) {
-            return chosen.clone();
-        }
-        let pick = |own: &Option<ServiceVersionId>, default: &Option<ServiceVersionId>| {
-            own.clone()
-                .filter(|id| self.usable_in_snapshot(id))
-                .or_else(|| default.clone())
-        };
-        ServiceRefs {
-            asr: pick(&chosen.asr, &self.services.defaults.asr),
-            llm: pick(&chosen.llm, &self.services.defaults.llm),
-        }
-    }
-    /// The first service an input chose, among those its configuration needs, that is
-    /// no longer saved or was deleted, and the version that would take its place: the
-    /// AI service, then speech. A purpose the input does not use never counts, and
-    /// nothing is known to be gone while the services record cannot be read.
-    pub fn dropped_choice(
-        &self,
-        chosen: &ServiceRefs,
-        config: &ConfigFile,
-    ) -> Option<(ServicePurpose, ServiceVersion)> {
-        if self.is_blocked(PreferenceGroup::Services) {
-            return None;
-        }
-        let needed = chosen.required_for(config);
-        let planned = self.plan_refs(chosen);
-        [
-            (ServicePurpose::Ai, needed.llm, planned.llm),
-            (ServicePurpose::Speech, needed.asr, planned.asr),
-        ]
-        .into_iter()
-        .filter_map(|(purpose, own, now)| {
-            own.filter(|id| !self.usable_in_snapshot(id))?;
-            Some((purpose, self.version(&now?)?.clone()))
-        })
-        .next()
-    }
-    /// Whether a planned task names a service its configuration needs that is no longer
-    /// saved or was deleted: continuing it can only stop again, and only a new attempt
-    /// with another service goes on. Unreadable service records are another obstacle.
+    /// Whether `references` name a service `base` needs that is no longer saved or was
+    /// deleted: a task running with them can only stop again. Unreadable service
+    /// records are another obstacle.
     pub fn services_missing(&self, base: &ConfigFile, references: &ServiceRefs) -> bool {
         if self.is_blocked(PreferenceGroup::Services) {
             return false;
@@ -1599,7 +1550,7 @@ impl Store {
             let id = required
                 .asr
                 .as_deref()
-                .ok_or_else(|| anyhow!(c2m_i18n::tr!("这次笔记还没有可用的语音识别服务")))?;
+                .ok_or_else(|| anyhow!(c2m_i18n::tr!("设置中还没有可用的语音识别服务")))?;
             let version = check(id)?;
             if version.config.protocol.purpose() != ServicePurpose::Speech {
                 bail!(c2m_i18n::tr!("所选服务不支持语音识别"));
@@ -1616,7 +1567,7 @@ impl Store {
             let id = required
                 .llm
                 .as_deref()
-                .ok_or_else(|| anyhow!(c2m_i18n::tr!("这次笔记还没有可用的 AI 服务")))?;
+                .ok_or_else(|| anyhow!(c2m_i18n::tr!("设置中还没有可用的 AI 服务")))?;
             let version = check(id)?;
             if version.config.protocol.purpose() != ServicePurpose::Ai {
                 bail!(c2m_i18n::tr!("所选服务不支持 AI 校对或摘要"));
@@ -1996,74 +1947,6 @@ mod tests {
         (directory, store)
     }
 
-    #[test]
-    fn a_deleted_choice_counts_only_where_the_input_uses_it() {
-        let (_directory, mut store) = isolated();
-        let chosen = complete_draft(&mut store, "chosen");
-        let chosen = store
-            .publish_service(&chosen.id, BindingScope::CurrentTask)
-            .unwrap();
-        let default = complete_draft(&mut store, "default");
-        let default = store
-            .publish_service(&default.id, BindingScope::Defaults)
-            .unwrap();
-        let refs = ServiceRefs {
-            asr: None,
-            llm: Some(chosen.id.clone()),
-        };
-        let mut config = ConfigFile::default();
-        config.llm.enabled = true;
-        assert!(store.dropped_choice(&refs, &config).is_none());
-        store.delete_service(&chosen.service_id).unwrap();
-        // Used: the default that would take its place is named, to be chosen.
-        let (purpose, replacement) = store.dropped_choice(&refs, &config).unwrap();
-        assert_eq!(purpose, ServicePurpose::Ai);
-        assert_eq!(replacement.id, default.id);
-        // Not used: nothing stands in the way.
-        config.llm.enabled = false;
-        config.llm.summarize = false;
-        config.llm.translate = None;
-        assert!(store.dropped_choice(&refs, &config).is_none());
-    }
-
-    #[test]
-    fn a_deleted_speech_choice_counts_with_ai_off() {
-        let (_directory, mut store) = isolated();
-        let mut speech = ServiceDraft::new(ServicePurpose::Speech);
-        speech.address = "https://example.test/v1".into();
-        speech.model = "speech".into();
-        let speech = store
-            .save_service_draft(speech, Some(Secret::new("test-only-secret")))
-            .unwrap();
-        let speech = store
-            .publish_service(&speech.id, BindingScope::CurrentTask)
-            .unwrap();
-        let mut fallback = ServiceDraft::new(ServicePurpose::Speech);
-        fallback.address = "https://example.test/v1".into();
-        fallback.model = "fallback".into();
-        let fallback = store
-            .save_service_draft(fallback, Some(Secret::new("test-only-secret")))
-            .unwrap();
-        let fallback = store
-            .publish_service(&fallback.id, BindingScope::Defaults)
-            .unwrap();
-        store.delete_service(&speech.service_id).unwrap();
-        let refs = ServiceRefs {
-            asr: Some(speech.id.clone()),
-            llm: None,
-        };
-        let mut config = ConfigFile::default();
-        config.llm.enabled = false;
-        config.llm.summarize = false;
-        config.defaults.provider = Some(AsrProvider::Api);
-        let (purpose, replacement) = store.dropped_choice(&refs, &config).unwrap();
-        assert_eq!(purpose, ServicePurpose::Speech);
-        assert_eq!(replacement.id, fallback.id);
-        // Subtitles only: speech is not used, so its deletion does not stand in the way.
-        config.defaults.transcript_source = Some(TranscriptSource::Subtitle);
-        assert!(store.dropped_choice(&refs, &config).is_none());
-    }
-
     fn complete_draft(store: &mut Store, model: &str) -> ServiceDraft {
         let mut draft = ServiceDraft::new(ServicePurpose::Ai);
         draft.address = "https://example.test/v1".into();
@@ -2116,7 +1999,7 @@ mod tests {
         };
         store.record_test(evidence).unwrap();
         let version = store
-            .publish_service(&draft.id, BindingScope::CurrentTask)
+            .publish_service(&draft.id, BindingScope::Saved)
             .unwrap();
         assert_eq!(version.config, config);
         assert!(store.default_refs().llm.is_none());
@@ -2203,7 +2086,7 @@ mod tests {
             .save_service_draft(edit, Some(Secret::new("replacement-test-key")))
             .unwrap();
         let new = store
-            .publish_service(&edit.id, BindingScope::CurrentTask)
+            .publish_service(&edit.id, BindingScope::Saved)
             .unwrap();
         assert_eq!(store.default_refs().llm, Some(old.id.clone()));
         assert_ne!(old.config.credential, new.config.credential);
@@ -2852,7 +2735,7 @@ mod tests {
         std::fs::remove_dir(root.join("services.json")).unwrap();
         let saved = store.save_service_draft(edit, None).unwrap();
         let published = store
-            .publish_service(&saved.id, BindingScope::CurrentTask)
+            .publish_service(&saved.id, BindingScope::Saved)
             .unwrap();
         let again = open(&root, store.vault());
         assert!(again.draft(&saved.id).is_none());
@@ -2873,12 +2756,12 @@ mod tests {
         assert_eq!(reopened.revision(PreferenceGroup::Services), 7);
     }
 
-    /// An input or task can hold a version that later leaves the services record:
-    /// its service deleted, the group reset, or an older backup recovered. A plan
-    /// follows the default instead of stopping; a planned task is reported as unable
-    /// to continue rather than offered a resume that would stop again.
+    /// A run can name a version that later leaves the services record: its service
+    /// deleted, the group reset, or an older backup recovered. Running with it is
+    /// reported as unable to continue rather than offered a resume that would stop
+    /// again; the default is what the next run uses.
     #[test]
-    fn a_choice_no_longer_saved_follows_the_default_and_a_task_holding_it_cannot_continue() {
+    fn a_version_no_longer_saved_is_missing_and_the_default_takes_over() {
         let mut config = ConfigFile::default();
         config.llm.enabled = true;
         let publish = |store: &mut Store, model: &str, scope| {
@@ -2889,12 +2772,11 @@ mod tests {
         // Deleted: the version goes with its service.
         let (directory, mut store) = isolated();
         let default = publish(&mut store, "default-model", BindingScope::Defaults);
-        let chosen = publish(&mut store, "chosen-model", BindingScope::CurrentTask);
+        let chosen = publish(&mut store, "chosen-model", BindingScope::Saved);
         let held = ServiceRefs {
             asr: None,
             llm: Some(chosen.id.clone()),
         };
-        assert_eq!(store.plan_refs(&held), held);
         assert!(!store.services_missing(&config, &held));
         store.delete_service(&chosen.service_id).unwrap();
         let store = open(directory.path(), store.vault());
@@ -2903,9 +2785,9 @@ mod tests {
             error.to_string(),
             c2m_i18n::tr!("任务使用的服务已从设置中删除")
         );
-        assert_eq!(store.plan_refs(&held).llm, Some(default.id.clone()));
+        assert_eq!(store.default_refs().llm, Some(default.id.clone()));
         let preview = store
-            .config_for_refs(&config, &store.plan_refs(&held))
+            .config_for_refs(&config, &store.default_refs())
             .unwrap();
         assert_eq!(preview.llm.model, "default-model");
         assert!(store.services_missing(&config, &held));
@@ -2921,7 +2803,6 @@ mod tests {
         };
         store.services.stopped.insert(only.service_id.clone(), 1);
         assert!(store.services_missing(&config, &held));
-        assert_eq!(store.plan_refs(&held).llm, Some(only.id.clone()));
 
         // A superseded version is still saved and stays the explicit choice.
         let (_directory, mut store) = isolated();
@@ -2936,13 +2817,12 @@ mod tests {
             asr: None,
             llm: Some(old.id.clone()),
         };
-        assert_eq!(store.plan_refs(&held), held);
         assert!(!store.services_missing(&config, &held));
 
         // Recovered from an older backup that predates the version.
         let (directory, mut store) = isolated();
-        let first = publish(&mut store, "first", BindingScope::Defaults);
-        let newer = publish(&mut store, "newer", BindingScope::CurrentTask);
+        publish(&mut store, "first", BindingScope::Defaults);
+        let newer = publish(&mut store, "newer", BindingScope::Saved);
         let services = directory.path().join("services.json");
         std::fs::write(&services, b"{damaged").unwrap();
         let recovered = open(directory.path(), store.vault());
@@ -2953,13 +2833,12 @@ mod tests {
         };
         assert!(recovered.config_for_refs(&config, &held).is_err());
         assert!(recovered.services_missing(&config, &held));
-        assert_eq!(recovered.plan_refs(&held).llm, Some(first.id));
 
         // Unreadable, backup included: nothing is known to be gone, so the explicit
         // choice stays and nothing reports it missing.
         let (directory, mut store) = isolated();
         publish(&mut store, "first", BindingScope::Defaults);
-        let chosen = publish(&mut store, "chosen", BindingScope::CurrentTask);
+        let chosen = publish(&mut store, "chosen", BindingScope::Saved);
         let services = directory.path().join("services.json");
         std::fs::write(&services, b"{damaged").unwrap();
         std::fs::write(crate::store::backup_path(&services), b"{damaged").unwrap();
@@ -2969,7 +2848,6 @@ mod tests {
             asr: None,
             llm: Some(chosen.id.clone()),
         };
-        assert_eq!(unreadable.plan_refs(&held), held);
         assert!(!unreadable.services_missing(&config, &held));
 
         // Reset: nothing is saved and nothing is the default any more.
@@ -2981,13 +2859,13 @@ mod tests {
         };
         store.reset_group(PreferenceGroup::Services).unwrap();
         assert!(store.services_missing(&config, &held));
-        assert_eq!(store.plan_refs(&held).llm, None);
+        assert_eq!(store.default_refs().llm, None);
         assert_eq!(
             store
-                .config_for_preview(&config, &store.plan_refs(&held))
+                .config_for_preview(&config, &store.default_refs())
                 .unwrap_err()
                 .to_string(),
-            c2m_i18n::tr!("这次笔记还没有可用的 AI 服务")
+            c2m_i18n::tr!("设置中还没有可用的 AI 服务")
         );
     }
 

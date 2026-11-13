@@ -34,7 +34,7 @@ pub fn source_metadata(source: &source::Source) -> String {
         .join(" · ")
 }
 
-/// One AI processing switch in the processing options.
+/// One AI processing switch, as a task's details name what its run used.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConversionAiOption {
     Proofread,
@@ -132,6 +132,21 @@ pub fn automatic_subtitle_fallback(
     true
 }
 
+/// The track to read for a video previewed without one chosen: its first, when
+/// Settings' 文字来源 (`mode`) uses subtitles and nothing is read or chosen yet (a
+/// preview taken under speech recognition read none).
+pub fn default_track_to_read(
+    source: &source::Source,
+    mode: TranscriptSource,
+) -> Option<c2m_source::subtitle::SubtitleTrack> {
+    (mode != TranscriptSource::Asr
+        && source.selected_subtitle.is_none()
+        && source.subtitle_request.is_none()
+        && source.subtitle_read_error.is_none())
+    .then(|| source.subtitles.tracks().first().cloned())
+    .flatten()
+}
+
 pub fn subtitle_needs_confirmation(source: &source::Source, source_mode: TranscriptSource) -> bool {
     !uses_speech(source, source_mode)
         && (source.selected_subtitle.is_none()
@@ -187,8 +202,7 @@ pub fn submitted_input_task<'a>(
     }
 }
 
-/// The submitted task still owns this input until it finishes. Its plan
-/// copied the options at submission, so the form cannot change them.
+/// The submitted task still owns this input until it finishes.
 pub fn locked_input_task<'a>(
     draft: &workspace::Draft,
     tasks: &'a [workspace::TaskRecord],
@@ -227,20 +241,21 @@ pub fn retired_input_task<'a>(
     let submitted = tasks
         .iter()
         .find(|task| Some(task.id.as_str()) == draft.submitted_task.as_deref())?;
-    (draft.title == submitted.plan.title
-        && draft.options.as_planned() == submitted.plan.options()
-        && draft.library_id == submitted.plan.library_id
-        && draft.folder == submitted.plan.folder
-        && draft.subtitle == submitted.plan.subtitle
-        && draft
-            .asr_service
-            .as_ref()
-            .is_none_or(|id| Some(id) == submitted.plan.asr_service.as_ref())
-        && draft
-            .ai_service
-            .as_ref()
-            .is_none_or(|id| Some(id) == submitted.plan.ai_service.as_ref()))
-    .then_some(task)
+    (draft.subtitle == submitted.plan.subtitle).then_some(task)
+}
+
+/// The task the current input was reopened from on Home, while it still waits: a
+/// conversion of the input would take its place, which the card says, and the
+/// person may continue that task instead.
+pub fn waiting_retried_task<'a>(
+    draft: &workspace::Draft,
+    tasks: &'a [workspace::TaskRecord],
+) -> Option<&'a workspace::TaskRecord> {
+    let id = draft.retry_of.as_deref()?;
+    tasks
+        .iter()
+        .find(|task| task.id == id)
+        .filter(|task| !task.state.finished() && task.handled_by.is_none() && !task.held)
 }
 
 /// A live navigation intent is separate from the saved task. Leaving its
@@ -419,7 +434,6 @@ pub struct PlanKey {
     /// changed or deleted changes which one the plan uses.
     pub services: u64,
     pub services_blocked: bool,
-    pub defaults_pending: bool,
     pub source: u64,
     pub reading: bool,
     pub subtitle_failed: bool,
@@ -456,8 +470,6 @@ pub struct ImportSession {
     pub preview_workers: usize,
     pub preview_error: Option<String>,
     pub source_validation: Option<String>,
-    /// The current validation error is the missing-title case (typed, not text-matched).
-    pub title_required: bool,
     pub show_preview_details: bool,
     pub subtitle_issue_open: bool,
     pub source_editor_open: bool,
@@ -507,7 +519,6 @@ impl ImportSession {
         self.subtitle_error = None;
         self.preview_error = None;
         self.source_validation = None;
-        self.title_required = false;
         self.show_preview_details = false;
         self.subtitle_issue_open = false;
     }
@@ -565,13 +576,6 @@ mod tests {
     use c2m_source::subtitle::{CachedSubtitle, SubtitleEvidence, SubtitleReadError};
     use desktop_store::workspace;
 
-    /// A plan's configuration as build_plan writes it from default options.
-    fn planned_config() -> c2m_config::settings::ConfigFile {
-        let mut config = c2m_config::settings::ConfigFile::default();
-        desktop_prefs::conversion::ConversionOptions::default().apply_to(&mut config);
-        config
-    }
-
     /// A pending Start for revision 7 with every prerequisite met.
     fn ready() -> GateInputs {
         GateInputs {
@@ -593,7 +597,6 @@ mod tests {
             preferences: 2,
             services: 5,
             services_blocked: false,
-            defaults_pending: false,
             source: 1,
             reading: true,
             subtitle_failed: false,
@@ -988,7 +991,6 @@ mod tests {
         let mut workspace = workspace::Workspace::open_at_inline(
             root.path().join("workspace.json"),
             root.path().join("library"),
-            Default::default(),
         )
         .unwrap();
         let state = &mut workspace.state;
@@ -1006,9 +1008,7 @@ mod tests {
             library_id: state.default_library.clone(),
             folder: None,
             subtitle: None,
-            config: planned_config(),
-            asr_service: None,
-            ai_service: None,
+            repair: None,
         };
         // Before submission the options belong to the form.
         let draft = state.draft_mut().unwrap();
@@ -1018,8 +1018,7 @@ mod tests {
         let (id, _) = state.enqueue(plan.clone(), None).unwrap();
         state.draft_mut().unwrap().submitted_task = Some(id.clone());
         // Leaving for the task list and coming back home keeps an in-flight
-        // input, so the options panel must offer the next video instead of
-        // vanishing.
+        // input: its card shows the task.
         for in_flight in [
             workspace::TaskState::Queued,
             workspace::TaskState::Running,
@@ -1048,17 +1047,11 @@ mod tests {
                 locked_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_none()
             );
         }
-        // 设置下一个视频 clears the link: the next input starts from the
-        // saved defaults and the submitted task keeps its own plan.
+        // Clearing the link starts the next input; the submitted task keeps its plan.
         state.task_mut(&id).unwrap().state = workspace::TaskState::Running;
-        let defaults = desktop_prefs::conversion::ConversionOptions {
-            summarize: !state.draft().unwrap().options.summarize,
-            ..state.draft().unwrap().options.clone()
-        };
-        assert!(state.prepare_next_import("", defaults.clone()));
+        assert!(state.prepare_next_import(""));
         let next = state.draft().unwrap();
         assert!(next.submitted_task.is_none());
-        assert!(next.options == defaults);
         assert!(locked_input_task(next, &state.tasks, "").is_none());
         let task = state.task(&id).unwrap();
         assert_eq!(task.state, workspace::TaskState::Running);
@@ -1071,7 +1064,6 @@ mod tests {
         let mut workspace = workspace::Workspace::open_at_inline(
             root.path().join("workspace.json"),
             root.path().join("library"),
-            Default::default(),
         )
         .unwrap();
         let state = &mut workspace.state;
@@ -1089,9 +1081,7 @@ mod tests {
             library_id: state.default_library.clone(),
             folder: None,
             subtitle: None,
-            config: planned_config(),
-            asr_service: None,
-            ai_service: None,
+            repair: None,
         };
         let (id, _) = state.enqueue(plan.clone(), None).unwrap();
         let draft = state.draft_mut().unwrap();
@@ -1121,7 +1111,7 @@ mod tests {
             completed_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_some()
         );
         state.task_mut(&id).unwrap().state = workspace::TaskState::Complete;
-        state.prepare_next_import("https://www.bilibili.com/video/BVnext", Default::default());
+        state.prepare_next_import("https://www.bilibili.com/video/BVnext");
         assert!(
             completed_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_none()
         );
@@ -1135,7 +1125,7 @@ mod tests {
             online: true,
             ..Default::default()
         };
-        let mut draft = workspace::Draft::new(true, "library".into(), Default::default());
+        let mut draft = workspace::Draft::new(true);
         draft.change_source(source.input.clone());
         draft.source = Some(source.clone());
         draft.submitted_task = Some("original".into());
@@ -1149,9 +1139,7 @@ mod tests {
                 library_id: "library".into(),
                 folder: None,
                 subtitle: None,
-                config: planned_config(),
-                asr_service: None,
-                ai_service: None,
+                repair: None,
             },
             state: workspace::TaskState::Uncertain,
             intent: workspace::Intent::Pause,
@@ -1169,6 +1157,10 @@ mod tests {
             unread: false,
             resend: Vec::new(),
             replaced_by: None,
+            rework: None,
+            rework_accepted: None,
+            ai_answered_by: Vec::new(),
+            ran_with: None,
         };
         let mut recovery = original.clone();
         recovery.id = "recovery".into();
@@ -1188,10 +1180,69 @@ mod tests {
         (draft, vec![original, recovery])
     }
 
+    /// Previewed under speech recognition, a video's subtitles were not read; with
+    /// Settings back on subtitles its first track is, and until then nothing starts.
+    #[test]
+    fn a_track_is_read_when_settings_turn_back_to_subtitles() {
+        use c2m_source::subtitle::{SubtitleKind, SubtitleOrigin, SubtitleTrack};
+        let track = SubtitleTrack {
+            id: "video:embedded:2".into(),
+            language: Some("zh".into()),
+            name: None,
+            kind: SubtitleKind::Unknown,
+            translated: false,
+            origin: SubtitleOrigin::Embedded {
+                stream_index: 2,
+                codec: "mov_text".into(),
+            },
+            source_order: 0,
+        };
+        let source = source::Source {
+            subtitles: SubtitleEvidence::Found {
+                tracks: vec![track.clone()],
+                warning: None,
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            super::default_track_to_read(&source, TranscriptSource::Asr),
+            None
+        );
+        assert_eq!(
+            super::default_track_to_read(&source, TranscriptSource::Auto),
+            Some(track.clone())
+        );
+        let mut reading = source.clone();
+        reading.subtitle_request = Some(track);
+        assert_eq!(
+            super::default_track_to_read(&reading, TranscriptSource::Auto),
+            None
+        );
+    }
+
+    #[test]
+    fn a_video_reopened_from_a_waiting_task_names_it_until_it_is_replaced() {
+        let (mut draft, mut tasks) = submitted_recovery_chain();
+        draft.retry_of = Some(tasks[1].id.clone());
+        tasks[1].handled_by = None;
+        tasks[1].state = workspace::TaskState::Paused;
+        assert_eq!(
+            super::waiting_retried_task(&draft, &tasks).unwrap().id,
+            tasks[1].id
+        );
+        // Finished, or already followed by another attempt: nothing to take the place of.
+        tasks[1].state = workspace::TaskState::Complete;
+        assert!(super::waiting_retried_task(&draft, &tasks).is_none());
+        tasks[1].state = workspace::TaskState::NeedsAttention;
+        tasks[1].handled_by = Some("later".into());
+        assert!(super::waiting_retried_task(&draft, &tasks).is_none());
+        draft.retry_of = None;
+        assert!(super::waiting_retried_task(&draft, &tasks).is_none());
+    }
+
     #[test]
     fn workbench_entry_retires_only_unchanged_terminal_inputs() {
         let (mut draft, mut tasks) = submitted_recovery_chain();
-        draft.title = tasks[0].plan.title.clone();
         for state in [
             workspace::TaskState::Complete,
             workspace::TaskState::Partial,
@@ -1219,17 +1270,8 @@ mod tests {
         }
         tasks[1].state = workspace::TaskState::Partial;
         let unchanged = draft.clone();
-        draft.title = "尚未提交的新名称".into();
-        assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
-        draft = unchanged.clone();
-        draft.options.keep_video = !draft.options.keep_video;
-        assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
-        // Vision without proofreading has no effect, so the plan does not record it.
-        draft = unchanged.clone();
-        draft.options.vision = !draft.options.vision;
-        assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_some());
-        draft = unchanged.clone();
-        draft.folder = Some(42);
+        // A subtitle file attached since is a change to keep.
+        draft.subtitle = Some("other.srt".into());
         assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
         draft = unchanged;
         assert!(super::retired_input_task(&draft, &tasks, "新视频").is_none());

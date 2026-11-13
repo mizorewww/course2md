@@ -43,11 +43,11 @@ macOS 也可以用 Homebrew 安装：`brew install --cask mizorewww/tap/course2m
 
 ### 添加视频
 
-在「主页」（启动后的首页，点左上角的 course2md 标志可返回）粘贴链接或拖入文件。course2md 会先读取视频信息，你可以确认标题、时长和处理选项后再开始转换。
+在「主页」（启动后的首页，点左上角的 course2md 标志可返回）粘贴链接或拖入文件。course2md 会先读取视频信息，你可以确认标题、时长和文字来源后再开始转换。笔记怎么生成（语音识别、AI 处理、导出格式）统一在「设置」中设定，每次转换都使用开始处理时的设置。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/zh/home-dark.png">
-  <img src="docs/images/zh/home-light.png" alt="主页：已预览的视频及其处理选项">
+  <img src="docs/images/zh/home-light.png" alt="主页：已预览的视频">
 </picture>
 
 ### 阅读、查找和复制

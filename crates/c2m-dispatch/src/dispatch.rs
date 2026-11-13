@@ -224,6 +224,8 @@ struct Ledger {
     locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     /// Sending/Uncertain receipts by stable id: read from disk once, then kept in step by `save`.
     unresolved: Mutex<Option<HashMap<String, Receipt>>>,
+    /// The service versions of the receipts on disk when first needed.
+    versions: Mutex<Option<std::collections::BTreeSet<String>>>,
 }
 
 /// How often safe boundaries re-read the task control file.
@@ -409,6 +411,7 @@ impl Ledger {
             parent: None,
             locks: Mutex::new(HashMap::new()),
             unresolved: Mutex::new(None),
+            versions: Mutex::new(None),
         }
     }
     fn control(&self) -> Result<Control> {
@@ -512,6 +515,28 @@ impl Ledger {
         }
         Ok(())
     }
+    /// The other service versions this task's saved requests were sent with.
+    fn earlier_versions(&self, current: &str) -> std::result::Result<Vec<String>, Failure> {
+        let mut versions = self.versions.lock().map_err(Failure::local)?;
+        if versions.is_none() {
+            let all = match &self.receipts {
+                Some(dir) => read_receipts(dir).map_err(Failure::local)?,
+                None => Vec::new(),
+            };
+            *versions = Some(
+                all.into_iter()
+                    .map(|receipt| receipt.service_version)
+                    .collect(),
+            );
+        }
+        Ok(versions
+            .as_ref()
+            .into_iter()
+            .flatten()
+            .filter(|version| version.as_str() != current)
+            .cloned()
+            .collect())
+    }
     fn unresolved_receipts(&self) -> std::result::Result<Vec<Receipt>, Failure> {
         let mut index = self.unresolved.lock().map_err(Failure::local)?;
         if index.is_none() {
@@ -558,6 +583,22 @@ impl Ledger {
             for payload in former {
                 let id = id_of(payload)?;
                 if self.load(&id)?.is_some() {
+                    stable_id = id;
+                    break;
+                }
+            }
+        }
+        // A task runs with the settings current when it starts, so a resumed task
+        // may name another version of its service than the one its finished requests
+        // went to. The same request to the same endpoint was already paid for and
+        // answered: its saved result is used instead of sending it again.
+        if self.load(&stable_id)?.is_none() {
+            for version in self.earlier_versions(&service_version)? {
+                let id = json_digest(&serde_json::json!({"service_version":version,"purpose":purpose,"endpoint":endpoint,"payload":identity})).map_err(Failure::local)?;
+                if self
+                    .load(&id)?
+                    .is_some_and(|receipt| receipt.state == State::Completed)
+                {
                     stable_id = id;
                     break;
                 }
@@ -1723,6 +1764,62 @@ mod tests {
         assert!(cached.replayed);
         assert_eq!(cached.value, result.value);
     }
+    /// A task resumed with another version of its service (the settings changed
+    /// while it was paused) does not pay again for a request it already has the
+    /// answer to; a request the new version changes is sent.
+    #[test]
+    fn a_finished_request_is_not_sent_again_under_another_service_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let payload = serde_json::json!({"model":"m","text":"lesson"});
+        let first = Ledger::new(
+            dir.path(),
+            None,
+            &[("llm".to_owned(), "version-1".to_owned())].into(),
+        )
+        .unwrap();
+        let answered = first
+            .send(
+                "llm",
+                "proofreading",
+                "https://example.test",
+                &payload,
+                success,
+                |_| Ok(()),
+            )
+            .unwrap();
+        assert!(!answered.replayed);
+        let resumed = Ledger::new(
+            dir.path(),
+            None,
+            &[("llm".to_owned(), "version-2".to_owned())].into(),
+        )
+        .unwrap();
+        let replay = resumed
+            .send(
+                "llm",
+                "proofreading",
+                "https://example.test",
+                &payload,
+                || panic!("an identical finished request must not be paid for again"),
+                |_| Ok(()),
+            )
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.value, answered.value);
+        // Another model is another request.
+        let changed = resumed
+            .send(
+                "llm",
+                "proofreading",
+                "https://example.test",
+                &serde_json::json!({"model":"other","text":"lesson"}),
+                success,
+                |_| Ok(()),
+            )
+            .unwrap();
+        assert!(!changed.replayed);
+    }
+
     #[test]
     fn durable_sending_and_protocol_failure_are_not_automatic_retries() {
         let dir = tempfile::tempdir().unwrap();

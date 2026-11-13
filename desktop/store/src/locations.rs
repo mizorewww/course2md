@@ -294,7 +294,6 @@ pub fn relocate_preview(preview: &mut crate::notes::Preview, old: &Path, new: &P
 mod tests {
     use super::{LocationChecks, inspect_location, relocate_preview, scan_locations};
     use crate::{storage, workspace};
-    use desktop_prefs::conversion::ConversionOptions;
     use std::{path::PathBuf, sync::atomic::AtomicBool};
 
     fn inspect_relocation(
@@ -372,12 +371,8 @@ mod tests {
         std::fs::remove_dir_all(&work).unwrap();
         let old = old.canonicalize().unwrap();
         let record = directory.path().join("workspace.json");
-        let mut workspace = workspace::Workspace::open_at_inline(
-            record.clone(),
-            old.clone(),
-            ConversionOptions::default(),
-        )
-        .unwrap();
+        let mut workspace =
+            workspace::Workspace::open_at_inline(record.clone(), old.clone()).unwrap();
         let id = workspace.state.default_library.clone();
         let source = workspace::Source {
             input: old.join("video.mp4").display().to_string(),
@@ -390,9 +385,6 @@ mod tests {
         draft.input = source.input.clone();
         draft.online = false;
         draft.source = Some(source.clone());
-        draft.title = "Keep my custom title".into();
-        draft.custom_title = true;
-        draft.folder = Some(7);
         let draft_id = draft.id.clone();
         let plan = workspace::TaskPlan {
             operation: c2m_engine::execution::Operation::Generate,
@@ -402,14 +394,17 @@ mod tests {
             library_id: id.clone(),
             folder: Some(7),
             subtitle: None,
-            config: c2m_config::settings::ConfigFile::default(),
-            asr_service: Some("fixed-service-version".into()),
-            ai_service: None,
+            repair: None,
         };
         let (task_id, _) = workspace.state.enqueue(plan, None).unwrap();
         let task = workspace.state.task_mut(&task_id).unwrap();
         task.state = workspace::TaskState::Uncertain;
         task.intent = workspace::Intent::Pause;
+        task.ran_with = Some(workspace::RunSettings::new(
+            &Default::default(),
+            Some("fixed-service-version".into()),
+            None,
+        ));
         let work = task.work_dir.clone();
         workspace
             .state
@@ -446,8 +441,6 @@ mod tests {
         assert_eq!(state.library(&id).unwrap().root, new);
         assert_eq!(state.default_library, id);
         assert_eq!(state.current_draft, draft_id);
-        assert_eq!(state.draft().unwrap().title, "Keep my custom title");
-        assert_eq!(state.draft().unwrap().folder, Some(7));
         assert_eq!(
             state.draft().unwrap().input,
             new.join("video.mp4").display().to_string()
@@ -456,7 +449,7 @@ mod tests {
         assert_eq!(task.state, workspace::TaskState::Uncertain);
         assert_eq!(task.intent, workspace::Intent::Pause);
         assert_eq!(
-            task.plan.asr_service.as_deref(),
+            task.ran_with.as_ref().unwrap().asr_service.as_deref(),
             Some("fixed-service-version")
         );
         assert_eq!(state.reader_sources["inside"], new.join("video.mp4"));
@@ -482,9 +475,7 @@ mod tests {
         assert!(preview.course.dir.starts_with(&new));
         let reread = crate::notes::read_preview(preview.course).unwrap();
         assert_eq!(reread.plain_text, original_text);
-        let reopened =
-            workspace::Workspace::open_at_inline(record, old.clone(), ConversionOptions::default())
-                .unwrap();
+        let reopened = workspace::Workspace::open_at_inline(record, old.clone()).unwrap();
         assert_eq!(reopened.state.library(&id).unwrap().root, new);
         assert!(
             reopened
@@ -507,12 +498,9 @@ mod tests {
         let target = directory.path().join("target");
         std::fs::create_dir(&old).unwrap();
         std::fs::create_dir(&target).unwrap();
-        let workspace = workspace::Workspace::open_at_inline(
-            directory.path().join("workspace.json"),
-            old,
-            ConversionOptions::default(),
-        )
-        .unwrap();
+        let workspace =
+            workspace::Workspace::open_at_inline(directory.path().join("workspace.json"), old)
+                .unwrap();
         workspace.save().unwrap();
         let id = workspace.state.default_library.clone();
         let before = std::fs::read(workspace.storage_path()).unwrap();
@@ -549,12 +537,9 @@ mod tests {
         let target = directory.path().join("target");
         std::fs::create_dir(&old).unwrap();
         std::fs::create_dir(&target).unwrap();
-        let mut workspace = workspace::Workspace::open_at_inline(
-            directory.path().join("workspace.json"),
-            old,
-            ConversionOptions::default(),
-        )
-        .unwrap();
+        let mut workspace =
+            workspace::Workspace::open_at_inline(directory.path().join("workspace.json"), old)
+                .unwrap();
         let id = workspace.state.default_library.clone();
         std::fs::write(target.join(".course2md-library-id"), &id).unwrap();
         let located = inspect_relocation(&workspace.state, &id, &target).unwrap();
@@ -590,12 +575,8 @@ mod tests {
         let target = directory.path().join("target");
         std::fs::create_dir(&old).unwrap();
         let record = directory.path().join("workspace.json");
-        let mut workspace = workspace::Workspace::open_at_inline(
-            record.clone(),
-            old.clone(),
-            ConversionOptions::default(),
-        )
-        .unwrap();
+        let mut workspace =
+            workspace::Workspace::open_at_inline(record.clone(), old.clone()).unwrap();
         workspace.save().unwrap();
         let id = workspace.state.default_library.clone();
         let before = workspace.state.clone();
@@ -755,12 +736,8 @@ mod tests {
         let old = std::fs::canonicalize(old).unwrap();
         let new = std::fs::canonicalize(new).unwrap();
         let record_path = directory.path().join("workspace.json");
-        let mut workspace = workspace::Workspace::open_at_inline(
-            record_path.clone(),
-            old.clone(),
-            ConversionOptions::default(),
-        )
-        .unwrap();
+        let mut workspace =
+            workspace::Workspace::open_at_inline(record_path.clone(), old.clone()).unwrap();
         let library_id = workspace.state.default_library.clone();
         let mut source = workspace::Source {
             input: old.join("media/video.mp4").display().to_string(),
@@ -774,9 +751,6 @@ mod tests {
         draft.online = false;
         draft.input = source.input.clone();
         draft.source = Some(source.clone());
-        draft.title = "My custom title".into();
-        draft.custom_title = true;
-        draft.folder = Some(17);
         let original_draft_id = draft.id.clone();
         let mut config = c2m_config::settings::ConfigFile::default();
         config.defaults.model_dir = Some(old.join("models"));
@@ -793,16 +767,18 @@ mod tests {
             library_id: library_id.clone(),
             folder: Some(17),
             subtitle: Some(old.join("subtitles/selected.srt")),
-            config,
-            asr_service: Some("fixed-asr-version".into()),
-            ai_service: Some("fixed-ai-version".into()),
+            repair: None,
         };
         let (task_id, _) = workspace.state.enqueue(plan, None).unwrap();
+        workspace.state.task_mut(&task_id).unwrap().ran_with = Some(workspace::RunSettings::new(
+            &config,
+            Some("fixed-asr-version".into()),
+            None,
+        ));
         let old_task_work = workspace.state.task(&task_id).unwrap().work_dir.clone();
         source.input = directory.path().join("outside.mp4").display().to_string();
         let outside_input = source.input.clone();
-        let mut outside_draft =
-            workspace::Draft::new(false, library_id.clone(), ConversionOptions::default());
+        let mut outside_draft = workspace::Draft::new(false);
         outside_draft.input = outside_input.clone();
         outside_draft.source = Some(source);
         workspace
@@ -842,12 +818,8 @@ mod tests {
             assert!(failed.is_err());
             assert_eq!(workspace.state.library(&library_id).unwrap().root, old);
         }
-        let before_commit = workspace::Workspace::open_at_inline(
-            record_path.clone(),
-            old.clone(),
-            ConversionOptions::default(),
-        )
-        .unwrap();
+        let before_commit =
+            workspace::Workspace::open_at_inline(record_path.clone(), old.clone()).unwrap();
         assert_eq!(before_commit.state.library(&library_id).unwrap().root, old);
         assert_eq!(
             before_commit.state.task(&task_id).unwrap().work_dir,
@@ -856,12 +828,7 @@ mod tests {
         workspace
             .transaction(|state| storage::publish_move(state, &prepared))
             .unwrap();
-        let mut reopened = workspace::Workspace::open_at_inline(
-            record_path,
-            old.clone(),
-            ConversionOptions::default(),
-        )
-        .unwrap();
+        let mut reopened = workspace::Workspace::open_at_inline(record_path, old.clone()).unwrap();
         let state = &reopened.state;
         let lagging: storage::Journal =
             serde_json::from_slice(&std::fs::read(&prepared.path).unwrap()).unwrap();
@@ -880,9 +847,6 @@ mod tests {
             .iter()
             .find(|draft| draft.id == original_draft_id)
             .unwrap();
-        assert_eq!(draft.library_id, library_id);
-        assert_eq!(draft.folder, Some(17));
-        assert_eq!(draft.title, "My custom title");
         assert_eq!(
             draft.input,
             new.join("media/video.mp4").display().to_string()
@@ -894,11 +858,9 @@ mod tests {
         assert_eq!(state.drafts.len(), 1);
         let task = state.task(&task_id).unwrap();
         assert_eq!(task.plan.title, "Frozen title");
-        assert_eq!(task.plan.asr_service.as_deref(), Some("fixed-asr-version"));
-        assert_eq!(
-            task.plan.config.defaults.model_dir,
-            Some(new.join("models"))
-        );
+        let ran_with = task.ran_with.as_ref().unwrap();
+        assert_eq!(ran_with.asr_service.as_deref(), Some("fixed-asr-version"));
+        assert_eq!(ran_with.config.defaults.model_dir, Some(new.join("models")));
         assert_eq!(
             task.work_dir,
             new.join(old_task_work.strip_prefix(&old).unwrap())
@@ -952,12 +914,9 @@ mod tests {
         let second = directory.path().join("second");
         std::fs::create_dir_all(&first).unwrap();
         std::fs::create_dir_all(&second).unwrap();
-        let mut workspace = workspace::Workspace::open_at_inline(
-            directory.path().join("workspace.json"),
-            first,
-            ConversionOptions::default(),
-        )
-        .unwrap();
+        let mut workspace =
+            workspace::Workspace::open_at_inline(directory.path().join("workspace.json"), first)
+                .unwrap();
         workspace.state.libraries.push(workspace::LibraryLocation {
             id: "other".into(),
             name: "Other library".into(),

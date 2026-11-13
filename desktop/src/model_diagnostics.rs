@@ -302,8 +302,11 @@ impl Desktop {
         task: &crate::workspace::TaskRecord,
         cx: &mut Context<Self>,
     ) {
-        let request =
-            desktop_tasks::task_view::task_model_request(task, self.recommended_local_provider());
+        let request = desktop_tasks::task_view::task_model_request(
+            &self.preferences,
+            task,
+            self.recommended_local_provider(),
+        );
         self.begin_model_preparation(request, true, cx);
     }
     fn begin_model_preparation(
@@ -376,6 +379,7 @@ impl Desktop {
             .workspace(cx)
             .map(|workspace| {
                 desktop_tasks::task_view::tasks_awaiting_model(
+                    &self.preferences,
                     &workspace.state.tasks,
                     request,
                     fallback,

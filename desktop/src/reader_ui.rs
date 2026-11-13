@@ -2509,15 +2509,19 @@ impl ReaderPage {
             .manifest
             .as_ref()
             .and_then(|manifest| self.workspace(cx)?.state.task(&manifest.task_id));
-        if let Some(task) = task {
-            let defaults = &task.plan.config.defaults;
-            if let Some(subtitle) = &task.plan.source.selected_subtitle {
-                details.push((
-                    course2md::tr!("所选字幕"),
-                    symbols::subtitles(),
-                    subtitle.label.clone(),
-                ));
-            }
+        if let Some(subtitle) = task.and_then(|task| task.plan.source.selected_subtitle.as_ref()) {
+            details.push((
+                course2md::tr!("所选字幕"),
+                symbols::subtitles(),
+                subtitle.label.clone(),
+            ));
+        }
+        // What the note was made with: the settings its task's run used.
+        if let Some(config) = task
+            .and_then(|task| task.ran_with.as_ref())
+            .map(|ran_with| &ran_with.config)
+        {
+            let defaults = &config.defaults;
             if defaults.transcript_source == Some(course2md::config::TranscriptSource::Asr) {
                 if let Some(model) = &defaults.asr_model {
                     details.push((
@@ -2534,11 +2538,11 @@ impl ReaderPage {
                     ));
                 }
             }
-            if task.plan.config.llm.uses_service() {
+            if config.llm.uses_service() {
                 details.push((
                     course2md::tr!("AI 模型"),
                     symbols::auto_fix_high(),
-                    task.plan.config.llm.model.clone(),
+                    config.llm.model.clone(),
                 ));
             }
         }

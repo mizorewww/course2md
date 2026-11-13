@@ -497,7 +497,7 @@ impl Desktop {
                 course2md::tr!("移动到…"),
                 symbols::drive_file_move(),
                 |this, course, _, cx| {
-                    let root = this.folder_context(Some(course.dir.clone()), cx).root;
+                    let root = this.folder_context(course.dir.clone(), cx).root;
                     this.begin_move(root, Moving::Note(course.dir.clone()), cx)
                 },
             ),
@@ -2085,6 +2085,12 @@ impl Desktop {
     fn workbench_attention_tasks(&self, cx: &App) -> Vec<crate::workspace::TaskRecord> {
         use crate::workspace::TaskState;
         let linked = self.current_input_task(cx).map(|task| task.id.clone());
+        // A task the video card above offers to continue is decided there, once.
+        let reopened = self.workspace(cx).and_then(|workspace| {
+            let state = &workspace.state;
+            desktop_tasks::import::waiting_retried_task(state.draft()?, &state.tasks)
+                .map(|task| task.id.clone())
+        });
         let mut attention: Vec<_> = self
             .records
             .read(cx)
@@ -2093,6 +2099,7 @@ impl Desktop {
             .flat_map(|workspace| &workspace.state.tasks)
             .filter(|task| {
                 Some(&task.id) != linked.as_ref()
+                    && Some(&task.id) != reopened.as_ref()
                     && task.handled_by.is_none()
                     && (matches!(
                         task.state,

@@ -43,11 +43,11 @@ On macOS you can also install it with Homebrew: `brew install --cask mizorewww/t
 
 ### Add a video
 
-Paste a link or drag a file onto **Home**, the start page (click the course2md logo to return to it). course2md reads the video first, so you can check the title, length and processing options before anything is converted.
+Paste a link or drag a file onto **Home**, the start page (click the course2md logo to return to it). course2md reads the video first, so you can check the title, length and where its text comes from before anything is converted. How notes are made (speech recognition, AI processing, exports) is set once in **Settings**, and every conversion uses the settings current when it starts.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/en/home-dark.png">
-  <img src="docs/images/en/home-light.png" alt="Home page with a previewed video and its processing options">
+  <img src="docs/images/en/home-light.png" alt="Home page with a previewed video">
 </picture>
 
 ### Read, find and copy

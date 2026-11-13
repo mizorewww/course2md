@@ -623,9 +623,7 @@ mod tests {
                 library_id: "library-1".into(),
                 folder: None,
                 subtitle: None,
-                config: Default::default(),
-                asr_service: None,
-                ai_service: None,
+                repair: None,
             },
             state,
             intent: Intent::Run,
@@ -643,6 +641,10 @@ mod tests {
             unread: false,
             resend: vec![],
             replaced_by: None,
+            rework: None,
+            rework_accepted: None,
+            ai_answered_by: Vec::new(),
+            ran_with: None,
         };
         let busy = super::note_has_unfinished_task;
         let running = [task(TaskState::Running)];

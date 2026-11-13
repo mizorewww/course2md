@@ -14,7 +14,7 @@ Ask when the app cannot determine the intended video, when an explicit choice ca
 
 ## Defaults and first use
 
-Choose useful defaults before adding a setting or an explanation. Configure reusable capabilities once; expose per-task overrides only when they help the current intent. Clearly distinguish changes for future work from changes to the current input. Do not require users to understand service revision IDs or task serialization to make that distinction.
+Choose useful defaults before adding a setting or an explanation. Configure reusable capabilities once, in Settings, which every conversion uses as they are when its work starts; do not add per-task or per-video copies of processing options. Say that a change applies to the next work that runs, waiting tasks included. Do not require users to understand service revision IDs or task serialization.
 
 Use first-use guidance to help people reach value with real content. It can combine a concise introduction, relevant capability choices and contextual help; choose the form from the actual task. Allow skipping, retain completed choices, and provide a way to revisit guidance without repeating it on every launch. Download or account setup should be relevant to the chosen capability, with truthful status and an opportunity to stop. An existing working configuration should not be erased or subjected to another compulsory setup flow.
 

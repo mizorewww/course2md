@@ -575,7 +575,6 @@ pub enum TaskAction {
     Adjust,
     Cancel,
     ViewTask,
-    NextVideo,
 }
 
 /// What a person came to the task for: where a card puts its one filled button.
@@ -605,17 +604,10 @@ pub fn lead_action<'a>(
             .then(|| actions.iter().find(|action| **action == TaskAction::Adjust))
             .flatten()
     };
-    // A running task has nothing to decide, so its next step is the next video.
-    let working = runs_in_card(task);
-    read.or_else(recovery).or_else(adjust).or_else(|| {
-        actions
-            .iter()
-            .find(|action| home && working && **action == TaskAction::NextVideo)
-    })
+    read.or_else(recovery).or_else(adjust)
 }
 
-/// A task still working carries the way to the next video on its card; otherwise it
-/// sits right under the options panel's header.
+/// A task still working: its card shows the step it is on.
 pub fn runs_in_card(task: &TaskRecord) -> bool {
     !task.state.finished() && task.state != TaskState::Uncertain && !task.has_uncertain()
 }
@@ -665,13 +657,15 @@ pub fn task_note_failures(
     }
 }
 
-/// The speech model `task` runs with: its own choice, or `fallback`'s default model
-/// where it names no engine.
+/// The speech model `task` runs with now: the one Settings name, or `fallback`'s
+/// default model where they name no engine.
 pub fn task_model_request(
+    preferences: &desktop_prefs::preferences::Store,
     task: &TaskRecord,
     fallback: c2m_config::config::AsrProvider,
 ) -> desktop_prefs::model_status::Request {
-    let defaults = &task.plan.config.defaults;
+    let config = crate::run::current_config(preferences, &task.plan, fallback);
+    let defaults = &config.defaults;
     desktop_prefs::model_status::Request::new(
         defaults.provider.unwrap_or(fallback),
         defaults.asr_model.as_deref(),
@@ -679,10 +673,11 @@ pub fn task_model_request(
     )
 }
 
-/// The tasks that stopped only because `request`'s model was not there, and continue
-/// once it is ready. A task the person paused, cancelled or continued in the
-/// meantime has left that state, and one stopped for another model waits for that.
+/// The tasks that stopped only because a speech model was not there and continue
+/// once `request`'s, the one they run with now, is ready. A task the person paused,
+/// cancelled or continued in the meantime has left that state.
 pub fn tasks_awaiting_model(
+    preferences: &desktop_prefs::preferences::Store,
     tasks: &[TaskRecord],
     request: &desktop_prefs::model_status::Request,
     fallback: c2m_config::config::AsrProvider,
@@ -695,7 +690,7 @@ pub fn tasks_awaiting_model(
                 && task.handled_by.is_none()
                 && !task.held
                 && !task.has_uncertain()
-                && task_model_request(task, fallback) == *request
+                && task_model_request(preferences, task, fallback) == *request
         })
         .map(|task| task.id.clone())
         .collect()
@@ -706,13 +701,15 @@ pub fn resumable(task: &TaskRecord) -> bool {
     task.state == TaskState::Paused && task.handled_by.is_none() && !task.has_uncertain()
 }
 
+/// What reopening a task's video on Home is for: regenerating its note, or another
+/// attempt with the current settings.
 pub fn adjust_label(task: &TaskRecord) -> &'static str {
     if task.artifact.is_some() {
-        c2m_i18n::tr!("调整并重新生成")
+        c2m_i18n::tr!("在主页重新生成")
     } else if task.state == TaskState::Paused {
-        c2m_i18n::tr!("调整选项")
+        c2m_i18n::tr!("在主页重新打开")
     } else {
-        c2m_i18n::tr!("调整后重试")
+        c2m_i18n::tr!("在主页重试")
     }
 }
 
@@ -738,16 +735,36 @@ pub fn task_log_text(task: &TaskRecord) -> Option<String> {
     (!text.trim().is_empty()).then_some(text)
 }
 
-pub fn task_text_source(task: &TaskRecord) -> &'static str {
-    if task.plan.options().source_mode != TranscriptSource::Asr
-        && task.plan.source.selected_subtitle.is_some()
-    {
-        c2m_i18n::tr!("视频字幕")
-    } else if task.plan.options().uses_cloud_provider() {
-        c2m_i18n::tr!("语音识别服务")
-    } else {
-        c2m_i18n::tr!("本机识别")
+/// The AI services a task's text goes to: while it works, the one its run uses; once
+/// it has finished, those whose answers its results are (an answer replayed from an
+/// earlier service keeps that service), never one that produced none of them.
+pub fn ai_producers(task: &TaskRecord) -> Vec<&str> {
+    if task.state.finished() || task.state == TaskState::Uncertain {
+        return task.ai_answered_by.iter().map(String::as_str).collect();
     }
+    task.ran_with
+        .as_ref()
+        .filter(|ran_with| ran_with.config.llm.uses_service())
+        .and_then(|ran_with| ran_with.ai_service.as_deref())
+        .into_iter()
+        .collect()
+}
+
+/// Where the text of a task's latest run came from; `None` before it ran.
+pub fn task_text_source(task: &TaskRecord) -> Option<&'static str> {
+    let options = task.ran_with.as_ref()?.options();
+    Some(
+        if options.source_mode == TranscriptSource::Subtitle
+            || (options.source_mode != TranscriptSource::Asr
+                && task.plan.source.selected_subtitle.is_some())
+        {
+            c2m_i18n::tr!("视频字幕")
+        } else if options.uses_cloud_provider() {
+            c2m_i18n::tr!("语音识别服务")
+        } else {
+            c2m_i18n::tr!("本机识别")
+        },
+    )
 }
 
 pub fn task_status_label(task: &TaskRecord) -> String {
@@ -876,7 +893,7 @@ impl TaskAction {
             | Self::OpenExports
             | Self::OpenSource
             | Self::CopyLink => 0,
-            Self::Details | Self::Log | Self::Followup(_) | Self::ViewTask | Self::NextVideo => 1,
+            Self::Details | Self::Log | Self::Followup(_) | Self::ViewTask => 1,
             Self::Move { .. } => 2,
             Self::Cancel => 4,
             _ => 3,
@@ -1067,16 +1084,13 @@ pub fn task_actions_for(
                     actions.push(Read);
                 }
                 // The rest stays behind ⋯: this card is one step of the workbench. A
-                // task whose service is gone keeps 调整后重试, its only way on.
+                // task whose service is gone keeps 在主页重试, its only way on.
                 if recovery.len() > 1 && !services_missing {
                     recovery.retain(|action| *action != Adjust);
                 }
                 actions.extend(recovery);
             }
             actions.push(ViewTask);
-            if runs_in_card(task) {
-                actions.push(NextVideo);
-            }
         }
     }
     actions
@@ -1235,9 +1249,7 @@ mod tests {
                 library_id: "library".into(),
                 folder: None,
                 subtitle: None,
-                config: Default::default(),
-                asr_service: None,
-                ai_service: None,
+                repair: None,
             },
             state: desktop_store::workspace::TaskState::Paused,
             intent: desktop_store::workspace::Intent::Run,
@@ -1255,6 +1267,10 @@ mod tests {
             unread: false,
             resend: Vec::new(),
             replaced_by: None,
+            rework: None,
+            rework_accepted: None,
+            ai_answered_by: Vec::new(),
+            ran_with: None,
         }
     }
 
@@ -1294,7 +1310,7 @@ mod tests {
         use super::{TaskAction as Action, TaskSurface, lead_action};
         let mut task = task_record("task");
         task.state = TaskState::Partial;
-        let home = [Action::Read, Action::Repair, Action::NextVideo];
+        let home = [Action::Read, Action::Repair, Action::ViewTask];
         assert_eq!(
             lead_action(&home, &task, TaskSurface::Home),
             Some(&Action::Read)
@@ -1303,15 +1319,13 @@ mod tests {
             lead_action(&home, &task, TaskSurface::Card),
             Some(&Action::Repair)
         );
+        // A running task has nothing to decide: the link field above takes the next video.
         task.state = TaskState::Running;
-        let running = [Action::Cancel, Action::ViewTask, Action::NextVideo];
-        assert_eq!(
-            lead_action(&running, &task, TaskSurface::Home),
-            Some(&Action::NextVideo)
-        );
+        let running = [Action::Cancel, Action::ViewTask];
+        assert_eq!(lead_action(&running, &task, TaskSurface::Home), None);
         // The resend button in the card's own block is that decision's one main action.
         task.state = TaskState::Uncertain;
-        let uncertain = [Action::Adjust, Action::ViewTask, Action::NextVideo];
+        let uncertain = [Action::Adjust, Action::ViewTask];
         assert_eq!(lead_action(&uncertain, &task, TaskSurface::Home), None);
     }
 
@@ -1524,17 +1538,25 @@ mod tests {
         assert_eq!(task_error_summary_in(&task, Lang::En).unwrap(), "其他错误");
     }
 
-    /// Once the model a task stopped for is ready, that task continues; one the
-    /// person paused or cancelled meanwhile does not, nor one waiting for another model.
+    /// Once the model a task would run with is ready, a task that stopped for a
+    /// model continues; one the person paused or cancelled meanwhile does not, nor
+    /// one when Settings name another model.
     #[test]
     fn tasks_stopped_for_a_model_continue_once_it_is_ready() {
         use super::{task_model_request, tasks_awaiting_model};
-        use c2m_config::config::AsrProvider;
+        use c2m_config::config::{AsrProvider, TranscriptSource};
         use c2m_protocol::progress::{ErrorCode, Event};
-        let stopped = |id: &str, model: Option<&str>| {
+        let dir = tempfile::tempdir().unwrap();
+        let mut preferences = desktop_prefs::preferences::Store::open(
+            dir.path().join("preferences"),
+            std::sync::Arc::new(desktop_prefs::credentials::MemoryCredentialVault::new()),
+        );
+        let mut settings = preferences.generation().clone();
+        settings.options.provider = Some(AsrProvider::Gpu);
+        settings.options.transcript_source = Some(TranscriptSource::Asr);
+        preferences.save_generation(settings.clone()).unwrap();
+        let stopped = |id: &str| {
             let mut task = task_record(id);
-            task.plan.config.defaults.provider = Some(AsrProvider::Gpu);
-            task.plan.config.defaults.asr_model = model.map(str::to_owned);
             task.state = TaskState::NeedsAttention;
             task.events.apply(&Event::Error {
                 message: "识别模型尚未下载".into(),
@@ -1544,41 +1566,38 @@ mod tests {
             });
             task
         };
-        let waiting = stopped("waiting", None);
-        let mut paused = stopped("paused", None);
+        let waiting = stopped("waiting");
+        let mut paused = stopped("paused");
         paused.state = TaskState::Paused;
-        let mut cancelled = stopped("cancelled", None);
+        let mut cancelled = stopped("cancelled");
         cancelled.state = TaskState::Cancelled;
-        let mut continued = stopped("continued", None);
+        let mut continued = stopped("continued");
         continued.state = TaskState::Queued;
-        let mut other_failure = stopped("other-failure", None);
+        let mut other_failure = stopped("other-failure");
         other_failure.events.apply(&Event::Error {
             message: "其他错误".into(),
             code: ErrorCode::Other,
             parts: Vec::new(),
             path: None,
         });
-        let request = task_model_request(&waiting, AsrProvider::Coreml);
-        let mut other_model = stopped("other-model", None);
-        other_model.plan.config.defaults.provider = Some(AsrProvider::Coreml);
-        let tasks = [
-            waiting,
-            paused,
-            cancelled,
-            continued,
-            other_failure,
-            other_model,
-        ];
+        let request = task_model_request(&preferences, &waiting, AsrProvider::Coreml);
+        let tasks = [waiting, paused, cancelled, continued, other_failure];
         assert_eq!(
-            tasks_awaiting_model(&tasks, &request, AsrProvider::Coreml),
+            tasks_awaiting_model(&preferences, &tasks, &request, AsrProvider::Coreml),
             ["waiting"]
         );
-        // A task naming no engine waits for the one this machine would use.
-        let mut unnamed = stopped("unnamed", None);
-        unnamed.plan.config.defaults.provider = None;
+        // Settings now name another engine: what was prepared is not what it needs.
+        settings.options.provider = Some(AsrProvider::Coreml);
+        preferences.save_generation(settings.clone()).unwrap();
+        assert!(
+            tasks_awaiting_model(&preferences, &tasks, &request, AsrProvider::Coreml).is_empty()
+        );
+        // Settings naming no engine wait for the one this machine would use.
+        settings.options.provider = None;
+        preferences.save_generation(settings).unwrap();
         assert_eq!(
-            tasks_awaiting_model(&[unnamed], &request, AsrProvider::Gpu),
-            ["unnamed"]
+            tasks_awaiting_model(&preferences, &tasks, &request, AsrProvider::Gpu),
+            ["waiting"]
         );
     }
 
@@ -1895,9 +1914,7 @@ mod tests {
                 library_id: "library".into(),
                 folder: None,
                 subtitle: None,
-                config: Default::default(),
-                asr_service: None,
-                ai_service: None,
+                repair: None,
             },
             state: TaskState::Partial,
             intent: Intent::Run,
@@ -1915,6 +1932,10 @@ mod tests {
             unread: false,
             resend: Vec::new(),
             replaced_by: None,
+            rework: None,
+            rework_accepted: None,
+            ai_answered_by: Vec::new(),
+            ran_with: None,
         };
         // The first recovery action in Recent Notes and every action in the
         // task cards must target actual incomplete work, never the first success.

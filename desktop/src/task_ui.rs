@@ -886,17 +886,28 @@ impl TasksPage {
         }
     }
 
-    /// Which service receives the text, when one does.
+    /// Which service received the text in the task's latest run, when one did.
+    /// The services whose answers the task's AI results are, which a result replayed
+    /// from an earlier service keeps: never a service that did not produce the text.
     fn task_ai_destination(&self, task: &TaskRecord) -> Option<String> {
-        let name = self.facts.services.get(
-            task.plan
-                .ai_service
-                .as_ref()
-                .filter(|_| task.plan.config.llm.uses_service())?,
-        )?;
+        let ran_with = task.ran_with.as_ref()?;
+        let names: Vec<&str> = desktop_tasks::task_view::ai_producers(task)
+            .into_iter()
+            .filter_map(|id| {
+                self.facts.services.get(id).map(String::as_str).or_else(|| {
+                    (ran_with.ai_service.as_deref() == Some(id))
+                        .then_some(ran_with.ai_service_name.as_deref())
+                        .flatten()
+                })
+            })
+            .collect();
+        if names.is_empty() {
+            return None;
+        }
+        let name = names.join(course2md::tr!("、"));
         Some(course2md::tr!(
             "{}发送到「{}」",
-            if task.plan.options().vision {
+            if ran_with.options().vision {
                 course2md::tr!("文字与截图")
             } else {
                 course2md::tr!("文字")
@@ -905,31 +916,9 @@ impl TasksPage {
         ))
     }
 
-    /// What a task was planned with, read from its saved plan: a submitted task's
-    /// options on the workbench, and the record in its details.
-    pub(crate) fn task_plan_rows(&self, task: &TaskRecord, flat: bool, cx: &App) -> Vec<Div> {
-        let options = task.plan.options();
-        let mut ai: Vec<String> = [
-            desktop_tasks::import::ConversionAiOption::Proofread,
-            desktop_tasks::import::ConversionAiOption::Summary,
-            desktop_tasks::import::ConversionAiOption::Vision,
-        ]
-        .into_iter()
-        .filter(|option| desktop_tasks::import::conversion_ai_option_enabled(&options, *option))
-        .map(|option| desktop_tasks::import::conversion_ai_option_label(option).to_owned())
-        .collect();
-        if options.translate.is_some() {
-            ai.push(course2md::tr!("双语翻译").to_owned());
-        }
-        let ai = if ai.is_empty() {
-            course2md::tr!("不使用 AI").to_owned()
-        } else {
-            ai.join(course2md::tr!("、"))
-        };
-        let ai = match self.task_ai_destination(task) {
-            Some(destination) => format!("{ai} · {destination}"),
-            None => ai,
-        };
+    /// Where a task saves, and, once it has run, what its latest run used: its
+    /// details on the task page.
+    pub(crate) fn task_detail_rows(&self, task: &TaskRecord, cx: &App) -> Vec<Div> {
         let library = self
             .workspace(cx)
             .and_then(|workspace| workspace.state.library(&task.plan.library_id));
@@ -950,29 +939,51 @@ impl TasksPage {
             None => folder,
         };
         let id = &task.id;
-        [
-            (
-                format!("task-destination-{id}"),
-                symbols::folder_open(),
-                course2md::tr!("保存到"),
-                destination,
-            ),
-            (
+        let mut rows = vec![(
+            format!("task-destination-{id}"),
+            symbols::folder_open(),
+            course2md::tr!("保存到"),
+            destination,
+        )];
+        if let (Some(ran_with), Some(source)) = (&task.ran_with, task_text_source(task)) {
+            let options = ran_with.options();
+            let mut ai: Vec<String> = [
+                desktop_tasks::import::ConversionAiOption::Proofread,
+                desktop_tasks::import::ConversionAiOption::Summary,
+                desktop_tasks::import::ConversionAiOption::Vision,
+            ]
+            .into_iter()
+            .filter(|option| desktop_tasks::import::conversion_ai_option_enabled(&options, *option))
+            .map(|option| desktop_tasks::import::conversion_ai_option_label(option).to_owned())
+            .collect();
+            if options.translate.is_some() {
+                ai.push(course2md::tr!("双语翻译").to_owned());
+            }
+            let ai = if ai.is_empty() {
+                course2md::tr!("不使用 AI").to_owned()
+            } else {
+                ai.join(course2md::tr!("、"))
+            };
+            let ai = match self.task_ai_destination(task) {
+                Some(destination) => format!("{ai} · {destination}"),
+                None => ai,
+            };
+            rows.push((
                 format!("task-text-source-{id}"),
                 symbols::subtitles(),
                 course2md::tr!("文字来源"),
-                task_text_source(task).to_owned(),
-            ),
-            (
+                source.to_owned(),
+            ));
+            rows.push((
                 format!("task-ai-{id}"),
                 symbols::auto_fix_high(),
                 course2md::tr!("AI 处理"),
                 ai,
-            ),
-        ]
-        .into_iter()
-        .map(|(id, icon, label, value)| ui::fact_row(id, (!flat).then_some(icon), label, value))
-        .collect()
+            ));
+        }
+        rows.into_iter()
+            .map(|(id, icon, label, value)| ui::fact_row(id, Some(icon), label, value))
+            .collect()
     }
 
     fn task_cover(&self, task: &TaskRecord, cx: &App) -> Option<PathBuf> {
@@ -1056,11 +1067,7 @@ impl TasksPage {
                     self.task_step_line(task, true, cx),
                 );
                 let head = self.task_card_head(task, place, chip, more, inner, facts);
-                (
-                    [true, true, false, false],
-                    head.into_any_element(),
-                    !in_column,
-                )
+                ([true; 4], head.into_any_element(), !in_column)
             }
         };
         let body = body.then(|| self.task_body(task, place, window, cx));
@@ -1076,7 +1083,7 @@ impl TasksPage {
             .clone();
         tile(outer)
             .map(|card| match place {
-                CardPlace::Home => card.rounded_t(RADIUS_HERO),
+                CardPlace::Home => card.rounded(RADIUS_HERO),
                 CardPlace::Open { .. } if outer == [true; 4] => card.rounded(RADIUS_HERO),
                 _ => card,
             })
@@ -1262,8 +1269,8 @@ impl TasksPage {
         let support = if home {
             desktop_tasks::import::source_metadata(&task.plan.source)
         } else {
-            [destination, task_text_source(task).to_owned()]
-                .into_iter()
+            std::iter::once(destination)
+                .chain(task_text_source(task).map(str::to_owned))
                 .chain(self.task_ai_destination(task))
                 .collect::<Vec<_>>()
                 .join(" · ")
@@ -1697,7 +1704,7 @@ impl TasksPage {
                 .child(MaterialDivider::new(SharedString::from(format!(
                     "task-detail-divider-{id}"
                 ))))
-                .children(self.task_plan_rows(task, false, cx))
+                .children(self.task_detail_rows(task, cx))
                 .children(
                     self.task_stage_rows(task, cx)
                         .into_iter()
@@ -1882,11 +1889,10 @@ impl TasksPage {
                 self.facts.storage_busy,
             ),
             TaskAction::Resend => (tr!("重新发送以上内容"), symbols::refresh(), false),
-            TaskAction::Adjust => (adjust_label(task), symbols::tune(), false),
+            TaskAction::Adjust => (adjust_label(task), symbols::home(), false),
             TaskAction::Cancel if cancelling => (tr!("正在取消…"), symbols::close(), true),
             TaskAction::Cancel => (tr!("取消任务"), symbols::close(), false),
             TaskAction::ViewTask => (tr!("查看任务"), symbols::task(), false),
-            TaskAction::NextVideo => (tr!("设置下一个视频"), symbols::add(), false),
         }
     }
 }
@@ -2107,9 +2113,7 @@ mod tests {
                 library_id: "library".into(),
                 folder: None,
                 subtitle: None,
-                config: Default::default(),
-                asr_service: None,
-                ai_service: None,
+                repair: None,
             },
             state: crate::workspace::TaskState::Paused,
             intent: crate::workspace::Intent::Run,
@@ -2127,6 +2131,10 @@ mod tests {
             unread: false,
             resend: Vec::new(),
             replaced_by: None,
+            rework: None,
+            rework_accepted: None,
+            ai_answered_by: Vec::new(),
+            ran_with: None,
         }
     }
 }

@@ -121,7 +121,10 @@ impl OfflineVideoRequest {
     ) -> Option<Self> {
         let manifest = course.manifest.as_ref()?;
         if !task.plan.source.online
-            || !task.plan.options().keep_video
+            || !task
+                .ran_with
+                .as_ref()
+                .is_some_and(|ran_with| ran_with.options().keep_video)
             || task.id != manifest.task_id
             || task.plan.source_id != manifest.source_id
             || task.artifact.as_ref() != Some(&course.dir)
@@ -754,15 +757,7 @@ mod tests {
                 library_id: library.id.clone(),
                 folder: None,
                 subtitle: None,
-                config: c2m_config::settings::ConfigFile {
-                    defaults: c2m_config::settings::Defaults {
-                        keep_video: Some(true),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-                asr_service: None,
-                ai_service: None,
+                repair: None,
             },
             state: workspace::TaskState::Complete,
             intent: workspace::Intent::Run,
@@ -780,6 +775,21 @@ mod tests {
             unread: false,
             resend: Vec::new(),
             replaced_by: None,
+            rework: None,
+            rework_accepted: None,
+            ai_answered_by: Vec::new(),
+            // Its run kept the downloaded video.
+            ran_with: Some(workspace::RunSettings::new(
+                &c2m_config::settings::ConfigFile {
+                    defaults: c2m_config::settings::Defaults {
+                        keep_video: Some(true),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                None,
+                None,
+            )),
         };
         (task, library)
     }
@@ -1003,7 +1013,17 @@ mod tests {
         changed.plan.source_id = "another-video".into();
         assert!(OfflineVideoRequest::for_note(&first, &changed, &library).is_none());
         changed = task.clone();
-        changed.plan.config.defaults.keep_video = Some(false);
+        changed
+            .ran_with
+            .as_mut()
+            .unwrap()
+            .config
+            .defaults
+            .keep_video = Some(false);
+        assert!(OfflineVideoRequest::for_note(&first, &changed, &library).is_none());
+        // A task with no record of its run (never ran) has no offline video either.
+        changed = task.clone();
+        changed.ran_with = None;
         assert!(OfflineVideoRequest::for_note(&first, &changed, &library).is_none());
         std::fs::remove_file(media).unwrap();
         assert_eq!(request.inspect(), OfflineVideo::Missing);

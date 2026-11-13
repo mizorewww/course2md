@@ -19,7 +19,7 @@ use crate::{
     course_library::CommandsButton,
     folder_tree::{Command, command_context_menu, with_context_menu},
 };
-use anyhow::{Context as _, Result, anyhow};
+use anyhow::{Result, anyhow};
 use course2md::execution::Component;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
@@ -58,7 +58,6 @@ enum EditField {
 
 struct ServiceEditor {
     form: ServiceForm,
-    target: Option<String>,
     repair_task: Option<(String, Vec<Component>)>,
     scroll: ScrollHandle,
     also_default: bool,
@@ -887,7 +886,9 @@ impl Desktop {
                 .when(self.settings_tab == SettingsTab::Generation, |view| {
                     view.child(TileScale::Regular.support(
                         "generation-default-explanation",
-                        course2md::tr!("这里是长期默认值，主页的「处理选项」可以只对单次生效"),
+                        course2md::tr!(
+                            "每次转换都使用这里的设置；更改会用于之后开始的处理，包括还在等待的任务"
+                        ),
                     ))
                 })
         });
@@ -2122,7 +2123,7 @@ impl Desktop {
         if self.preferences.is_blocked(PreferenceGroup::Generation) {
             return Some(OrdinaryPreferenceIssue {
                 group,
-                message: course2md::tr!("生成选项暂时无法读取，原文件与当前输入已保留").into(),
+                message: course2md::tr!("生成笔记设置暂时无法读取，原文件与当前输入已保留").into(),
                 can_retry: false,
             });
         }
@@ -2134,7 +2135,7 @@ impl Desktop {
                     .filter(|(_, error)| *error)
                     .map(|(message, _)| message)
                     .unwrap_or_else(|| {
-                        course2md::tr!("生成选项的修改尚未保存，当前输入已保留").into()
+                        course2md::tr!("生成笔记设置的修改尚未保存，当前输入已保留").into()
                     }),
                 can_retry: true,
             });
@@ -2185,7 +2186,7 @@ impl Desktop {
                         self.settings_ui.pending_generation = None;
                     }
                     PreferenceGroup::Application => self.settings_ui.pending_application = None,
-                    PreferenceGroup::Services => self.forget_missing_draft_services(cx),
+                    PreferenceGroup::Services => {}
                 }
                 self.settings_ui.initialized = false;
                 // Rehydrate on the event path now rather than on the next visit; rendering never does this.
@@ -2200,9 +2201,7 @@ impl Desktop {
                 if group == PreferenceGroup::Generation {
                     self.clear_resolved_generation_errors(previous);
                 }
-                if !self.preference_defaults_pending {
-                    self.advance_conversion_when_ready(cx);
-                }
+                self.advance_conversion_when_ready(cx);
                 cx.notify();
                 true
             }

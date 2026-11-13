@@ -17,7 +17,7 @@ What makes the app read as itself, on every page and palette. A page that loses 
 
 ## Hierarchy comes from surfaces, then hairlines
 
-- One subject is one surface. The processing options are a single card; the note list and recent notes are single cards whose rows are parted by a hairline inset past the cover. Connected tiles are for peer settings, not for parts of one thing.
+- One subject is one surface. The video card is a single card; the note list and recent notes are single cards whose rows are parted by a hairline inset past the cover. Connected tiles are for peer settings, not for parts of one thing.
 - Page titles are `HeadlineMedium` (`ui::page_title`), on the same line as the settings title.
 - Rows hold what they are about: a status chip at the row's end, an add row's plus in the icon column with no chevron.
 - Facts are chips, not a sentence: note facts as neutral chips, diagnosis and task steps as `status_chip_outlined`.
