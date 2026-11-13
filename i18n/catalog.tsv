@@ -2310,3 +2310,4 @@ AI 处理的设置已更改	AI 处理的设置已更改	The AI processing settin
 继续生成会按当前设置重新处理上次已完成的部分，可能产生额外费用。	继续生成会按当前设置重新处理上次已完成的部分，可能产生额外费用。	Continuing redoes the parts already finished with the current settings, which may cost extra.	繼續產生會按目前的設定重新處理上次已完成的部分，可能產生額外費用。	続行すると、完了済みの部分を現在の設定でやり直すため、追加料金が発生する場合があります。
 设置已更改，继续生成会重新处理上次已完成的部分，可能产生额外费用。请确认后继续。	设置已更改，继续生成会重新处理上次已完成的部分，可能产生额外费用。请确认后继续。	The settings changed: continuing redoes the parts already finished, which may cost extra. Confirm to continue.	設定已變更，繼續產生會重新處理上次已完成的部分，可能產生額外費用。請確認後繼續。	設定が変更されました。続行すると完了済みの部分をやり直すため、追加料金が発生する場合があります。確認してから続行してください。
 语音识别的设置已更改	语音识别的设置已更改	The speech recognition settings changed	語音辨識的設定已變更	音声認識の設定が変更されました
+文字或截图会重新生成，AI 处理随之重新发送	文字或截图会重新生成，AI 处理随之重新发送	The text or screenshots will be made again, and the AI processing sent again with them	文字或截圖會重新產生，AI 處理隨之重新傳送	テキストまたはスクリーンショットが作り直され、それに伴い AI 処理も再送信されます

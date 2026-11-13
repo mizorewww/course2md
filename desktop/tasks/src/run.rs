@@ -140,17 +140,36 @@ fn named(preferences: &preferences::Store, mut settings: RunSettings) -> RunSett
 }
 
 /// Paid work the run `before` finished (`paid`) that a run with `next` would do and
-/// pay for again, as the person is asked about it. A free service (a local Ollama
-/// server, a ChatGPT plan through Codex: the engine's own rule for resending) never
-/// asks, nor does work the next run reuses: speech progress and transcripts follow
-/// their own identity, and answered requests whose payload is unchanged replay.
+/// pay for again, as the person is asked about it. What a run redoes is the engine's
+/// own rule ([`c2m_engine::execution::redone_work`]): a transcript or screenshots
+/// made again change every AI request built from them. A free service (a local
+/// Ollama server, a ChatGPT plan through Codex: the engine's own rule for resending)
+/// never asks, nor does work that replays: requests whose payload is unchanged, under
+/// any version of their service (a new key or name). `source` is the task's video.
 pub fn rework(
+    source: &str,
     before: Option<&RunSettings>,
     next: &RunSettings,
     paid: workspace::PaidWork,
 ) -> Option<workspace::Rework> {
     use c2m_config::{config::AsrProvider::Api, llm_settings::LlmProvider};
     let before = before?;
+    // What the earlier run's work would be redone of. Service versions are left out:
+    // a request to another version with the same payload replays.
+    let binding = |settings: &RunSettings| {
+        c2m_engine::options::resolve(source.to_owned(), &Default::default(), &settings.config)
+            .ok()
+            .map(|cfg| c2m_engine::execution::settings_binding(&cfg))
+    };
+    let redone = match (binding(before), binding(next)) {
+        (Some(old), Some(new)) => c2m_engine::execution::redone_work(&old, &new),
+        // Unknown: as if everything were redone, so nothing paid is redone unasked.
+        _ => c2m_engine::execution::RedoneWork {
+            media: true,
+            screenshots: true,
+            transcript: true,
+        },
+    };
     let mut changes = Vec::new();
     let change =
         |label: &str, old: &Option<String>, new: &Option<String>, other: &str| match (old, new) {
@@ -159,7 +178,7 @@ pub fn rework(
             }
             _ => other.to_owned(),
         };
-    // AI: what the answered requests would be sent with.
+    // AI: what the answered requests would be sent with, and what they are built from.
     let request = |settings: &RunSettings| {
         let llm = &settings.config.llm;
         (
@@ -174,38 +193,26 @@ pub fn rework(
         next.config.llm.provider,
         LlmProvider::Ollama | LlmProvider::Codex
     );
-    if paid.ai
-        && before.ai_service.is_some()
-        && next.ai_service.is_some()
-        && !free
-        && (request(before) != request(next)
+    if paid.ai && before.ai_service.is_some() && next.ai_service.is_some() && !free {
+        if request(before) != request(next)
             || (before.config.llm.translate.is_some()
-                && before.config.llm.translate != next.config.llm.translate))
-    {
-        changes.push(change(
-            c2m_i18n::tr!("AI 服务"),
-            &before.ai_service_name,
-            &next.ai_service_name,
-            c2m_i18n::tr!("AI 处理的设置已更改"),
-        ));
+                && before.config.llm.translate != next.config.llm.translate)
+        {
+            changes.push(change(
+                c2m_i18n::tr!("AI 服务"),
+                &before.ai_service_name,
+                &next.ai_service_name,
+                c2m_i18n::tr!("AI 处理的设置已更改"),
+            ));
+        } else if redone.transcript || redone.screenshots {
+            changes.push(c2m_i18n::tr!("文字或截图会重新生成，AI 处理随之重新发送").to_owned());
+        }
     }
-    // Speech recognition in the cloud: redone when what recognizes it changed.
-    let recognition = |settings: &RunSettings| {
-        let defaults = &settings.config.defaults;
-        let api = &settings.config.asr_api;
-        (
-            defaults.transcript_source,
-            defaults.provider,
-            defaults.asr_model.clone(),
-            api.base_url.clone(),
-            api.model.clone(),
-            settings.asr_service.clone(),
-        )
-    };
+    // Speech recognition in the cloud, redone when what recognizes it changed.
     if paid.transcription
         && before.config.defaults.provider == Some(Api)
         && next.config.defaults.provider == Some(Api)
-        && recognition(before) != recognition(next)
+        && redone.transcript
     {
         changes.push(change(
             c2m_i18n::tr!("语音识别服务"),
@@ -433,8 +440,12 @@ impl StartRequest {
             writes,
         } = self;
         workspace::check_library(&location)?;
-        if let Some(rework) = rework(before.as_ref(), &ran_with, workspace::paid_work(task))
-            && task.rework_accepted.as_deref() != Some(rework.token.as_str())
+        if let Some(rework) = rework(
+            &task.plan.source.input,
+            before.as_ref(),
+            &ran_with,
+            workspace::paid_work(task),
+        ) && task.rework_accepted.as_deref() != Some(rework.token.as_str())
         {
             return Err(NeedsRework(rework).into());
         }
@@ -978,6 +989,8 @@ mod tests {
         );
     }
 
+    const VIDEO: &str = "https://www.bilibili.com/video/BVrun";
+
     fn settings(edit: impl FnOnce(&mut RunSettings)) -> RunSettings {
         let mut settings = RunSettings::default();
         settings.config.llm.enabled = true;
@@ -1003,31 +1016,34 @@ mod tests {
             s.ai_service = Some("ai-a2".into());
             s.ai_service_name = Some("Renamed".into());
         });
-        assert_eq!(rework(Some(&before), &renamed, ai), None);
+        assert_eq!(rework(VIDEO, Some(&before), &renamed, ai), None);
         // Another model: asked, with the old name kept though that version is gone.
         let other = settings(|s| {
             s.config.llm.model = "model-b".into();
             s.ai_service = Some("ai-b".into());
             s.ai_service_name = Some("Service B".into());
         });
-        let asked = rework(Some(&before), &other, ai).unwrap();
+        let asked = rework(VIDEO, Some(&before), &other, ai).unwrap();
         assert_eq!(asked.changes, ["AI 服务：「Service A」→「Service B」"]);
         assert_eq!(asked.token, other.token());
         // Another proofreading rule on the same service is a change too.
         let rule = settings(|s| s.config.llm.prompt = Some("new rule".into()));
         assert_eq!(
-            rework(Some(&before), &rule, ai).unwrap().changes,
+            rework(VIDEO, Some(&before), &rule, ai).unwrap().changes,
             ["AI 处理的设置已更改"]
         );
         // Nothing answered, or nothing run before: nothing to pay for again.
-        assert_eq!(rework(Some(&before), &other, PaidWork::default()), None);
-        assert_eq!(rework(None, &other, ai), None);
+        assert_eq!(
+            rework(VIDEO, Some(&before), &other, PaidWork::default()),
+            None
+        );
+        assert_eq!(rework(VIDEO, None, &other, ai), None);
         // A free service resends without asking.
         let ollama = settings(|s| {
             s.config.llm.model = "local".into();
             s.config.llm.provider = c2m_config::llm_settings::LlmProvider::Ollama;
         });
-        assert_eq!(rework(Some(&before), &ollama, ai), None);
+        assert_eq!(rework(VIDEO, Some(&before), &ollama, ai), None);
         // Cloud speech recognition that changed redoes a paid transcript; local does not.
         let speech = PaidWork {
             ai: false,
@@ -1043,6 +1059,7 @@ mod tests {
         };
         assert_eq!(
             rework(
+                VIDEO,
                 Some(&cloud("a", "Speech A")),
                 &cloud("b", "Speech B"),
                 speech
@@ -1052,7 +1069,53 @@ mod tests {
             ["语音识别服务：「Speech A」→「Speech B」"]
         );
         let local = settings(|s| s.config.defaults.provider = Some(AsrProvider::Cpu));
-        assert_eq!(rework(Some(&cloud("a", "Speech A")), &local, speech), None);
+        assert_eq!(
+            rework(VIDEO, Some(&cloud("a", "Speech A")), &local, speech),
+            None
+        );
+        // A new key or name for the same speech service: its requests replay.
+        let mut rotated = cloud("a", "Speech A renamed");
+        rotated.asr_service = Some("asr-a-version-2".into());
+        assert_eq!(
+            rework(VIDEO, Some(&cloud("a", "Speech A")), &rotated, speech),
+            None
+        );
+    }
+
+    /// The reported flow: AI proofreading was paid for, then another local speech
+    /// model is chosen. The transcript is redone, so every proofreading request
+    /// changes and nothing replays: continuing asks first. So do screenshots made
+    /// again, and another text source.
+    #[test]
+    fn work_redone_under_paid_ai_is_asked_first() {
+        let ai = workspace::PaidWork {
+            ai: true,
+            transcription: false,
+        };
+        let local = |edit: &dyn Fn(&mut RunSettings)| {
+            settings(|s| {
+                s.config.defaults.provider = Some(AsrProvider::Cpu);
+                s.config.defaults.asr_model = Some("whisper".into());
+                s.config.defaults.transcript_source = Some(TranscriptSource::Asr);
+                edit(s);
+            })
+        };
+        let before = local(&|_| {});
+        let another_model = local(&|s| s.config.defaults.asr_model = Some("qwen3-1.7b".into()));
+        assert_eq!(
+            rework(VIDEO, Some(&before), &another_model, ai)
+                .unwrap()
+                .changes,
+            ["文字或截图会重新生成，AI 处理随之重新发送"]
+        );
+        let subtitles =
+            local(&|s| s.config.defaults.transcript_source = Some(TranscriptSource::Subtitle));
+        assert!(rework(VIDEO, Some(&before), &subtitles, ai).is_some());
+        let height = local(&|s| s.config.defaults.max_height = Some(720));
+        assert!(rework(VIDEO, Some(&before), &height, ai).is_some());
+        // Nothing the AI requests are built from changed: they replay.
+        let formats = local(&|s| s.config.defaults.formats = Some(Vec::new()));
+        assert_eq!(rework(VIDEO, Some(&before), &formats, ai), None);
     }
 
     /// Every way a task starts passes the same check: one that would redo paid work
@@ -1128,6 +1191,33 @@ mod tests {
         let task = workspace.state.task(&id).unwrap();
         assert!(task.rework.is_none() && task.rework_accepted.is_none());
         assert_eq!(task.ran_with.as_ref().unwrap().config.llm.model, "old-ai");
+        // The reported flow: with that proofreading paid for, another speech model is
+        // chosen in Settings. The transcript would be redone and every request with it,
+        // so continuing waits for the person again.
+        workspace
+            .transaction(|state| {
+                let task = state.task_mut(&id).unwrap();
+                task.state = TaskState::Paused;
+                state.set_intent(&id, Intent::Run)
+            })
+            .unwrap();
+        assert!(start(&workspace).is_ok(), "nothing changed: it continues");
+        save_speech_model(&mut preferences, "another-speech-model");
+        let start = |workspace: &workspace::Workspace| {
+            let task = workspace.state.task(&id).unwrap().clone();
+            start_request(
+                &preferences,
+                Some(workspace),
+                &task,
+                &HashMap::new(),
+                AsrProvider::Cpu,
+            )
+            .unwrap()
+            .prepare(&task)
+        };
+        assert!(
+            matches!(start(&workspace), Err(error) if error.downcast_ref::<NeedsRework>().is_some())
+        );
     }
 
     /// A task an older version queued fixed the model it would use; it now runs with

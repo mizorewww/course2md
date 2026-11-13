@@ -2075,7 +2075,7 @@ fn worker_holds(work_dir: &Path) -> bool {
 pub struct PaidWork {
     /// AI requests that were answered.
     pub ai: bool,
-    /// Speech recognition: a transcript, or progress towards one.
+    /// Speech recognition: a recognized transcript, or progress towards one.
     pub transcription: bool,
 }
 
@@ -2089,9 +2089,12 @@ pub fn paid_work(task: &TaskRecord) -> PaidWork {
                     && Component::parse(&receipt.purpose).is_some_and(Component::is_ai)
             })
         }),
-        transcription: ["transcript.json", "asr.jsonl"]
-            .iter()
-            .any(|name| task.work_dir.join(name).is_file()),
+        // Recognized speech, not a transcript taken from subtitles.
+        transcription: task.work_dir.join("asr.jsonl").is_file()
+            || std::fs::read(task.work_dir.join("transcript.json"))
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                .is_some_and(|cache| cache["source"] == "asr"),
     }
 }
 
