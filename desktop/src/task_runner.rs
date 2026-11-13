@@ -403,8 +403,8 @@ impl Desktop {
         let plan = match self.build_plan(PlanValidation::Submission, cx) {
             Ok(plan) => plan,
             Err(error) => {
-                self.import.source_validation = Some(format!("{error:#}"));
-                self.import.validation_attempt = self.import.validation_attempt.wrapping_add(1);
+                let missing = self.text_source_missing(cx);
+                self.import.refuse_start(format!("{error:#}"), missing);
                 if self.import.source_preview.is_none() && self.online(cx) {
                     let input = self.inputs[&Field::Source].clone();
                     window.on_next_frame(move |window, cx| {
