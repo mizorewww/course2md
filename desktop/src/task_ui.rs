@@ -1874,7 +1874,7 @@ impl TasksPage {
             ),
             TaskAction::Repair => (tr!("修复 AI 服务并补做"), symbols::settings(), false),
             TaskAction::Retry(component) => {
-                (retry_component_label(component), symbols::refresh(), false)
+                (task_retry_label(task, component), symbols::refresh(), false)
             }
             TaskAction::Reassociate(_) => (
                 tr!("重新关联此保存位置"),
