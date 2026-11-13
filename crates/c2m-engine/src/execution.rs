@@ -451,6 +451,7 @@ pub(crate) fn enter_work_dir(
     work_dir: &Path,
     binding: &serde_json::Value,
     former: Option<&serde_json::Value>,
+    settings_may_change: bool,
     source: crate::dispatch::ControlSource,
 ) -> Result<WorkDir> {
     std::fs::create_dir_all(work_dir)?;
@@ -462,7 +463,7 @@ pub(crate) fn enter_work_dir(
         .with_context(|| {
             crate::tr!("目录正被另一任务使用：{}。请等待任务结束", path.display()).to_string()
         })?;
-    bind_work_dir(work_dir, binding, former)?;
+    bind_work_dir(work_dir, binding, former, settings_may_change)?;
     let control = crate::dispatch::TaskControl::open(work_dir, source)?;
     Ok(WorkDir {
         job: Job {
@@ -475,10 +476,15 @@ pub(crate) fn enter_work_dir(
 
 /// A mismatch is evidence that this is a different task; preserve both old work and error.
 /// `former` is the identity the same task bound before, which takes the current one.
+/// With `settings_may_change` (a desktop task, which runs with the settings current
+/// when it starts), the same task bound with other settings or service versions
+/// takes the new ones: its saved work keeps its own identity (speech progress names
+/// its model, a request its service version and payload).
 pub(crate) fn bind_work_dir(
     work_dir: &Path,
     binding: &serde_json::Value,
     former: Option<&serde_json::Value>,
+    settings_may_change: bool,
 ) -> Result<()> {
     std::fs::create_dir_all(work_dir)?;
     let path = work_dir.join("task-identity.json");
@@ -486,7 +492,7 @@ pub(crate) fn bind_work_dir(
         let old: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?).context(
             tr!("任务进度身份损坏，原文件已保留 / Task identity is damaged"),
         )?;
-        if former == Some(&old) {
+        if former == Some(&old) || (settings_may_change && same_task(&old, binding)) {
             return crate::fsio::atomic_write(&path, &serde_json::to_vec_pretty(binding)?);
         }
         anyhow::ensure!(
@@ -505,6 +511,20 @@ pub(crate) fn bind_work_dir(
         crate::fsio::atomic_write(&path, &serde_json::to_vec_pretty(binding)?)?;
     }
     Ok(())
+}
+
+/// Whether two bindings are of one task, whatever settings each was bound with.
+fn same_task(old: &serde_json::Value, new: &serde_json::Value) -> bool {
+    let without_settings = |binding: &serde_json::Value| {
+        let mut binding = binding.clone();
+        if let Some(object) = binding.as_object_mut() {
+            for key in ["config", "service_versions", "allow_unauthenticated_asr"] {
+                object.remove(key);
+            }
+        }
+        binding
+    };
+    old.get("task_id").is_some() && without_settings(old) == without_settings(new)
 }
 
 /// Runs a request obtained from [`Request::read`], which validated it. The task
@@ -601,18 +621,53 @@ mod tests {
         assert!(valid_id("a.b"));
     }
 
+    /// A desktop task runs with the settings current when it starts: resumed with
+    /// another model or service version it keeps its work directory, while another
+    /// task, or another source, is still refused.
+    #[test]
+    fn a_desktop_task_resumes_with_changed_settings_but_not_as_another_task() {
+        let dir = tempfile::tempdir().unwrap();
+        let bound = |model: &str, version: &str, task: &str| {
+            serde_json::json!({
+                "task_id": task, "source_id": "video",
+                "config": {"asr_model": model}, "service_versions": {"llm": version},
+            })
+        };
+        bind_work_dir(dir.path(), &bound("old", "v1", "task"), None, true).unwrap();
+        // Outside the desktop, changed inputs are still another task.
+        assert!(bind_work_dir(dir.path(), &bound("new", "v2", "task"), None, false).is_err());
+        bind_work_dir(dir.path(), &bound("new", "v2", "task"), None, true).unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.path().join("task-identity.json")).unwrap())
+                .unwrap();
+        assert_eq!(saved, bound("new", "v2", "task"));
+        assert!(bind_work_dir(dir.path(), &bound("new", "v2", "other"), None, true).is_err());
+    }
+
     #[test]
     fn immutable_work_rejects_changed_inputs_without_destroying_progress() {
         let dir = tempfile::tempdir().unwrap();
-        bind_work_dir(dir.path(), &serde_json::json!({"title":"A"}), None).unwrap();
+        bind_work_dir(dir.path(), &serde_json::json!({"title":"A"}), None, false).unwrap();
         std::fs::write(dir.path().join("asr.jsonl"), "saved result").unwrap();
-        bind_work_dir(dir.path(), &serde_json::json!({"title":"A"}), None).unwrap();
-        assert!(bind_work_dir(dir.path(), &serde_json::json!({"title":"B"}), None).is_err());
+        bind_work_dir(dir.path(), &serde_json::json!({"title":"A"}), None, false).unwrap();
+        assert!(bind_work_dir(dir.path(), &serde_json::json!({"title":"B"}), None, false).is_err());
         // The identity the same task bound before gives way to the current one.
         let former = serde_json::json!({"title":"A"});
-        bind_work_dir(dir.path(), &serde_json::json!({"title":"C"}), Some(&former)).unwrap();
-        bind_work_dir(dir.path(), &serde_json::json!({"title":"C"}), Some(&former)).unwrap();
-        assert!(bind_work_dir(dir.path(), &serde_json::json!({"title":"A"}), None).is_err());
+        bind_work_dir(
+            dir.path(),
+            &serde_json::json!({"title":"C"}),
+            Some(&former),
+            false,
+        )
+        .unwrap();
+        bind_work_dir(
+            dir.path(),
+            &serde_json::json!({"title":"C"}),
+            Some(&former),
+            false,
+        )
+        .unwrap();
+        assert!(bind_work_dir(dir.path(), &serde_json::json!({"title":"A"}), None, false).is_err());
         assert_eq!(
             std::fs::read_to_string(dir.path().join("asr.jsonl")).unwrap(),
             "saved result"

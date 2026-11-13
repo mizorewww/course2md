@@ -232,6 +232,7 @@ pub(crate) async fn run_task(
         &request.work_dir,
         &binding,
         former,
+        parent.is_some(),
         ControlSource {
             control_path: request.control_path.clone(),
             service_versions: request.service_versions.clone(),
