@@ -543,9 +543,23 @@ fn same_task(old: &serde_json::Value, new: &serde_json::Value) -> bool {
     old.get("task_id").is_some() && without_settings(old) == without_settings(new)
 }
 
-/// Saved work in `work_dir` that the settings of `old` made and `new` would make
-/// differently, by the parts of the binding each depends on.
-fn outdated_work(old: &serde_json::Value, new: &serde_json::Value) -> Vec<&'static str> {
+/// What a desktop task's run under other settings redoes of the work an earlier run
+/// saved, by the parts of the binding each depends on. The app asks before paid
+/// work is redone from the same rule ([`redone_work`]), so the two cannot drift.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RedoneWork {
+    /// The downloaded video: its height.
+    pub media: bool,
+    /// The screenshots: the video and how slides are found in it.
+    pub screenshots: bool,
+    /// The transcript: the text source, its subtitles, and the recognition that made
+    /// it (speech progress keeps its own identity, see `c2m_asr::checkpoint`).
+    pub transcript: bool,
+}
+
+/// What `new` redoes of the work `old` made: bindings as [`Request::binding`]
+/// writes them, or as [`settings_binding`] gives them for settings alone.
+pub fn redone_work(old: &serde_json::Value, new: &serde_json::Value) -> RedoneWork {
     let differs = |paths: &[&[&str]]| {
         paths.iter().any(|path| {
             let at = |binding: &serde_json::Value| {
@@ -556,37 +570,48 @@ fn outdated_work(old: &serde_json::Value, new: &serde_json::Value) -> Vec<&'stat
             at(old) != at(new)
         })
     };
-    let mut outdated = Vec::new();
-    // The downloaded video: its height.
     let media = differs(&[&["config", "max_height"]]);
-    if media {
+    RedoneWork {
+        media,
+        screenshots: media
+            || differs(&[
+                &["config", "similarity"],
+                &["config", "sample_interval"],
+                &["config", "cooldown"],
+                &["config", "slide_mode"],
+                &["config", "stable_secs"],
+                &["config", "roi"],
+            ]),
+        transcript: differs(&[
+            &["config", "transcript_source"],
+            &["config", "provider"],
+            &["config", "asr_model"],
+            &["config", "max_speech"],
+            &["config", "asr_api"],
+            &["service_versions", "asr"],
+            &["subtitle_digest"],
+            &["subtitle_events"],
+        ]),
+    }
+}
+
+/// The part of a task's binding its settings make, for [`redone_work`].
+pub fn settings_binding(cfg: &PipelineConfig) -> serde_json::Value {
+    serde_json::json!({ "config": cfg.redacted_for_identity(Path::new("")) })
+}
+
+/// Saved work in `work_dir` that the settings of `old` made and `new` would make
+/// differently.
+fn outdated_work(old: &serde_json::Value, new: &serde_json::Value) -> Vec<&'static str> {
+    let redone = redone_work(old, new);
+    let mut outdated = Vec::new();
+    if redone.media {
         outdated.extend(["media.mp4", "media.sha256"]);
     }
-    // The screenshots: the video and how slides are found in it.
-    if media
-        || differs(&[
-            &["config", "similarity"],
-            &["config", "sample_interval"],
-            &["config", "cooldown"],
-            &["config", "slide_mode"],
-            &["config", "stable_secs"],
-            &["config", "roi"],
-        ])
-    {
+    if redone.screenshots {
         outdated.push("screenshots.json");
     }
-    // The transcript: the text source, its subtitles, and the recognition that
-    // made it (speech progress keeps its own identity, see `c2m_asr::checkpoint`).
-    if differs(&[
-        &["config", "transcript_source"],
-        &["config", "provider"],
-        &["config", "asr_model"],
-        &["config", "max_speech"],
-        &["config", "asr_api"],
-        &["service_versions", "asr"],
-        &["subtitle_digest"],
-        &["subtitle_events"],
-    ]) {
+    if redone.transcript {
         outdated.push("transcript.json");
     }
     outdated

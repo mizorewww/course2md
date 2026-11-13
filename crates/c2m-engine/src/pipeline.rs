@@ -1527,8 +1527,6 @@ fn build_sections(
     }
 }
 
-/// 读取转写缓存；全空的缓存是上次失败运行的残留（端点持续返回空文本却
-/// 无报错），丢弃并重新识别，而不是用"所选字幕没有可读文字"误导用户。
 /// Whether a repair takes a request record of the work it repairs. A finished
 /// request comes along whichever version of the service answered it: a repair runs
 /// with the current service, and the same request to the same endpoint replays its
@@ -1545,6 +1543,8 @@ fn imports_prior_receipt(receipt: &crate::dispatch::Receipt, current: Option<&St
         )
 }
 
+/// 读取转写缓存；全空的缓存是上次失败运行的残留（端点持续返回空文本却
+/// 无报错），丢弃并重新识别，而不是用"所选字幕没有可读文字"误导用户。
 fn cached_transcript(cache_path: &Path) -> Result<Option<TranscriptCache>> {
     if !cache_path.is_file() {
         return Ok(None);
