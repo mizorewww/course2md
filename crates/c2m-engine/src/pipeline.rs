@@ -1838,6 +1838,7 @@ mod tests {
             succeeded: 63,
             failed: 137,
             note: Some("HTTP 404 model not found".into()),
+            ..Default::default()
         };
         let outcome = super::outcome_from_report(&report);
         assert_eq!(outcome.status, crate::artifact::Status::Partial);
@@ -1850,6 +1851,7 @@ mod tests {
             succeeded: 3,
             failed: 0,
             note: None,
+            ..Default::default()
         };
         let outcome = super::outcome_from_report(&clean);
         assert_eq!(outcome.status, crate::artifact::Status::Succeeded);

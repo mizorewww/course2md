@@ -58,6 +58,28 @@ pub struct LlmSettings {
     pub translate: Option<String>,
     /// 校对并发数（chunk 间相互独立；自建网关/代理可调高）
     pub concurrency: usize,
+    /// Send a failed AI request again on its own (with backoff), including one
+    /// whose answer was lost and may already be charged. Off, such a request
+    /// waits for the person's decision. Written only when changed, so files and
+    /// saved task plans read by earlier versions stay as they were.
+    #[serde(skip_serializing_if = "is_default_auto_retry")]
+    pub auto_retry: bool,
+    /// Sends per AI request, the first included, when `auto_retry` is on.
+    #[serde(skip_serializing_if = "is_default_retry_attempts")]
+    pub retry_attempts: u32,
+}
+
+/// AI requests are retried automatically unless the person turns it off.
+pub const DEFAULT_AUTO_RETRY: bool = true;
+/// One request and up to three retries.
+pub const DEFAULT_RETRY_ATTEMPTS: u32 = 4;
+
+fn is_default_auto_retry(value: &bool) -> bool {
+    *value == DEFAULT_AUTO_RETRY
+}
+
+fn is_default_retry_attempts(value: &u32) -> bool {
+    *value == DEFAULT_RETRY_ATTEMPTS
 }
 
 /// Credentials never reach logs or error text: the key shows only as set or not.
@@ -75,6 +97,8 @@ impl std::fmt::Debug for LlmSettings {
             .field("summarize", &self.summarize)
             .field("translate", &self.translate)
             .field("concurrency", &self.concurrency)
+            .field("auto_retry", &self.auto_retry)
+            .field("retry_attempts", &self.retry_attempts)
             .finish()
     }
 }
@@ -93,6 +117,8 @@ impl Default for LlmSettings {
             summarize: false,
             translate: None,
             concurrency: DEFAULT_CONCURRENCY,
+            auto_retry: DEFAULT_AUTO_RETRY,
+            retry_attempts: DEFAULT_RETRY_ATTEMPTS,
         }
     }
 }
@@ -127,5 +153,22 @@ mod tests {
             serde_json::to_string(&LlmProvider::OpenAiCompatible).unwrap(),
             r#""open-ai-compatible""#
         );
+    }
+
+    #[test]
+    fn retry_defaults_are_not_written_and_changes_are() {
+        let defaults = super::LlmSettings::default();
+        let json = serde_json::to_value(&defaults).unwrap();
+        assert!(json.get("auto_retry").is_none(), "{json}");
+        assert!(json.get("retry_attempts").is_none(), "{json}");
+        let changed = super::LlmSettings {
+            auto_retry: false,
+            retry_attempts: 2,
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&changed).unwrap();
+        let back: super::LlmSettings = serde_json::from_value(json).unwrap();
+        assert!(!back.auto_retry);
+        assert_eq!(back.retry_attempts, 2);
     }
 }

@@ -108,13 +108,19 @@ fn request_summary(
     description: &str,
 ) -> Result<String> {
     let body = crate::provider::chat_body(s, &system_prompt(), user, llm::CHAT_MAX_TOKENS);
-    chat.send(&body, description, &|content| {
-        anyhow::ensure!(
-            parse_summary(content).is_some(),
-            tr!("服务返回的摘要结构无效 / Invalid summary structure")
-        );
-        Ok(())
-    })
+    chat.send(
+        &body,
+        description,
+        crate::provider::Delivery::default(),
+        &|content, _| {
+            anyhow::ensure!(
+                parse_summary(content).is_some(),
+                tr!("服务返回的摘要结构无效 / Invalid summary structure")
+            );
+            Ok(())
+        },
+    )
+    .map(|answer| answer.content)
     .context(tr!("生成摘要请求失败 / Summary request failed"))
 }
 

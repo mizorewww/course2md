@@ -61,6 +61,119 @@ pub(crate) fn is_sse(s: &LlmSettings) -> bool {
     s.provider == LlmProvider::Codex
 }
 
+/// How a request goes out, beside what it asks ([`chat_body`], the ledger identity).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Delivery {
+    /// The output budget for this request; None keeps the body's own.
+    pub max_tokens: Option<u32>,
+    /// Ask the model not to think first, where the service has a way to say so.
+    pub no_reasoning: bool,
+}
+
+/// The body as sent: always streamed, so a long answer arrives as it is written and
+/// only a silence can time it out, with `delivery` applied. None of this changes
+/// what is asked, so the ledger keeps identifying the request by `body`.
+pub(crate) fn sent_body(s: &LlmSettings, body: &Value, delivery: Delivery) -> Value {
+    let mut sent = body.clone();
+    // Codex is already a stream, and the ChatGPT backend takes no output limit here.
+    if s.provider == LlmProvider::Codex {
+        return sent;
+    }
+    let Some(object) = sent.as_object_mut() else {
+        return sent;
+    };
+    object.insert("stream".into(), Value::Bool(true));
+    object.insert(
+        "stream_options".into(),
+        serde_json::json!({"include_usage": true}),
+    );
+    if let Some(max_tokens) = delivery.max_tokens {
+        object.insert("max_tokens".into(), max_tokens.into());
+    }
+    if controls_reasoning(s, delivery) {
+        object.insert("reasoning_effort".into(), "none".into());
+    }
+    sent
+}
+
+/// Whether the sent body turns thinking off. Ollama reads `reasoning_effort: "none"`
+/// as think=false; other OpenAI-compatible services differ in what they accept, so
+/// they keep their default.
+pub(crate) fn controls_reasoning(s: &LlmSettings, delivery: Delivery) -> bool {
+    delivery.no_reasoning && s.provider == LlmProvider::Ollama
+}
+
+/// A streamed answer, read to its end, as the chat/completions JSON the rest reads.
+/// A service that answered with one JSON body despite `stream` is read as it is.
+pub(crate) fn stream_to_chat_json(s: &LlmSettings, bytes: &[u8]) -> Result<Value> {
+    if s.provider == LlmProvider::Codex {
+        return sse_to_chat_json(bytes);
+    }
+    let text = String::from_utf8_lossy(bytes);
+    if text.trim_start().starts_with('{') {
+        return Ok(serde_json::from_str(text.trim())?);
+    }
+    chat_sse_to_chat_json(&text)
+}
+
+/// Whether the answer stopped at its output limit instead of finishing.
+pub(crate) fn truncated(value: &Value) -> bool {
+    matches!(
+        value["choices"][0]["finish_reason"].as_str(),
+        Some("length" | "max_tokens" | "max_output_tokens")
+    )
+}
+
+/// chat/completions SSE (`data: {"choices":[{"delta":{"content":…}}]}` … `data: [DONE]`)
+/// aggregated into one response. A stream must end with a finish reason or `[DONE]`;
+/// one that stops before is a lost answer, not a short one. Thinking deltas
+/// (`reasoning_content`, `reasoning`) are not part of the answer.
+fn chat_sse_to_chat_json(text: &str) -> Result<Value> {
+    let mut out = String::new();
+    let mut finish: Option<String> = None;
+    let mut done = false;
+    let mut usage = Value::Null;
+    for line in text.lines() {
+        let Some(data) = line.strip_prefix("data:") else {
+            continue;
+        };
+        let data = data.trim();
+        if data == "[DONE]" {
+            done = true;
+            continue;
+        }
+        let Ok(event) = serde_json::from_str::<Value>(data) else {
+            continue;
+        };
+        if let Some(error) = event.get("error").filter(|e| !e.is_null()) {
+            let message = error["message"]
+                .as_str()
+                .or_else(|| error.as_str())
+                .unwrap_or("unknown error");
+            bail!("AI 服务返回错误内容 / AI service returned an error: {message}");
+        }
+        let choice = &event["choices"][0];
+        if let Some(delta) = choice["delta"]["content"].as_str() {
+            out.push_str(delta);
+        }
+        if let Some(reason) = choice["finish_reason"].as_str() {
+            finish = Some(reason.to_owned());
+        }
+        if event["usage"].is_object() {
+            usage = event["usage"].clone();
+        }
+    }
+    ensure!(
+        done || finish.is_some(),
+        crate::tr!("AI 服务响应中断（流未完成）/ AI response stream ended before completion")
+    );
+    let finish = finish.unwrap_or_else(|| "stop".into());
+    Ok(serde_json::json!({
+        "choices": [{"message": {"content": out}, "finish_reason": finish}],
+        "usage": usage,
+    }))
+}
+
 /// 构造请求体（结构化输出契约在两种方言中各自表达）。
 pub(crate) fn chat_body(
     s: &LlmSettings,
@@ -167,6 +280,7 @@ pub(crate) fn sse_to_chat_json(bytes: &[u8]) -> Result<Value> {
     let mut completed = false;
     let mut usage = serde_json::Value::Null;
     let mut failed: Option<String> = None;
+    let mut cut_short = false;
     for line in text.lines() {
         let Some(data) = line.strip_prefix("data:") else {
             continue;
@@ -194,6 +308,15 @@ pub(crate) fn sse_to_chat_json(bytes: &[u8]) -> Result<Value> {
                     });
                 }
             }
+            // Stopped at the output limit: a short answer, not a failed one; the
+            // caller asks again for what it lacks.
+            Some("response.incomplete")
+                if event["response"]["incomplete_details"]["reason"].as_str()
+                    == Some("max_output_tokens") =>
+            {
+                completed = true;
+                cut_short = true;
+            }
             Some("response.failed") | Some("response.incomplete") | Some("error") => {
                 failed = Some(
                     event["response"]["error"]["message"]
@@ -215,10 +338,14 @@ pub(crate) fn sse_to_chat_json(bytes: &[u8]) -> Result<Value> {
         crate::tr!("AI 服务响应中断（流未完成）/ AI response stream ended before completion")
     );
     ensure!(
-        !out.trim().is_empty(),
+        cut_short || !out.trim().is_empty(),
         crate::tr!("AI 服务响应缺少正文 / AI response is missing text")
     );
-    Ok(serde_json::json!({"choices": [{"message": {"content": out}}], "usage": usage}))
+    let finish = if cut_short { "length" } else { "stop" };
+    Ok(serde_json::json!({
+        "choices": [{"message": {"content": out}, "finish_reason": finish}],
+        "usage": usage,
+    }))
 }
 
 #[cfg(test)]
@@ -305,5 +432,87 @@ data: [DONE]
 "#;
         assert!(sse_to_chat_json(failed).is_err());
         assert!(sse_to_chat_json(b"data: {\"type\":\"response.created\"}\n").is_err());
+
+        let cut = br#"data: {"type":"response.output_text.delta","delta":"{\"segments\":[{\"id\":0"}
+data: {"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}
+"#;
+        assert!(truncated(&sse_to_chat_json(cut).unwrap()));
+    }
+
+    /// One `data:` line per event, from JSON values.
+    fn sse(events: &[Value]) -> String {
+        events
+            .iter()
+            .map(|event| format!("data: {event}\n\n"))
+            .collect()
+    }
+
+    fn delta(content: &str) -> Value {
+        serde_json::json!({"choices": [{"delta": {"content": content}}]})
+    }
+
+    #[test]
+    fn chat_streams_are_assembled_and_their_ends_checked() {
+        let s = settings(LlmProvider::OpenAiCompatible);
+        let thinking = serde_json::json!({"choices": [{"delta": {"reasoning_content": "hmm"}}]});
+        let finished = serde_json::json!({"choices": [{"delta": {"content": "[]}"}, "finish_reason": "stop"}]});
+        let usage = serde_json::json!({"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 4}});
+        let ok = format!(
+            "{}: keep-alive\n\n{}data: [DONE]\n\n",
+            sse(&[thinking, delta("{\"segments\":")]),
+            sse(&[finished, usage])
+        );
+        let value = stream_to_chat_json(&s, ok.as_bytes()).unwrap();
+        assert_eq!(
+            value["choices"][0]["message"]["content"], "{\"segments\":[]}",
+            "thinking is not part of the answer"
+        );
+        assert_eq!(value["usage"]["completion_tokens"], 4);
+        assert!(!truncated(&value));
+
+        // Stopped at the output limit: kept, and marked.
+        let limit = serde_json::json!({"choices": [{"delta": {}, "finish_reason": "length"}]});
+        let cut = sse(&[delta("{\"segm"), limit]);
+        let value = stream_to_chat_json(&s, cut.as_bytes()).unwrap();
+        assert!(truncated(&value));
+        assert_eq!(value["choices"][0]["message"]["content"], "{\"segm");
+
+        // A stream that stops without an end is lost, not short.
+        let lost = sse(&[delta("{")]);
+        assert!(stream_to_chat_json(&s, lost.as_bytes()).is_err());
+        // An error in the stream is the service's answer.
+        let error = sse(&[serde_json::json!({"error": {"message": "overloaded"}})]);
+        assert!(stream_to_chat_json(&s, error.as_bytes()).is_err());
+        // A service that ignored `stream` is read as one body.
+        let plain = r#"{"choices":[{"message":{"content":"ok"},"finish_reason":"length"}]}"#;
+        assert!(truncated(
+            &stream_to_chat_json(&s, plain.as_bytes()).unwrap()
+        ));
+    }
+
+    #[test]
+    fn sent_bodies_stream_and_keep_what_is_asked() {
+        let body = |s: &LlmSettings| chat_body(s, "系统", Value::String("输入".into()), 16384);
+        let delivery = Delivery {
+            max_tokens: Some(4096),
+            no_reasoning: true,
+        };
+        let s = settings(LlmProvider::OpenAiCompatible);
+        let sent = sent_body(&s, &body(&s), delivery);
+        assert_eq!(sent["stream"], true);
+        assert_eq!(sent["stream_options"]["include_usage"], true);
+        assert_eq!(sent["max_tokens"], 4096);
+        assert!(sent.get("reasoning_effort").is_none());
+        assert_eq!(sent["messages"], body(&s)["messages"]);
+
+        let s = settings(LlmProvider::Ollama);
+        let sent = sent_body(&s, &body(&s), delivery);
+        assert_eq!(sent["reasoning_effort"], "none");
+        let sent = sent_body(&s, &body(&s), Delivery::default());
+        assert!(sent.get("reasoning_effort").is_none());
+        assert_eq!(sent["max_tokens"], 16384);
+
+        let s = settings(LlmProvider::Codex);
+        assert_eq!(sent_body(&s, &body(&s), delivery), body(&s));
     }
 }

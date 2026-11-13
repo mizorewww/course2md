@@ -75,6 +75,28 @@ const TEST_QUESTION: &str = "只回复两个字符：ok";
 /// 每次请求合并的语音段数。
 const BATCH: usize = 20;
 
+/// The most transcript characters one request carries. Proofreading and translation
+/// answer with about as much text as they are given, so this bounds the answer too:
+/// 1,500 CJK characters are roughly 1,500–2,500 tokens out, a few seconds to half a
+/// minute of generation. Most 20-paragraph batches stay within it, so they are the
+/// same requests (and receipts) as before; only the long ones are split.
+const BATCH_CHARS: usize = 1_500;
+
+/// The output budget for proofreading or translating `items`: twice their length
+/// (a token per CJK character at worst, with room for rewording), the JSON around
+/// each item, and a margin; never less than [`MIN_BATCH_TOKENS`] so a model that
+/// thinks first still has room, never more than [`CHAT_MAX_TOKENS`]. A model that
+/// runs on (thinking or repeating itself) stops here instead of at the global cap.
+fn batch_max_tokens(items: &[&str]) -> u32 {
+    let chars: usize = items.iter().map(|item| item.chars().count()).sum();
+    let budget = 2 * chars + 32 * items.len() + 1024;
+    u32::try_from(budget)
+        .unwrap_or(u32::MAX)
+        .clamp(MIN_BATCH_TOKENS, CHAT_MAX_TOKENS)
+}
+
+const MIN_BATCH_TOKENS: u32 = 4096;
+
 /// 请求用途：请求账本分类与 token 用量归属。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, strum::IntoStaticStr)]
 #[strum(serialize_all = "lowercase")]
@@ -119,8 +141,39 @@ pub fn validate(s: &LlmSettings) -> Result<()> {
 
 /// 校对并发上限：再高对端点限流没有好处，只放大 429 风险
 const MAX_CONCURRENCY: usize = 16;
-/// LLM 请求最大尝试次数（1 次原始 + 重试）。
+/// LLM 请求最大尝试次数（1 次原始 + 重试），未开启自动重试时。
 const MAX_ATTEMPTS: u32 = 3;
+/// The most sends `retry_attempts` may ask for.
+const MAX_RETRY_ATTEMPTS: u32 = 8;
+
+/// How a failed AI request is retried. With automatic retries on: the configured
+/// number of sends, waiting 1 s, 2 s, 4 s… up to 30 s, plus jitter. Off: the
+/// requests that provably cost nothing more (never sent, rate limited) as before.
+fn retry_policy(s: &LlmSettings) -> crate::pool::RetryPolicy {
+    if s.auto_retry {
+        crate::pool::RetryPolicy {
+            max_attempts: s.retry_attempts.clamp(1, MAX_RETRY_ATTEMPTS),
+            base: Duration::from_secs(1),
+            cap: Duration::from_secs(30),
+        }
+    } else {
+        crate::pool::RetryPolicy {
+            max_attempts: MAX_ATTEMPTS,
+            ..crate::pool::RetryPolicy::DEFAULT
+        }
+    }
+}
+
+/// Whether a request whose result is unknown may be sent again without asking.
+fn resend_rule(s: &LlmSettings) -> crate::dispatch::Resend {
+    if s.auto_retry {
+        crate::dispatch::Resend::Automatic
+    } else if crate::provider::free_to_resend(s) {
+        crate::dispatch::Resend::Free
+    } else {
+        crate::dispatch::Resend::AskUser
+    }
+}
 
 /// A response that stops arriving for `stall` is abandoned then, instead of holding
 /// the task for the whole request budget. The two shapes stall differently:
@@ -130,18 +183,23 @@ const MAX_ATTEMPTS: u32 = 3;
 /// - A stream can legitimately outlast `stall`, but sends something all along, so
 ///   the limit applies to each read and not to the stream.
 fn stall_limited_agent(streaming: bool, stall: Duration) -> ureq::Agent {
-    let builder = crate::runtime::agent_builder()
-        .timeout_global(Some(REQUEST_BUDGET))
-        .http_status_as_error(false);
+    let builder = crate::runtime::agent_builder().http_status_as_error(false);
     let builder = if streaming {
-        builder.timeout_per_read(Some(stall))
+        builder
+            .timeout_global(Some(STREAM_BUDGET))
+            .timeout_per_read(Some(stall))
     } else {
-        builder.timeout_recv_body(Some(stall))
+        builder
+            .timeout_global(Some(REQUEST_BUDGET))
+            .timeout_recv_body(Some(stall))
     };
     builder.build().new_agent()
 }
 
 const REQUEST_BUDGET: Duration = Duration::from_secs(300);
+/// Only a safety net: a stream that keeps sending is alive. Output limits end
+/// every AI request long before this.
+const STREAM_BUDGET: Duration = Duration::from_secs(30 * 60);
 const STALL_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Upper bound on a streamed (SSE) response body read in one connection test.
@@ -157,26 +215,150 @@ pub struct PolishReport {
     /// 首个失败原因（截断），用于结果消息可见性；无失败或纯跳过时为 None
     #[serde(default)]
     pub note: Option<String>,
+    /// Batches sent this run (a batch the service answered only in part counts once).
+    #[serde(default)]
+    pub batches: usize,
+    /// Batches that kept some of their text unfinished after every retry. Running
+    /// the same step again with the same task control sends only these: finished
+    /// batches come back from their receipts.
+    #[serde(default)]
+    pub failed_batches: usize,
 }
 
-/// A transcript batch: at most [`BATCH`] events, and the slide image sent with them.
+/// A transcript batch: at most [`BATCH`] events and [`BATCH_CHARS`] characters, and
+/// the slide image sent with them.
 type Chunk<'a> = (Option<std::path::PathBuf>, Vec<&'a mut TranscriptEvent>);
 
+/// Cuts `events` into batches in order, between events and never inside one: a
+/// batch closes at [`BATCH`] events or before the event that would take it past
+/// [`BATCH_CHARS`]. An event longer than that on its own is a batch by itself.
 fn into_chunks<'a>(
     image: Option<std::path::PathBuf>,
     events: impl Iterator<Item = &'a mut TranscriptEvent>,
     chunks: &mut Vec<Chunk<'a>>,
 ) {
-    let mut refs: Vec<_> = events.collect();
-    while !refs.is_empty() {
-        let rest = refs.split_off(refs.len().min(BATCH));
-        chunks.push((image.clone(), std::mem::replace(&mut refs, rest)));
+    let mut batch = Vec::new();
+    let mut chars = 0;
+    for event in events {
+        let length = event.text.chars().count();
+        if !batch.is_empty() && (batch.len() == BATCH || chars + length > BATCH_CHARS) {
+            chunks.push((image.clone(), std::mem::take(&mut batch)));
+            chars = 0;
+        }
+        chars += length;
+        batch.push(event);
+    }
+    if !batch.is_empty() {
+        chunks.push((image, batch));
+    }
+}
+
+/// One AI step's batch requests and what each answer does to its events.
+struct Batches<'s, B, A> {
+    chat: Chat<'s>,
+    purpose: Purpose,
+    body_for: B,
+    apply: A,
+    warned: std::sync::atomic::AtomicBool,
+}
+
+impl<B, A> Batches<'_, B, A>
+where
+    B: Fn(&[&str], Option<&str>) -> Result<serde_json::Value> + Sync,
+    A: Fn(&mut [&mut TranscriptEvent], &[(usize, String)]) + Sync,
+{
+    /// Sends `events` as one request and applies the answer. An answer cut off at
+    /// its output limit keeps the items it finished, and only the rest is asked
+    /// again: as one smaller request, or split in two when nothing was finished
+    /// (the same request would only stop at the same place). Returns the events
+    /// finished, and why the others were not.
+    fn send(
+        &self,
+        image: Option<&str>,
+        events: &mut [&mut TranscriptEvent],
+    ) -> (usize, Option<anyhow::Error>) {
+        let (Some(first), Some(last)) = (events.first(), events.last()) else {
+            return (0, None);
+        };
+        let (start, end) = (
+            crate::timeline::fmt_ts(first.start),
+            crate::timeline::fmt_ts(last.end),
+        );
+        let description = if self.purpose == Purpose::Proofreading {
+            tr!(
+                "校对 {}–{} 的文字 / Proofread transcript {}–{}",
+                start,
+                end,
+                start,
+                end
+            )
+        } else {
+            tr!(
+                "翻译 {}–{} 的文字 / Translate transcript {}–{}",
+                start,
+                end,
+                start,
+                end
+            )
+        };
+        let items: Vec<&str> = events.iter().map(|e| e.text.as_str()).collect();
+        let answer = (self.body_for)(&items, image).and_then(|body| {
+            self.chat
+                .segments(&body, &description, items.len(), batch_max_tokens(&items))
+        });
+        let answer = match answer {
+            Ok(answer) => answer,
+            Err(error) => return (0, Some(error)),
+        };
+        (self.apply)(events, &answer.segments);
+        if !answer.truncated {
+            return (events.len(), None);
+        }
+        let finished: std::collections::HashSet<usize> =
+            answer.segments.iter().map(|(id, _)| *id).collect();
+        let total = events.len();
+        let mut rest: Vec<&mut TranscriptEvent> = events
+            .iter_mut()
+            .enumerate()
+            .filter(|(index, _)| !finished.contains(index))
+            .map(|(_, event)| &mut **event)
+            .collect();
+        tracing::info!(
+            finished = finished.len(),
+            rest = rest.len(),
+            "AI 回答达到输出上限，补发未完成的部分 / The answer reached its output limit; asking again for the rest"
+        );
+        let done = total - rest.len();
+        if rest.is_empty() {
+            return (done, None);
+        }
+        if done > 0 {
+            let (more, error) = self.send(image, &mut rest);
+            return (done + more, error);
+        }
+        if rest.len() == 1 {
+            return (
+                0,
+                Some(anyhow::anyhow!(tr!(
+                    "这一段的结果超出了输出上限 / The answer for this paragraph exceeds the output limit"
+                ))),
+            );
+        }
+        let middle = rest.len() / 2;
+        let (left, right) = rest.split_at_mut(middle);
+        let (left_done, left_error) = self.send(image, left);
+        let (right_done, right_error) = self.send(image, right);
+        (left_done + right_done, left_error.or(right_error))
     }
 }
 
 /// One AI step over transcript batches, on the shared worker pool. A batch counts
 /// toward progress once taken. A failed batch keeps its text and records the first
 /// cause, and never stops the note; Err = the task was stopped.
+///
+/// Every request goes through the task's ledger, so running a step again with the
+/// same control is a retry of what failed: finished batches are read back from
+/// their receipts and only the unfinished ones are sent.
 fn run_batches(
     s: &LlmSettings,
     purpose: Purpose,
@@ -194,54 +376,29 @@ fn run_batches(
     let pb = crate::progress::Bar::new(purpose.usage_stage(), chunks.len() as u64).with_template(
         &format!("{{spinner:.green}} {label} {{pos}}/{{len}} [{{bar:32.cyan/blue}}] {{msg}}"),
     );
-    let chat = Chat::new(s, purpose, control);
-    let warned = std::sync::atomic::AtomicBool::new(false);
-    let first_error = std::sync::Mutex::new(None::<String>);
-    let batch = |(image_path, mut chunk): Chunk<'_>| -> Result<usize> {
-        let (first, last) = (
-            chunk.first().context("empty batch")?,
-            chunk.last().context("empty batch")?,
-        );
-        let (start, end) = (
-            crate::timeline::fmt_ts(first.start),
-            crate::timeline::fmt_ts(last.end),
-        );
-        let description = if purpose == Purpose::Proofreading {
-            tr!(
-                "校对 {}–{} 的文字 / Proofread transcript {}–{}",
-                start,
-                end,
-                start,
-                end
-            )
-        } else {
-            tr!(
-                "翻译 {}–{} 的文字 / Translate transcript {}–{}",
-                start,
-                end,
-                start,
-                end
-            )
-        };
-        let items: Vec<&str> = chunk.iter().map(|e| e.text.as_str()).collect();
-        let image = image_path
-            .as_deref()
-            .and_then(|path| section_image_b64(path, &warned));
-        let body = body_for(&items, image.as_deref())?;
-        let segments = chat.segments(&body, &description, items.len())?;
-        apply(&mut chunk, &segments);
-        Ok(chunk.len())
+    let batches = Batches {
+        chat: Chat::new(s, purpose, control),
+        purpose,
+        body_for,
+        apply,
+        warned: std::sync::atomic::AtomicBool::new(false),
     };
+    let first_error = std::sync::Mutex::new(None::<String>);
+    let total = chunks.len();
     let counts = crate::pool::map_pool(
         chunks,
         s.concurrency.clamp(1, MAX_CONCURRENCY),
         control,
-        |chunk| {
+        |(image_path, mut chunk): Chunk<'_>| {
             pb.inc(1);
-            Ok(batch(chunk).unwrap_or_else(|error| {
+            let image = image_path
+                .as_deref()
+                .and_then(|path| section_image_b64(path, &batches.warned));
+            let (done, error) = batches.send(image.as_deref(), &mut chunk);
+            if let Some(error) = error {
                 let cause = format!("{error:#}");
                 warn_once(
-                    &warned,
+                    &batches.warned,
                     &if purpose == Purpose::Proofreading {
                         tr!("校对未完成，已保留原文：{}", cause)
                     } else {
@@ -250,17 +407,19 @@ fn run_batches(
                 );
                 let mut first = crate::runtime::lock_recover(&first_error);
                 first.get_or_insert_with(|| brief(&cause));
-                0
-            }))
+            }
+            Ok((done, done < chunk.len()))
         },
     )?;
     pb.finish();
-    let succeeded = counts.into_iter().sum();
+    let succeeded = counts.iter().map(|(done, _)| done).sum();
     Ok(PolishReport {
         attempted,
         succeeded,
         failed: attempted.saturating_sub(succeeded),
         note: crate::runtime::lock_recover(&first_error).take(),
+        batches: total,
+        failed_batches: counts.iter().filter(|(_, failed)| *failed).count(),
     })
 }
 
@@ -692,6 +851,34 @@ pub(crate) struct Chat<'a> {
     settings: &'a LlmSettings,
     purpose: Purpose,
     control: &'a crate::dispatch::TaskControl,
+    policy: crate::pool::RetryPolicy,
+    resend: crate::dispatch::Resend,
+}
+
+/// A service's answer: its text, and whether it stopped at its output limit.
+pub(crate) struct Answer {
+    pub content: String,
+    pub truncated: bool,
+}
+
+/// A batch's answer as (id, text). A truncated answer holds the items it finished,
+/// which may be none; an answer that was not cut off holds every item.
+pub(crate) struct Segments {
+    pub segments: Vec<(usize, String)>,
+    pub truncated: bool,
+}
+
+/// The finished items of an answer cut off at its output limit: every complete
+/// `{"id":…,"text":…}` object for an input id, the first one for each id.
+fn salvage_segments(content: &str, expected: usize) -> Vec<(usize, String)> {
+    let found = parse_segments(content)
+        .or_else(|| lenient_scan(content))
+        .unwrap_or_default();
+    let mut seen = std::collections::HashSet::new();
+    found
+        .into_iter()
+        .filter(|(id, _)| *id < expected && seen.insert(*id))
+        .collect()
 }
 
 impl<'a> Chat<'a> {
@@ -701,28 +888,56 @@ impl<'a> Chat<'a> {
         control: &'a crate::dispatch::TaskControl,
     ) -> Self {
         Self {
-            agent: stall_limited_agent(crate::provider::is_sse(settings), STALL_TIMEOUT),
+            agent: stall_limited_agent(true, STALL_TIMEOUT),
             settings,
             purpose,
             control,
+            policy: retry_policy(settings),
+            resend: resend_rule(settings),
         }
     }
 
     /// 发 chat/completions 请求并返回 message.content。`validate` 校验正文结构，在请求
-    /// 账本里执行：无效响应记为失败，不会被当成已完成复用。
+    /// 账本里执行：无效响应记为失败，不会被当成已完成复用。它也收到回答是否在输出
+    /// 上限处截断：截断的回答可以只有部分内容。
     ///
     /// 兼容性降级：部分 OpenAI 兼容端点不支持 `response_format: json_object`，
-    /// 仅当服务明确拒绝这个字段（400/422）时去掉该字段重试一次。
+    /// 仅当服务明确拒绝这个字段（400/422）时去掉该字段重试一次。A service that
+    /// refuses the request for turning thinking off is asked once more without it.
     pub(crate) fn send(
         &self,
         body: &serde_json::Value,
         description: &str,
-        validate: &dyn Fn(&str) -> Result<()>,
-    ) -> Result<String> {
+        delivery: crate::provider::Delivery,
+        validate: &dyn Fn(&str, bool) -> Result<()>,
+    ) -> Result<Answer> {
         let s = self.settings;
-        let attempt = || self.once(body, description, validate);
-        let reply = match crate::pool::retry(self.control, MAX_ATTEMPTS, attempt) {
+        let attempt = |identity: &serde_json::Value, sent: &serde_json::Value| {
+            crate::pool::retry_with(self.control, &self.policy, || {
+                self.once(identity, sent, description, validate)
+            })
+        };
+        let rejected_parameters = |error: &anyhow::Error| {
+            error
+                .downcast_ref::<crate::dispatch::Failure>()
+                .is_some_and(|failure| matches!(failure.status, Some(400 | 422)))
+        };
+        let sent = crate::provider::sent_body(s, body, delivery);
+        let reply = match attempt(body, &sent) {
             Ok(reply) => reply,
+            Err(first)
+                if crate::provider::controls_reasoning(s, delivery)
+                    && rejected_parameters(&first) =>
+            {
+                // The service does not know how to turn thinking off. The request
+                // without it is another request, under its own receipt.
+                let plain = crate::provider::Delivery {
+                    no_reasoning: false,
+                    ..delivery
+                };
+                let identity = serde_json::json!({"request": body, "reasoning": "default"});
+                attempt(&identity, &crate::provider::sent_body(s, body, plain))?
+            }
             Err(first) => {
                 let degradable = first
                     .downcast_ref::<crate::dispatch::Failure>()
@@ -732,15 +947,16 @@ impl<'a> Chat<'a> {
                 }
                 let mut relaxed = body.clone();
                 crate::provider::strip_structured_format(s, &mut relaxed);
-                // 原请求已按 MAX_ATTEMPTS 重试过，这里只验证兼容性：只试一次
-                let reply = self.once(&relaxed, description, validate)?;
+                let sent = crate::provider::sent_body(s, &relaxed, delivery);
+                // 原请求已按重试策略重试过，这里只验证兼容性：只试一次
+                let reply = self.once(&relaxed, &sent, description, validate)?;
                 tracing::debug!("端点不支持 response_format，降级重试成功");
                 reply
             }
         };
         let resp = reply.value;
         // token 用量实时反馈：GUI 阶段行据此跳动（上传=prompt，下载=completion）。
-        // Codex SSE 已在 provider::sse_to_chat_json 归一成 chat/completions 同一形状。
+        // 各方言的流已在 provider 归一成 chat/completions 同一形状。
         let usage = &resp["usage"];
         if !reply.replayed {
             crate::progress::note_tokens(
@@ -750,25 +966,30 @@ impl<'a> Chat<'a> {
             );
         }
         // 账本已校验正文存在且结构有效
-        Ok(resp["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string())
+        Ok(Answer {
+            content: resp["choices"][0]["message"]["content"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            truncated: crate::provider::truncated(&resp),
+        })
     }
 
-    /// One attempt; validation errors omit provider response bodies which may echo credentials.
+    /// One attempt; validation errors omit provider response bodies which may echo
+    /// credentials. `sent` goes out as a stream; `identity` is what the ledger knows
+    /// the request by.
     fn once(
         &self,
-        body: &serde_json::Value,
+        identity: &serde_json::Value,
+        sent: &serde_json::Value,
         description: &str,
-        validate: &dyn Fn(&str) -> Result<()>,
+        validate: &dyn Fn(&str, bool) -> Result<()>,
     ) -> std::result::Result<crate::dispatch::Reply, crate::dispatch::Failure> {
         let s = self.settings;
         let url = crate::provider::endpoint(s);
         let headers = crate::provider::auth_headers(s).map_err(crate::dispatch::Failure::local)?;
-        let sse = crate::provider::is_sse(s);
         let former = if self.purpose == Purpose::Proofreading {
-            former_proofreading_bodies(s, body)
+            former_proofreading_bodies(s, identity)
         } else {
             Vec::new()
         };
@@ -778,29 +999,24 @@ impl<'a> Chat<'a> {
                 purpose: self.purpose.into(),
                 description,
                 endpoint: &url,
-                identity: body,
+                identity,
                 former: &former,
-                resend: if crate::provider::free_to_resend(s) {
-                    crate::dispatch::Resend::Free
-                } else {
-                    crate::dispatch::Resend::AskUser
-                },
+                resend: self.resend,
             },
             || {
                 let mut request = self.agent.post(&url);
                 for (name, value) in &headers {
                     request = request.header(name, value);
                 }
-                let response = crate::runtime::receive(crate::runtime::send_json(request, body))?;
-                // Codex Responses API 只提供 SSE 流：聚合为 chat/completions 形状，
-                // 下游校验与解析不变；非 2xx 原样上交（重试/降级逻辑要看状态码）
-                if sse && (200..300).contains(&response.status) {
-                    let canonical =
-                        crate::provider::sse_to_chat_json(&response.body).map_err(|e| {
-                            crate::dispatch::NetworkFailure {
-                                message: format!("{e:#}"),
-                                definitely_unsent: false,
-                            }
+                let response = crate::runtime::receive(crate::runtime::send_json(request, sent))?;
+                // 流聚合为 chat/completions 形状，下游校验与解析不变；
+                // 非 2xx 原样上交（重试/降级逻辑要看状态码）。An unfinished stream is a
+                // lost answer: the service may have produced (and charged) it.
+                if (200..300).contains(&response.status) {
+                    let canonical = crate::provider::stream_to_chat_json(s, &response.body)
+                        .map_err(|e| crate::dispatch::NetworkFailure {
+                            message: format!("{e:#}"),
+                            definitely_unsent: false,
                         })?;
                     return Ok(crate::dispatch::HttpResponse {
                         body: serde_json::to_vec(&canonical).unwrap_or_default(),
@@ -816,24 +1032,31 @@ impl<'a> Chat<'a> {
                     value.get("error").is_none_or(serde_json::Value::is_null),
                     tr!("AI 服务返回了错误 / The AI service returned an error")
                 );
-                let content = value["choices"][0]["message"]["content"]
-                    .as_str()
-                    .filter(|s| !s.trim().is_empty())
-                    .context(tr!(
+                let truncated = crate::provider::truncated(value);
+                let content = value["choices"][0]["message"]["content"].as_str();
+                let content = if truncated {
+                    content.unwrap_or_default()
+                } else {
+                    content.filter(|s| !s.trim().is_empty()).context(tr!(
                         "AI 服务没有返回内容 / The AI service returned no content"
-                    ))?;
-                validate(content)
+                    ))?
+                };
+                validate(content, truncated)
             },
         )
     }
 
-    /// A batch's reply as (id, text), one entry per input item.
+    /// A batch's reply as (id, text). A complete reply has one entry per input item;
+    /// a reply cut off at its output limit is kept as it is, a definite answer, and
+    /// yields the items it finished, so asking again for the rest never resends
+    /// what was answered.
     fn segments(
         &self,
         body: &serde_json::Value,
         description: &str,
         expected: usize,
-    ) -> Result<Vec<(usize, String)>> {
+        max_tokens: u32,
+    ) -> Result<Segments> {
         let proofreading = self.purpose == Purpose::Proofreading;
         let parsed = |content: &str| {
             parse_segments(content).context(if proofreading {
@@ -842,7 +1065,14 @@ impl<'a> Chat<'a> {
                 tr!("服务返回的翻译结构无效 / Invalid translation structure")
             })
         };
-        let content = self.send(body, description, &|content| {
+        let delivery = crate::provider::Delivery {
+            max_tokens: Some(max_tokens),
+            no_reasoning: true,
+        };
+        let answer = self.send(body, description, delivery, &|content, truncated| {
+            if truncated {
+                return Ok(());
+            }
             anyhow::ensure!(
                 segment_ids_match(&parsed(content)?, expected),
                 if proofreading {
@@ -857,7 +1087,16 @@ impl<'a> Chat<'a> {
             );
             Ok(())
         })?;
-        parsed(&content)
+        if answer.truncated {
+            return Ok(Segments {
+                segments: salvage_segments(&answer.content, expected),
+                truncated: true,
+            });
+        }
+        Ok(Segments {
+            segments: parsed(&answer.content)?,
+            truncated: false,
+        })
     }
 }
 
@@ -1089,6 +1328,18 @@ pub fn print_status(cfg: &crate::settings::ConfigFile) {
     );
     println_tr!("  自动摘要 / Automatic summary: {}", state(s.summarize));
     println_tr!("  并发请求 / Concurrent requests: {}", s.concurrency);
+    println_tr!(
+        "  失败自动重试 / Automatic retries: {}",
+        if s.auto_retry {
+            tr!(
+                "开启，每个请求最多发送 {} 次 / on, up to {} sends per request",
+                s.retry_attempts,
+                s.retry_attempts
+            )
+        } else {
+            state(false).to_owned()
+        }
+    );
     println_tr!("  使用提示 / Usage hint: {}", state(!s.disable_hint));
     if !s.enabled {
         println_tr!("开启校对 / Enable transcript polish: course2md llm setup");
@@ -1347,6 +1598,8 @@ mod tests {
             summarize: false,
             translate: None,
             concurrency: 8,
+            auto_retry: true,
+            retry_attempts: 4,
         }
     }
 
@@ -1475,5 +1728,337 @@ mod tests {
         assert_eq!(got, vec![(0, "a".into()), (1, "b".into())]);
         assert!(parse_id_text_pairs(tr!("没有数组")).is_none());
         assert!(parse_id_text_pairs("[]").is_none());
+    }
+
+    fn speech(text: &str) -> TranscriptEvent {
+        TranscriptEvent {
+            start: 0.0,
+            end: 1.0,
+            text: text.into(),
+            raw: None,
+            translation: None,
+        }
+    }
+
+    #[test]
+    fn batches_break_between_events_by_count_and_length_in_order() {
+        let long = "长".repeat(BATCH_CHARS + 10);
+        let mut events: Vec<TranscriptEvent> = (0..25)
+            .map(|i| speech(&format!("第{i}段")))
+            .chain([speech(&long), speech("尾")])
+            .collect();
+        let mut chunks = Vec::new();
+        into_chunks(None, events.iter_mut(), &mut chunks);
+        let sizes: Vec<usize> = chunks.iter().map(|(_, chunk)| chunk.len()).collect();
+        // 20 short events, the 5 after them, the oversized one alone, then the rest.
+        assert_eq!(sizes, [20, 5, 1, 1]);
+        let order: Vec<&str> = chunks
+            .iter()
+            .flat_map(|(_, chunk)| chunk.iter().map(|e| e.text.as_str()))
+            .collect();
+        let expected: Vec<String> = (0..25)
+            .map(|i| format!("第{i}段"))
+            .chain([long.clone(), "尾".into()])
+            .collect();
+        assert_eq!(order, expected, "nothing is lost, split or reordered");
+
+        // Characters close a batch before the event that would cross the limit.
+        let half = "半".repeat(BATCH_CHARS / 2);
+        let mut events = [speech(&half), speech(&half), speech("x")];
+        let mut chunks = Vec::new();
+        into_chunks(None, events.iter_mut(), &mut chunks);
+        let sizes: Vec<usize> = chunks.iter().map(|(_, chunk)| chunk.len()).collect();
+        assert_eq!(sizes, [2, 1]);
+        for (_, chunk) in &chunks {
+            let chars: usize = chunk.iter().map(|e| e.text.chars().count()).sum();
+            assert!(chars <= BATCH_CHARS);
+        }
+    }
+
+    #[test]
+    fn the_output_budget_follows_the_batch() {
+        assert_eq!(batch_max_tokens(&["短"]), MIN_BATCH_TOKENS);
+        let full = "字".repeat(BATCH_CHARS);
+        let budget = batch_max_tokens(&[full.as_str()]);
+        assert!(budget > 2 * BATCH_CHARS as u32 && budget < CHAT_MAX_TOKENS / 2);
+        let huge = "字".repeat(20_000);
+        assert_eq!(batch_max_tokens(&[huge.as_str()]), CHAT_MAX_TOKENS);
+    }
+
+    #[test]
+    fn a_truncated_answer_keeps_its_finished_items() {
+        // Cut off inside the third item: no closing `]}`.
+        let content = r#"{"segments":[{"id":0,"text":"甲 $\\frac{a}{b}$"},{"id":1,"text":"乙"},{"id":2,"text":"丙丙丙"#;
+        assert!(parse_segments(content).is_none() || parse_segments(content).unwrap().len() < 3);
+        assert_eq!(
+            salvage_segments(content, 3),
+            vec![(0, "甲 $\\frac{a}{b}$".into()), (1, "乙".into())]
+        );
+        // Out-of-range and repeated ids (a model repeating itself) are dropped.
+        let content = r#"{"segments":[{"id":0,"text":"a"},{"id":9,"text":"x"},{"id":0,"text":"again"},{"id":1,"text":"b"#;
+        assert_eq!(salvage_segments(content, 2), vec![(0, "a".into())]);
+        assert!(salvage_segments("{\"segm", 2).is_empty());
+    }
+
+    /// A loopback service: `answer(n, items)` replies to the n-th request (from 0),
+    /// given the batch it carries. Returns the base URL and every request body.
+    fn scripted_service(
+        answer: impl Fn(usize, &[String]) -> String + Send + 'static,
+    ) -> (
+        String,
+        std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+    ) {
+        use std::io::{Read as _, Write as _};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let bodies = seen.clone();
+        std::thread::spawn(move || {
+            for (index, stream) in listener.incoming().enumerate() {
+                let Ok(mut stream) = stream else { return };
+                let mut data = Vec::new();
+                let mut chunk = [0u8; 8192];
+                let body = loop {
+                    if let Some(end) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let head = String::from_utf8_lossy(&data[..end]).to_ascii_lowercase();
+                        let length: usize = head
+                            .lines()
+                            .find_map(|line| line.strip_prefix("content-length:"))
+                            .map_or(0, |value| value.trim().parse().unwrap());
+                        if data.len() >= end + 4 + length {
+                            break data[end + 4..end + 4 + length].to_vec();
+                        }
+                    }
+                    match stream.read(&mut chunk) {
+                        Ok(0) | Err(_) => break Vec::new(),
+                        Ok(n) => data.extend_from_slice(&chunk[..n]),
+                    }
+                };
+                let body: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+                let items: Vec<String> = body["messages"][1]["content"][0]["text"]
+                    .as_str()
+                    .and_then(|text| serde_json::from_str::<Vec<serde_json::Value>>(text).ok())
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|item| item["text"].as_str().unwrap_or_default().to_owned())
+                    .collect();
+                bodies.lock().unwrap().push(body);
+                let _ = stream.write_all(answer(index, &items).as_bytes());
+            }
+        });
+        (url, seen)
+    }
+
+    /// A streamed answer carrying `content`, ending with `finish`.
+    fn streamed(content: &str, finish: &str) -> String {
+        let events = [
+            serde_json::json!({"choices": [{"delta": {"content": content}}]}),
+            serde_json::json!({"choices": [{"delta": {}, "finish_reason": finish}]}),
+        ];
+        let body: String = events
+            .iter()
+            .map(|event| format!("data: {event}\n\n"))
+            .chain(["data: [DONE]\n\n".to_owned()])
+            .collect();
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    /// Every item proofread as `<text>!`, ids `from..`.
+    fn proofread(items: &[String]) -> String {
+        let segments: Vec<_> = items
+            .iter()
+            .enumerate()
+            .map(|(id, text)| serde_json::json!({"id": id, "text": format!("{text}!")}))
+            .collect();
+        serde_json::json!({ "segments": segments }).to_string()
+    }
+
+    fn status(code: u16) -> String {
+        format!("HTTP/1.1 {code} Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+    }
+
+    fn polish_settings(url: String, attempts: u32) -> LlmSettings {
+        LlmSettings {
+            base_url: url,
+            concurrency: 1,
+            retry_attempts: attempts,
+            ..test_settings()
+        }
+    }
+
+    fn one_section(texts: &[&str]) -> Vec<Section> {
+        vec![Section {
+            t: 0.0,
+            end: 1.0,
+            image: String::new(),
+            speech: texts.iter().map(|text| speech(text)).collect(),
+        }]
+    }
+
+    fn texts(sections: &[Section]) -> Vec<String> {
+        sections[0].speech.iter().map(|e| e.text.clone()).collect()
+    }
+
+    #[test]
+    fn running_again_sends_only_the_batches_that_failed() {
+        let failing = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let fail = failing.clone();
+        let (url, bodies) = scripted_service(move |_, items| {
+            if fail.load(std::sync::atomic::Ordering::SeqCst) && items.iter().any(|i| i == "坏") {
+                status(502)
+            } else {
+                streamed(&proofread(items), "stop")
+            }
+        });
+        // Three batches of 20; the middle one meets a failing gateway.
+        let mut texts_in: Vec<String> = (0..60).map(|i| format!("段{i}")).collect();
+        texts_in[25] = "坏".into();
+        let refs: Vec<&str> = texts_in.iter().map(String::as_str).collect();
+        let settings = polish_settings(url, 1);
+        let work = tempfile::tempdir().unwrap();
+        let control = crate::dispatch::TaskControl::open(work.path(), Default::default()).unwrap();
+
+        let mut sections = one_section(&refs);
+        let report =
+            polish_sections_report(&mut sections, Path::new(""), &settings, &control).unwrap();
+        assert_eq!((report.batches, report.failed_batches), (3, 1));
+        assert_eq!((report.succeeded, report.failed), (40, 20));
+        assert_eq!(texts(&sections)[25], "坏", "a failed batch keeps its text");
+        assert_eq!(bodies.lock().unwrap().len(), 3);
+
+        // The service recovers; the same step again sends the failed batch alone.
+        failing.store(false, std::sync::atomic::Ordering::SeqCst);
+        let mut sections = one_section(&refs);
+        let report =
+            polish_sections_report(&mut sections, Path::new(""), &settings, &control).unwrap();
+        assert_eq!((report.succeeded, report.failed_batches), (60, 0));
+        let bodies = bodies.lock().unwrap();
+        assert_eq!(
+            bodies.len(),
+            4,
+            "finished batches come back from their receipts"
+        );
+        assert!(bodies[3].to_string().contains("坏"));
+        assert!(texts(&sections).iter().all(|text| text.ends_with('!')));
+    }
+
+    #[test]
+    fn failures_are_retried_automatically_but_rejections_are_not() {
+        let (url, bodies) = scripted_service(|index, items| match index {
+            0 => status(503),
+            _ => streamed(&proofread(items), "stop"),
+        });
+        let mut sections = one_section(&["一", "二"]);
+        let report = polish_sections_report(
+            &mut sections,
+            Path::new(""),
+            &polish_settings(url, 3),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(report.succeeded, 2);
+        assert_eq!(bodies.lock().unwrap().len(), 2);
+
+        let (url, bodies) = scripted_service(|_, _| status(401));
+        let mut sections = one_section(&["一"]);
+        let report = polish_sections_report(
+            &mut sections,
+            Path::new(""),
+            &polish_settings(url, 3),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(report.failed, 1);
+        assert_eq!(
+            bodies.lock().unwrap().len(),
+            1,
+            "a refused key is not retried"
+        );
+    }
+
+    #[test]
+    fn a_cut_off_answer_keeps_what_it_finished_and_asks_for_the_rest() {
+        let (url, bodies) = scripted_service(|index, items| match index {
+            // Stops at its output limit inside the third item.
+            0 => {
+                let finished = &proofread(&items[..2]);
+                let cut = format!(
+                    "{},{{\"id\":2,\"text\":\"半",
+                    finished.trim_end_matches("]}")
+                );
+                streamed(&cut, "length")
+            }
+            _ => streamed(&proofread(items), "stop"),
+        });
+        let mut sections = one_section(&["一", "二", "三", "四"]);
+        let report = polish_sections_report(
+            &mut sections,
+            Path::new(""),
+            &polish_settings(url, 1),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!((report.succeeded, report.failed), (4, 0));
+        assert_eq!(texts(&sections), ["一!", "二!", "三!", "四!"]);
+        let bodies = bodies.lock().unwrap();
+        assert_eq!(bodies.len(), 2);
+        let second = bodies[1]["messages"][1]["content"][0]["text"]
+            .as_str()
+            .unwrap();
+        assert!(second.contains("三") && second.contains("四"));
+        assert!(!second.contains("一"), "a finished item is not asked again");
+        // Streamed, with an output budget sized to the batch.
+        assert_eq!(bodies[0]["stream"], true);
+        assert_eq!(bodies[0]["max_tokens"], MIN_BATCH_TOKENS);
+    }
+
+    #[test]
+    fn a_cut_off_answer_with_nothing_finished_is_split() {
+        let (url, bodies) = scripted_service(|_, items| {
+            if items.len() > 1 {
+                streamed("{\"segments\":[{\"id\":0,\"text\":\"", "length")
+            } else {
+                streamed(&proofread(items), "stop")
+            }
+        });
+        let mut sections = one_section(&["一", "二", "三"]);
+        let report = polish_sections_report(
+            &mut sections,
+            Path::new(""),
+            &polish_settings(url, 1),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(report.succeeded, 3);
+        assert_eq!(texts(&sections), ["一!", "二!", "三!"]);
+        // [一二三] → [一] + [二三] → [二] + [三]
+        let sizes: Vec<usize> = bodies
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|body| {
+                let text = body["messages"][1]["content"][0]["text"].as_str().unwrap();
+                serde_json::from_str::<Vec<serde_json::Value>>(text)
+                    .unwrap()
+                    .len()
+            })
+            .collect();
+        assert_eq!(sizes, [3, 1, 2, 1, 1]);
+
+        // A single paragraph that cannot fit fails alone, with its text kept.
+        let (url, _) = scripted_service(|_, _| streamed("", "length"));
+        let mut sections = one_section(&["一"]);
+        let report = polish_sections_report(
+            &mut sections,
+            Path::new(""),
+            &polish_settings(url, 1),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(report.failed, 1);
+        assert_eq!(texts(&sections), ["一"]);
     }
 }

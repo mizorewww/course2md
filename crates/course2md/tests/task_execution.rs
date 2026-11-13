@@ -1036,6 +1036,8 @@ fn proofreading_resend_continues_unsent_summary_without_repeating_source_work() 
     original.config.llm.base_url = mock.url.clone();
     original.config.llm.model = "test-model".into();
     original.config.llm.api_key = "private-task-key".into();
+    // Lost answers wait for the person only without automatic retries.
+    original.config.llm.auto_retry = false;
     original
         .service_versions
         .insert("llm".into(), "ai-v1".into());
@@ -1216,6 +1218,8 @@ fn translation_resend(missing_receipt: bool, lose_again: bool) {
     llm.base_url = mock.url.clone();
     llm.model = "test-model".into();
     llm.api_key = "private-task-key".into();
+    // Lost answers wait for the person only without automatic retries.
+    llm.auto_retry = false;
     original
         .service_versions
         .insert("llm".into(), "ai-v1".into());
@@ -1423,6 +1427,8 @@ fn several_uncertain_batches(lost_kind: &'static str, lost: usize) {
     llm.base_url = mock.url.clone();
     llm.model = "test-model".into();
     llm.api_key = "private-task-key".into();
+    // Lost answers wait for the person only without automatic retries.
+    llm.auto_retry = false;
     original
         .service_versions
         .insert("llm".into(), "ai-v1".into());
