@@ -642,6 +642,8 @@ mod tests {
             unread: false,
             resend: vec![],
             replaced_by: None,
+            rework: None,
+            rework_accepted: None,
             ran_with: None,
         };
         let busy = super::note_has_unfinished_task;

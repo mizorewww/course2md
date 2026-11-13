@@ -503,6 +503,11 @@ impl Desktop {
         if self.storage_ui.busy {
             return;
         }
+        // Until this machine is checked, an automatic speech engine would be a guess,
+        // and a wrong one would discard the speech progress saved with the right one.
+        if self.environment.is_none() {
+            return;
+        }
         let Some(task) = self
             .workspace(cx)
             .and_then(|w| w.state.next_task())
@@ -586,7 +591,10 @@ impl Desktop {
             let read = read.await;
             let _ = this.update(cx, |this, cx| match read {
                 Ok((request, ran_with)) => this.start_task_request(task, request, ran_with, cx),
-                Err(error) => this.fail_task_before_start(&task.id, error, cx),
+                Err(error) => match error.downcast::<run::NeedsRework>() {
+                    Ok(run::NeedsRework(rework)) => this.await_rework(&task.id, rework, cx),
+                    Err(error) => this.fail_task_before_start(&task.id, error, cx),
+                },
             });
         })
         .detach();
@@ -654,33 +662,60 @@ impl Desktop {
         cx.notify();
     }
 
-    /// Continues a paused or stopped task with the current settings. When that would
-    /// send what its earlier run already had answered to another AI service, which
-    /// may cost again, the person decides first.
+    /// Continues a paused or stopped task with the current settings. One that stopped
+    /// because that would redo paid work its earlier run finished continues only once
+    /// the person agrees here; every other way a task resumes (all at once, after a
+    /// move, when its model is ready, on relaunch) leaves it waiting for this.
     fn resume_task(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
-        let resent = self.task(&id, cx).and_then(|task| {
-            let answered = workspace::has_answered_ai_requests(task);
-            run::ai_work_sent_again(&self.preferences, task, answered)
-        });
-        let Some((before, now)) = resent else {
+        let Some(rework) = self.task(&id, cx).and_then(|task| task.rework.clone()) else {
             self.set_task_intent(id, Intent::Run, cx);
             return;
         };
-        ui::Confirm::new(
-            course2md::tr!("用新的 AI 服务继续生成？"),
+        let mut question = ui::Confirm::new(
+            course2md::tr!("用当前设置继续生成？"),
             course2md::tr!("暂不继续"),
             course2md::tr!("继续生成"),
-        )
-        .text(course2md::tr!(
-            "设置中的 AI 服务已从「{}」换成「{}」。继续生成时，上次已完成的校对、翻译或摘要会重新发送给新服务，可能产生额外费用。",
-            before,
-            now
-        ))
-        .ask(
-            cx.listener(move |this, _, _, cx| this.set_task_intent(id.clone(), Intent::Run, cx)),
-            window,
-            cx,
         );
+        for change in rework.changes {
+            question = question.text(change);
+        }
+        question
+            .text(course2md::tr!(
+                "继续生成会按当前设置重新处理上次已完成的部分，可能产生额外费用。"
+            ))
+            .ask(
+                cx.listener(move |this, _, _, cx| this.accept_rework(id.clone(), cx)),
+                window,
+                cx,
+            );
+    }
+
+    fn accept_rework(&mut self, id: String, cx: &mut Context<Self>) {
+        if self
+            .transact(
+                course2md::tr!("任务状态尚未保存：{}"),
+                |state| run::accept_rework(state, &id),
+                cx,
+            )
+            .is_some()
+        {
+            self.follow_resumed_input_task(&id, cx);
+            self.start_next_task(cx);
+        }
+        cx.notify();
+    }
+
+    /// A start that would redo paid work the person has not agreed to redo: the task
+    /// waits, paused, and the queue goes on.
+    fn await_rework(&mut self, task_id: &str, rework: workspace::Rework, cx: &mut Context<Self>) {
+        self.work.update(cx, |work, _| work.end_start(task_id));
+        if let Some(Err(error)) = self.with_workspace(cx, |workspace| {
+            workspace.transaction(|state| run::await_rework(state, task_id, rework))
+        }) {
+            self.report(course2md::tr!("任务状态尚未保存：{}"), error);
+        }
+        self.start_next_task(cx);
+        cx.notify();
     }
 
     pub fn set_task_intent(&mut self, id: String, intent: Intent, cx: &mut Context<Self>) {

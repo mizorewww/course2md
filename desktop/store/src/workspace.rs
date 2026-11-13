@@ -285,7 +285,7 @@ pub struct RepairScope {
 /// What a task's latest run started with: the settings current then, with the
 /// service versions they named. Written when a run starts, so a task that has
 /// not run has none; the next run replaces it.
-#[derive(Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct RunSettings {
     #[serde(serialize_with = "serialize_public_config")]
     pub config: ConfigFile,
@@ -293,6 +293,11 @@ pub struct RunSettings {
     pub asr_service: Option<String>,
     #[serde(default)]
     pub ai_service: Option<String>,
+    /// The services' names then, which a version deleted since no longer gives.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asr_service_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_service_name: Option<String>,
 }
 
 impl RunSettings {
@@ -305,7 +310,19 @@ impl RunSettings {
             config: public_config(config),
             asr_service,
             ai_service,
+            ..Default::default()
         }
+    }
+
+    /// A stable name for these settings, which the person's agreement to redo paid
+    /// work under them refers to.
+    pub fn token(&self) -> String {
+        let mut public = serde_json::to_value(self).unwrap_or_default();
+        if let Some(object) = public.as_object_mut() {
+            object.remove("asr_service_name");
+            object.remove("ai_service_name");
+        }
+        c2m_core::digest::json_digest(&public).unwrap_or_default()
     }
 
     pub fn options(&self) -> ConversionOptions {
@@ -328,12 +345,59 @@ struct TaskPlanWire {
     ai_service: Option<String>,
 }
 
-/// An older plan's configuration, or none where it no longer reads.
+/// An older plan's configuration. Where it no longer reads as a whole (written by
+/// a version with other fields), what can be read is kept and the rest reported.
 fn lenient_config<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<ConfigFile>, D::Error> {
     let value = serde_json::Value::deserialize(deserializer)?;
-    Ok(serde_json::from_value(value).ok())
+    if value.is_null() {
+        return Ok(None);
+    }
+    Ok(Some(
+        match serde_json::from_value::<ConfigFile>(value.clone()) {
+            Ok(config) => config,
+            Err(error) => {
+                eprintln!("course2md: an older task's settings were read in part: {error}");
+                readable_config(&value)
+            }
+        },
+    ))
+}
+
+/// The fields of an older configuration that a task's record still needs, each
+/// read on its own.
+fn readable_config(value: &serde_json::Value) -> ConfigFile {
+    fn read<T: serde::de::DeserializeOwned>(value: &serde_json::Value, path: &[&str]) -> Option<T> {
+        let found = path.iter().try_fold(value, |value, key| value.get(*key))?;
+        serde_json::from_value(found.clone()).ok()
+    }
+    let mut config = ConfigFile::default();
+    let defaults = &mut config.defaults;
+    defaults.provider = read(value, &["defaults", "provider"]);
+    defaults.asr_model = read(value, &["defaults", "asr_model"]);
+    defaults.transcript_source = read(value, &["defaults", "transcript_source"]);
+    defaults.keep_video = read(value, &["defaults", "keep_video"]);
+    defaults.formats = read(value, &["defaults", "formats"]);
+    defaults.model_dir = read(value, &["defaults", "model_dir"]);
+    let llm = &mut config.llm;
+    llm.enabled = read(value, &["llm", "enabled"]).unwrap_or_default();
+    llm.summarize = read(value, &["llm", "summarize"]).unwrap_or_default();
+    llm.vision = read(value, &["llm", "vision"]).unwrap_or_default();
+    llm.translate = read(value, &["llm", "translate"]);
+    llm.model = read(value, &["llm", "model"]).unwrap_or_default();
+    llm.base_url = read(value, &["llm", "base_url"]).unwrap_or_default();
+    llm.prompt = read(value, &["llm", "prompt"]);
+    config
+}
+
+/// Paid work an earlier run finished that continuing with the current settings would
+/// do and pay for again: what changed, as the person is asked about it, and the
+/// settings it would be redone with (`RunSettings::token`).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Rework {
+    pub changes: Vec<String>,
+    pub token: String,
 }
 
 pub use c2m_dispatch::dispatch::Intent;
@@ -395,6 +459,13 @@ pub struct TaskRecord {
     /// What the latest run started with.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ran_with: Option<RunSettings>,
+    /// Paid work an earlier run finished that continuing with the current settings
+    /// would redo: the task waits, paused, for the person's word.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rework: Option<Rework>,
+    /// The settings (`RunSettings::token`) the person agreed to redo that work with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rework_accepted: Option<String>,
     /// The later attempt that replaced this one: the task whose `parent` this is.
     #[serde(skip)]
     pub handled_by: Option<String>,
@@ -430,6 +501,10 @@ struct TaskRecordWire {
     replaced_by: Option<String>,
     #[serde(default)]
     ran_with: Option<RunSettings>,
+    #[serde(default)]
+    rework: Option<Rework>,
+    #[serde(default)]
+    rework_accepted: Option<String>,
     #[serde(flatten)]
     events: JobEvents,
 }
@@ -456,13 +531,12 @@ impl From<TaskRecordWire> for TaskRecord {
                 formats: config.defaults.formats.clone(),
             });
         }
-        // What a task that already ran was made with stays known; one still waiting
-        // to start runs with the settings current then instead.
-        let ran_with = wire.ran_with.or_else(|| {
-            config
-                .filter(|_| wire.state != TaskState::Queued)
-                .map(|config| RunSettings::new(&config, asr_service, ai_service))
-        });
+        // What the task's requests were made with stays known: what a task that ran
+        // was made with, and for one still waiting, the services an uncertain request
+        // or a paid redo is compared with. Its next run uses the current settings.
+        let ran_with = wire
+            .ran_with
+            .or_else(|| config.map(|config| RunSettings::new(&config, asr_service, ai_service)));
         Self {
             id: wire.id,
             plan,
@@ -476,6 +550,8 @@ impl From<TaskRecordWire> for TaskRecord {
             resend: wire.resend,
             replaced_by: wire.replaced_by,
             ran_with,
+            rework: wire.rework,
+            rework_accepted: wire.rework_accepted,
             handled_by: None,
             held: false,
             work_dir: PathBuf::new(),
@@ -1050,6 +1126,8 @@ impl State {
             resend: Vec::new(),
             replaced_by: None,
             ran_with: None,
+            rework: None,
+            rework_accepted: None,
             // A new task has said nothing yet.
             events: JobEvents {
                 loaded: true,
@@ -1992,15 +2070,29 @@ fn worker_holds(work_dir: &Path) -> bool {
         .is_ok_and(|file| matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock)))
 }
 
-/// Whether the task's work directory holds AI requests that were answered: work
-/// already paid for. Blocking: it reads the task's request records.
-pub fn has_answered_ai_requests(task: &TaskRecord) -> bool {
-    c2m_dispatch::dispatch::receipts(&task.work_dir).is_ok_and(|receipts| {
-        receipts.iter().any(|receipt| {
-            receipt.state == c2m_dispatch::dispatch::State::Completed
-                && Component::parse(&receipt.purpose).is_some_and(Component::is_ai)
-        })
-    })
+/// What an earlier run of a task finished that a service was paid for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PaidWork {
+    /// AI requests that were answered.
+    pub ai: bool,
+    /// Speech recognition: a transcript, or progress towards one.
+    pub transcription: bool,
+}
+
+/// What the task's work directory holds that was paid for. Blocking: it reads the
+/// task's request records.
+pub fn paid_work(task: &TaskRecord) -> PaidWork {
+    PaidWork {
+        ai: c2m_dispatch::dispatch::receipts(&task.work_dir).is_ok_and(|receipts| {
+            receipts.iter().any(|receipt| {
+                receipt.state == c2m_dispatch::dispatch::State::Completed
+                    && Component::parse(&receipt.purpose).is_some_and(Component::is_ai)
+            })
+        }),
+        transcription: ["transcript.json", "asr.jsonl"]
+            .iter()
+            .any(|name| task.work_dir.join(name).is_file()),
+    }
 }
 
 pub fn reconcile_receipts(task: &mut TaskRecord) -> Result<()> {
@@ -3251,8 +3343,7 @@ mod tests {
             // Even a run record handed the resolved keys does not write them.
             task.ran_with = Some(RunSettings {
                 config,
-                asr_service: None,
-                ai_service: None,
+                ..Default::default()
             });
             Ok(())
         })
@@ -3902,10 +3993,12 @@ mod tests {
         let reopened = Workspace::open_at_inline(file.clone(), library).unwrap();
         let draft = reopened.state.draft().unwrap();
         assert_eq!(draft.text_source, None);
+        // A waiting task keeps what its requests would be compared with: its next run
+        // uses the current settings, and redoing paid work under them is asked first.
         let waiting = reopened.state.task(&queued).unwrap();
-        assert!(
-            waiting.ran_with.is_none(),
-            "a waiting task runs with the current settings"
+        assert_eq!(
+            waiting.ran_with.as_ref().unwrap().ai_service.as_deref(),
+            Some("ai-version-old")
         );
         let ran = reopened.state.task(&finished).unwrap();
         let ran_with = ran.ran_with.as_ref().unwrap();
@@ -3970,6 +4063,22 @@ mod tests {
             "updated": 1,
             "parent": "task-base",
         });
+        let task: TaskRecord = serde_json::from_value(record.clone()).unwrap();
+        let repair = task.plan.repair.unwrap();
+        assert_eq!(repair.translate.as_deref(), Some("en"));
+        assert_eq!(
+            repair.formats,
+            Some(vec![c2m_config::config::OutputFormat::Json])
+        );
+        assert_eq!(
+            task.ran_with.unwrap().ai_service.as_deref(),
+            Some("ai-version-old")
+        );
+        // Written by a version with fields this one does not know: what can be read
+        // is kept, the translation language among it.
+        let mut record = record;
+        record["plan"]["config"]["llm"]["retired_field"] = true.into();
+        record["plan"]["config"]["defaults"]["another_retired_field"] = 3.into();
         let task: TaskRecord = serde_json::from_value(record).unwrap();
         let repair = task.plan.repair.unwrap();
         assert_eq!(repair.translate.as_deref(), Some("en"));
@@ -3977,7 +4086,6 @@ mod tests {
             repair.formats,
             Some(vec![c2m_config::config::OutputFormat::Json])
         );
-        assert!(task.ran_with.is_none());
     }
 
     #[test]
@@ -5135,8 +5243,7 @@ mod tests {
                 },
                 ..Default::default()
             },
-            asr_service: None,
-            ai_service: None,
+            ..Default::default()
         });
         ws.state.task_mut(&id).unwrap().state = TaskState::Running;
         ws.state.task_mut(&id).unwrap().resend = vec!["old-attempt.1".into()];

@@ -51,7 +51,7 @@ pub fn text_source(plan: &TaskPlan, settings: TranscriptSource) -> TranscriptSou
 /// plan itself decides (its video's text, the parts a repair redoes), and the
 /// recognition engine and its model filled in where Settings leave them
 /// automatic, `fallback` being this machine's engine. Its services are
-/// `task_refs`.
+/// `task_settings`.
 pub fn current_config(
     preferences: &preferences::Store,
     plan: &TaskPlan,
@@ -89,49 +89,174 @@ pub fn current_config(
     config
 }
 
-/// The services a task runs with: Settings' defaults, except for a resend the person
-/// authorized, which goes to the services its uncertain requests were made with.
-/// A request's identity includes its service version: sent elsewhere, the old
-/// request would never be settled and the task would stay unconfirmed.
-pub fn task_refs(preferences: &preferences::Store, task: &TaskRecord) -> preferences::ServiceRefs {
-    match task.ran_with.as_ref().filter(|_| !task.resend.is_empty()) {
-        Some(ran_with) => preferences::ServiceRefs {
-            asr: ran_with.asr_service.clone(),
-            llm: ran_with.ai_service.clone(),
-        },
-        None => preferences.default_refs(),
+/// The settings an unsettled paid request was made with, which a task keeps until
+/// it is settled: a resend the person authorized, or a request whose outcome is not
+/// known. A request's identity includes its payload and service version, so sent
+/// with other settings the old request would never be settled.
+fn pinned(task: &TaskRecord) -> Option<&RunSettings> {
+    task.ran_with
+        .as_ref()
+        .filter(|_| !task.resend.is_empty() || task.has_uncertain())
+}
+
+/// The configuration and services a task runs with: the current settings and
+/// default services, or, while it has an unsettled paid request, exactly what that
+/// request was made with.
+pub fn task_settings(
+    preferences: &preferences::Store,
+    task: &TaskRecord,
+    fallback: AsrProvider,
+) -> (ConfigFile, preferences::ServiceRefs) {
+    match pinned(task) {
+        Some(ran_with) => (ran_with.config.clone(), refs_of(ran_with)),
+        None => (
+            current_config(preferences, &task.plan, fallback),
+            preferences.default_refs(),
+        ),
     }
 }
 
-/// The AI service a task would continue with, when it is another than the one
-/// its earlier run used and its requests differ (another model, address or kind of
-/// service): what that run already had answered is then sent, and paid for, again.
-/// The old and new services' names. `answered` says whether the earlier run has
-/// answered AI requests (`workspace::has_answered_ai_requests`). Identical requests
-/// to an edited service (a new key or name) reuse their answers and ask nothing.
-pub fn ai_work_sent_again(
-    preferences: &preferences::Store,
-    task: &TaskRecord,
-    answered: bool,
-) -> Option<(String, String)> {
-    let before = task.ran_with.as_ref()?.ai_service.as_deref()?;
-    let now = task_refs(preferences, task).llm?;
-    if !answered || before == now {
-        return None;
+fn refs_of(settings: &RunSettings) -> preferences::ServiceRefs {
+    preferences::ServiceRefs {
+        asr: settings.asr_service.clone(),
+        llm: settings.ai_service.clone(),
     }
-    let now = preferences.version(&now)?;
-    let changed = preferences.version(before).is_none_or(|before| {
-        before.config.model != now.config.model
-            || before.config.endpoint != now.config.endpoint
-            || before.config.protocol != now.config.protocol
-    });
-    changed.then(|| {
-        let name = preferences.version(before).map_or_else(
-            || now.config.name.clone(),
-            |before| before.config.name.clone(),
-        );
-        (name, now.config.name.clone())
+}
+
+/// `settings` with the names its services have now, where it does not know them.
+fn named(preferences: &preferences::Store, mut settings: RunSettings) -> RunSettings {
+    let name = |id: &Option<String>| {
+        id.as_deref()
+            .and_then(|id| preferences.version(id))
+            .map(|version| version.config.name.clone())
+    };
+    if settings.asr_service_name.is_none() {
+        settings.asr_service_name = name(&settings.asr_service);
+    }
+    if settings.ai_service_name.is_none() {
+        settings.ai_service_name = name(&settings.ai_service);
+    }
+    settings
+}
+
+/// Paid work the run `before` finished (`paid`) that a run with `next` would do and
+/// pay for again, as the person is asked about it. A free service (a local Ollama
+/// server, a ChatGPT plan through Codex: the engine's own rule for resending) never
+/// asks, nor does work the next run reuses: speech progress and transcripts follow
+/// their own identity, and answered requests whose payload is unchanged replay.
+pub fn rework(
+    before: Option<&RunSettings>,
+    next: &RunSettings,
+    paid: workspace::PaidWork,
+) -> Option<workspace::Rework> {
+    use c2m_config::{config::AsrProvider::Api, llm_settings::LlmProvider};
+    let before = before?;
+    let mut changes = Vec::new();
+    let change =
+        |label: &str, old: &Option<String>, new: &Option<String>, other: &str| match (old, new) {
+            (Some(old), Some(new)) if old != new => {
+                c2m_i18n::tr!("{}：「{}」→「{}」", label, old, new)
+            }
+            _ => other.to_owned(),
+        };
+    // AI: what the answered requests would be sent with.
+    let request = |settings: &RunSettings| {
+        let llm = &settings.config.llm;
+        (
+            llm.provider,
+            llm.base_url.clone(),
+            llm.model.clone(),
+            llm.prompt.clone(),
+            llm.vision,
+        )
+    };
+    let free = matches!(
+        next.config.llm.provider,
+        LlmProvider::Ollama | LlmProvider::Codex
+    );
+    if paid.ai
+        && before.ai_service.is_some()
+        && next.ai_service.is_some()
+        && !free
+        && (request(before) != request(next)
+            || (before.config.llm.translate.is_some()
+                && before.config.llm.translate != next.config.llm.translate))
+    {
+        changes.push(change(
+            c2m_i18n::tr!("AI 服务"),
+            &before.ai_service_name,
+            &next.ai_service_name,
+            c2m_i18n::tr!("AI 处理的设置已更改"),
+        ));
+    }
+    // Speech recognition in the cloud: redone when what recognizes it changed.
+    let recognition = |settings: &RunSettings| {
+        let defaults = &settings.config.defaults;
+        let api = &settings.config.asr_api;
+        (
+            defaults.transcript_source,
+            defaults.provider,
+            defaults.asr_model.clone(),
+            api.base_url.clone(),
+            api.model.clone(),
+            settings.asr_service.clone(),
+        )
+    };
+    if paid.transcription
+        && before.config.defaults.provider == Some(Api)
+        && next.config.defaults.provider == Some(Api)
+        && recognition(before) != recognition(next)
+    {
+        changes.push(change(
+            c2m_i18n::tr!("语音识别服务"),
+            &before.asr_service_name,
+            &next.asr_service_name,
+            c2m_i18n::tr!("语音识别的设置已更改"),
+        ));
+    }
+    (!changes.is_empty()).then(|| workspace::Rework {
+        changes,
+        token: next.token(),
     })
+}
+
+/// Continuing would redo paid work under the current settings and the person has
+/// not agreed to that yet; the start stops and the task waits for them.
+#[derive(Debug)]
+pub struct NeedsRework(pub workspace::Rework);
+
+impl std::fmt::Display for NeedsRework {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(c2m_i18n::tr!(
+            "设置已更改，继续生成会重新处理上次已完成的部分，可能产生额外费用。请确认后继续。"
+        ))
+    }
+}
+
+impl std::error::Error for NeedsRework {}
+
+/// A start that `NeedsRework`: the task waits, paused, for the person's word.
+pub fn await_rework(
+    state: &mut workspace::State,
+    id: &str,
+    rework: workspace::Rework,
+) -> Result<()> {
+    let record = state.task_mut(id).context(c2m_i18n::tr!("任务不存在"))?;
+    record.intent = Intent::Pause;
+    record.state = TaskState::Paused;
+    record.events.error = Some(NeedsRework(rework.clone()).to_string());
+    record.rework = Some(rework);
+    record.unread = true;
+    record.updated = workspace::now();
+    Ok(())
+}
+
+/// The person agreed to redo the paid work `rework` names: the task continues.
+pub fn accept_rework(state: &mut workspace::State, id: &str) -> Result<()> {
+    let record = state.task_mut(id).context(c2m_i18n::tr!("任务不存在"))?;
+    record.rework_accepted = record.rework.take().map(|rework| rework.token);
+    record.events.error = None;
+    state.set_intent(id, Intent::Run)
 }
 
 /// Whether a service the task would run with now is no longer saved or was deleted,
@@ -141,10 +266,8 @@ pub fn services_missing(
     task: &TaskRecord,
     fallback: AsrProvider,
 ) -> bool {
-    preferences.services_missing(
-        &current_config(preferences, &task.plan, fallback),
-        &task_refs(preferences, task),
-    )
+    let (config, refs) = task_settings(preferences, task, fallback);
+    preferences.services_missing(&config, &refs)
 }
 
 /// The credential references a task needs resolved before it can start.
@@ -153,10 +276,8 @@ pub fn needed_credentials(
     task: &TaskRecord,
     fallback: AsrProvider,
 ) -> Result<Vec<String>> {
-    preferences.credential_references_for(
-        &current_config(preferences, &task.plan, fallback),
-        &task_refs(preferences, task),
-    )
+    let (config, refs) = task_settings(preferences, task, fallback);
+    preferences.credential_references_for(&config, &refs)
 }
 
 /// The engine request a task runs as, with the current settings and services resolved
@@ -172,12 +293,14 @@ pub fn execution_request(
     let location = state
         .library(&task.plan.library_id)
         .context(c2m_i18n::tr!("任务保存位置暂时不可用"))?;
-    let refs = task_refs(preferences, task);
-    let base = current_config(preferences, &task.plan, fallback);
+    let (base, refs) = task_settings(preferences, task, fallback);
     let config = preferences
         .resolve_for_execution_with_secrets(&base, &refs, secrets)?
         .into_config();
-    let ran_with = RunSettings::new(&config, refs.asr.clone(), refs.llm.clone());
+    let ran_with = named(
+        preferences,
+        RunSettings::new(&config, refs.asr.clone(), refs.llm.clone()),
+    );
     let course_id = workspace::course_dir_name(&task.plan.source_id);
     let service_versions = [("asr", refs.asr.clone()), ("llm", refs.llm)]
         .into_iter()
@@ -256,6 +379,8 @@ pub struct StartRequest {
     pub request: Request,
     /// What the run starts with, for `mark_running`.
     pub ran_with: RunSettings,
+    /// What the earlier run used, when the start may redo its paid work.
+    before: Option<RunSettings>,
     control: Vec<u8>,
     location: LibraryLocation,
     writes: LibraryWrites,
@@ -273,6 +398,11 @@ pub fn start_request(
     let (request, ran_with) =
         execution_request(preferences, &workspace.state, task, secrets, fallback)?;
     let control = control_for(preferences, task, Some(&ran_with))?;
+    let before = task
+        .ran_with
+        .clone()
+        .filter(|_| pinned(task).is_none())
+        .map(|before| named(preferences, before));
     let location = workspace
         .state
         .library(&task.plan.library_id)
@@ -281,6 +411,7 @@ pub fn start_request(
     Ok(StartRequest {
         request,
         ran_with,
+        before,
         control,
         location,
         writes: workspace.library_writes(),
@@ -289,16 +420,24 @@ pub fn start_request(
 
 impl StartRequest {
     /// Checks the library and puts the task's subtitles and control file in place.
-    /// Blocking: all of it touches the library's disk, which may be slow.
+    /// A start that would redo paid work the person has not agreed to redo stops with
+    /// [`NeedsRework`]. Blocking: all of it touches the library's disk, which may be
+    /// slow.
     pub fn prepare(self, task: &TaskRecord) -> Result<(Request, RunSettings)> {
         let Self {
             mut request,
             ran_with,
+            before,
             control,
             location,
             writes,
         } = self;
         workspace::check_library(&location)?;
+        if let Some(rework) = rework(before.as_ref(), &ran_with, workspace::paid_work(task))
+            && task.rework_accepted.as_deref() != Some(rework.token.as_str())
+        {
+            return Err(NeedsRework(rework).into());
+        }
         if request.config.defaults.transcript_source != Some(TranscriptSource::Asr)
             && task.plan.subtitle.is_none()
         {
@@ -323,6 +462,8 @@ pub fn mark_running(state: &mut workspace::State, id: &str, ran_with: RunSetting
     let record = state.task_mut(id).context(c2m_i18n::tr!("任务不存在"))?;
     record.state = TaskState::Running;
     record.ran_with = Some(ran_with);
+    record.rework = None;
+    record.rework_accepted = None;
     record.events.begin_run();
     workspace::forget_task_subtitles(record);
     record.updated = workspace::now();
@@ -631,7 +772,7 @@ mod tests {
             std::sync::Arc::new(desktop_prefs::credentials::MemoryCredentialVault::new()),
         );
         let mut draft = ServiceDraft::new(ServicePurpose::Ai);
-        draft.protocol = ServiceProtocol::OllamaChat;
+        draft.protocol = ServiceProtocol::AiChat;
         draft.authentication = Authentication::None;
         draft.address = "http://127.0.0.1:9".into();
         draft.model = model.into();
@@ -765,14 +906,17 @@ mod tests {
             .commit_publication(&edit.id, BindingScope::Defaults, verified)
             .unwrap()
             .id;
+        // The earlier run: another speech model, the old AI version, its own prompt.
+        let mut earlier = c2m_config::settings::ConfigFile::default();
+        earlier.defaults.provider = Some(AsrProvider::Cpu);
+        earlier.defaults.transcript_source = Some(TranscriptSource::Asr);
+        earlier.defaults.asr_model = Some("earlier-speech".into());
+        earlier.llm.enabled = true;
+        earlier.llm.prompt = Some("earlier rule".into());
         workspace
             .transaction(|state| {
                 let task = state.task_mut(&id).unwrap();
-                task.ran_with = Some(RunSettings::new(
-                    &Default::default(),
-                    None,
-                    Some(old_service.clone()),
-                ));
+                task.ran_with = Some(RunSettings::new(&earlier, None, Some(old_service.clone())));
                 Ok(())
             })
             .unwrap();
@@ -799,58 +943,191 @@ mod tests {
                 Ok(())
             })
             .unwrap();
+        // The resend is the same request: every setting it was made with, not only
+        // its service.
         let resend = run(&workspace);
         assert_eq!(resend.service_versions.get("llm"), Some(&old_service));
         assert_eq!(resend.config.llm.model, "old-ai");
-    }
-
-    /// Continuing a task with another AI model or service than its earlier run
-    /// would pay again for what that run had answered: that is asked first. An edit
-    /// that leaves the requests as they were (a new key or name) reuses the answers
-    /// and asks nothing, and nothing is asked before any request was answered.
-    #[test]
-    fn continuing_with_a_changed_ai_service_asks_before_paying_again() {
-        use desktop_prefs::preferences::{BindingScope, ServiceDraft, Store};
-        let (root, mut workspace, id) = queued_task();
-        let (mut preferences, first) = preferences_with_ai_service(root.path(), "model-a");
-        let publish = |preferences: &mut Store, base: &str, edit: &dyn Fn(&mut ServiceDraft)| {
-            let mut draft = ServiceDraft::from_version(preferences.version(base).unwrap());
-            edit(&mut draft);
-            let draft = preferences.commit_service_draft(draft, None).unwrap();
-            let verified = Store::verify_credential(
-                preferences.vault().as_ref(),
-                preferences.publication_credential(&draft.id).unwrap(),
-            )
-            .unwrap();
-            preferences
-                .commit_publication(&draft.id, BindingScope::Defaults, verified)
-                .unwrap()
-                .id
-        };
+        assert_eq!(resend.config.llm.prompt.as_deref(), Some("earlier rule"));
+        assert_eq!(
+            resend.config.defaults.asr_model.as_deref(),
+            Some("earlier-speech")
+        );
+        // A request whose outcome is not known yet (a crash while it was sent) keeps
+        // them too, so a later resend can still settle it.
         workspace
             .transaction(|state| {
-                state.task_mut(&id).unwrap().ran_with = Some(RunSettings::new(
-                    &Default::default(),
-                    None,
-                    Some(first.clone()),
-                ));
+                let task = state.task_mut(&id).unwrap();
+                task.resend.clear();
+                task.events.blocked.push(workspace::BlockedRequest {
+                    reason: c2m_protocol::progress::BlockReason::Uncertain,
+                    request_id: Some("llm-request.1".into()),
+                    purpose: Some("proofreading".into()),
+                    description: "校对".into(),
+                    kind: Some(c2m_artifact::artifact::FailureKind::Uncertain),
+                    message: "结果未知".into(),
+                });
                 Ok(())
             })
             .unwrap();
-        let task = workspace.state.task(&id).unwrap().clone();
-        assert_eq!(ai_work_sent_again(&preferences, &task, true), None);
-        // Renamed only: the same requests, whose answers are reused.
-        publish(&mut preferences, &first, &|draft| {
-            draft.name = "renamed".into()
+        let unsettled = run(&workspace);
+        assert_eq!(unsettled.service_versions.get("llm"), Some(&old_service));
+        assert_eq!(
+            unsettled.config.defaults.asr_model.as_deref(),
+            Some("earlier-speech")
+        );
+    }
+
+    fn settings(edit: impl FnOnce(&mut RunSettings)) -> RunSettings {
+        let mut settings = RunSettings::default();
+        settings.config.llm.enabled = true;
+        settings.config.llm.model = "model-a".into();
+        settings.ai_service = Some("ai-a".into());
+        settings.ai_service_name = Some("Service A".into());
+        edit(&mut settings);
+        settings
+    }
+
+    /// Redoing paid work under changed settings is asked first, naming what changed;
+    /// a free service, unchanged requests and work never paid for ask nothing.
+    #[test]
+    fn redoing_paid_work_under_changed_settings_is_asked_first() {
+        use workspace::PaidWork;
+        let ai = PaidWork {
+            ai: true,
+            transcription: false,
+        };
+        let before = settings(|_| {});
+        // Unchanged requests replay: nothing to ask, even with an edited key or name.
+        let renamed = settings(|s| {
+            s.ai_service = Some("ai-a2".into());
+            s.ai_service_name = Some("Renamed".into());
         });
-        assert_eq!(ai_work_sent_again(&preferences, &task, true), None);
-        // Another model: the answered work would be sent again.
-        let default = preferences.default_refs().llm.unwrap();
-        publish(&mut preferences, &default, &|draft| {
-            draft.model = "model-b".into()
+        assert_eq!(rework(Some(&before), &renamed, ai), None);
+        // Another model: asked, with the old name kept though that version is gone.
+        let other = settings(|s| {
+            s.config.llm.model = "model-b".into();
+            s.ai_service = Some("ai-b".into());
+            s.ai_service_name = Some("Service B".into());
         });
-        assert!(ai_work_sent_again(&preferences, &task, true).is_some());
-        assert_eq!(ai_work_sent_again(&preferences, &task, false), None);
+        let asked = rework(Some(&before), &other, ai).unwrap();
+        assert_eq!(asked.changes, ["AI 服务：「Service A」→「Service B」"]);
+        assert_eq!(asked.token, other.token());
+        // Another proofreading rule on the same service is a change too.
+        let rule = settings(|s| s.config.llm.prompt = Some("new rule".into()));
+        assert_eq!(
+            rework(Some(&before), &rule, ai).unwrap().changes,
+            ["AI 处理的设置已更改"]
+        );
+        // Nothing answered, or nothing run before: nothing to pay for again.
+        assert_eq!(rework(Some(&before), &other, PaidWork::default()), None);
+        assert_eq!(rework(None, &other, ai), None);
+        // A free service resends without asking.
+        let ollama = settings(|s| {
+            s.config.llm.model = "local".into();
+            s.config.llm.provider = c2m_config::llm_settings::LlmProvider::Ollama;
+        });
+        assert_eq!(rework(Some(&before), &ollama, ai), None);
+        // Cloud speech recognition that changed redoes a paid transcript; local does not.
+        let speech = PaidWork {
+            ai: false,
+            transcription: true,
+        };
+        let cloud = |model: &str, name: &str| {
+            settings(|s| {
+                s.config.defaults.provider = Some(AsrProvider::Api);
+                s.config.asr_api.model = model.into();
+                s.asr_service = Some(format!("asr-{model}"));
+                s.asr_service_name = Some(name.into());
+            })
+        };
+        assert_eq!(
+            rework(
+                Some(&cloud("a", "Speech A")),
+                &cloud("b", "Speech B"),
+                speech
+            )
+            .unwrap()
+            .changes,
+            ["语音识别服务：「Speech A」→「Speech B」"]
+        );
+        let local = settings(|s| s.config.defaults.provider = Some(AsrProvider::Cpu));
+        assert_eq!(rework(Some(&cloud("a", "Speech A")), &local, speech), None);
+    }
+
+    /// Every way a task starts passes the same check: one that would redo paid work
+    /// stops before its job runs and waits, paused, until the person agrees to
+    /// exactly these settings; then it starts.
+    #[test]
+    fn a_start_that_would_pay_again_waits_for_the_person() {
+        let (root, mut workspace, id) = queued_task();
+        let (mut preferences, old_service) = preferences_with_ai_service(root.path(), "old-ai");
+        save_speech_model(&mut preferences, "speech");
+        let mut earlier = c2m_config::settings::ConfigFile::default();
+        earlier.llm.enabled = true;
+        earlier.llm.model = "older-model".into();
+        let work_dir = workspace.state.task(&id).unwrap().work_dir.clone();
+        workspace
+            .transaction(|state| {
+                state.task_mut(&id).unwrap().ran_with =
+                    Some(RunSettings::new(&earlier, None, Some(old_service.clone())));
+                Ok(())
+            })
+            .unwrap();
+        // An answered proofreading request of the earlier run.
+        std::fs::create_dir_all(work_dir.join("requests")).unwrap();
+        std::fs::write(
+            work_dir.join("requests/answered.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "schema": 1, "stable_id": "answered", "request_id": "answered.1",
+                "purpose": "proofreading", "description": "", "service_version": old_service,
+                "attempt": 1, "state": "completed", "http_status": 200,
+                "response": {}, "message": null,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let start = |workspace: &workspace::Workspace| {
+            let task = workspace.state.task(&id).unwrap().clone();
+            start_request(
+                &preferences,
+                Some(workspace),
+                &task,
+                &HashMap::new(),
+                AsrProvider::Cpu,
+            )
+            .unwrap()
+            .prepare(&task)
+        };
+        let Err(error) = start(&workspace) else {
+            panic!("a start that would pay again must wait");
+        };
+        let NeedsRework(asked) = error.downcast::<NeedsRework>().unwrap();
+        workspace
+            .transaction(|state| await_rework(state, &id, asked.clone()))
+            .unwrap();
+        let task = workspace.state.task(&id).unwrap();
+        assert_eq!(task.state, TaskState::Paused);
+        assert_eq!(task.rework.as_ref(), Some(&asked));
+        // Resumed by any way but the person's answer, it stops at the same check.
+        workspace
+            .transaction(|state| state.set_intent(&id, Intent::Run))
+            .unwrap();
+        assert!(
+            matches!(start(&workspace), Err(error) if error.downcast_ref::<NeedsRework>().is_some())
+        );
+        workspace
+            .transaction(|state| accept_rework(state, &id))
+            .unwrap();
+        let Ok((_, ran_with)) = start(&workspace) else {
+            panic!("an accepted redo starts");
+        };
+        workspace
+            .transaction(|state| mark_running(state, &id, ran_with))
+            .unwrap();
+        let task = workspace.state.task(&id).unwrap();
+        assert!(task.rework.is_none() && task.rework_accepted.is_none());
+        assert_eq!(task.ran_with.as_ref().unwrap().config.llm.model, "old-ai");
     }
 
     /// A task an older version queued fixed the model it would use; it now runs with

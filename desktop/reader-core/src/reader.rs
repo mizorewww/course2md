@@ -776,6 +776,8 @@ mod tests {
             unread: false,
             resend: Vec::new(),
             replaced_by: None,
+            rework: None,
+            rework_accepted: None,
             // Its run kept the downloaded video.
             ran_with: Some(workspace::RunSettings::new(
                 &c2m_config::settings::ConfigFile {

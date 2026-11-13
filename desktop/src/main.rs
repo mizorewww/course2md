@@ -598,6 +598,8 @@ impl Desktop {
                 this.environment = Some(environment);
                 this.refresh_model_diagnostics(cx);
                 this.advance_conversion_when_ready(cx);
+                // Tasks wait for it: an automatic speech engine is resolved from it.
+                this.start_next_task(cx);
                 cx.notify();
             });
         })

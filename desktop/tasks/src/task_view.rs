@@ -1251,6 +1251,8 @@ mod tests {
             unread: false,
             resend: Vec::new(),
             replaced_by: None,
+            rework: None,
+            rework_accepted: None,
             ran_with: None,
         }
     }
@@ -1914,6 +1916,8 @@ mod tests {
             unread: false,
             resend: Vec::new(),
             replaced_by: None,
+            rework: None,
+            rework_accepted: None,
             ran_with: None,
         };
         // The first recovery action in Recent Notes and every action in the
