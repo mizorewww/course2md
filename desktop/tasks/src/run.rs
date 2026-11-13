@@ -51,7 +51,7 @@ pub fn text_source(plan: &TaskPlan, settings: TranscriptSource) -> TranscriptSou
 /// plan itself decides (its video's text, the parts a repair redoes), and the
 /// recognition engine and its model filled in where Settings leave them
 /// automatic, `fallback` being this machine's engine. Its services are
-/// `preferences.default_refs()`.
+/// `task_refs`.
 pub fn current_config(
     preferences: &preferences::Store,
     plan: &TaskPlan,
@@ -89,6 +89,20 @@ pub fn current_config(
     config
 }
 
+/// The services a task runs with: Settings' defaults, except for a resend the person
+/// authorized, which goes to the services its uncertain requests were made with.
+/// A request's identity includes its service version: sent elsewhere, the old
+/// request would never be settled and the task would stay unconfirmed.
+pub fn task_refs(preferences: &preferences::Store, task: &TaskRecord) -> preferences::ServiceRefs {
+    match task.ran_with.as_ref().filter(|_| !task.resend.is_empty()) {
+        Some(ran_with) => preferences::ServiceRefs {
+            asr: ran_with.asr_service.clone(),
+            llm: ran_with.ai_service.clone(),
+        },
+        None => preferences.default_refs(),
+    }
+}
+
 /// Whether a service the task would run with now is no longer saved or was deleted,
 /// so that starting it again could only stop with the same reason.
 pub fn services_missing(
@@ -98,7 +112,7 @@ pub fn services_missing(
 ) -> bool {
     preferences.services_missing(
         &current_config(preferences, &task.plan, fallback),
-        &preferences.default_refs(),
+        &task_refs(preferences, task),
     )
 }
 
@@ -110,7 +124,7 @@ pub fn needed_credentials(
 ) -> Result<Vec<String>> {
     preferences.credential_references_for(
         &current_config(preferences, &task.plan, fallback),
-        &preferences.default_refs(),
+        &task_refs(preferences, task),
     )
 }
 
@@ -127,7 +141,7 @@ pub fn execution_request(
     let location = state
         .library(&task.plan.library_id)
         .context(c2m_i18n::tr!("任务保存位置暂时不可用"))?;
-    let refs = preferences.default_refs();
+    let refs = task_refs(preferences, task);
     let base = current_config(preferences, &task.plan, fallback);
     let config = preferences
         .resolve_for_execution_with_secrets(&base, &refs, secrets)?
@@ -697,6 +711,66 @@ mod tests {
             again.config.defaults.asr_model.as_deref(),
             Some("third-speech")
         );
+    }
+
+    /// A resend the person authorized goes to the service version its uncertain
+    /// requests were made with, whatever the default is now: a request's identity
+    /// includes it, and the old request is settled only by its own resend.
+    #[test]
+    fn an_authorized_resend_keeps_the_service_its_requests_were_made_with() {
+        use desktop_prefs::preferences::{BindingScope, ServiceDraft, Store};
+        let (root, mut workspace, id) = queued_task();
+        let (mut preferences, old_service) = preferences_with_ai_service(root.path(), "old-ai");
+        save_speech_model(&mut preferences, "speech");
+        let mut edit = ServiceDraft::from_version(preferences.version(&old_service).unwrap());
+        edit.model = "new-ai".into();
+        let edit = preferences.commit_service_draft(edit, None).unwrap();
+        let verified = Store::verify_credential(
+            preferences.vault().as_ref(),
+            preferences.publication_credential(&edit.id).unwrap(),
+        )
+        .unwrap();
+        let new_service = preferences
+            .commit_publication(&edit.id, BindingScope::Defaults, verified)
+            .unwrap()
+            .id;
+        workspace
+            .transaction(|state| {
+                let task = state.task_mut(&id).unwrap();
+                task.ran_with = Some(RunSettings::new(
+                    &Default::default(),
+                    None,
+                    Some(old_service.clone()),
+                ));
+                Ok(())
+            })
+            .unwrap();
+        let run = |workspace: &workspace::Workspace| {
+            let task = workspace.state.task(&id).unwrap();
+            execution_request(
+                &preferences,
+                &workspace.state,
+                task,
+                &HashMap::new(),
+                AsrProvider::Cpu,
+            )
+            .unwrap()
+            .0
+        };
+        // Resumed without a resend: the current default.
+        assert_eq!(
+            run(&workspace).service_versions.get("llm"),
+            Some(&new_service)
+        );
+        workspace
+            .transaction(|state| {
+                state.task_mut(&id).unwrap().resend = vec!["llm-request.1".into()];
+                Ok(())
+            })
+            .unwrap();
+        let resend = run(&workspace);
+        assert_eq!(resend.service_versions.get("llm"), Some(&old_service));
+        assert_eq!(resend.config.llm.model, "old-ai");
     }
 
     /// A task an older version queued fixed the model it would use; it now runs with

@@ -1365,6 +1365,10 @@ impl State {
         } else {
             None
         };
+        // A resend goes to the services the uncertain requests were made with.
+        let resend_services = (!resend.is_empty())
+            .then(|| original.ran_with.clone())
+            .flatten();
         let mut plan = original.plan;
         plan.repair = Some(RepairScope { translate, formats });
         plan.operation = c2m_engine::execution::Operation::Reprocess {
@@ -1376,6 +1380,9 @@ impl State {
         let (next, created) = self.enqueue(plan, Some(id.to_owned()))?;
         if created && let Some(task) = self.task_mut(&next) {
             task.resend = resend;
+            if resend_services.is_some() {
+                task.ran_with = resend_services;
+            }
         }
         Ok(next)
     }
