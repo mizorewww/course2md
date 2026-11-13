@@ -132,6 +132,21 @@ pub fn automatic_subtitle_fallback(
     true
 }
 
+/// The track to read for a video previewed without one chosen: its first, when
+/// Settings' 文字来源 (`mode`) uses subtitles and nothing is read or chosen yet (a
+/// preview taken under speech recognition read none).
+pub fn default_track_to_read(
+    source: &source::Source,
+    mode: TranscriptSource,
+) -> Option<c2m_source::subtitle::SubtitleTrack> {
+    (mode != TranscriptSource::Asr
+        && source.selected_subtitle.is_none()
+        && source.subtitle_request.is_none()
+        && source.subtitle_read_error.is_none())
+    .then(|| source.subtitles.tracks().first().cloned())
+    .flatten()
+}
+
 pub fn subtitle_needs_confirmation(source: &source::Source, source_mode: TranscriptSource) -> bool {
     !uses_speech(source, source_mode)
         && (source.selected_subtitle.is_none()
@@ -1163,6 +1178,46 @@ mod tests {
         };
         original.handled_by = Some(recovery.id.clone());
         (draft, vec![original, recovery])
+    }
+
+    /// Previewed under speech recognition, a video's subtitles were not read; with
+    /// Settings back on subtitles its first track is, and until then nothing starts.
+    #[test]
+    fn a_track_is_read_when_settings_turn_back_to_subtitles() {
+        use c2m_source::subtitle::{SubtitleKind, SubtitleOrigin, SubtitleTrack};
+        let track = SubtitleTrack {
+            id: "video:embedded:2".into(),
+            language: Some("zh".into()),
+            name: None,
+            kind: SubtitleKind::Unknown,
+            translated: false,
+            origin: SubtitleOrigin::Embedded {
+                stream_index: 2,
+                codec: "mov_text".into(),
+            },
+            source_order: 0,
+        };
+        let source = source::Source {
+            subtitles: SubtitleEvidence::Found {
+                tracks: vec![track.clone()],
+                warning: None,
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            super::default_track_to_read(&source, TranscriptSource::Asr),
+            None
+        );
+        assert_eq!(
+            super::default_track_to_read(&source, TranscriptSource::Auto),
+            Some(track.clone())
+        );
+        let mut reading = source.clone();
+        reading.subtitle_request = Some(track);
+        assert_eq!(
+            super::default_track_to_read(&reading, TranscriptSource::Auto),
+            None
+        );
     }
 
     #[test]

@@ -2314,3 +2314,4 @@ AI 处理的设置已更改	AI 处理的设置已更改	The AI processing settin
 开始转换会按当前设置重新生成，并取代暂停的任务《{}》	开始转换会按当前设置重新生成，并取代暂停的任务《{}》	Starting the conversion makes the note again with the current settings and replaces the paused task “{}”	開始轉換會按目前的設定重新產生，並取代暫停的任務《{}》	変換を開始すると現在の設定で作り直し、一時停止中のタスク「{}」を置き換えます
 继续原任务	继续原任务	Continue that task	繼續原任務	元のタスクを続行
 语音识别（文字来源设置）	语音识别（文字来源设置）	Speech recognition (text source setting)	語音辨識（文字來源設定）	音声認識（テキストソースの設定）
+重新生成会按当前设置进行，并取代暂停的任务《{}》	重新生成会按当前设置进行，并取代暂停的任务《{}》	Regenerating uses the current settings and replaces the paused task “{}”	重新產生會按目前的設定進行，並取代暫停的任務《{}》	再生成は現在の設定で行われ、一時停止中のタスク「{}」を置き換えます

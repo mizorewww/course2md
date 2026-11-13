@@ -682,10 +682,49 @@ impl Desktop {
     }
 
     fn resume_task(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(rework) = self.task(&id, cx).and_then(|task| task.rework.clone()) else {
+        let Some(task) = self.task(&id, cx).cloned() else {
+            return;
+        };
+        if let Some(rework) = task.rework.clone() {
+            self.ask_rework(id, rework, window, cx);
+            return;
+        }
+        // Asked at once when continuing would pay again; the check reads the task's
+        // request records, so it runs off the UI thread.
+        let Some(check) =
+            run::resume_check(&self.preferences, &task, self.recommended_local_provider())
+        else {
             self.set_task_intent(id, Intent::Run, cx);
             return;
         };
+        let check = crate::spawn_blocking_io(move || check.run());
+        cx.spawn_in(window, async move |this, cx| {
+            let rework = check.await.flatten();
+            let _ = this.update_in(cx, |this, window, cx| match rework {
+                Some(rework) => {
+                    let asked = this.transact(
+                        course2md::tr!("任务状态尚未保存：{}"),
+                        |state| run::ask_rework(state, &id, rework.clone()),
+                        cx,
+                    );
+                    if asked.is_some() {
+                        this.ask_rework(id, rework, window, cx);
+                    }
+                }
+                None => this.set_task_intent(id, Intent::Run, cx),
+            });
+        })
+        .detach();
+    }
+
+    /// Asks whether to redo the paid work `rework` names, and continues on yes.
+    fn ask_rework(
+        &mut self,
+        id: String,
+        rework: workspace::Rework,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let mut question = ui::Confirm::new(
             course2md::tr!("用当前设置继续生成？"),
             course2md::tr!("暂不继续"),

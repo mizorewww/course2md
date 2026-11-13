@@ -562,6 +562,37 @@ impl Desktop {
         Some((provider, model, root))
     }
 
+    /// The video has subtitles and Settings use them, but none is chosen or being
+    /// read: the card asks for one, and nothing starts until then. (A failed read is
+    /// not this: starting may fall back to speech recognition.)
+    fn subtitle_choice_missing(&self, cx: &App) -> bool {
+        let mode = self.text_mode(cx);
+        !self.import.subtitle_loading
+            && self.import.subtitle_error.is_none()
+            && self.import.source_preview.as_ref().is_some_and(|source| {
+                desktop_tasks::import::default_track_to_read(source, mode).is_some()
+            })
+    }
+
+    /// After Settings' 文字来源 changed: a preview taken under speech recognition read
+    /// no subtitles, so with subtitles allowed now the video's first track is read,
+    /// as a fresh preview would.
+    pub(crate) fn confirm_default_subtitle_if_needed(&mut self, cx: &mut Context<Self>) {
+        if self.text_mode(cx) == TranscriptSource::Asr || self.import.subtitle_loading {
+            return;
+        }
+        let mode = self.text_mode(cx);
+        let Some(track) = self
+            .import
+            .source_preview
+            .as_ref()
+            .and_then(|source| desktop_tasks::import::default_track_to_read(source, mode))
+        else {
+            return;
+        };
+        self.confirm_default_subtitle(track, cx);
+    }
+
     /// Checks, off the render path, the model this video would be recognized with.
     pub(crate) fn check_import_model(&mut self, cx: &mut Context<Self>) {
         if self.import_uses_speech(cx)
@@ -1334,10 +1365,13 @@ impl Desktop {
                                 .icon(symbols::play_arrow())
                                 .child(course2md::tr!("开始转换"))
                                 .track_focus(&self.import_submit_focus)
+                                // Not while the video's text still needs a choice: the
+                                // card says which.
                                 .disabled(
                                     recovery.blocked
                                         || self.import.pending_conversion.is_some()
-                                        || self.import.preview_cancel.is_some(),
+                                        || self.import.preview_cancel.is_some()
+                                        || self.subtitle_choice_missing(cx),
                                 )
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.start_conversion(window, cx)
@@ -2273,16 +2307,16 @@ impl Desktop {
             desktop_tasks::import::waiting_retried_task(state.draft()?, &state.tasks)
                 .map(|task| (task.id.clone(), task.plan.title.clone()))
         }) {
-            facts.push(
-                supporting_info(
-                    "retried-task-consequence",
-                    course2md::tr!(
-                        "开始转换会按当前设置重新生成，并取代暂停的任务《{}》",
-                        title
-                    ),
+            // Named after the action shown: 重新生成 for a video with a note.
+            let consequence = if self.existing_source_note(cx).is_some() {
+                course2md::tr!("重新生成会按当前设置进行，并取代暂停的任务《{}》", title)
+            } else {
+                course2md::tr!(
+                    "开始转换会按当前设置重新生成，并取代暂停的任务《{}》",
+                    title
                 )
-                .into_any_element(),
-            );
+            };
+            facts.push(supporting_info("retried-task-consequence", consequence).into_any_element());
             actions.push(
                 button(
                     "continue-retried-task",

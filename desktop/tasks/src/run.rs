@@ -231,6 +231,70 @@ pub fn rework(
     })
 }
 
+/// The paid redo continuing `task` now would cause, checked before it is resumed so
+/// the person is asked at once: the same check its start applies, with the same
+/// settings (`RunSettings::token`), so agreeing here lets that start go on.
+/// Blocking: it reads the task's request records.
+pub fn resume_rework(
+    preferences: &preferences::Store,
+    task: &TaskRecord,
+    fallback: AsrProvider,
+) -> Option<workspace::Rework> {
+    resume_check(preferences, task, fallback)?.run()
+}
+
+/// What [`resume_rework`] compares, taken from the settings on the UI thread; its
+/// `run` reads the task's records and belongs off it.
+pub struct ResumeCheck {
+    task: TaskRecord,
+    before: RunSettings,
+    next: RunSettings,
+}
+
+pub fn resume_check(
+    preferences: &preferences::Store,
+    task: &TaskRecord,
+    fallback: AsrProvider,
+) -> Option<ResumeCheck> {
+    let before = task
+        .ran_with
+        .clone()
+        .filter(|_| pinned(task).is_none())
+        .map(|before| named(preferences, before))?;
+    let (base, refs) = task_settings(preferences, task, fallback);
+    let config = preferences.config_for_refs(&base, &refs).ok()?;
+    let next = named(
+        preferences,
+        RunSettings::new(&config, refs.asr.clone(), refs.llm.clone()),
+    );
+    Some(ResumeCheck {
+        task: task.clone(),
+        before,
+        next,
+    })
+}
+
+impl ResumeCheck {
+    /// Blocking: it reads the task's request records.
+    pub fn run(self) -> Option<workspace::Rework> {
+        rework(
+            &self.task.plan.source.input,
+            Some(&self.before),
+            &self.next,
+            workspace::paid_work(&self.task),
+        )
+    }
+}
+
+/// Records that the person was asked about `rework` for task `id`.
+pub fn ask_rework(state: &mut workspace::State, id: &str, rework: workspace::Rework) -> Result<()> {
+    state
+        .task_mut(id)
+        .context(c2m_i18n::tr!("任务不存在"))?
+        .rework = Some(rework);
+    Ok(())
+}
+
 /// Continuing would redo paid work under the current settings and the person has
 /// not agreed to that yet; the start stops and the task waits for them.
 #[derive(Debug)]
@@ -1244,6 +1308,63 @@ mod tests {
         assert!(
             matches!(start(&workspace), Err(error) if error.downcast_ref::<NeedsRework>().is_some())
         );
+    }
+
+    /// Continuing a task asks at once when it would pay again, with the settings its
+    /// start then checks: agreeing lets that start go on without asking twice, and a
+    /// task with nothing to redo continues without asking.
+    #[test]
+    fn resuming_asks_once_with_the_settings_the_start_checks() {
+        let (root, mut workspace, id) = queued_task();
+        let (mut preferences, old_service) = preferences_with_ai_service(root.path(), "old-ai");
+        save_speech_model(&mut preferences, "speech");
+        let task = workspace.state.task(&id).unwrap().clone();
+        assert_eq!(resume_rework(&preferences, &task, AsrProvider::Cpu), None);
+        let mut earlier = c2m_config::settings::ConfigFile::default();
+        earlier.llm.enabled = true;
+        earlier.llm.model = "older-model".into();
+        let work_dir = task.work_dir.clone();
+        std::fs::create_dir_all(work_dir.join("requests")).unwrap();
+        std::fs::write(
+            work_dir.join("requests/answered.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "schema": 1, "stable_id": "answered", "request_id": "answered.1",
+                "purpose": "proofreading", "description": "", "service_version": old_service,
+                "attempt": 1, "state": "completed", "http_status": 200,
+                "response": {}, "message": null,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        workspace
+            .transaction(|state| {
+                let task = state.task_mut(&id).unwrap();
+                task.ran_with = Some(RunSettings::new(&earlier, None, Some(old_service.clone())));
+                task.state = TaskState::Paused;
+                task.intent = Intent::Pause;
+                Ok(())
+            })
+            .unwrap();
+        let task = workspace.state.task(&id).unwrap().clone();
+        let asked = resume_rework(&preferences, &task, AsrProvider::Cpu).unwrap();
+        workspace
+            .transaction(|state| {
+                ask_rework(state, &id, asked.clone())?;
+                accept_rework(state, &id)
+            })
+            .unwrap();
+        let task = workspace.state.task(&id).unwrap().clone();
+        assert_eq!(task.state, TaskState::Queued);
+        let started = start_request(
+            &preferences,
+            Some(&workspace),
+            &task,
+            &HashMap::new(),
+            AsrProvider::Cpu,
+        )
+        .unwrap()
+        .prepare(&task);
+        assert!(started.is_ok(), "agreed once, the start goes on");
     }
 
     /// The UI review's case: proofreading answered by service A, the task continued

@@ -1432,6 +1432,7 @@ impl Desktop {
         // A preview checked against the old settings is checked again.
         self.import.preview_plan_cache = None;
         self.check_import_model(cx);
+        self.confirm_default_subtitle_if_needed(cx);
         cx.notify();
     }
 }
