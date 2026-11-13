@@ -551,12 +551,27 @@ impl ImportSession {
     pub fn refuse_start(&mut self, message: String, missing_text_source: bool) {
         self.validation_attempt = self.validation_attempt.wrapping_add(1);
         if missing_text_source {
-            self.pending_conversion = None;
-            self.following_conversion = None;
-            self.source_validation = None;
+            self.cancel_start();
         } else {
             self.source_validation = Some(message);
         }
+    }
+
+    /// 开始转换 for the current preview: a fresh intent, followed when `follow`
+    /// (started from Home), with no earlier refusal standing beside it.
+    pub fn begin_start(&mut self, follow: bool) {
+        self.pending_conversion = Some(self.preview_generation);
+        self.following_conversion =
+            follow.then_some(ConversionFollow::Preparing(self.preview_generation));
+        self.source_validation = None;
+    }
+
+    /// The start intent ends without a task (取消转换, or an obstacle only the
+    /// person can resolve): nothing is followed, and its refusal goes with it.
+    pub fn cancel_start(&mut self) {
+        self.pending_conversion = None;
+        self.following_conversion = None;
+        self.source_validation = None;
     }
 
     /// Stops a subtitle read; its late result no longer counts. Returns the new generation.
@@ -839,6 +854,32 @@ mod tests {
         assert_eq!(session.following_conversion, None);
         assert_eq!(session.source_validation, None);
         assert_eq!(session.validation_attempt, 2);
+    }
+
+    /// A new Start or 取消转换 leaves no earlier refusal (and its 重试转换) standing.
+    #[test]
+    fn a_new_or_cancelled_start_drops_the_previous_refusal() {
+        use super::ImportSession;
+        let mut session = ImportSession {
+            preview_generation: 4,
+            ..Default::default()
+        };
+        session.begin_start(true);
+        session.refuse_start("保存位置不可用".into(), false);
+        session.cancel_start();
+        assert_eq!(session.pending_conversion, None);
+        assert_eq!(session.following_conversion, None);
+        assert_eq!(session.source_validation, None);
+        session.source_validation = Some("保存位置不可用".into());
+        session.begin_start(true);
+        assert_eq!(session.pending_conversion, Some(4));
+        assert_eq!(
+            session.following_conversion,
+            Some(ConversionFollow::Preparing(4))
+        );
+        assert_eq!(session.source_validation, None);
+        session.begin_start(false);
+        assert_eq!(session.following_conversion, None);
     }
 
     #[test]

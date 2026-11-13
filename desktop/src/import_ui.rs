@@ -188,9 +188,7 @@ impl Desktop {
             self.inspect_source(window, cx);
             return;
         }
-        self.import.pending_conversion = Some(self.import.preview_generation);
-        self.import.following_conversion = (self.page == Page::New)
-            .then_some(ConversionFollow::Preparing(self.import.preview_generation));
+        self.import.begin_start(self.page == Page::New);
         self.advance_conversion(window, cx);
     }
 
@@ -230,18 +228,27 @@ impl Desktop {
                 return;
             }
         }
+        let missing_text_source = self.text_source_missing(cx);
         match conversion_gate(GateInputs {
             requested_revision: self.import.pending_conversion,
             current_revision: self.import.preview_generation,
             reading,
             has_source: self.import.source_preview.is_some(),
             needs_text_choice: self.subtitle_attention_required(cx),
-            missing_text_source: self.text_source_missing(cx),
+            missing_text_source,
             environment_ready: self.environment.is_some(),
             library_ready: !self.library(cx).loading,
             existing_note: self.existing_source_note(cx).is_some(),
         }) {
             ConversionGate::Wait => cx.notify(),
+            // Without a text source the intent ends as a refused Start does: the card
+            // shows the obstacle, and nothing is left following it.
+            ConversionGate::Stop
+                if missing_text_source && generation == self.import.preview_generation =>
+            {
+                self.import.cancel_start();
+                cx.notify();
+            }
             ConversionGate::Stop => {
                 self.import.pending_conversion = None;
                 cx.notify();
@@ -1699,6 +1706,11 @@ impl Desktop {
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.save_current_draft(cx);
                     this.open_settings(window, cx);
+                    // Once resolved this action is gone: returning focuses the
+                    // card's primary action instead.
+                    if let Some((_, focus)) = &mut this.settings_origin {
+                        *focus = Some(this.import_submit_focus.clone());
+                    }
                     // 文字来源 is the category's first row.
                     this.select_settings_tab(
                         crate::settings_ui::SettingsTab::Generation,
@@ -2583,8 +2595,7 @@ impl Desktop {
                     course2md::tr!("取消转换"),
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.import.pending_conversion = None;
-                    this.import.following_conversion = None;
+                    this.import.cancel_start();
                     cx.notify();
                 })),
             );
