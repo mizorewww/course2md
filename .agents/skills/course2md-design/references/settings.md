@@ -4,9 +4,9 @@ Read with [the shared system](system.md), [layout and type](layout-and-type.md) 
 
 ## Scope and continuity
 
-Use [task decisions and continuity](interaction.md) for settings reached during another task. Keep infrequently changed defaults here and current-task choices near their effects. A missing required service or unavailable model should lead to the relevant repair and back to the originating work, not require users to reconstruct a path through settings categories.
+Use [task decisions and continuity](interaction.md) for settings reached during another task. Settings are the one place processing options live; the workbench does not override them for a video. A missing required service or unavailable model should lead to the relevant repair and back to the originating work, not require users to reconstruct a path through settings categories.
 
-State whether a change applies to future work or the current input. Reuse saved service configuration; immutable versions protect submitted tasks internally and belong in details when they explain a discrepancy. Do not make ordinary service selection a version-management workflow. Preserve unfinished input during temporary navigation, and distinguish canceling an editor from publishing its values.
+State that a change applies to the next work that runs, including tasks still waiting. Reuse saved service configuration; a task records the service versions and models its run used, which belong in its details when they explain a result. Do not make ordinary service selection a version-management workflow. Preserve unfinished input during temporary navigation, and distinguish canceling an editor from publishing its values.
 
 Model setup should communicate the decision that matters: the recommended usable option, any relevant download, and why someone might change it. Hardware and model identifiers remain available for explicit configuration and diagnosis. Opening settings must not be a prerequisite for ordinary conversion when usable defaults already exist.
 
