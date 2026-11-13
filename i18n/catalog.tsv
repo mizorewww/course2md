@@ -1383,7 +1383,7 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 没有 JSON	没有 JSON	No JSON	沒有 JSON	JSONなし
 没有匹配的笔记	没有匹配的笔记	No matching notes	沒有匹配的筆記	一致するノートがありません
 没有可保存的输入	没有可保存的输入	No input to save	沒有可儲存的輸入	保存する入力がありません
-没有字幕时会提示选择字幕文件或改用语音识别	没有字幕时会提示选择字幕文件或改用语音识别	If there are no subtitles, you will be prompted to select a subtitle file or use speech recognition instead.	沒有字幕時會提示選擇字幕檔案或改用語音辨識	字幕がない場合は、字幕ファイルを選択するか、代わりに音声認識を使用するように求められます。
+视频没有字幕时，视频卡片会说明；本地视频可选择字幕文件，否则需更改文字来源	视频没有字幕时，视频卡片会说明；本地视频可选择字幕文件，否则需更改文字来源	When a video has no subtitles, its video card says so; a local video can use a subtitle file, otherwise change the transcript source	影片沒有字幕時，影片卡片會說明；本機影片可選擇字幕檔案，否則需更改文字來源	動画に字幕がない場合は動画カードに表示されます。ローカル動画は字幕ファイルを選択でき、それ以外は文字起こしのソースを変更してください
 没有对应的截图	没有对应的截图	There is no corresponding screenshot	沒有對應的截圖	対応するスクリーンショットはありません
 没有提取到截图	没有提取到截图	No screenshots were extracted	沒有提取到截圖	スクリーンショットは抽出されませんでした
 没有数组	没有数组	No array	沒有陣列	配列がありません
@@ -2315,3 +2315,6 @@ AI 处理的设置已更改	AI 处理的设置已更改	The AI processing settin
 继续原任务	继续原任务	Continue that task	繼續原任務	元のタスクを続行
 语音识别（文字来源设置）	语音识别（文字来源设置）	Speech recognition (text source setting)	語音辨識（文字來源設定）	音声認識（テキストソースの設定）
 重新生成会按当前设置进行，并取代暂停的任务《{}》	重新生成会按当前设置进行，并取代暂停的任务《{}》	Regenerating uses the current settings and replaces the paused task “{}”	重新產生會按目前的設定進行，並取代暫停的任務《{}》	再生成は現在の設定で行われ、一時停止中のタスク「{}」を置き換えます
+这个视频没有字幕，而文字来源设置为仅字幕	这个视频没有字幕，而文字来源设置为仅字幕	This video has no subtitles, and the transcript source is set to subtitles only	這部影片沒有字幕，而文字來源設定為僅字幕	この動画には字幕がありませんが、文字起こしのソースは「字幕のみ」に設定されています
+还没读取这个视频的字幕，而文字来源设置为仅字幕	还没读取这个视频的字幕，而文字来源设置为仅字幕	This video's subtitles haven't been read yet, and the transcript source is set to subtitles only	還沒讀取這部影片的字幕，而文字來源設定為僅字幕	この動画の字幕はまだ読み込まれていませんが、文字起こしのソースは「字幕のみ」に設定されています
+更改文字来源	更改文字来源	Change transcript source	更改文字來源	文字起こしのソースを変更

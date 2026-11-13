@@ -188,9 +188,7 @@ impl Desktop {
             self.inspect_source(window, cx);
             return;
         }
-        self.import.pending_conversion = Some(self.import.preview_generation);
-        self.import.following_conversion = (self.page == Page::New)
-            .then_some(ConversionFollow::Preparing(self.import.preview_generation));
+        self.import.begin_start(self.page == Page::New);
         self.advance_conversion(window, cx);
     }
 
@@ -230,17 +228,27 @@ impl Desktop {
                 return;
             }
         }
+        let missing_text_source = self.text_source_missing(cx);
         match conversion_gate(GateInputs {
             requested_revision: self.import.pending_conversion,
             current_revision: self.import.preview_generation,
             reading,
             has_source: self.import.source_preview.is_some(),
             needs_text_choice: self.subtitle_attention_required(cx),
+            missing_text_source,
             environment_ready: self.environment.is_some(),
             library_ready: !self.library(cx).loading,
             existing_note: self.existing_source_note(cx).is_some(),
         }) {
             ConversionGate::Wait => cx.notify(),
+            // Without a text source the intent ends as a refused Start does: the card
+            // shows the obstacle, and nothing is left following it.
+            ConversionGate::Stop
+                if missing_text_source && generation == self.import.preview_generation =>
+            {
+                self.import.cancel_start();
+                cx.notify();
+            }
             ConversionGate::Stop => {
                 self.import.pending_conversion = None;
                 cx.notify();
@@ -656,6 +664,19 @@ impl Desktop {
                 cx.notify();
             }
         }
+    }
+
+    /// Settings' 文字来源 is 仅字幕 and this video has no subtitle to use, with no read
+    /// on its way: the card names the obstacle and its repairs, and nothing starts.
+    pub(super) fn text_source_missing(&self, cx: &App) -> bool {
+        !self.import.subtitle_loading
+            && self.import.source_preview.as_ref().is_some_and(|source| {
+                subtitles_required_but_missing(
+                    source,
+                    self.text_mode(cx),
+                    self.import.subtitle_error.is_some(),
+                )
+            })
     }
 
     pub(super) fn subtitle_attention_required(&self, cx: &App) -> bool {
@@ -1371,7 +1392,8 @@ impl Desktop {
                                     recovery.blocked
                                         || self.import.pending_conversion.is_some()
                                         || self.import.preview_cancel.is_some()
-                                        || self.subtitle_choice_missing(cx),
+                                        || self.subtitle_choice_missing(cx)
+                                        || self.text_source_missing(cx),
                                 )
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.start_conversion(window, cx)
@@ -1537,10 +1559,13 @@ impl Desktop {
             && read_error
                 .or(source_failure)
                 .is_some_and(source::legacy_login_failure_from_text);
+        // Subtitles only, and none to use: said with its repairs beneath the chip,
+        // unless a failed read already says what happened.
+        let missing = self.text_source_missing(cx);
         let notice = match &source.subtitles {
-            _ if !speech || self.import.subtitle_loading => None,
-            SubtitleEvidence::NoneFound => Some(course2md::tr!("未找到字幕").to_owned()),
-            SubtitleEvidence::Unsupported { message } => Some(message.clone()),
+            _ if self.import.subtitle_loading => None,
+            SubtitleEvidence::NoneFound if speech => Some(course2md::tr!("未找到字幕").to_owned()),
+            SubtitleEvidence::Unsupported { message } if speech || missing => Some(message.clone()),
             _ => None,
         };
         let warning = match &source.subtitles {
@@ -1608,6 +1633,93 @@ impl Desktop {
             .when_some(failure.map(str::to_owned).or(warning), |view, message| {
                 view.child(self.subtitle_issue(&message, failure.is_some(), source, login, cx))
             })
+            .when(missing && failure.is_none(), |view| {
+                view.child(self.missing_text_source_notice(source, cx))
+            })
+    }
+
+    /// Settings ask for subtitles only and this video has none: what stands in the
+    /// way, and the ways past it from the card.
+    fn missing_text_source_notice(&self, source: &source::Source, cx: &mut Context<Self>) -> Div {
+        let unchecked = matches!(source.subtitles, SubtitleEvidence::Unchecked);
+        let summary = if unchecked {
+            course2md::tr!("还没读取这个视频的字幕，而文字来源设置为仅字幕")
+        } else {
+            course2md::tr!("这个视频没有字幕，而文字来源设置为仅字幕")
+        };
+        // Never read: reading them is the first way on.
+        let retry = unchecked.then(|| {
+            material_button("read-missing-subtitles", ButtonVariant::Text)
+                .icon(symbols::refresh())
+                .child(course2md::tr!("重新读取字幕"))
+                .on_click(cx.listener(|this, _, _, cx| this.retry_subtitles(cx)))
+                .into_any_element()
+        });
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(rem(8.))
+            .children(ui::async_status(
+                "missing-text-source",
+                &ui::AsyncStatus::Warning(summary.into()),
+                retry,
+                cx,
+            ))
+            .child(
+                h_flex()
+                    .gap(rem(8.))
+                    .flex_wrap()
+                    .children(self.text_source_repairs(source, cx)),
+            )
+    }
+
+    /// Under subtitles only, what gives this video a text source: a subtitle file
+    /// beside a local video, or another 文字来源 in Settings, where it is decided.
+    fn text_source_repairs(
+        &self,
+        source: &source::Source,
+        cx: &mut Context<Self>,
+    ) -> Vec<MaterialButton> {
+        if self.text_mode(cx) != TranscriptSource::Subtitle {
+            return Vec::new();
+        }
+        let mut repairs = Vec::new();
+        if !source.online {
+            repairs.push(
+                material_button("attach-missing-subtitle", ButtonVariant::Outlined)
+                    .tone(ButtonTone::Accent)
+                    .icon(symbols::file_upload())
+                    .child(course2md::tr!("选择字幕文件"))
+                    .disabled(self.import.subtitle_loading)
+                    .on_click(
+                        cx.listener(|this, _, window, cx| {
+                            this.choose_attached_subtitle(window, cx)
+                        }),
+                    ),
+            );
+        }
+        repairs.push(
+            material_button("change-text-source", ButtonVariant::Outlined)
+                .tone(ButtonTone::Accent)
+                .icon(symbols::settings())
+                .child(course2md::tr!("更改文字来源"))
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.save_current_draft(cx);
+                    this.open_settings(window, cx);
+                    // Once resolved this action is gone: returning focuses the
+                    // card's primary action instead.
+                    if let Some((_, focus)) = &mut this.settings_origin {
+                        *focus = Some(this.import_submit_focus.clone());
+                    }
+                    // 文字来源 is the category's first row.
+                    this.select_settings_tab(
+                        crate::settings_ui::SettingsTab::Generation,
+                        window,
+                        cx,
+                    );
+                })),
+        );
+        repairs
     }
 
     /// The video's subtitle tracks, and the ways to get more of them.
@@ -1762,6 +1874,11 @@ impl Desktop {
                             )
                         },
                     )
+                    // Subtitles only: no fallback to speech, so the issue offers what
+                    // gives the video a text source.
+                    .when(failed, |row| {
+                        row.children(self.text_source_repairs(source, cx))
+                    })
                     .when(login, |row| {
                         row.child(
                             material_button("login-for-subtitles", ButtonVariant::Outlined)
@@ -1907,7 +2024,8 @@ impl Desktop {
     }
 
     /// Capture builds only: `COURSE2MD_CAPTURE_SOURCE` fills the link field
-    /// once at startup and previews it, so preview states can be rendered.
+    /// once at startup and previews it, so preview states can be rendered. A path
+    /// to a file is taken as a local video, as if dropped on the window.
     #[cfg(feature = "capture")]
     fn capture_source(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use std::sync::atomic::Ordering;
@@ -1916,6 +2034,10 @@ impl Desktop {
             return;
         };
         if DONE.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        if std::path::Path::new(&link).is_file() {
+            self.drop_source_files(&[PathBuf::from(link)], window, cx);
             return;
         }
         self.inputs[&Field::Source].update(cx, |state, cx| state.set_value(link, window, cx));
@@ -2204,6 +2326,14 @@ impl Desktop {
                     .err()
                     .filter(|_| settled)
                     .map(|(message, _)| message.clone())
+            })
+            // A Start the plan refused: its reason stands on the card beside 取消转换 and
+            // 重试转换, not under the link field the card has replaced.
+            .or_else(|| {
+                self.import
+                    .source_validation
+                    .clone()
+                    .filter(|_| self.import.pending_conversion.is_some() && !reading)
             });
         // Waiting for the component or location checks is progress, not a failure.
         let checking = !preferences_blocked && (self.environment.is_none() || plan_pending);
@@ -2400,7 +2530,8 @@ impl Desktop {
                     reading
                         || checking
                         || self.records.read(cx).workspace.is_none()
-                        || preferences_blocked,
+                        || preferences_blocked
+                        || self.text_source_missing(cx),
                 )
                 .on_click(cx.listener(move |_, _, window, cx| {
                     // The note is replaced, not kept beside the new one: ask first.
@@ -2464,8 +2595,7 @@ impl Desktop {
                     course2md::tr!("取消转换"),
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.import.pending_conversion = None;
-                    this.import.following_conversion = None;
+                    this.import.cancel_start();
                     cx.notify();
                 })),
             );
