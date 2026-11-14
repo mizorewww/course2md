@@ -1052,10 +1052,15 @@ impl Task<'_> {
             identity["source_id"].as_str() == Some(request.source_id.as_str()),
             tr!("旧进度与此视频来源不符 / Prior work belongs to another source")
         );
+        // The note's own task, or a repair of that note that left it as it was:
+        // its receipts hold what the note's task paid for, and what it added.
+        let repair_of_base = identity["operation"]["kind"] == "reprocess"
+            && identity["operation"]["base_version_id"].as_str() == Some(base.task_id.as_str());
         anyhow::ensure!(
-            identity["task_id"]
-                .as_str()
-                .is_none_or(|id| id == base.task_id),
+            repair_of_base
+                || identity["task_id"]
+                    .as_str()
+                    .is_none_or(|id| id == base.task_id),
             tr!("旧进度与原笔记任务不符 / Prior work belongs to another task")
         );
         let ledger_dir = job.dir.join("requests");

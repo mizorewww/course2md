@@ -1715,6 +1715,100 @@ fn a_retry_that_finishes_nothing_more_reports_the_partial_note_unchanged() {
     );
 }
 
+/// A proofreading left partial by one refused paragraph, then a retry of it that
+/// an alpha.8 app ran and that finished nothing new (it ended in an error, its
+/// note unchanged). Continuing from that retry's work, as a repair of the same
+/// note, is accepted: its receipts are the note's, finished batches come back
+/// from them, and only the refused part is asked again.
+#[test]
+fn a_repair_continues_from_an_earlier_repair_of_the_same_note() {
+    if !common::ffmpeg_available() {
+        return;
+    }
+    let mock = MockAi::respond_with(|_, body| {
+        Some(if body.to_string().contains("敏感") {
+            (
+                400,
+                serde_json::json!({"error":{"message":"Content Exists Risk"}}),
+            )
+        } else {
+            (200, batch_reply(body, false))
+        })
+    });
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("unreadable-video.mp4");
+    std::fs::write(&source, b"broken").unwrap();
+    let mut original = request(root.path(), &source);
+    original.duration = 450.;
+    original.subtitle_events = Some(
+        (0..45)
+            .map(|index| TranscriptEvent {
+                start: index as f64 * 10.,
+                end: index as f64 * 10. + 2.,
+                text: if index == 33 {
+                    "这一句包含敏感词。".into()
+                } else {
+                    format!("这是课程的第 {index} 句讲解内容。")
+                },
+                raw: None,
+                translation: None,
+            })
+            .collect(),
+    );
+    let llm = &mut original.config.llm;
+    llm.enabled = true;
+    llm.concurrency = 1;
+    llm.base_url = mock.url.clone();
+    llm.model = "test-model".into();
+    llm.api_key = "private-task-key".into();
+    original
+        .service_versions
+        .insert("llm".into(), "ai-v1".into());
+    assert!(run(root.path(), &original).status.success());
+    let note = original.course_dir.clone();
+    let manifest = artifact::read_manifest(&note.join("manifest.json")).unwrap();
+    assert!(manifest.partial);
+    assert_eq!(manifest.outcomes.proofreading.total, Some(45));
+    assert_eq!(manifest.outcomes.proofreading.completed, Some(44));
+    let before = std::fs::read(note.join("manifest.json")).unwrap();
+    let repair = |id: &str, prior: &Path| {
+        let mut repair = original.clone();
+        repair.task_id = id.into();
+        repair.work_dir = root.path().join(format!("{id}-work"));
+        repair.operation = course2md::execution::Operation::Reprocess {
+            note_dir: note.clone(),
+            base_task_id: original.task_id.clone(),
+            components: vec![Component::Proofreading],
+            prior_work_dir: Some(prior.to_path_buf()),
+        };
+        repair
+    };
+    // The alpha.8 retry: from the note's task.
+    let first = repair("retry-alpha8", &original.work_dir);
+    assert!(run(root.path(), &first).status.success());
+    // Continued from that retry's own work.
+    let sent_before = mock.calls.load(Ordering::SeqCst);
+    let second = repair("retry-again", &first.work_dir);
+    let output = run(root.path(), &second);
+    let observed = events(&output);
+    assert!(output.status.success(), "{observed:#?}");
+    let done = observed
+        .iter()
+        .find(|event| event["type"] == "done")
+        .expect("the partial note is reported");
+    assert_eq!(done["partial"], true);
+    assert_eq!(done["outcomes"]["proofreading"]["completed"], 44);
+    // Only the refused part was asked again, once per halving down to it: no
+    // finished batch went out.
+    let bodies = mock.bodies.lock().unwrap()[sent_before..].to_vec();
+    assert!(!bodies.is_empty());
+    assert!(
+        bodies.iter().all(|body| body.to_string().contains("敏感")),
+        "a finished batch was sent again"
+    );
+    assert_eq!(std::fs::read(note.join("manifest.json")).unwrap(), before);
+}
+
 /// A regenerate whose AI service is unreachable ends failed and leaves the
 /// complete note, its summary and its exports as they were; a later repair that
 /// asks for no export still keeps every export the note had.
