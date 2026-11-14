@@ -2745,7 +2745,7 @@ impl ReaderPage {
             .iter()
             .enumerate()
             .filter_map(|(index, issue)| {
-                let detail = issue.detail()?.to_owned();
+                let detail = issue.detail()?;
                 Some(
                     v_flex()
                         .gap(rem(4.))

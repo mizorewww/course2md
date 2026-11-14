@@ -895,19 +895,99 @@ pub fn outcome_failure_message(
     part: NotePart,
     outcome: &c2m_artifact::artifact::Outcome,
 ) -> String {
-    use c2m_artifact::artifact::FailureKind;
-    let cause = match outcome.kind {
-        Some(FailureKind::Authentication) => c2m_i18n::tr!("服务拒绝了 API Key"),
-        Some(FailureKind::Model) => c2m_i18n::tr!("服务地址或模型名称有误"),
-        Some(FailureKind::Parameters) => c2m_i18n::tr!("服务不支持当前的模型设置"),
-        Some(FailureKind::RateLimit) => c2m_i18n::tr!("服务暂时限制了请求次数"),
-        Some(FailureKind::Service) => c2m_i18n::tr!("服务暂时无法完成请求"),
-        Some(FailureKind::Uncertain) => c2m_i18n::tr!("请求结果未确认"),
-        Some(FailureKind::Local | FailureKind::Other) | None => {
-            return legacy_outcome_message(part, outcome.message.as_deref());
-        }
+    if let Some(message) = batch_failure_message(part, outcome) {
+        return message;
+    }
+    let Some(cause) = classified_cause(outcome) else {
+        return legacy_outcome_message(part, outcome.message.as_deref());
     };
     c2m_i18n::tr!("{}：{}", missing_term(part), cause)
+}
+
+/// The cause a classified failure words in the interface language.
+fn classified_cause(outcome: &c2m_artifact::artifact::Outcome) -> Option<&'static str> {
+    use c2m_artifact::artifact::FailureKind;
+    Some(match outcome.kind? {
+        FailureKind::Authentication => c2m_i18n::tr!("服务拒绝了 API Key"),
+        FailureKind::Model => c2m_i18n::tr!("服务地址或模型名称有误"),
+        FailureKind::Parameters => c2m_i18n::tr!("服务不支持当前的模型设置"),
+        FailureKind::RateLimit => c2m_i18n::tr!("服务暂时限制了请求次数"),
+        FailureKind::Service => c2m_i18n::tr!("服务暂时无法完成请求"),
+        FailureKind::Uncertain => c2m_i18n::tr!("请求结果未确认"),
+        FailureKind::Local | FailureKind::Other => return None,
+    })
+}
+
+/// A proofreading or translation that finished only some of its paragraphs:
+/// how many of how many kept their original text or stayed untranslated, then
+/// where the first unfinished one is and why — in the interface language when
+/// the failure is classified, otherwise as the engine and the service worded
+/// it, which is the actual error. "校对未完成：165 段中 1 段保留原文；首个错误：
+/// 12:30–12:41：…".
+fn batch_failure_message(
+    part: NotePart,
+    outcome: &c2m_artifact::artifact::Outcome,
+) -> Option<String> {
+    if !matches!(part, NotePart::Proofreading | NotePart::Translation)
+        || outcome.status != c2m_artifact::artifact::Status::Partial
+    {
+        return None;
+    }
+    let total = outcome.total?;
+    let unfinished = total.checked_sub(outcome.completed?).filter(|n| *n > 0)?;
+    let count = if part == NotePart::Proofreading {
+        c2m_i18n::tr!(
+            "{} 段中 {} 段保留原文",
+            grouped(total as u64),
+            grouped(unfinished as u64)
+        )
+    } else {
+        c2m_i18n::tr!(
+            "{} 段中 {} 段未翻译",
+            grouped(total as u64),
+            grouped(unfinished as u64)
+        )
+    };
+    // The engine records "…；首个错误：<range>：<cause>".
+    let first = outcome
+        .message
+        .as_deref()
+        .and_then(|message| message.split_once("；首个错误："))
+        .map(|(_, first)| first.trim());
+    let (range, worded) = match first.and_then(|first| first.split_once('：')) {
+        Some((range, cause)) if is_time_range(range) => (Some(range), Some(cause.trim())),
+        _ => (None, first),
+    };
+    // A part the service refused while it accepted the rest is about that
+    // part's text, not the settings the engine's generic refusal names: what
+    // the service said is the cause.
+    let refused = worded
+        .filter(|cause| cause.contains("（HTTP 400）") || cause.contains("（HTTP 422）"))
+        .and_then(|cause| cause.split_once("（服务说明："))
+        .map(|(_, said)| c2m_i18n::tr!("服务拒绝处理这部分内容：{}", said.trim_end_matches('）')));
+    let cause = classified_cause(outcome)
+        .map(str::to_owned)
+        .or(refused)
+        .or(worded.map(str::to_owned));
+    let detail = match (range, cause) {
+        (Some(range), Some(cause)) => c2m_i18n::tr!("{}：{}", range, cause),
+        (range, cause) => cause.or(range.map(str::to_owned)).unwrap_or_default(),
+    };
+    let body = if detail.is_empty() {
+        count
+    } else {
+        c2m_i18n::tr!("{}；首个错误：{}", count, detail)
+    };
+    Some(c2m_i18n::tr!("{}：{}", missing_term(part), body))
+}
+
+/// "12:30–12:41", "1:02:03–1:02:30": where in the video a part is.
+fn is_time_range(text: &str) -> bool {
+    text.split_once('–').is_some_and(|(from, to)| {
+        [from, to]
+            .iter()
+            .all(|time| !time.is_empty() && time.chars().all(|c| c.is_ascii_digit() || c == ':'))
+    })
 }
 
 /// Older saved outcomes combined a stage label, retention message and English
@@ -1282,7 +1362,6 @@ mod tests {
             "{detail}"
         );
     }
-
     #[test]
     fn model_download_metrics_stay_labeled_while_speed_is_measured() {
         let now = Instant::now();
@@ -1361,6 +1440,7 @@ mod tests {
             "已完成"
         );
     }
+
     #[test]
     fn a_replayed_stream_says_what_the_live_one_said() {
         let stage = Stage::Transcribe;
@@ -1668,6 +1748,56 @@ mod tests {
             "摘要未生成"
         );
     }
+
+    #[test]
+    fn a_partly_finished_proofreading_says_how_much_where_and_why() {
+        use c2m_artifact::artifact::{FailureKind, Outcome, Status};
+        let partial = |kind, message: &str| Outcome {
+            status: Status::Partial,
+            message: Some(message.into()),
+            completed: Some(164),
+            total: Some(165),
+            kind,
+        };
+        // A refused part: what the service said about it.
+        let refused = partial(
+            None,
+            "校对未全部完成（1/165 失败），原文已保留；首个错误：12:30–12:41：服务拒绝了请求参数（HTTP 400）。（服务说明：Content Exists Risk）",
+        );
+        assert_eq!(
+            outcome_failure_message(NotePart::Proofreading, &refused),
+            "校对未完成：165 段中 1 段保留原文；首个错误：12:30–12:41：服务拒绝处理这部分内容：Content Exists Risk"
+        );
+        // A classified cause is worded in the interface language.
+        let limited = partial(
+            Some(FailureKind::RateLimit),
+            "校对未全部完成（1/165 失败），原文已保留；首个错误：1:02:03–1:02:30：服务请求次数达到限制，请稍后重试。",
+        );
+        assert_eq!(
+            outcome_failure_message(NotePart::Proofreading, &limited),
+            "校对未完成：165 段中 1 段保留原文；首个错误：1:02:03–1:02:30：服务暂时限制了请求次数"
+        );
+        // An older record without a range still names its cause.
+        let older = partial(
+            None,
+            "校对未全部完成（1/165 失败），原文已保留；首个错误：HTTP 503",
+        );
+        assert_eq!(
+            outcome_failure_message(NotePart::Proofreading, &older),
+            "校对未完成：165 段中 1 段保留原文；首个错误：HTTP 503"
+        );
+        let translation = Outcome {
+            message: Some("翻译未全部完成（3/40 失败）".into()),
+            completed: Some(37),
+            total: Some(40),
+            ..partial(None, "")
+        };
+        assert_eq!(
+            outcome_failure_message(NotePart::Translation, &translation),
+            "翻译未完成：40 段中 3 段未翻译"
+        );
+    }
+
     #[test]
     fn retry_and_cached_work_do_not_inflate_eta() {
         let now = Instant::now();

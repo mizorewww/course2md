@@ -162,6 +162,9 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {} 分钟	{} 分钟	{} min	{} 分鐘	{} 分
 {} 字节	{} 字节	{} bytes	{} 位元組	{}バイト
 {} 小时 {} 分	{} 小时 {} 分	{}h {}m	{} 小時 {} 分	{} 時間 {} 分
+{} 段中 {} 段保留原文	{} 段中 {} 段保留原文	Out of {} paragraphs, {} kept the original text	{} 段中 {} 段保留原文	{} 段落中 {} 段落は元のテキストのままです
+{} 段中 {} 段未翻译	{} 段中 {} 段未翻译	Out of {} paragraphs, {} were not translated	{} 段中 {} 段未翻譯	{} 段落中 {} 段落は翻訳されていません
+服务拒绝处理这部分内容：{}	服务拒绝处理这部分内容：{}	The service refused to process this part: {}	服務拒絕處理這部分內容：{}	サービスがこの部分の処理を拒否しました：{}
 {} 已准备完成	{} 已准备完成	{} is ready	{} 已準備完成	{} の準備ができました
 {} 张	{} 张	{} matched	{} 張	{} 枚
 {} 张截图 / {} 段文字	{} 张截图 / {} 段文字	Screenshots: {} / text paragraphs: {}	{} 張截圖 / {} 段文字	スクリーンショット {} 枚 / テキスト {} 段落
@@ -191,12 +194,12 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {}需要是有效的非负数	{}需要是有效的非负数	{} needs to be a valid non-negative number	{}需要是有效的非負數	{}は有効な非負の数値である必要があります
 {}（具体内容未记录）	{}（具体内容未记录）	{} (specific content not recorded)	{}（具體內容未記錄）	{}（詳細は記録されていません）
 {}（自动选择）	{}（自动选择）	{} (automatic)	{}（自動選擇）	{}（自動）
+{}（服务说明：{}）	{}（服务说明：{}）	{} (the service said: {})	{}（服務說明：{}）	{}（サービスの説明：{}）
 {}，{}	{}，{}	{}, {}	{}，{}	{}、{}
 {}：{}	{}：{}	{}: {}	{}：{}	{}:{}
 {}：{}{}	{}：{}{}	{}: {}{}	{}：{}{}	{}：{}{}
 {}；尚未发送请求	{}；尚未发送请求	{}; request not sent yet	{}；尚未傳送請求	{};リクエストはまだ送信されていません
 {}；首个错误：{}	{}；首个错误：{}	{}; first error: {}	{}；首個錯誤：{}	{};最初のエラー: {}
-{}（服务说明：{}）	{}（服务说明：{}）	{} (the service said: {})	{}（服務說明：{}）	{}（サービスの説明：{}）
 ↑↓ 选择，Enter 确认，Esc 取消。 / Use ↑↓ to select, Enter to confirm, Esc to cancel.	↑↓ 选择，Enter 确认，Esc 取消。	Use ↑↓ to select, Enter to confirm, Esc to cancel.	↑↓ 選擇，Enter 確認，Esc 取消。	↑↓ で選択、Enter で確定、Esc でキャンセル。
 ✓ api  已设置密钥（隐藏）/ API key set (hidden)	✓ api  已设置密钥（隐藏）/ API key set (hidden)	✓ api  API key set (hidden)	✓ api  已設定金鑰（隱藏）/ API key set (hidden)	✓ api  API キー設定済み（非表示）
 ✓ npu  检测到 Intel NPU（首次使用会自动安装运行组件）/ Intel NPU detected (runtime components install on first use)	✓ npu  检测到 Intel NPU（首次使用会自动安装运行组件）/ Intel NPU detected (runtime components install on first use)	✓ npu  Intel NPU detected (runtime components install on first use)	✓ npu  偵測到 Intel NPU（首次使用會自動安裝執行元件）/ Intel NPU detected (runtime components install on first use)	✓ npu  Intel NPU を検出しました（初回使用時にランタイム コンポーネントを自動でインストールします）

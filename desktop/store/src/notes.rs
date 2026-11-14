@@ -295,13 +295,31 @@ pub struct ProcessingIssue {
     pub outcome: artifact::Outcome,
 }
 impl ProcessingIssue {
-    /// The recorded cause as published (engine messages already use the UI language).
-    pub fn detail(&self) -> Option<&str> {
+    /// The recorded cause as published. A proofreading or translation that
+    /// finished only some paragraphs says how many of how many, where the first
+    /// unfinished one is and why, in the interface language as far as the cause
+    /// is classified.
+    pub fn detail(&self) -> Option<String> {
+        let part = match self.stage {
+            ProcessingStage::Proofreading => Some(crate::activity::NotePart::Proofreading),
+            ProcessingStage::Translation => Some(crate::activity::NotePart::Translation),
+            _ => None,
+        };
+        if let Some(part) = part
+            && self.outcome.status == artifact::Status::Partial
+            && self.outcome.total.is_some()
+        {
+            return Some(crate::activity::outcome_failure_message(
+                part,
+                &self.outcome,
+            ));
+        }
         self.outcome
             .message
             .as_deref()
             .map(str::trim)
             .filter(|detail| !detail.is_empty())
+            .map(str::to_owned)
     }
 }
 fn processing_issues(manifest: &artifact::Manifest) -> Vec<ProcessingIssue> {
@@ -864,7 +882,7 @@ mod tests {
             stage: ProcessingStage::Summary,
             outcome: artifact::Outcome::failed("摘要尚未完成，已保留正文"),
         };
-        assert_eq!(issue.detail(), Some("摘要尚未完成，已保留正文"));
+        assert_eq!(issue.detail().as_deref(), Some("摘要尚未完成，已保留正文"));
     }
 
     #[test]
