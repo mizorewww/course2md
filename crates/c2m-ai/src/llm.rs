@@ -717,7 +717,9 @@ fn run_batches(
                 && unfinished
                     .as_ref()
                     .and_then(Unfinished::failure)
-                    .is_some_and(|failure| failure.retryable && !refused(failure));
+                    .is_some_and(|failure| {
+                        failure.retryable && !failure.unusable && !refused(failure)
+                    });
             Ok(BatchResult {
                 done,
                 size: chunk.len(),
@@ -1623,7 +1625,8 @@ struct Reconciled {
 /// paragraphs whose text is clearly their own — more like their own original
 /// than like either neighbor's, and, beside a missing one, no longer than their
 /// own and half of it, where a merge would have put its text — and the rest is
-/// asked again. A translation cannot be told apart from its original that way,
+/// asked again, an empty one too: it removes a filler paragraph only in a
+/// complete answer. A translation cannot be told apart from its original that way,
 /// and keeps nothing: the batch is asked again as it was. An id given twice
 /// counts as left out; an id past the batch means the numbering is off.
 fn reconcile(answer: Vec<(usize, String)>, items: &[&str], purpose: Purpose) -> Option<Reconciled> {
@@ -1663,10 +1666,11 @@ fn reconcile(answer: Vec<(usize, String)>, items: &[&str], purpose: Purpose) -> 
             .filter(|&neighbor| missing(neighbor))
             .map(length)
             .sum();
-        // A paragraph returned empty is removed as filler; only a short one can
-        // be, whatever the numbering.
+        // An empty text in an answer whose numbering is in doubt may belong to
+        // any paragraph: nothing is removed on its word. The paragraph is asked
+        // again, alone or with fewer, where its "" can be trusted.
         if text.trim().is_empty() {
-            return length(id) <= FILLER_CHARS;
+            return false;
         }
         let likeness = resemblance(text, items[id]);
         // Room for the punctuation a proofreading adds, not for half the
@@ -1685,9 +1689,6 @@ fn reconcile(answer: Vec<(usize, String)>, items: &[&str], purpose: Purpose) -> 
         complete: false,
     })
 }
-
-/// The longest paragraph an answer that left others out may remove as filler.
-const FILLER_CHARS: usize = 8;
 
 /// How alike two texts are, from 0 to 1: the share of their pairs of adjacent
 /// characters they have in common (single characters for a text of one). A
@@ -3107,7 +3108,7 @@ mod tests {
             &items,
             Purpose::Proofreading,
         ));
-        assert_eq!(merged, [0, 1, 4]);
+        assert_eq!(merged, [0, 4]);
         // Paragraph 2 left out and the rest numbered anew: each id carries the
         // next paragraph's text. Only what is clearly its own is kept.
         let renumbered = ids(reconcile(
@@ -3120,7 +3121,7 @@ mod tests {
             &items,
             Purpose::Proofreading,
         ));
-        assert_eq!(renumbered, [0, 1]);
+        assert_eq!(renumbered, [0]);
         // A merge that kept its length within the limit is still not its own:
         // it is as much like the paragraph it swallowed.
         let swallowed = ids(reconcile(
@@ -3133,7 +3134,7 @@ mod tests {
             &items,
             Purpose::Proofreading,
         ));
-        assert_eq!(swallowed, [0, 1, 2]);
+        assert_eq!(swallowed, [0, 2]);
         // A translation cannot be matched to its original: nothing is kept, and
         // the batch is asked again as it was.
         let translated = reconcile(
@@ -3171,7 +3172,7 @@ mod tests {
             &items,
             Purpose::Proofreading,
         ));
-        assert_eq!(twice, [1, 2, 3, 4]);
+        assert_eq!(twice, [2, 3, 4]);
         // A `null` text is no answer for its paragraph: it is asked again, and
         // only an explicit "" removes a filler paragraph.
         assert_eq!(
@@ -3502,6 +3503,23 @@ mod tests {
         assert_eq!(report.failed, 0);
         // Two batches, the second's retry, then its try at the end.
         assert_eq!(bodies.lock().unwrap().len(), 4);
+    }
+
+    /// An answer that stayed unusable after its retries would only come back the
+    /// same: it gets no try at the end.
+    #[test]
+    fn an_unusable_batch_is_not_tried_again_at_the_end() {
+        let (url, bodies) = scripted_service(|_, _| streamed("抱歉，我无法处理。", "stop"));
+        let mut sections = one_section(&["一", "二"]);
+        let report = polish_sections_report(
+            &mut sections,
+            Path::new(""),
+            &polish_settings(url, 1),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(report.failed, 2);
+        assert_eq!(bodies.lock().unwrap().len(), 1);
     }
 
     /// A batch read back from its receipt is not timed as a request.
