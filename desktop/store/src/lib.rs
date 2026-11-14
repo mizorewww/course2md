@@ -3,6 +3,7 @@
 //! Nothing here depends on GPUI.
 
 pub mod activity;
+pub mod eta;
 pub mod library;
 pub mod locations;
 pub mod migrate;
