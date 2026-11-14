@@ -43,6 +43,10 @@ pub struct Activity {
     updated: Instant,
     /// The remaining time shown, measured from `started` and `baseline`.
     eta: crate::eta::Eta,
+    /// How much of `current` was read back from earlier work, not done now; and
+    /// how much of `baseline` was.
+    replayed: u64,
+    baseline_replayed: u64,
 }
 /// A request that stopped a job, as the task card explains it.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -182,9 +186,11 @@ impl JobEvents {
                 phase,
                 unit,
                 found,
+                replayed,
             } => {
                 let now = Instant::now();
                 let activity = self.stage(stage);
+                activity.replayed = replayed.unwrap_or(0);
                 activity.update_at(now, *current, *total, message.clone());
                 activity.set_phase_at(now, *phase);
                 activity.unit = *unit;
@@ -340,6 +346,8 @@ impl Activity {
             baseline: 0,
             updated: now,
             eta: crate::eta::Eta::default(),
+            replayed: 0,
+            baseline_replayed: 0,
         }
     }
     pub fn update(&mut self, current: u64, total: u64, message: Option<String>) {
@@ -351,6 +359,7 @@ impl Activity {
         if current < self.current || total != self.total {
             self.started = now;
             self.baseline = current;
+            self.baseline_replayed = self.replayed;
             self.eta.reset();
         }
         if current != self.current {
@@ -468,6 +477,7 @@ impl Activity {
             if phase == Some(Phase::Download) {
                 self.started = now;
                 self.baseline = self.current;
+                self.baseline_replayed = self.replayed;
                 self.eta.reset();
             }
             self.updated = now;
@@ -491,11 +501,17 @@ impl Activity {
         } else {
             1
         };
+        // Work read back from earlier runs (AI answers from their receipts) is
+        // neither speed nor left to do: the estimate sees only the rest.
+        let replayed = self.replayed.min(self.current);
         self.eta.observe(
             now,
-            (self.started, self.baseline),
-            self.current,
-            self.total,
+            (
+                self.started,
+                self.baseline.saturating_sub(self.baseline_replayed),
+            ),
+            self.current - replayed,
+            self.total.saturating_sub(replayed),
             warmup,
         );
     }
@@ -1334,6 +1350,31 @@ mod tests {
         assert_eq!(older.ai_detail_at(true, at(5)), None);
     }
 
+    /// A retry reads most batches back from their receipts at once; only the
+    /// requests it sends are speed.
+    #[test]
+    fn batches_read_back_from_receipts_are_not_timed() {
+        let mut llm = Activity::new();
+        let t0 = Instant::now();
+        let at = |seconds| t0 + Duration::from_secs(seconds);
+        llm.workers = 1;
+        llm.unit = Some(Unit::Batches);
+        llm.update_at(at(0), 0, 20, None);
+        llm.estimate(&Stage::Llm, at(0));
+        // Ten answers come back from receipts in the first moment.
+        for replayed in 1..=10 {
+            llm.replayed = replayed;
+            report(&mut llm, &Stage::Llm, at(0), replayed);
+        }
+        // Then a request every 5 s.
+        for live in 1..=3 {
+            report(&mut llm, &Stage::Llm, at(5 * live), 10 + live);
+        }
+        // Seven left at 5 s each, not at the pace the replays implied.
+        let left = llm.eta.remaining(at(15)).unwrap().as_secs_f64();
+        assert!((30. ..=40.).contains(&left), "{left}");
+    }
+
     #[test]
     fn byte_downloads_keep_measured_speed_and_remaining_time() {
         let t0 = Instant::now();
@@ -1457,6 +1498,7 @@ mod tests {
                 phase: None,
                 unit: None,
                 found: None,
+                replayed: None,
             },
             Event::Log {
                 level: c2m_protocol::progress::LogLevel::Info,
@@ -1603,6 +1645,7 @@ mod tests {
             phase: None,
             unit: None,
             found,
+            replayed: None,
         };
         let mut events = JobEvents::default();
         events.apply(&Event::Stage {

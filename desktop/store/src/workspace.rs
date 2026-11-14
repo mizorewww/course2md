@@ -3560,6 +3560,7 @@ mod tests {
             phase: None,
             unit: None,
             found: None,
+            replayed: None,
         };
         ws.state.apply_task_event(&id, &counted);
         assert_eq!(ws.state.revision, revision);

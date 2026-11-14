@@ -340,6 +340,11 @@ pub enum Event {
         /// candidate screenshots of a scene scan. Absent from older engines.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         found: Option<u64>,
+        /// How much of `current` was read back from earlier work (an AI answer
+        /// from its receipt) rather than done now, so it is not timed as speed.
+        /// Absent when none was, and from older engines.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        replayed: Option<u64>,
     },
     /// Running LLM token totals for the stage: they start again at zero when
     /// that stage starts, and no other stage's start touches them.
@@ -521,6 +526,7 @@ pub fn download_progress(current: u64, total: u64) {
         phase: None,
         unit: Some(Unit::Bytes),
         found: None,
+        replayed: None,
     });
 }
 
@@ -632,6 +638,8 @@ pub struct Bar {
     phase: Mutex<Option<Phase>>,
     unit: Option<Unit>,
     found: Mutex<Option<u64>>,
+    /// How much of `current` was read back rather than done now.
+    replayed: AtomicU64,
     last_emit: Mutex<std::time::Instant>,
 }
 
@@ -651,6 +659,7 @@ impl Bar {
             phase: Mutex::new(None),
             unit: None,
             found: Mutex::new(None),
+            replayed: AtomicU64::new(0),
             last_emit: Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(1)),
         }
     }
@@ -698,6 +707,17 @@ impl Bar {
     /// steps: answers read back from receipts land together, and a dropped step
     /// would leave the count behind until the next one, minutes later.
     pub fn advance(&self, n: u64) {
+        self.bar.inc(n);
+        if is_json() {
+            let cur = self.current.fetch_add(n, Ordering::Relaxed) + n;
+            self.emit_progress(cur, true);
+        }
+    }
+
+    /// [`Self::advance`] for work read back from what an earlier run did (an AI
+    /// answer from its receipt): counted as done, but not as speed.
+    pub fn advance_replayed(&self, n: u64) {
+        self.replayed.fetch_add(n, Ordering::Relaxed);
         self.bar.inc(n);
         if is_json() {
             let cur = self.current.fetch_add(n, Ordering::Relaxed) + n;
@@ -788,6 +808,7 @@ impl Bar {
             phase,
             unit: self.unit,
             found,
+            replayed: Some(self.replayed.load(Ordering::Relaxed)).filter(|n| *n > 0),
         });
     }
 }
@@ -1021,6 +1042,7 @@ mod tests {
             phase: Some(Phase::Download),
             unit: Some(Unit::Bytes),
             found: None,
+            replayed: None,
         };
         assert_eq!(
             serde_json::to_value(&event).unwrap(),
