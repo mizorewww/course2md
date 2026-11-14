@@ -318,28 +318,43 @@ fn service_detail(value: Option<&Value>, body: &[u8], secrets: &[&str]) -> Optio
 }
 
 /// `text` with every word that could be a credential replaced by `***`: one
-/// starting `sk-`, or a run of 20 or more letters, digits and `_` mixing letters
-/// and digits. A run with hyphens is words joined, as model names are
-/// (`gpt-4o-mini-2024-07-18`), and is kept.
+/// starting `sk-` or `AIza`, a JSON web token (`eyJ…` in three dotted parts), or
+/// a run of 20 or more letters, digits, `-` and `_` mixing letters and digits.
+/// A run whose hyphens join two or more plain words is a name, as model names
+/// are (`gpt-4o-mini-2024-07-18`), and is kept.
 fn redact_secrets(text: &str) -> String {
+    let random = |part: &str| {
+        let letters = part.chars().any(|c| c.is_ascii_alphabetic());
+        let digits = part.chars().any(|c| c.is_ascii_digit());
+        let words = part
+            .split('-')
+            .filter(|piece| piece.len() >= 2 && piece.chars().all(|c| c.is_ascii_alphabetic()))
+            .count();
+        part.len() >= 20 && letters && digits && words < 2
+    };
     let secret = |word: &str| {
-        let letters = word.chars().any(|c| c.is_ascii_alphabetic());
-        let digits = word.chars().any(|c| c.is_ascii_digit());
+        let parts: Vec<&str> = word.split('.').collect();
         (word.starts_with("sk-") && word.len() > 6)
-            || (word.len() >= 20 && letters && digits && !word.contains('-'))
+            || (word.starts_with("AIza") && word.len() >= 30)
+            || (parts.len() == 3 && word.starts_with("eyJ") && parts.iter().all(|p| p.len() >= 8))
+            || parts.iter().any(|part| random(part))
     };
     let mut out = String::with_capacity(text.len());
     let mut word = String::new();
     let flush = |word: &mut String, out: &mut String| {
-        if secret(word) {
+        // A sentence's full stop is not part of the word before it.
+        let trimmed = word.trim_end_matches('.');
+        let stops = &word[trimmed.len()..];
+        if secret(trimmed) {
             out.push_str("***");
         } else {
-            out.push_str(word);
+            out.push_str(trimmed);
         }
+        out.push_str(stops);
         word.clear();
     };
     for c in text.chars() {
-        if c.is_ascii_alphanumeric() || matches!(c, '-' | '_') {
+        if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
             word.push(c);
         } else {
             flush(&mut word, &mut out);
@@ -1459,6 +1474,19 @@ mod tests {
             echoed.starts_with("Incorrect API key provided: ***."),
             "{echoed}"
         );
+        // Keys with hyphens and underscores, and tokens, are.
+        for key in [
+            "AIzaSyA-1b2C3d4E5f6G7h8I9j0K_lmnopqrstu",
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
+            "a1b2c3d4-e5f6-a7b8-c9d0-e1f2a3b4c5d6",
+            "sk-proj-Ab_12-Cd",
+        ] {
+            let said = said(&format!(
+                r#"{{"error":{{"message":"Key {key} was rejected."}}}}"#
+            ))
+            .unwrap();
+            assert_eq!(said, "Key *** was rejected.", "{key}");
+        }
         // A model name is not a credential.
         assert_eq!(
             said(r#"{"error":{"message":"The model gpt-4o-mini-2024-07-18 is overloaded"}}"#)
