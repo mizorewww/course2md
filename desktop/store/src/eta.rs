@@ -91,9 +91,10 @@ impl Eta {
         }
         if current > last_count
             && self.points.len() > 1
-            && at.saturating_duration_since(last_time) >= STALL
+            && at.saturating_duration_since(last_time) >= self.stall()
         {
-            // Work that stalled for two minutes or more starts measuring
+            // Work that stalled for two minutes or more (three of its usual gaps
+            // between reports, for work that reports rarely) starts measuring
             // again from here: the stall says nothing about its pace now.
             self.points.clear();
             self.points.push_back((at, current));
@@ -164,6 +165,23 @@ impl Eta {
                 }
             }
         };
+    }
+
+    /// How long a silence is a stall: [`STALL`], or three times the usual gap
+    /// between reports when work reports more rarely than that (one AI batch
+    /// every few minutes on a local model).
+    fn stall(&self) -> Duration {
+        let mut gaps: Vec<Duration> = self
+            .points
+            .iter()
+            .zip(self.points.iter().skip(1))
+            .map(|((earlier, _), (later, _))| later.saturating_duration_since(*earlier))
+            .collect();
+        if gaps.is_empty() {
+            return STALL;
+        }
+        gaps.sort();
+        STALL.max(gaps[gaps.len() / 2] * 3)
     }
 
     /// The remaining time as of `at`, while the countdown has not run out.
@@ -412,6 +430,21 @@ mod tests {
         }
         let left = eta.remaining(at(150.)).unwrap().as_secs_f64();
         let truth = (1_000. - 310.) / 10.;
+        assert!((left - truth).abs() / truth < 0.2, "{left} vs {truth}");
+    }
+
+    /// One batch every two and a half minutes (a local model, one at a time) is
+    /// its pace, not a stall: the estimate appears and follows it.
+    #[test]
+    fn work_that_reports_every_few_minutes_is_timed() {
+        let start = Instant::now();
+        let at = |seconds: f64| start + Duration::from_secs_f64(seconds);
+        let mut eta = Eta::default();
+        for batch in 1..=4u64 {
+            eta.observe(at(150. * batch as f64), (start, 0), batch, 12, 1);
+        }
+        let left = eta.remaining(at(600.)).unwrap().as_secs_f64();
+        let truth = 8. * 150.;
         assert!((left - truth).abs() / truth < 0.2, "{left} vs {truth}");
     }
 
