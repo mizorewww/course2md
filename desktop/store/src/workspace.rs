@@ -1857,6 +1857,12 @@ enum ArtifactFact {
         base: PathBuf,
         outcomes: BTreeMap<String, c2m_artifact::artifact::Outcome>,
     },
+    /// A repair an older app ended in an error when it finished nothing more:
+    /// its base's note is still there, as partial as it was.
+    Unchanged {
+        note: PathBuf,
+        outcomes: Box<c2m_artifact::artifact::Outcomes>,
+    },
 }
 
 /// The task the note in `note` is the result of, read without checking its files.
@@ -1948,6 +1954,21 @@ fn probe_artifact(task: &TaskRecord, location: &LibraryLocation) -> Result<Artif
                 outcomes: record.outcomes,
             });
         }
+        // A repair that finished nothing more ended in an error before this
+        // version, waiting for the person with the engine's message; it now ends
+        // partial with the note it left as it was, and its retry is the note's.
+        if !task.exports_only()
+            && task.artifact.is_none()
+            && task.state == TaskState::NeedsAttention
+            && note_task(&note).as_ref() == Some(base_task_id)
+            && let Some(manifest) = c2m_artifact::artifact::note_manifest(&note)?
+                .filter(|manifest| manifest.partial && manifest.source_id == task.plan.source_id)
+        {
+            return Ok(ArtifactFact::Unchanged {
+                note,
+                outcomes: Box::new(manifest.outcomes),
+            });
+        }
         // Exports an older app wrote beside a version, now in the flat note.
         if task
             .artifact
@@ -1987,6 +2008,18 @@ fn apply_artifact(task: &mut TaskRecord, fact: ArtifactFact) {
             task.unread = true;
         }
         ArtifactFact::Moved { note } => task.artifact = Some(note),
+        // Not for a task that has a request to decide about, or that ran meanwhile.
+        ArtifactFact::Unchanged { note, outcomes }
+            if task.state == TaskState::NeedsAttention
+                && task.artifact.is_none()
+                && !task.has_uncertain() =>
+        {
+            task.artifact = Some(note);
+            task.events.outcomes = Some(*outcomes);
+            task.state = TaskState::Partial;
+            task.events.error = None;
+        }
+        ArtifactFact::Unchanged { .. } => {}
         ArtifactFact::Replaced { by } => {
             task.replaced_by = Some(by);
             task.artifact = None;
@@ -6153,6 +6186,70 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("之后的任务"), "{error:#}");
         assert_eq!(ws.state.tasks.len(), 1);
+    }
+
+    /// The record an alpha.8 app left when "Retry unfinished proofreading"
+    /// finished nothing new: the retry waits for the person with the engine's
+    /// message and no note of its own, its note unchanged. Opened now, it is the
+    /// partial result it is, with the note's reasons, and retrying it again plans
+    /// from the note's own task.
+    #[test]
+    fn a_retry_an_older_app_ended_in_an_error_opens_partial_and_retries() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
+        let note = publish_note(&ws.state, &id, true);
+        let outcomes = c2m_artifact::artifact::note_manifest(&note)
+            .unwrap()
+            .unwrap()
+            .outcomes;
+        let original = ws.state.task_mut(&id).unwrap();
+        original.state = TaskState::Partial;
+        original.artifact = Some(note.clone());
+        original.events.outcomes = Some(outcomes.clone());
+        let retry = ws
+            .state
+            .reprocess(&id, vec![Component::Proofreading], vec![])
+            .unwrap();
+        let alpha8 = ws.state.task_mut(&retry).unwrap();
+        alpha8.state = TaskState::NeedsAttention;
+        alpha8.events.error = Some(
+            "校对未全部完成（1/165 失败），原文已保留；首个错误：12:30–12:41：服务拒绝了请求参数（HTTP 400）".into(),
+        );
+        assert!(alpha8.artifact.is_none());
+        ws.save().unwrap();
+
+        let mut reopened = Workspace::open_at(
+            dir.path().join("workspace.json"),
+            dir.path().join("library"),
+        )
+        .unwrap();
+        let reconciliation = reopened.reconciliation().unwrap();
+        reopened.apply_reconciliation(reconciliation.run()).unwrap();
+        let task = reopened.state.task(&retry).unwrap();
+        assert_eq!(task.state, TaskState::Partial);
+        assert_eq!(task.artifact.as_ref(), Some(&note));
+        assert_eq!(task.events.error, None);
+        assert_eq!(task.events.outcomes.as_ref(), Some(&outcomes));
+        assert_eq!(reopened.state.note_task(&id).unwrap().id, retry);
+        // Its retry plans from the note's own task, whose receipts the engine takes.
+        let again = reopened
+            .state
+            .reprocess(&retry, vec![Component::Proofreading], vec![])
+            .unwrap();
+        let base_work = reopened.state.task(&id).unwrap().work_dir.clone();
+        match &reopened.state.task(&again).unwrap().plan.operation {
+            c2m_engine::execution::Operation::Reprocess {
+                base_task_id,
+                prior_work_dir,
+                ..
+            } => {
+                assert_eq!(base_task_id, &id);
+                assert_eq!(prior_work_dir.as_ref(), Some(&base_work));
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     /// A retry that finished nothing more left the note as its base published it.
