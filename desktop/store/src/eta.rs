@@ -19,7 +19,10 @@
 //! - it is worded in steps that grow with it ([`label`]): 5 s under a minute, then
 //!   10 s, 30 s, a minute and 5 minutes;
 //! - a countdown that runs out while the work goes on shows nothing rather than a
-//!   number that is no longer true.
+//!   number that is no longer true, and work that resumes after [`STALL`] is
+//!   timed afresh;
+//! - work read back from an earlier run (AI answers from their receipts) is
+//!   neither speed nor left to do: callers leave it out of the counts.
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
@@ -27,6 +30,9 @@ use std::time::{Duration, Instant};
 const WINDOW: Duration = Duration::from_secs(30);
 /// The fewest reports with progress the rate spans, however old.
 const WINDOW_REPORTS: usize = 8;
+/// A silence after which work that resumes is timed afresh. Apple model
+/// ranges land a wave at a time, half a minute apart on a slow link.
+const STALL: Duration = Duration::from_secs(120);
 /// Reports closer together than this are one point of the window.
 const POINT_SPACING: Duration = Duration::from_millis(250);
 /// How long work must have run in its sample before it is timed at all.
@@ -83,8 +89,27 @@ impl Eta {
             self.reset();
             return;
         }
+        if current > last_count
+            && self.points.len() > 1
+            && at.saturating_duration_since(last_time) >= STALL
+        {
+            // Work that stalled for two minutes or more starts measuring
+            // again from here: the stall says nothing about its pace now.
+            self.points.clear();
+            self.points.push_back((at, current));
+            self.shown = None;
+            return;
+        }
         if current > last_count {
-            if self.points.len() > 1 && at.saturating_duration_since(last_time) < POINT_SPACING {
+            // The newest point moves forward until it is a spacing past the one
+            // before it, then stays and a new one starts: compared with the
+            // newest instead, frequent reports would keep replacing it and the
+            // window would never fill.
+            let len = self.points.len();
+            let previous = (len > 1).then(|| self.points[len - 2].0);
+            if previous
+                .is_some_and(|time| last_time.saturating_duration_since(time) < POINT_SPACING)
+            {
                 self.points.pop_back();
             }
             self.points.push_back((at, current));
@@ -111,7 +136,11 @@ impl Eta {
             return;
         }
         let estimate = (total - current) as f64 / rate;
-        self.shown = match self.shown {
+        // A countdown that ran out is not shown and is not a starting point.
+        let shown = self.shown.filter(|(then, value)| {
+            *value - at.saturating_duration_since(*then).as_secs_f64() > 0.
+        });
+        self.shown = match shown {
             None => Some((at, estimate)),
             Some((then, value)) => {
                 let since = at.saturating_duration_since(then);
@@ -342,6 +371,48 @@ mod tests {
         // Done, or a retry: no estimate.
         eta.observe(at(500.), (start, 0), 1_000, 1_000, 1);
         assert!(eta.remaining(at(500.)).is_none());
+    }
+
+    /// A scan reporting every 100 ms that slows down from 100 to 20 frames a
+    /// second: the estimate follows the new pace within the window, rather than
+    /// the average since the start.
+    #[test]
+    fn frequent_reports_keep_a_window_that_follows_a_slowdown() {
+        let start = Instant::now();
+        let at = |seconds: f64| start + Duration::from_secs_f64(seconds);
+        let total = 50_000;
+        let mut eta = Eta::default();
+        let mut count = 0;
+        for tick in 1..=6_000 {
+            let seconds = f64::from(tick) / 10.;
+            count += if seconds <= 300. { 10 } else { 2 };
+            eta.observe(at(seconds), (start, 0), count, total, 1);
+        }
+        // At 600 s: 36,000 done, 14,000 left at 20 a second.
+        let truth = (total - count) as f64 / 20.;
+        let left = eta.remaining(at(600.)).unwrap().as_secs_f64();
+        assert!((left - truth).abs() / truth < 0.2, "{left} vs {truth}");
+        assert!(eta.points.len() <= 200, "{} points", eta.points.len());
+    }
+
+    /// Work that resumes after a stall longer than the window is timed afresh,
+    /// at its new pace, not from half of an old countdown.
+    #[test]
+    fn work_resuming_after_a_stall_is_timed_afresh() {
+        let start = Instant::now();
+        let at = |seconds: f64| start + Duration::from_secs_f64(seconds);
+        let mut eta = Eta::default();
+        for second in 1..=20 {
+            eta.observe(at(second as f64), (start, 0), second * 10, 1_000, 1);
+        }
+        // Nothing for two minutes, then 10 a second again.
+        for second in 140..=150 {
+            let count = 200 + (second - 139) * 10;
+            eta.observe(at(second as f64), (start, 0), count, 1_000, 1);
+        }
+        let left = eta.remaining(at(150.)).unwrap().as_secs_f64();
+        let truth = (1_000. - 310.) / 10.;
+        assert!((left - truth).abs() / truth < 0.2, "{left} vs {truth}");
     }
 
     #[test]
