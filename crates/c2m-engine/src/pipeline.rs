@@ -838,6 +838,9 @@ impl Task<'_> {
                 || (translation_target.is_some() && improved(Component::Translation)));
         let translation_redone = has(Component::Translation) && improved(Component::Translation);
         let summary_redone = has(Component::Summary) && improved(Component::Summary);
+        // Why this run's parts ended as they did, before a part that finished
+        // nothing more falls back to the note's own record.
+        let this_run = outcomes.clone();
         if has(Component::Proofreading) && !text_redone {
             document.sections = before_ai.0;
             outcomes.proofreading = base.outcomes.proofreading.clone();
@@ -860,7 +863,7 @@ impl Task<'_> {
             }
             let unfinished = redone
                 .iter()
-                .map(|&component| part(&outcomes, component))
+                .map(|&component| part(&this_run, component))
                 .find(|outcome| outcome.status != Status::Succeeded);
             // A retry of a partial note's unfinished parts that finished nothing
             // more leaves the note as it was: still partial, for the same reasons,
@@ -876,6 +879,19 @@ impl Task<'_> {
                 tracing::warn!(
                     "补做没有完成更多内容，笔记未改动 / Nothing more was finished; the note is unchanged"
                 );
+                // The note's record, with each part retried now saying why it is
+                // still unfinished this time (a rejected key, a rate limit).
+                let mut reported = base.outcomes.clone();
+                for &component in &redone {
+                    let now = part(&this_run, component);
+                    if now.status != Status::Succeeded && now.status != Status::NotRequested {
+                        match component {
+                            Component::Proofreading => reported.proofreading = now,
+                            Component::Translation => reported.translation = now,
+                            _ => reported.summary = now,
+                        }
+                    }
+                }
                 progress::emit(&progress::Event::Done(Box::new(progress::Done {
                     task_id: request.task_id.clone(),
                     course_id: base.course_id.clone(),
@@ -885,7 +901,7 @@ impl Task<'_> {
                     slides: base.frames.len(),
                     outputs: base.outputs.iter().map(PathBuf::from).collect(),
                     partial: Some(true),
-                    outcomes: Some(base.outcomes.clone()),
+                    outcomes: Some(reported),
                     ..done_counts(&document.sections, self.started)
                 })));
                 return Ok(());

@@ -1665,11 +1665,19 @@ fn a_retry_that_finishes_nothing_more_reports_the_partial_note_unchanged() {
     if !common::ffmpeg_available() {
         return;
     }
-    let mock = MockAi::respond_with(|_, _| {
-        Some((
-            400,
-            serde_json::json!({"error":{"message":"Content Exists Risk"}}),
-        ))
+    // The summary is refused for its content, then, on the retry, the key is.
+    let mock = MockAi::respond_with(|number, _| {
+        Some(if number == 0 {
+            (
+                400,
+                serde_json::json!({"error":{"message":"Content Exists Risk"}}),
+            )
+        } else {
+            (
+                401,
+                serde_json::json!({"error":{"message":"Incorrect API key provided"}}),
+            )
+        })
     });
     let root = tempfile::tempdir().unwrap();
     let source = root.path().join("video.mp4");
@@ -1708,6 +1716,8 @@ fn a_retry_that_finishes_nothing_more_reports_the_partial_note_unchanged() {
         .expect("the unchanged note is reported");
     assert_eq!(done["partial"], true);
     assert_eq!(done["outcomes"]["summary"]["status"], "failed");
+    // Why it is still unfinished this time, not the note's old reason.
+    assert_eq!(done["outcomes"]["summary"]["kind"], "authentication");
     assert_eq!(
         std::fs::read(note.join("manifest.json")).unwrap(),
         before,
@@ -1807,6 +1817,24 @@ fn a_repair_continues_from_an_earlier_repair_of_the_same_note() {
         "a finished batch was sent again"
     );
     assert_eq!(std::fs::read(note.join("manifest.json")).unwrap(), before);
+
+    // Work of another task, neither the note's nor a repair of it, is refused.
+    let mut other = original.clone();
+    other.task_id = "another-task".into();
+    other.work_dir = root.path().join("another-work");
+    other.course_dir = root.path().join("another-course");
+    assert!(run(root.path(), &other).status.success());
+    let foreign = repair("retry-foreign", &other.work_dir);
+    let output = run(root.path(), &foreign);
+    assert!(!output.status.success());
+    assert!(
+        events(&output).iter().any(|event| event["type"] == "error"
+            && event["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("旧进度与原笔记任务不符"))),
+        "{:#?}",
+        events(&output)
+    );
 }
 
 /// A regenerate whose AI service is unreachable ends failed and leaves the
