@@ -356,6 +356,10 @@ pub struct Failure {
     /// The answer was unusable in a way the same request would only repeat
     /// ([`Repeats`]); the caller has to ask differently.
     pub repeats: bool,
+    /// The service answered, but the answer did not fit what was asked (a
+    /// paragraph missing or out of place, no readable structure). Asking for
+    /// less at once may get a usable one.
+    pub unusable: bool,
     pub kind: FailureKind,
     /// The wait the service asked for before another attempt, if it named one.
     pub retry_after: Option<std::time::Duration>,
@@ -379,6 +383,7 @@ impl Failure {
             unsupported_response_format: false,
             refused_parameter: None,
             repeats: false,
+            unusable: false,
             kind: FailureKind::Local,
             retry_after: None,
         }

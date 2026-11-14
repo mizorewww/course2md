@@ -290,6 +290,9 @@ pub struct PolishReport {
     /// batches come back from their receipts.
     #[serde(default)]
     pub failed_batches: usize,
+    /// What kind of failure [`Self::note`] is, when the service classified it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<c2m_core::outcome::FailureKind>,
 }
 
 /// A transcript batch: at most [`BATCH`] events and [`BATCH_CHARS`] characters, and
@@ -327,6 +330,24 @@ struct Batches<'s, B, A> {
     body_for: B,
     apply: A,
     warned: std::sync::atomic::AtomicBool,
+    /// Some request of this step got a usable answer: the service and its
+    /// settings work, so a batch it refused or answered unusably is about its
+    /// own text, and smaller parts of it are worth asking.
+    answered: std::sync::atomic::AtomicBool,
+}
+
+/// The part of a batch that stayed unfinished, and why.
+struct Unfinished {
+    /// "00:12:30–00:13:10": where in the video it is.
+    range: String,
+    error: anyhow::Error,
+}
+
+impl Unfinished {
+    /// "00:12:30–00:13:10：cause", for the note's record of what failed.
+    fn note(&self) -> String {
+        tr!("{}：{}", self.range, format!("{:#}", self.error))
+    }
 }
 
 impl<B, A> Batches<'_, B, A>
@@ -335,19 +356,22 @@ where
     A: Fn(&mut [&mut TranscriptEvent], &[(usize, String)]) + Sync,
 {
     /// Sends `events` as one request and applies the answer. An answer cut off at
-    /// its output limit keeps the items it finished, and only the rest is asked
-    /// again as one smaller request. One that finished nothing (the model thought
-    /// or repeated itself through the budget) is asked once more with the full
-    /// budget, then split in two, at most [`MAX_SPLITS`] times: the same request
-    /// would only stop at the same place. Returns the events finished, and why the
-    /// others were not.
+    /// its output limit, or one that left some paragraphs out, keeps the items it
+    /// finished, and only the rest is asked again as one smaller request. One cut
+    /// off with nothing finished (the model thought or repeated itself through the
+    /// budget) is asked once more with the full budget, then split in two, at most
+    /// [`MAX_SPLITS`] times: the same request would only stop at the same place.
+    /// A batch the service refused for its content, or kept answering unusably
+    /// after every retry, is split in two the same way, so only the paragraph it
+    /// is about stays unfinished ([`Self::isolates`]). Returns the events
+    /// finished, and why the others were not.
     fn send(
         &self,
         image: Option<&str>,
         events: &mut [&mut TranscriptEvent],
         splits: u32,
         full_budget: bool,
-    ) -> (usize, Option<anyhow::Error>) {
+    ) -> (usize, Option<Unfinished>) {
         let (Some(first), Some(last)) = (events.first(), events.last()) else {
             return (0, None);
         };
@@ -355,6 +379,10 @@ where
             crate::timeline::fmt_ts(first.start),
             crate::timeline::fmt_ts(last.end),
         );
+        let unfinished = |error| Unfinished {
+            range: format!("{start}–{end}"),
+            error,
+        };
         let description = if self.purpose == Purpose::Proofreading {
             tr!(
                 "校对 {}–{} 的文字 / Proofread transcript {}–{}",
@@ -375,11 +403,26 @@ where
         let items: Vec<&str> = events.iter().map(|e| e.text.as_str()).collect();
         let budget = (!full_budget).then(|| batch_max_tokens(&items));
         let answer = (self.body_for)(&items, image)
-            .and_then(|body| self.chat.segments(&body, &description, items.len(), budget));
+            .and_then(|body| self.chat.segments(&body, &description, &items, budget));
         let answer = match answer {
             Ok(answer) => answer,
-            Err(error) => return (0, Some(error)),
+            Err(error) if events.len() > 1 && self.isolates(&error, splits) => {
+                tracing::info!(
+                    items = events.len(),
+                    "AI 服务没有完成这一批，分成两半再试 / The service did not finish this batch; asking for each half: {error:#}"
+                );
+                let middle = events.len() / 2;
+                let (left, right) = events.split_at_mut(middle);
+                let (left_done, left_error) = self.send(image, left, splits + 1, false);
+                let (right_done, right_error) = self.send(image, right, splits + 1, false);
+                return (left_done + right_done, left_error.or(right_error));
+            }
+            Err(error) => return (0, Some(unfinished(error))),
         };
+        if !answer.segments.is_empty() {
+            self.answered
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         (self.apply)(events, &answer.segments);
         if !answer.truncated {
             return (events.len(), None);
@@ -396,7 +439,7 @@ where
         tracing::info!(
             finished = finished.len(),
             rest = rest.len(),
-            "AI 回答达到输出上限，补发未完成的部分 / The answer reached its output limit; asking again for the rest"
+            "AI 回答没有完成全部段落，补发未完成的部分 / The answer did not finish every paragraph; asking again for the rest"
         );
         let done = total - rest.len();
         if rest.is_empty() {
@@ -410,7 +453,7 @@ where
         let budgeted = self.chat.settings.provider != LlmProvider::Codex;
         match after_empty_answer(rest.len(), splits, full_budget, budgeted) {
             EmptyAnswer::FullBudget => self.send(image, &mut rest, splits, true),
-            EmptyAnswer::GiveUp => (0, Some(anyhow::anyhow!(output_limit_message()))),
+            EmptyAnswer::GiveUp => (0, Some(unfinished(anyhow::anyhow!(output_limit_message())))),
             EmptyAnswer::Halve => {
                 let middle = rest.len() / 2;
                 let (left, right) = rest.split_at_mut(middle);
@@ -421,7 +464,34 @@ where
             }
         }
     }
+
+    /// Whether a batch that ended in `error` is asked again in two halves: only
+    /// once another request of this step was answered, so the service and its
+    /// settings work. A refusal of the request as it is (HTTP 400/422 not about a
+    /// parameter, which a service gives for content it will not process or a
+    /// request too large) is split down to single paragraphs; an answer that
+    /// stayed unusable after every retry, which costs a request each time,
+    /// [`MAX_SPLITS`] times. A refused key, model or address, a rate limit, a lost
+    /// answer and a stop are not about the batch's text and are never split.
+    fn isolates(&self, error: &anyhow::Error, splits: u32) -> bool {
+        if !self.answered.load(std::sync::atomic::Ordering::Relaxed) {
+            return false;
+        }
+        let Some(failure) = error.downcast_ref::<crate::dispatch::Failure>() else {
+            return false;
+        };
+        let refused = matches!(failure.status, Some(400 | 422))
+            && failure.refused_parameter.is_none()
+            && !failure.unsupported_response_format;
+        (refused && splits < MAX_ISOLATING_SPLITS) || (failure.unusable && splits < MAX_SPLITS)
+    }
 }
+
+/// How many times a batch the service refused is halved: down to one paragraph
+/// for a batch of [`BATCH`]. A refused request is not processed, and a half that
+/// is accepted stops there, so one refused paragraph costs about two requests
+/// per halving.
+const MAX_ISOLATING_SPLITS: u32 = 5;
 
 /// What follows an answer cut off with nothing finished.
 #[derive(Debug, PartialEq, Eq)]
@@ -451,7 +521,7 @@ fn after_empty_answer(items: usize, splits: u32, full_budget: bool, budgeted: bo
 const MAX_SPLITS: u32 = 2;
 
 /// One AI step over transcript batches, on the shared worker pool. A batch counts
-/// toward progress once taken. A failed batch keeps its text and records the first
+/// toward progress once it is answered or given up on. A failed batch keeps its text and records the first
 /// cause, and never stops the note; Err = the task was stopped.
 ///
 /// Every request goes through the task's ledger, so running a step again with the
@@ -471,30 +541,37 @@ fn run_batches(
     } else {
         "translate"
     };
-    let pb = crate::progress::Bar::new(purpose.usage_stage(), chunks.len() as u64).with_template(
-        &format!("{{spinner:.green}} {label} {{pos}}/{{len}} [{{bar:32.cyan/blue}}] {{msg}}"),
-    );
+    // Counts the batches answered or given up on, which the desktop times the
+    // rest by, and says how many run at once.
+    let pb = crate::progress::Bar::new(purpose.usage_stage(), chunks.len() as u64)
+        .with_template(&format!(
+            "{{spinner:.green}} {label} {{pos}}/{{len}} [{{bar:32.cyan/blue}}] {{msg}}"
+        ))
+        .with_unit(crate::progress::Unit::Batches);
+    let workers = s.concurrency.clamp(1, MAX_CONCURRENCY);
+    crate::progress::workers(purpose.usage_stage(), workers.min(chunks.len()));
+    pb.set_position(0);
     let batches = Batches {
         chat: Chat::new(s, purpose, control),
         purpose,
         body_for,
         apply,
         warned: std::sync::atomic::AtomicBool::new(false),
+        answered: std::sync::atomic::AtomicBool::new(false),
     };
-    let first_error = std::sync::Mutex::new(None::<String>);
     let total = chunks.len();
     let counts = crate::pool::map_pool(
         chunks,
-        s.concurrency.clamp(1, MAX_CONCURRENCY),
+        workers,
         control,
         |(image_path, mut chunk): Chunk<'_>| {
-            pb.inc(1);
             let image = image_path
                 .as_deref()
                 .and_then(|path| section_image_b64(path, &batches.warned));
-            let (done, error) = batches.send(image.as_deref(), &mut chunk, 0, false);
-            if let Some(error) = error {
-                let cause = format!("{error:#}");
+            let (done, unfinished) = batches.send(image.as_deref(), &mut chunk, 0, false);
+            pb.advance(1);
+            let cause = unfinished.map(|unfinished| {
+                let cause = unfinished.note();
                 warn_once(
                     &batches.warned,
                     &if purpose == Purpose::Proofreading {
@@ -503,21 +580,27 @@ fn run_batches(
                         tr!("翻译未完成：{}", cause)
                     },
                 );
-                let mut first = crate::runtime::lock_recover(&first_error);
-                first.get_or_insert_with(|| brief(&cause));
-            }
-            Ok((done, done < chunk.len()))
+                let kind = unfinished
+                    .error
+                    .downcast_ref::<crate::dispatch::Failure>()
+                    .map(|failure| failure.kind);
+                (brief(&cause), kind)
+            });
+            Ok((done, done < chunk.len(), cause))
         },
     )?;
     pb.finish();
-    let succeeded = counts.iter().map(|(done, _)| done).sum();
+    let succeeded = counts.iter().map(|(done, ..)| done).sum();
+    // The first unfinished part in the video, whichever finished first.
+    let first = counts.iter().find_map(|(.., cause)| cause.clone());
     Ok(PolishReport {
         attempted,
         succeeded,
         failed: attempted.saturating_sub(succeeded),
-        note: crate::runtime::lock_recover(&first_error).take(),
+        kind: first.as_ref().and_then(|(_, kind)| *kind),
+        note: first.map(|(note, _)| note),
         batches: total,
-        failed_batches: counts.iter().filter(|(_, failed)| *failed).count(),
+        failed_batches: counts.iter().filter(|(_, failed, _)| *failed).count(),
     })
 }
 
@@ -719,8 +802,10 @@ fn section_image_b64(path: &Path, warned: &std::sync::atomic::AtomicBool) -> Opt
     }
 }
 
+/// A cause short enough to record, long enough for its time range, the error
+/// and what the service said about it.
 fn brief(msg: &str) -> String {
-    const MAX: usize = 160;
+    const MAX: usize = 480;
     let mut s: String = msg.chars().take(MAX).collect();
     if msg.chars().count() > MAX {
         s.push('…');
@@ -895,9 +980,15 @@ pub(crate) fn restore_latex(text: &str) -> String {
     out
 }
 
+/// One `{"id":…,"text":…}` item. A `null` text is an empty one: what a model
+/// writes for a filler paragraph it was told to return empty.
 fn segment(item: &serde_json::Value) -> Option<(usize, String)> {
     let id = item.get("id")?.as_u64()? as usize;
-    Some((id, restore_latex(item.get("text")?.as_str()?)))
+    let text = match item.get("text")? {
+        serde_json::Value::Null => "",
+        text => text.as_str()?,
+    };
+    Some((id, restore_latex(text)))
 }
 
 fn parse_items(items: &[serde_json::Value]) -> Option<Vec<(usize, String)>> {
@@ -1127,6 +1218,24 @@ impl<'a> Chat<'a> {
         } else {
             Vec::new()
         };
+        // The key and every credential header, as sent and without its scheme.
+        let credential = |name: &str| {
+            let name = name.to_ascii_lowercase();
+            ["auth", "key", "token", "account"]
+                .iter()
+                .any(|part| name.contains(part))
+        };
+        let secrets: Vec<&str> = std::iter::once(s.api_key.as_str())
+            .chain(
+                headers
+                    .iter()
+                    .filter(|(name, _)| credential(name))
+                    .flat_map(|(_, value)| {
+                        [value.as_str(), value.rsplit(' ').next().unwrap_or_default()]
+                    }),
+            )
+            .filter(|secret| !secret.trim().is_empty())
+            .collect();
         self.control.request(
             &crate::dispatch::RequestSpec {
                 service: "llm",
@@ -1136,6 +1245,7 @@ impl<'a> Chat<'a> {
                 identity,
                 former: &former,
                 resend: self.resend,
+                secrets: &secrets,
             },
             || {
                 let mut request = self.agent.post(&url);
@@ -1185,22 +1295,34 @@ impl<'a> Chat<'a> {
     /// full budget). A complete reply has one entry per input item. A reply cut
     /// off at its output limit with finished items is kept as it is, a definite
     /// answer, and yields those items, so asking again for the rest never resends
-    /// what was answered. One cut off with nothing finished (thinking or repetition
-    /// used the budget) is a failure, so it is never read back as an answer, and
-    /// comes back as an empty truncated reply for the caller to ask differently.
+    /// what was answered; so is one that left some paragraphs out ([`reconcile`]),
+    /// which yields the paragraphs that are certainly their own. One cut off with
+    /// nothing finished (thinking or repetition used the budget) is a failure, so
+    /// it is never read back as an answer, and comes back as an empty truncated
+    /// reply for the caller to ask differently.
     fn segments(
         &self,
         body: &serde_json::Value,
         description: &str,
-        expected: usize,
+        items: &[&str],
         max_tokens: Option<u32>,
     ) -> Result<Segments> {
+        let expected = items.len();
         let proofreading = self.purpose == Purpose::Proofreading;
         let parsed = |content: &str| {
             parse_segments(content).context(if proofreading {
                 tr!("服务返回的校对结构无效 / Invalid proofreading structure")
             } else {
                 tr!("服务返回的翻译结构无效 / Invalid translation structure")
+            })
+        };
+        let usable = |content: &str| -> Result<Reconciled> {
+            reconcile(parsed(content)?, items, self.purpose).context(if proofreading {
+                tr!(
+                    "校对结果与原文段落不对应，已保留原文 / Proofread segments do not match the input"
+                )
+            } else {
+                tr!("翻译结果与原文段落不对应 / Translated segments do not match the input")
             })
         };
         let delivery = crate::provider::Delivery {
@@ -1222,19 +1344,7 @@ impl<'a> Chat<'a> {
                     }
                     return Ok(());
                 }
-                anyhow::ensure!(
-                    segment_ids_match(&parsed(content)?, expected),
-                    if proofreading {
-                        tr!(
-                            "校对结果与原文段落不对应，已保留原文 / Proofread segments do not match the input"
-                        )
-                    } else {
-                        tr!(
-                            "翻译结果与原文段落不对应 / Translated segments do not match the input"
-                        )
-                    }
-                );
-                Ok(())
+                usable(content).map(drop)
             },
         );
         let answer = match answer {
@@ -1258,11 +1368,86 @@ impl<'a> Chat<'a> {
                 truncated: true,
             });
         }
+        let reconciled = usable(&answer.content)?;
+        if !reconciled.complete {
+            tracing::info!(
+                answered = reconciled.segments.len(),
+                expected,
+                "AI 回答缺少部分段落 / The answer left some paragraphs out"
+            );
+        }
         Ok(Segments {
-            segments: parsed(&answer.content)?,
-            truncated: false,
+            segments: reconciled.segments,
+            truncated: !reconciled.complete,
         })
     }
+}
+
+/// An answer lined up with the paragraphs asked.
+#[derive(Debug, PartialEq)]
+struct Reconciled {
+    segments: Vec<(usize, String)>,
+    /// Every paragraph has its answer; otherwise the rest is to be asked again.
+    complete: bool,
+}
+
+/// How an answer that was not cut off lines up with the `items` asked, or None
+/// when it cannot be trusted at all.
+///
+/// One entry per id is complete. An answer numbered from 1 instead of 0, every id
+/// once, is the same answer. One that left some ids out (a model that drops a
+/// filler paragraph instead of returning it empty, or merges two paragraphs into
+/// one) keeps the paragraphs that are certainly their own, and the rest is asked
+/// again: an id given twice counts as left out, and a neighbor of a missing id is
+/// asked again unless it is a proofreading answer no longer than its own text
+/// and half the missing one, since a merge puts the missing text into a
+/// neighbor. An id past the batch means the numbering is off, and nothing can be
+/// matched to its paragraph.
+fn reconcile(answer: Vec<(usize, String)>, items: &[&str], purpose: Purpose) -> Option<Reconciled> {
+    let expected = items.len();
+    if segment_ids_match(&answer, expected) {
+        return Some(Reconciled {
+            segments: answer,
+            complete: true,
+        });
+    }
+    let from_one: Vec<(usize, String)> = answer
+        .iter()
+        .filter_map(|(id, text)| Some((id.checked_sub(1)?, text.clone())))
+        .collect();
+    if from_one.len() == answer.len() && segment_ids_match(&from_one, expected) {
+        return Some(Reconciled {
+            segments: from_one,
+            complete: true,
+        });
+    }
+    if answer.iter().any(|(id, _)| *id >= expected) {
+        return None;
+    }
+    let mut count = vec![0usize; expected];
+    for (id, _) in &answer {
+        count[*id] += 1;
+    }
+    let missing = |id: usize| count.get(id).is_some_and(|n| *n != 1);
+    let length = |id: usize| items.get(id).map_or(0, |text| text.chars().count());
+    let own = |id: usize, text: &str| {
+        let gap: usize = [id.checked_sub(1), Some(id + 1)]
+            .into_iter()
+            .flatten()
+            .filter(|&neighbor| neighbor < expected && missing(neighbor))
+            .map(length)
+            .sum();
+        gap == 0
+            || (purpose == Purpose::Proofreading && text.chars().count() <= length(id) + gap / 2)
+    };
+    let segments: Vec<(usize, String)> = answer
+        .into_iter()
+        .filter(|(id, text)| !missing(*id) && own(*id, text))
+        .collect();
+    (!segments.is_empty()).then_some(Reconciled {
+        segments,
+        complete: false,
+    })
 }
 
 fn output_limit_message() -> &'static str {
@@ -2568,5 +2753,275 @@ mod tests {
             assert_eq!(report.succeeded == 1, resent, "{provider:?}");
             assert_eq!(bodies.lock().unwrap().len(), 1 + usize::from(resent));
         }
+    }
+
+    /// Paragraph `i` of a minute-long lecture, `i` seconds in.
+    fn timed_section(texts: &[String]) -> Vec<Section> {
+        vec![Section {
+            t: 0.0,
+            end: texts.len() as f64,
+            image: String::new(),
+            speech: texts
+                .iter()
+                .enumerate()
+                .map(|(i, text)| TranscriptEvent {
+                    start: i as f64,
+                    end: i as f64 + 1.0,
+                    ..speech(text)
+                })
+                .collect(),
+        }]
+    }
+
+    /// `items` proofread as `<text>!`, leaving out those `skip` names.
+    fn proofread_except(items: &[String], skip: impl Fn(&str) -> bool) -> String {
+        let segments: Vec<_> = items
+            .iter()
+            .enumerate()
+            .filter(|(_, text)| !skip(text))
+            .map(|(id, text)| serde_json::json!({"id": id, "text": format!("{text}!")}))
+            .collect();
+        serde_json::json!({ "segments": segments }).to_string()
+    }
+
+    fn sent_items(body: &serde_json::Value) -> String {
+        body["messages"][1]["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    #[test]
+    fn an_answer_that_leaves_paragraphs_out_keeps_the_rest_and_asks_for_those() {
+        let items = ["一二三四五", "啊", "七八九十", "甲乙丙丁", "戊己庚辛"];
+        let answer = |pairs: &[(usize, &str)]| -> Vec<(usize, String)> {
+            pairs.iter().map(|(id, t)| (*id, (*t).to_owned())).collect()
+        };
+        // A filler paragraph left out: its neighbors kept their own length.
+        let dropped = reconcile(
+            answer(&[
+                (0, "一二三四五"),
+                (2, "七八九十"),
+                (3, "甲乙丙丁"),
+                (4, "戊己庚辛"),
+            ]),
+            &items,
+            Purpose::Proofreading,
+        )
+        .unwrap();
+        assert!(!dropped.complete);
+        assert_eq!(dropped.segments.len(), 4);
+        // Two paragraphs merged into one: the merged one is asked again with the
+        // one it swallowed; the other neighbor kept its own length.
+        let merged = reconcile(
+            answer(&[
+                (0, "一二三四五"),
+                (1, "啊"),
+                (2, "七八九十甲乙丙丁"),
+                (4, "戊己庚辛"),
+            ]),
+            &items,
+            Purpose::Proofreading,
+        )
+        .unwrap();
+        assert_eq!(
+            merged
+                .segments
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            [0, 1, 4]
+        );
+        // A translation's length says nothing: neighbors of a gap are asked again.
+        let translated = reconcile(
+            answer(&[(0, "a"), (2, "b"), (3, "c"), (4, "d")]),
+            &items,
+            Purpose::Translation,
+        )
+        .unwrap();
+        assert_eq!(
+            translated
+                .segments
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            [3, 4]
+        );
+        // Numbered from one: the same complete answer.
+        let shifted = reconcile(
+            answer(&[(1, "a"), (2, "b"), (3, "c"), (4, "d"), (5, "e")]),
+            &items,
+            Purpose::Proofreading,
+        )
+        .unwrap();
+        assert!(shifted.complete);
+        assert_eq!(shifted.segments[0], (0, "a".to_owned()));
+        // An id past the batch: nothing can be matched.
+        assert!(reconcile(answer(&[(0, "a"), (7, "b")]), &items, Purpose::Proofreading).is_none());
+        // An id given twice is left out with its neighbors.
+        let twice = reconcile(
+            answer(&[
+                (0, "a"),
+                (0, "b"),
+                (1, "啊"),
+                (2, "七八九十"),
+                (3, "甲乙丙丁"),
+                (4, "戊"),
+            ]),
+            &items,
+            Purpose::Translation,
+        )
+        .unwrap();
+        assert_eq!(
+            twice.segments.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            [2, 3, 4]
+        );
+        // A `null` text is an empty one: a filler paragraph removed.
+        assert_eq!(
+            parse_segments(r#"{"segments":[{"id":0,"text":null}]}"#),
+            Some(vec![(0, String::new())])
+        );
+    }
+
+    #[test]
+    fn a_paragraph_the_model_keeps_leaving_out_is_asked_alone_and_the_rest_finishes() {
+        let (url, bodies) = scripted_service(|_, items| {
+            if items.len() == 1 && items[0] == "嗯嗯嗯嗯" {
+                // Asked alone, the paragraph comes back empty, as the prompt asks.
+                streamed(r#"{"segments":[{"id":0,"text":""}]}"#, "stop")
+            } else {
+                streamed(&proofread_except(items, |text| text == "嗯嗯嗯嗯"), "stop")
+            }
+        });
+        let mut texts_in: Vec<String> = (0..20).map(|i| format!("第{i}段内容")).collect();
+        texts_in[7] = "嗯嗯嗯嗯".into();
+        let refs: Vec<&str> = texts_in.iter().map(String::as_str).collect();
+        let mut sections = one_section(&refs);
+        let report = polish_sections_report(
+            &mut sections,
+            Path::new(""),
+            &polish_settings(url, 1),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!((report.succeeded, report.failed), (20, 0));
+        let out = texts(&sections);
+        assert_eq!(out.len(), 19, "the filler paragraph is removed");
+        assert!(out.iter().all(|text| text.ends_with('!')), "{out:?}");
+        let bodies = bodies.lock().unwrap();
+        // The batch, then the paragraph it left out alone: its neighbors kept
+        // their own length, so they were not merged with it.
+        assert_eq!(bodies.len(), 2, "{bodies:?}");
+        let second = sent_items(&bodies[1]);
+        assert!(
+            second.contains("嗯") && !second.contains("第6段"),
+            "{second}"
+        );
+    }
+
+    #[test]
+    fn a_paragraph_the_service_refuses_stays_as_it_was_and_only_it() {
+        let (url, bodies) = scripted_service(|_, items| {
+            if items.iter().any(|text| text.contains("敏感")) {
+                let body =
+                    r#"{"error":{"message":"Content Exists Risk","type":"invalid_request_error"}}"#;
+                format!(
+                    "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+            } else {
+                streamed(&proofread(items), "stop")
+            }
+        });
+        let mut texts_in: Vec<String> = (0..40).map(|i| format!("段{i}")).collect();
+        texts_in[33] = "敏感".into();
+        let mut sections = timed_section(&texts_in);
+        let report = polish_sections_report(
+            &mut sections,
+            Path::new(""),
+            &polish_settings(url, 4),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!((report.succeeded, report.failed), (39, 1));
+        assert_eq!(report.failed_batches, 1);
+        let out = texts(&sections);
+        assert_eq!(out[33], "敏感", "the refused paragraph keeps its text");
+        assert_eq!(out.iter().filter(|text| text.ends_with('!')).count(), 39);
+        // Where it is, and what the service said.
+        let note = report.note.unwrap();
+        assert!(note.contains("00:33–00:34"), "{note}");
+        assert!(note.contains("Content Exists Risk"), "{note}");
+        // One batch, then halving down to the paragraph: 20 → 10 → 5 → 3 → 2 → 1,
+        // each refused part costing one request and each accepted half one.
+        let sent = bodies.lock().unwrap().len();
+        assert!(sent <= 2 + 2 * 5, "{sent} requests");
+    }
+
+    #[test]
+    fn refusals_are_not_split_while_nothing_has_been_answered() {
+        let (url, bodies) = scripted_service(|_, _| status(400));
+        let texts_in: Vec<String> = (0..20).map(|i| format!("段{i}")).collect();
+        let mut sections = timed_section(&texts_in);
+        let report = polish_sections_report(
+            &mut sections,
+            Path::new(""),
+            &polish_settings(url, 4),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(report.failed, 20);
+        assert_eq!(
+            bodies.lock().unwrap().len(),
+            1,
+            "a refused setting is not split"
+        );
+    }
+
+    #[test]
+    fn an_unusable_answer_for_one_paragraph_leaves_only_a_few_unfinished() {
+        // Any batch holding the paragraph gets an answer without structure.
+        let (url, bodies) = scripted_service(|_, items| {
+            if items.iter().any(|text| text == "坏") {
+                streamed("抱歉，我无法处理。", "stop")
+            } else {
+                streamed(&proofread(items), "stop")
+            }
+        });
+        let mut texts_in: Vec<String> = (0..40).map(|i| format!("段{i}")).collect();
+        texts_in[25] = "坏".into();
+        let mut sections = timed_section(&texts_in);
+        let report = polish_sections_report(
+            &mut sections,
+            Path::new(""),
+            &polish_settings(url, 1),
+            &Default::default(),
+        )
+        .unwrap();
+        // Halved twice: the quarter holding it stays unfinished, not the batch.
+        assert_eq!((report.succeeded, report.failed), (35, 5));
+        assert!(texts(&sections)[25] == "坏");
+        assert_eq!(bodies.lock().unwrap().len(), 2 + 2 + 2);
+    }
+
+    #[test]
+    fn a_rate_limit_is_waited_out_past_the_configured_tries() {
+        let (url, bodies) = scripted_service(|index, items| {
+            if index < 3 {
+                status(429)
+            } else {
+                streamed(&proofread(items), "stop")
+            }
+        });
+        let mut sections = one_section(&["一"]);
+        let report = polish_sections_report(
+            &mut sections,
+            Path::new(""),
+            &polish_settings(url, 2),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(report.succeeded, 1);
+        assert_eq!(bodies.lock().unwrap().len(), 4);
     }
 }

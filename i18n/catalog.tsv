@@ -194,6 +194,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {}：{}{}	{}：{}{}	{}: {}{}	{}：{}{}	{}：{}{}
 {}；尚未发送请求	{}；尚未发送请求	{}; request not sent yet	{}；尚未傳送請求	{};リクエストはまだ送信されていません
 {}；首个错误：{}	{}；首个错误：{}	{}; first error: {}	{}；首個錯誤：{}	{};最初のエラー: {}
+{}（服务说明：{}）	{}（服务说明：{}）	{} (the service said: {})	{}（服務說明：{}）	{}（サービスの説明：{}）
 ↑↓ 选择，Enter 确认，Esc 取消。 / Use ↑↓ to select, Enter to confirm, Esc to cancel.	↑↓ 选择，Enter 确认，Esc 取消。	Use ↑↓ to select, Enter to confirm, Esc to cancel.	↑↓ 選擇，Enter 確認，Esc 取消。	↑↓ で選択、Enter で確定、Esc でキャンセル。
 ✓ api  已设置密钥（隐藏）/ API key set (hidden)	✓ api  已设置密钥（隐藏）/ API key set (hidden)	✓ api  API key set (hidden)	✓ api  已設定金鑰（隱藏）/ API key set (hidden)	✓ api  API キー設定済み（非表示）
 ✓ npu  检测到 Intel NPU（首次使用会自动安装运行组件）/ Intel NPU detected (runtime components install on first use)	✓ npu  检测到 Intel NPU（首次使用会自动安装运行组件）/ Intel NPU detected (runtime components install on first use)	✓ npu  Intel NPU detected (runtime components install on first use)	✓ npu  偵測到 Intel NPU（首次使用會自動安裝執行元件）/ Intel NPU detected (runtime components install on first use)	✓ npu  Intel NPU を検出しました（初回使用時にランタイム コンポーネントを自動でインストールします）

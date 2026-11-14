@@ -1573,16 +1573,34 @@ fn report_message(base: String, report: &crate::llm::PolishReport) -> Option<Str
 }
 
 /// Map a polish run onto the version outcome.
+///
+/// Its kind is the first unfinished part's, so the desktop words the cause in
+/// its own language. A part the service refused while the rest was accepted is
+/// about that part's text, not the key, model or settings, which work: it names
+/// no kind that would send the person to repair the service.
 fn outcome_from_report(report: &crate::llm::PolishReport) -> Outcome {
+    let status = if report.failed == 0 {
+        Status::Succeeded
+    } else if report.succeeded > 0 {
+        Status::Partial
+    } else {
+        Status::Failed
+    };
+    let kind = report
+        .kind
+        .filter(|_| status != Status::Succeeded)
+        .filter(|kind| {
+            status == Status::Failed
+                || !matches!(
+                    kind,
+                    artifact::FailureKind::Authentication
+                        | artifact::FailureKind::Model
+                        | artifact::FailureKind::Parameters
+                )
+        });
     Outcome {
-        kind: None,
-        status: if report.failed == 0 {
-            Status::Succeeded
-        } else if report.succeeded > 0 {
-            Status::Partial
-        } else {
-            Status::Failed
-        },
+        kind,
+        status,
         message: report_message(
             tr!(
                 "校对未全部完成（{}/{} 失败），原文已保留",
@@ -1658,6 +1676,8 @@ mod tests {
             unsupported_response_format: false,
             refused_parameter: None,
             repeats: false,
+            unusable: false,
+            detail: None,
             retry_authorized: None,
         };
         let current = "version-2".to_string();
@@ -1898,6 +1918,29 @@ mod tests {
         let msg = outcome.message.unwrap();
         assert!(msg.contains("137/200"), "应包含失败计数: {msg}");
         assert!(msg.contains("HTTP 404"), "应包含首个错误原因: {msg}");
+
+        // The kind is the first unfinished part's; a refusal of one part while the
+        // rest was accepted does not say the settings are wrong.
+        use crate::artifact::FailureKind;
+        let with = |succeeded, kind| {
+            super::outcome_from_report(&crate::llm::PolishReport {
+                attempted: 165,
+                succeeded,
+                failed: 165 - succeeded,
+                kind: Some(kind),
+                ..Default::default()
+            })
+            .kind
+        };
+        assert_eq!(
+            with(164, FailureKind::RateLimit),
+            Some(FailureKind::RateLimit)
+        );
+        assert_eq!(with(164, FailureKind::Parameters), None);
+        assert_eq!(
+            with(0, FailureKind::Authentication),
+            Some(FailureKind::Authentication)
+        );
 
         let clean = crate::llm::PolishReport {
             attempted: 3,

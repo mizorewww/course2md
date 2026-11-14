@@ -81,6 +81,15 @@ pub struct Receipt {
     /// failure back at once, so the caller asks differently without paying again.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub repeats: bool,
+    /// The service answered but the answer did not fit the request
+    /// ([`Failure::unusable`]): asking for less at once may help.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unusable: bool,
+    /// What the service itself said about a refused or failed request, as it
+    /// wrote it, with anything that looks like a credential removed. Kept so the
+    /// person can see (and send) the actual cause.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
     /// Explicit component reprocessing permits this exact known-failed attempt once.
     /// Sending/uncertain attempts still require Control::resend authorization.
     #[serde(default)]
@@ -103,6 +112,9 @@ pub struct RequestSpec<'a> {
     /// so an upgrade never pays for a request an older version already sent.
     pub former: &'a [Value],
     pub resend: Resend,
+    /// The credentials the request carries, removed from anything the service
+    /// said that is kept ([`Receipt::detail`]).
+    pub secrets: &'a [&'a str],
 }
 
 /// A service response, and whether it was received now or replayed from a
@@ -262,6 +274,85 @@ impl Resend {
     /// A failed answer may be sent again.
     fn retries_failures(self) -> bool {
         matches!(self, Self::Automatic | Self::FreeAutomatic)
+    }
+}
+
+/// The longest explanation of a service's own kept from an error response.
+const DETAIL_CHARS: usize = 300;
+
+/// What a refused or failed response says about itself: the message of an
+/// OpenAI-style `error` object (or `message`, `detail`, a plain-text body), on
+/// one line, shortened, and with anything that looks like a key, token or
+/// signature replaced, since an error body may echo the credentials it refused:
+/// `secrets` (the request's own), then whatever looks like one.
+fn service_detail(value: Option<&Value>, body: &[u8], secrets: &[&str]) -> Option<String> {
+    let text = match value {
+        Some(value) => {
+            let error = value.get("error").unwrap_or(value);
+            [
+                error.get("message"),
+                Some(error).filter(|error| error.is_string()),
+                value.get("message"),
+                value.get("detail"),
+                error.get("code"),
+            ]
+            .into_iter()
+            .flatten()
+            .find_map(Value::as_str)
+            .map(str::to_owned)?
+        }
+        // A gateway's own page (HTML) says nothing the status does not.
+        None => Some(String::from_utf8_lossy(body).into_owned())
+            .filter(|text| !text.trim_start().starts_with('<'))?,
+    };
+    let mut line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    for secret in secrets.iter().filter(|secret| secret.len() >= 4) {
+        line = line.replace(secret, "***");
+    }
+    let redacted = redact_secrets(&line);
+    let mut detail: String = redacted.chars().take(DETAIL_CHARS).collect();
+    if redacted.chars().count() > DETAIL_CHARS {
+        detail.push('…');
+    }
+    (!detail.is_empty()).then_some(detail)
+}
+
+/// `text` with every word that could be a credential replaced by `***`: a run of
+/// 20 or more letters, digits, `-` or `_` mixing letters and digits, or one
+/// starting `sk-`.
+fn redact_secrets(text: &str) -> String {
+    let secret = |word: &str| {
+        let letters = word.chars().any(|c| c.is_ascii_alphabetic());
+        let digits = word.chars().any(|c| c.is_ascii_digit());
+        (word.len() >= 20 && letters && digits) || (word.starts_with("sk-") && word.len() > 6)
+    };
+    let mut out = String::with_capacity(text.len());
+    let mut word = String::new();
+    let flush = |word: &mut String, out: &mut String| {
+        if secret(word) {
+            out.push_str("***");
+        } else {
+            out.push_str(word);
+        }
+        word.clear();
+    };
+    for c in text.chars() {
+        if c.is_ascii_alphanumeric() || matches!(c, '-' | '_') {
+            word.push(c);
+        } else {
+            flush(&mut word, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut word, &mut out);
+    out
+}
+
+/// `message` followed by what the service said, when it said anything.
+fn with_detail(message: String, detail: Option<&str>) -> String {
+    match detail {
+        Some(detail) => crate::tr!("{}（服务说明：{}）", message, detail),
+        None => message,
     }
 }
 
@@ -569,6 +660,7 @@ impl Ledger {
             identity,
             former,
             resend,
+            secrets,
         } = *spec;
         let service_version = self
             .service_versions
@@ -668,6 +760,7 @@ impl Ledger {
                 return Err(Failure {
                     unsupported_response_format: old.unsupported_response_format,
                     refused_parameter: old.refused_parameter.clone(),
+                    unusable: old.unusable,
                     ..Failure::with_status(
                         old.http_status,
                         false,
@@ -720,6 +813,8 @@ impl Ledger {
             unsupported_response_format: false,
             refused_parameter: None,
             repeats: false,
+            unusable: false,
+            detail: None,
             retry_authorized: None,
         };
         // This durable write happens before the only call that can send network bytes.
@@ -757,9 +852,18 @@ impl Ledger {
         };
         receipt.http_status = Some(response.status);
         let value = serde_json::from_slice::<Value>(&response.body);
+        // What an AI service said is kept for a refusal of the request's content
+        // or size and for a busy or failing service: the actual cause, which
+        // nothing else names. Not for a refused key, where an error body is the
+        // likeliest to echo it, and not for other services, which word their
+        // refusals themselves.
+        let detail = (service == "llm" && !matches!(response.status, 200..=299 | 401 | 403))
+            .then(|| service_detail(value.as_ref().ok(), &response.body, secrets))
+            .flatten();
+        receipt.detail.clone_from(&detail);
         if (400..500).contains(&response.status) {
             let unsupported = rejects_response_format(response.status, value.as_ref().ok());
-            let message = rejection_message(response.status);
+            let message = with_detail(rejection_message(response.status), detail.as_deref());
             receipt.state = State::Rejected;
             receipt.unsupported_response_format = unsupported;
             let refused =
@@ -787,6 +891,10 @@ impl Ledger {
             } else {
                 State::Uncertain
             };
+            receipt.message = Some(with_detail(
+                rejection_message(response.status),
+                detail.as_deref(),
+            ));
             self.save(&receipt)?;
             // As for a lost response above: without per-request billing, a server
             // error costs nothing to send again, so no one needs to be asked.
@@ -796,7 +904,7 @@ impl Ledger {
                     ..Failure::with_status(
                         Some(response.status),
                         true,
-                        rejection_message(response.status),
+                        receipt.message.clone().unwrap_or_default(),
                     )
                 });
             }
@@ -825,10 +933,12 @@ impl Ledger {
             receipt.state = State::Failed;
             receipt.message = Some(format!("{error:#}"));
             receipt.repeats = repeats;
+            receipt.unusable = !repeats;
             self.save(&receipt)?;
             return Err(Failure {
                 retryable: resend.retries_failures() && !repeats,
                 repeats,
+                unusable: !repeats,
                 ..Failure::local(receipt.message.unwrap())
             });
         }
@@ -866,6 +976,7 @@ mod tests {
                     identity,
                     former: &[],
                     resend: Resend::AskUser,
+                    secrets: &[],
                 },
                 send,
                 validate,
@@ -1235,6 +1346,7 @@ mod tests {
                     identity: payload,
                     former: &[],
                     resend,
+                    secrets: &[],
                 },
                 || {
                     if ok {
@@ -1282,6 +1394,7 @@ mod tests {
             identity: &payload,
             former: &[],
             resend: Resend::Free,
+            secrets: &[],
         };
         let failed = || Ok(HttpResponse::new(502, b"bad gateway".to_vec()));
         let first = ledger
@@ -1297,6 +1410,84 @@ mod tests {
         let resent = ledger.send_described(&spec, success, |_| Ok(())).unwrap();
         assert!(!resent.replayed);
         assert_eq!(receipts(dir.path()).unwrap()[0].attempt, 2);
+    }
+
+    #[test]
+    fn what_a_service_said_is_kept_without_credentials() {
+        let json = |text: &str| serde_json::from_str::<Value>(text).ok();
+        let said = |body: &str| {
+            service_detail(json(body).as_ref(), body.as_bytes(), &["private-task-key"])
+        };
+        assert_eq!(
+            said(r#"{"error":{"message":"Content Exists Risk","type":"invalid_request_error"}}"#)
+                .as_deref(),
+            Some("Content Exists Risk")
+        );
+        assert_eq!(
+            said(r#"{"error":"Rate limit reached for model"}"#).as_deref(),
+            Some("Rate limit reached for model")
+        );
+        assert_eq!(
+            said(r#"{"code":"DataInspectionFailed","message":"Input data may contain\n inappropriate content."}"#)
+                .as_deref(),
+            Some("Input data may contain inappropriate content.")
+        );
+        let echoed = said(
+            r#"{"error":{"message":"Incorrect API key provided: sk-abcdef. Key tok_9f8e7d6c5b4a3f2e1d0c9b8a is invalid."}}"#,
+        )
+        .unwrap();
+        assert!(
+            !echoed.contains("sk-abcdef") && !echoed.contains("9f8e7d6c5b4a"),
+            "{echoed}"
+        );
+        assert!(
+            echoed.starts_with("Incorrect API key provided: ***."),
+            "{echoed}"
+        );
+        // A gateway's HTML page and an empty body say nothing.
+        assert_eq!(said("<html><body>502 Bad Gateway</body></html>"), None);
+        assert_eq!(said(""), None);
+        assert_eq!(
+            said("upstream connect error").as_deref(),
+            Some("upstream connect error")
+        );
+        let long = said(&format!(
+            r#"{{"error":{{"message":"{}"}}}}"#,
+            "x ".repeat(400)
+        ))
+        .unwrap();
+        assert_eq!(long.chars().count(), DETAIL_CHARS + 1);
+    }
+
+    #[test]
+    fn a_refusal_keeps_what_the_service_said_in_its_receipt_and_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = Ledger::new(dir.path(), None, &Default::default()).unwrap();
+        let body = br#"{"error":{"message":"Content Exists Risk"}}"#;
+        let failure = ledger
+            .send(
+                "llm",
+                "proofreading",
+                "https://example.test",
+                &serde_json::json!({"text": "x"}),
+                || {
+                    Ok(HttpResponse {
+                        status: 400,
+                        body: body.to_vec(),
+                        retry_after: None,
+                    })
+                },
+                |_| Ok(()),
+            )
+            .unwrap_err();
+        assert!(
+            failure.message.contains("Content Exists Risk"),
+            "{}",
+            failure.message
+        );
+        let receipt = &receipts(dir.path()).unwrap()[0];
+        assert_eq!(receipt.detail.as_deref(), Some("Content Exists Risk"));
+        assert_eq!(receipt.state, State::Rejected);
     }
 
     #[test]
@@ -1316,6 +1507,7 @@ mod tests {
                     identity: payload,
                     former: &[],
                     resend: Resend::Automatic,
+                    secrets: &[],
                 },
                 answer,
                 |_| {
@@ -1411,6 +1603,8 @@ mod tests {
                 unsupported_response_format: false,
                 refused_parameter: None,
                 repeats: false,
+                unusable: false,
+                detail: None,
                 retry_authorized: None,
             })
             .unwrap();
@@ -1434,6 +1628,7 @@ mod tests {
             identity: payload,
             former: &[],
             resend,
+            secrets: &[],
         };
         static LOST: std::sync::LazyLock<Value> =
             std::sync::LazyLock::new(|| serde_json::json!({"text": "lost"}));
@@ -1928,6 +2123,7 @@ mod ephemeral_tests {
                 identity: &serde_json::json!({"n":1}),
                 former: &[],
                 resend,
+                secrets: &[],
             },
             move || Ok(HttpResponse::new(status, body)),
             |_| Ok(()),
@@ -1966,6 +2162,7 @@ mod ephemeral_tests {
                     identity: &serde_json::json!({"n":2}),
                     former: &[],
                     resend: Resend::Free,
+                    secrets: &[],
                 },
                 || {
                     Err(NetworkFailure {

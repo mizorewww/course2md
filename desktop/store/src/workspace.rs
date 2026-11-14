@@ -4320,6 +4320,8 @@ mod tests {
             unsupported_response_format: false,
             refused_parameter: None,
             repeats: false,
+            unusable: false,
+            detail: None,
             retry_authorized: None,
         };
         std::fs::create_dir_all(task.work_dir.join("requests")).unwrap();
@@ -4636,6 +4638,8 @@ mod tests {
             unsupported_response_format: false,
             refused_parameter: None,
             repeats: false,
+            unusable: false,
+            detail: None,
             retry_authorized: None,
         };
         std::fs::create_dir_all(task.work_dir.join("requests")).unwrap();
@@ -4715,6 +4719,8 @@ mod tests {
             unsupported_response_format: false,
             refused_parameter: None,
             repeats: false,
+            unusable: false,
+            detail: None,
             retry_authorized: None,
         };
         std::fs::create_dir_all(task.work_dir.join("requests")).unwrap();
@@ -5078,6 +5084,8 @@ mod tests {
                 unsupported_response_format: false,
                 refused_parameter: None,
                 repeats: false,
+                unusable: false,
+                detail: None,
                 retry_authorized: None,
             };
             std::fs::write(
