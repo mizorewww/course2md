@@ -48,7 +48,7 @@ sys-locale = "0.3"
 # they use. The root's [patch] applies Material's optional engine patches to these.
 gpui-kit = { version = "0.9.1", features = ["gpui-fast"] }
 gpui-base = "0.9.1"
-gpui-kit-material = { version = "0.1.3", default-features = false, features = ["serde", "gpui-fast"] }
+gpui-kit-material = { version = "0.1.4", default-features = false, features = ["serde", "gpui-fast"] }
 gpui-kit-material-color = { version = "0.1.1", features = ["serde"] }
 # The release gpui-kit-material depends on.
 gpui-material-symbols = { version = "0.1", default-features = false }
@@ -82,7 +82,7 @@ strip = true
 
 # Only the workspace root's patches count, so the desktop's stack is pinned here.
 [patch.crates-io]
-# gpui-kit-material's optional Git patch set (its README's quick start, 0.1.3), which
+# gpui-kit-material's optional Git patch set (its README's quick start, 0.1.4), which
 # changes engine behavior only: spaces that overflow a wrapped row hang instead of
 # starting the next one, and a wheel over nested scroll containers (a list inside a
 # scrolling page) scrolls only the innermost one it moves, for the whole gesture, instead
