@@ -1735,7 +1735,15 @@ fn a_repair_continues_from_an_earlier_repair_of_the_same_note() {
     if !common::ffmpeg_available() {
         return;
     }
-    let mock = MockAi::respond_with(|_, body| {
+    let key_refused = Arc::new(AtomicBool::new(false));
+    let refusing = key_refused.clone();
+    let mock = MockAi::respond_with(move |_, body| {
+        if refusing.load(Ordering::SeqCst) {
+            return Some((
+                401,
+                serde_json::json!({"error":{"message":"Incorrect API key provided"}}),
+            ));
+        }
         Some(if body.to_string().contains("敏感") {
             (
                 400,
@@ -1817,6 +1825,30 @@ fn a_repair_continues_from_an_earlier_repair_of_the_same_note() {
         "a finished batch was sent again"
     );
     assert_eq!(std::fs::read(note.join("manifest.json")).unwrap(), before);
+
+    // A retry that has no earlier answers to read back and whose key is now
+    // refused finishes nothing: it says why, but the note still holds 44 of 45.
+    key_refused.store(true, Ordering::SeqCst);
+    let mut fresh = repair("retry-refused-key", &first.work_dir);
+    if let course2md::execution::Operation::Reprocess { prior_work_dir, .. } = &mut fresh.operation
+    {
+        *prior_work_dir = None;
+    }
+    let output = run(root.path(), &fresh);
+    let observed = events(&output);
+    assert!(output.status.success(), "{observed:#?}");
+    let proofreading = &observed
+        .iter()
+        .find(|event| event["type"] == "done")
+        .expect("the partial note is reported")["outcomes"]["proofreading"];
+    assert_eq!(proofreading["status"], "partial");
+    assert_eq!(proofreading["completed"], 44);
+    assert_eq!(proofreading["total"], 45);
+    assert_eq!(proofreading["kind"], "authentication");
+    let message = proofreading["message"].as_str().unwrap();
+    assert!(message.contains("1/45"), "{message}");
+    assert_eq!(std::fs::read(note.join("manifest.json")).unwrap(), before);
+    key_refused.store(false, Ordering::SeqCst);
 
     // Work of another task, neither the note's nor a repair of it, is refused.
     let mut other = original.clone();

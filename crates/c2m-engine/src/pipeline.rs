@@ -881,15 +881,24 @@ impl Task<'_> {
                 );
                 // The note's record, with each part retried now saying why it is
                 // still unfinished this time (a rejected key, a rate limit).
+                // Only the cause is this run's: the note's status and counts are
+                // what it holds, even when this run could not read back answers
+                // it had and finished none.
                 let mut reported = base.outcomes.clone();
                 for &component in &redone {
                     let now = part(&this_run, component);
-                    if now.status != Status::Succeeded && now.status != Status::NotRequested {
-                        match component {
-                            Component::Proofreading => reported.proofreading = now,
-                            Component::Translation => reported.translation = now,
-                            _ => reported.summary = now,
-                        }
+                    let note = match component {
+                        Component::Proofreading => &mut reported.proofreading,
+                        Component::Translation => &mut reported.translation,
+                        _ => &mut reported.summary,
+                    };
+                    if now.status != Status::Succeeded
+                        && now.status != Status::NotRequested
+                        && note.status != Status::Succeeded
+                    {
+                        note.kind = now.kind;
+                        note.first_failure = now.first_failure;
+                        note.message = retried_cause(note.message.as_deref(), now.message);
                     }
                 }
                 progress::emit(&progress::Event::Done(Box::new(progress::Done {
@@ -1614,6 +1623,27 @@ fn cached_transcript(cache_path: &Path) -> Result<Option<TranscriptCache>> {
 
 /// A batch report's message: nothing when every batch worked, else `base` and the
 /// first error.
+/// The record of a part a retry left unfinished: the note's own words for what
+/// is unfinished (its counts), with this run's first error, when it names one;
+/// this run's words otherwise.
+fn retried_cause(note: Option<&str>, now: Option<String>) -> Option<String> {
+    let separator = tr!("{}；首个错误：{}", "", "");
+    let first_error = now
+        .as_deref()
+        .and_then(|now| now.split_once(separator.as_str()))
+        .map(|(_, first)| first.to_owned());
+    match (note, first_error) {
+        (Some(note), Some(first)) => {
+            let head = note
+                .split_once(separator.as_str())
+                .map_or(note, |(head, _)| head);
+            Some(tr!("{}；首个错误：{}", head, first))
+        }
+        (note, None) => now.or(note.map(str::to_owned)),
+        (None, Some(_)) => now,
+    }
+}
+
 fn report_message(base: String, report: &crate::llm::PolishReport) -> Option<String> {
     (report.failed > 0).then(|| match &report.note {
         Some(note) => tr!("{}；首个错误：{}", base, note),
