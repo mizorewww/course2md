@@ -135,6 +135,9 @@ pub enum Phase {
 #[serde(rename_all = "snake_case")]
 pub enum Unit {
     Bytes,
+    /// AI requests answered or given up on, out of all the step sends: a
+    /// count of finished work, where older engines counted the requests sent.
+    Batches,
 }
 
 /// Why a task stopped at a safe boundary instead of sending the next request.
@@ -492,6 +495,14 @@ pub fn note_tokens(stage: Stage, prompt: u64, completion: u64) {
     });
 }
 
+/// How many requests `stage` runs at once (json mode).
+pub fn workers(stage: Stage, workers: usize) {
+    emit(&Event::Workers {
+        stage,
+        workers: workers.max(1),
+    });
+}
+
 /// 视频下载字节进度：yt-dlp 每次刷一行，这里限流后发给 GUI。
 pub fn download_progress(current: u64, total: u64) {
     static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
@@ -680,6 +691,17 @@ impl Bar {
         if is_json() {
             let cur = self.current.fetch_add(n, Ordering::Relaxed) + n;
             self.emit_progress(cur, false);
+        }
+    }
+
+    /// Like [`Self::inc`] but never throttled, for work that finishes in coarse
+    /// steps: answers read back from receipts land together, and a dropped step
+    /// would leave the count behind until the next one, minutes later.
+    pub fn advance(&self, n: u64) {
+        self.bar.inc(n);
+        if is_json() {
+            let cur = self.current.fetch_add(n, Ordering::Relaxed) + n;
+            self.emit_progress(cur, true);
         }
     }
 
