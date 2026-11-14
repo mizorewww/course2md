@@ -773,6 +773,7 @@ impl Ledger {
                     unsupported_response_format: old.unsupported_response_format,
                     refused_parameter: old.refused_parameter.clone(),
                     unusable: old.unusable,
+                    detail: old.detail.clone(),
                     ..Failure::with_status(
                         old.http_status,
                         false,
@@ -889,6 +890,7 @@ impl Ledger {
             return Err(Failure {
                 unsupported_response_format: unsupported,
                 refused_parameter: refused,
+                detail: detail.clone(),
                 retry_after: response.retry_after,
                 ..Failure::with_status(
                     Some(response.status),
@@ -913,6 +915,7 @@ impl Ledger {
             if !resend.asks() {
                 return Err(Failure {
                     retry_after: response.retry_after,
+                    detail: detail.clone(),
                     ..Failure::with_status(
                         Some(response.status),
                         true,

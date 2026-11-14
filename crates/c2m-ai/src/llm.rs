@@ -146,6 +146,12 @@ const MAX_ATTEMPTS: u32 = 3;
 /// The most sends `retry_attempts` may ask for.
 const MAX_RETRY_ATTEMPTS: u32 = 8;
 
+/// The first wait after a failure the service did not call busy.
+const RETRY_BASE: Duration = if cfg!(test) {
+    Duration::from_millis(5)
+} else {
+    Duration::from_secs(1)
+};
 /// The first wait after a service said it is busy (429, 5xx). A rate limit
 /// usually clears within a minute, which waits of 1 s, 2 s and 4 s used up in seconds.
 const BUSY_BASE: Duration = if cfg!(test) {
@@ -166,7 +172,7 @@ fn retry_policy(s: &LlmSettings) -> crate::pool::RetryPolicy {
     if s.auto_retry {
         crate::pool::RetryPolicy {
             max_attempts: s.retry_attempts.clamp(1, MAX_RETRY_ATTEMPTS),
-            base: Duration::from_secs(1),
+            base: RETRY_BASE,
             cap: Duration::from_secs(60),
             follows_service: true,
             busy_base: BUSY_BASE,
@@ -293,6 +299,9 @@ pub struct PolishReport {
     /// What kind of failure [`Self::note`] is, when the service classified it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<c2m_core::outcome::FailureKind>,
+    /// Where the first unfinished part is and what the service said about it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_failure: Option<c2m_core::outcome::FirstFailure>,
 }
 
 /// A transcript batch: at most [`BATCH`] events and [`BATCH_CHARS`] characters, and
@@ -334,6 +343,9 @@ struct Batches<'s, B, A> {
     /// settings work, so a batch it refused or answered unusably is about its
     /// own text, and smaller parts of it are worth asking.
     answered: std::sync::atomic::AtomicBool,
+    /// The requests this step may still spend asking for parts of batches on
+    /// their own ([`Self::isolate`]).
+    isolation_budget: std::sync::atomic::AtomicUsize,
 }
 
 /// The part of a batch that stayed unfinished, and why.
@@ -344,10 +356,42 @@ struct Unfinished {
 }
 
 impl Unfinished {
-    /// "00:12:30–00:13:10：cause", for the note's record of what failed.
+    /// "00:12:30–00:13:10：cause", for the note's record of what failed. A part
+    /// the service refused as it is says so with the service's own words, not
+    /// as the generic refusal that names the model and settings.
     fn note(&self) -> String {
-        tr!("{}：{}", self.range, format!("{:#}", self.error))
+        let cause = match self.failure().filter(|failure| refused(failure)) {
+            Some(failure) => match &failure.detail {
+                Some(detail) => tr!("服务拒绝处理这部分内容：{}", detail),
+                None => tr!("服务拒绝处理这部分内容").to_owned(),
+            },
+            None => format!("{:#}", self.error),
+        };
+        tr!("{}：{}", self.range, cause)
     }
+
+    fn failure(&self) -> Option<&crate::dispatch::Failure> {
+        self.error.downcast_ref::<crate::dispatch::Failure>()
+    }
+
+    /// What the step's outcome records of it.
+    fn first_failure(&self) -> c2m_core::outcome::FirstFailure {
+        let failure = self.failure();
+        c2m_core::outcome::FirstFailure {
+            range: self.range.clone(),
+            detail: failure.and_then(|failure| failure.detail.clone()),
+            refused: failure.is_some_and(refused),
+        }
+    }
+}
+
+/// A refusal of the request as it is: HTTP 400/422 that names no parameter to
+/// leave out, which a service gives for content it will not process or a
+/// request too large.
+fn refused(failure: &crate::dispatch::Failure) -> bool {
+    matches!(failure.status, Some(400 | 422))
+        && failure.refused_parameter.is_none()
+        && !failure.unsupported_response_format
 }
 
 impl<B, A> Batches<'_, B, A>
@@ -362,15 +406,16 @@ where
     /// budget) is asked once more with the full budget, then split in two, at most
     /// [`MAX_SPLITS`] times: the same request would only stop at the same place.
     /// A batch the service refused for its content, or kept answering unusably
-    /// after every retry, is split in two the same way, so only the paragraph it
-    /// is about stays unfinished ([`Self::isolates`]). Returns the events
-    /// finished, and why the others were not.
+    /// after every retry, is asked for in parts ([`Self::isolate`]), unless it is
+    /// itself such a `part`, which is sent once and left to its caller. Returns
+    /// the events finished, and why the others were not.
     fn send(
         &self,
         image: Option<&str>,
         events: &mut [&mut TranscriptEvent],
         splits: u32,
         full_budget: bool,
+        part: bool,
     ) -> (usize, Option<Unfinished>) {
         let (Some(first), Some(last)) = (events.first(), events.last()) else {
             return (0, None);
@@ -402,21 +447,13 @@ where
         };
         let items: Vec<&str> = events.iter().map(|e| e.text.as_str()).collect();
         let budget = (!full_budget).then(|| batch_max_tokens(&items));
-        let answer = (self.body_for)(&items, image)
-            .and_then(|body| self.chat.segments(&body, &description, &items, budget));
+        let answer = (self.body_for)(&items, image).and_then(|body| {
+            self.chat
+                .segments(&body, &description, &items, budget, part)
+        });
         let answer = match answer {
             Ok(answer) => answer,
-            Err(error) if events.len() > 1 && self.isolates(&error, splits) => {
-                tracing::info!(
-                    items = events.len(),
-                    "AI 服务没有完成这一批，分成两半再试 / The service did not finish this batch; asking for each half: {error:#}"
-                );
-                let middle = events.len() / 2;
-                let (left, right) = events.split_at_mut(middle);
-                let (left_done, left_error) = self.send(image, left, splits + 1, false);
-                let (right_done, right_error) = self.send(image, right, splits + 1, false);
-                return (left_done + right_done, left_error.or(right_error));
-            }
+            Err(error) if !part => return self.isolate(image, events, splits, unfinished(error)),
             Err(error) => return (0, Some(unfinished(error))),
         };
         if !answer.segments.is_empty() {
@@ -446,33 +483,84 @@ where
             return (done, None);
         }
         if done > 0 {
-            let (more, error) = self.send(image, &mut rest, splits, false);
+            let (more, error) = self.send(image, &mut rest, splits, false, part);
             return (done + more, error);
         }
         // Codex takes no output limit from here: its full budget is the same request.
         let budgeted = self.chat.settings.provider != LlmProvider::Codex;
         match after_empty_answer(rest.len(), splits, full_budget, budgeted) {
-            EmptyAnswer::FullBudget => self.send(image, &mut rest, splits, true),
+            EmptyAnswer::FullBudget => self.send(image, &mut rest, splits, true, part),
             EmptyAnswer::GiveUp => (0, Some(unfinished(anyhow::anyhow!(output_limit_message())))),
             EmptyAnswer::Halve => {
                 let middle = rest.len() / 2;
                 let (left, right) = rest.split_at_mut(middle);
                 // The full budget did not do for the whole; the halves start with it.
-                let (left_done, left_error) = self.send(image, left, splits + 1, budgeted);
-                let (right_done, right_error) = self.send(image, right, splits + 1, budgeted);
+                let (left_done, left_error) = self.send(image, left, splits + 1, budgeted, part);
+                let (right_done, right_error) = self.send(image, right, splits + 1, budgeted, part);
                 (left_done + right_done, left_error.or(right_error))
             }
         }
     }
 
-    /// Whether a batch that ended in `error` is asked again in two halves: only
-    /// once another request of this step was answered, so the service and its
-    /// settings work. A refusal of the request as it is (HTTP 400/422 not about a
-    /// parameter, which a service gives for content it will not process or a
-    /// request too large) is split down to single paragraphs; an answer that
-    /// stayed unusable after every retry, which costs a request each time,
-    /// [`MAX_SPLITS`] times. A refused key, model or address, a rate limit, a lost
-    /// answer and a stop are not about the batch's text and are never split.
+    /// Asks for the two halves of a batch that ended unfinished, each once, and
+    /// again for the half of a half that still failed, so that only the
+    /// paragraph a refusal or an unusable answer is about stays unfinished.
+    ///
+    /// Only once another request of this step was answered, so the service and
+    /// its settings work, and within the step's budget of such requests. A
+    /// refusal is followed down to one paragraph; an answer unusable after every
+    /// retry, which costs a request each time, [`MAX_SPLITS`] times. When both
+    /// halves are refused, the refusal is about the request as a whole (its
+    /// image, its size) and halving stops. A refused key, model or address, a
+    /// rate limit, a lost answer and a stop are not about the batch's text and
+    /// are never split.
+    fn isolate(
+        &self,
+        image: Option<&str>,
+        events: &mut [&mut TranscriptEvent],
+        splits: u32,
+        unfinished: Unfinished,
+    ) -> (usize, Option<Unfinished>) {
+        if events.len() < 2 || !self.isolates(&unfinished.error, splits) || !self.spend(2) {
+            return (0, Some(unfinished));
+        }
+        tracing::info!(
+            items = events.len(),
+            "AI 服务没有完成这一批，分成两半再试 / The service did not finish this batch; asking for each half: {:#}",
+            unfinished.error
+        );
+        let middle = events.len() / 2;
+        let (left, right) = events.split_at_mut(middle);
+        let (left_done, left_failed) = self.send(image, left, splits + 1, false, true);
+        let (right_done, right_failed) = self.send(image, right, splits + 1, false, true);
+        let whole_refused = left_done + right_done == 0
+            && [&left_failed, &right_failed].iter().all(|failed| {
+                failed
+                    .as_ref()
+                    .and_then(Unfinished::failure)
+                    .is_some_and(refused)
+            });
+        if whole_refused {
+            return (0, left_failed);
+        }
+        let mut done = left_done + right_done;
+        let mut first = None;
+        for (half, half_done, failed) in [
+            (left, left_done, left_failed),
+            (right, right_done, right_failed),
+        ] {
+            let Some(failed) = failed else { continue };
+            let (more, still) = if half_done == 0 {
+                self.isolate(image, half, splits + 1, failed)
+            } else {
+                (0, Some(failed))
+            };
+            done += more;
+            first = first.or(still);
+        }
+        (done, first)
+    }
+
     fn isolates(&self, error: &anyhow::Error, splits: u32) -> bool {
         if !self.answered.load(std::sync::atomic::Ordering::Relaxed) {
             return false;
@@ -480,11 +568,38 @@ where
         let Some(failure) = error.downcast_ref::<crate::dispatch::Failure>() else {
             return false;
         };
-        let refused = matches!(failure.status, Some(400 | 422))
-            && failure.refused_parameter.is_none()
-            && !failure.unsupported_response_format;
-        (refused && splits < MAX_ISOLATING_SPLITS) || (failure.unusable && splits < MAX_SPLITS)
+        (refused(failure) && splits < MAX_ISOLATING_SPLITS)
+            || (failure.unusable && splits < MAX_SPLITS)
     }
+
+    /// Takes `requests` from the step's budget for asking for parts, if it has them.
+    fn spend(&self, requests: usize) -> bool {
+        self.isolation_budget
+            .fetch_update(
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+                |left| left.checked_sub(requests),
+            )
+            .is_ok()
+    }
+}
+
+thread_local! {
+    /// Whether the work on this thread got an answer from the service, rather
+    /// than reading every answer back from its receipt.
+    static SENT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `work` (one batch, on one worker thread) and says whether it took the
+/// time of real requests: an answer came from the service, or it ran for a
+/// second or more (a request that failed was still sent and waited for). A
+/// batch read back from its receipts takes no time, and is not speed.
+pub(crate) fn answered_now<T>(work: impl FnOnce() -> T) -> (T, bool) {
+    SENT.with(|sent| sent.set(false));
+    let started = std::time::Instant::now();
+    let result = work();
+    let sent = SENT.with(std::cell::Cell::get) || started.elapsed() >= Duration::from_secs(1);
+    (result, sent)
 }
 
 /// How many times a batch the service refused is halved: down to one paragraph
@@ -558,9 +673,29 @@ fn run_batches(
         apply,
         warned: std::sync::atomic::AtomicBool::new(false),
         answered: std::sync::atomic::AtomicBool::new(false),
+        isolation_budget: std::sync::atomic::AtomicUsize::new(
+            (2 * chunks.len()).max(MIN_ISOLATION_BUDGET),
+        ),
     };
     let total = chunks.len();
-    let counts = crate::pool::map_pool(
+    // Why a batch stayed unfinished, as the step's record keeps it.
+    let record = |unfinished: &Unfinished| {
+        let cause = unfinished.note();
+        warn_once(
+            &batches.warned,
+            &if purpose == Purpose::Proofreading {
+                tr!("校对未完成，已保留原文：{}", cause)
+            } else {
+                tr!("翻译未完成：{}", cause)
+            },
+        );
+        Cause {
+            note: brief(&cause),
+            kind: unfinished.failure().map(|failure| failure.kind),
+            first: unfinished.first_failure(),
+        }
+    };
+    let mut results = crate::pool::map_pool(
         chunks,
         workers,
         control,
@@ -568,41 +703,95 @@ fn run_batches(
             let image = image_path
                 .as_deref()
                 .and_then(|path| section_image_b64(path, &batches.warned));
-            let (done, unfinished) = batches.send(image.as_deref(), &mut chunk, 0, false);
-            pb.advance(1);
-            let cause = unfinished.map(|unfinished| {
-                let cause = unfinished.note();
-                warn_once(
-                    &batches.warned,
-                    &if purpose == Purpose::Proofreading {
-                        tr!("校对未完成，已保留原文：{}", cause)
-                    } else {
-                        tr!("翻译未完成：{}", cause)
-                    },
-                );
-                let kind = unfinished
-                    .error
-                    .downcast_ref::<crate::dispatch::Failure>()
-                    .map(|failure| failure.kind);
-                (brief(&cause), kind)
-            });
-            Ok((done, done < chunk.len(), cause))
+            let ((done, unfinished), sent) =
+                answered_now(|| batches.send(image.as_deref(), &mut chunk, 0, false, false));
+            if sent {
+                pb.advance(1);
+            } else {
+                pb.advance_replayed(1);
+            }
+            // A batch that met only a passing failure (a busy service, a lost
+            // answer) gets one more try once the others are done.
+            let again = s.auto_retry
+                && done == 0
+                && unfinished
+                    .as_ref()
+                    .and_then(Unfinished::failure)
+                    .is_some_and(|failure| failure.retryable && !refused(failure));
+            Ok(BatchResult {
+                done,
+                size: chunk.len(),
+                cause: unfinished.as_ref().map(record),
+                again: again.then_some((image, chunk)),
+            })
         },
     )?;
+    let second: Vec<_> = results
+        .iter_mut()
+        .enumerate()
+        .filter_map(|(index, result)| Some((index, result.again.take()?)))
+        .collect();
+    if !second.is_empty() {
+        tracing::info!(
+            batches = second.len(),
+            "部分批次稍后再试一次 / Trying the batches that met a passing failure once more"
+        );
+        crate::pool::interruptible_sleep(control, SECOND_PASS_PAUSE)?;
+        let retried =
+            crate::pool::map_pool(second, workers, control, |(index, (image, mut chunk))| {
+                let (done, unfinished) = batches.send(image.as_deref(), &mut chunk, 0, false, true);
+                Ok((index, done, unfinished.as_ref().map(record)))
+            })?;
+        for (index, done, cause) in retried {
+            results[index].done = done;
+            results[index].cause = cause;
+        }
+    }
     pb.finish();
-    let succeeded = counts.iter().map(|(done, ..)| done).sum();
+    let succeeded = results.iter().map(|result| result.done).sum();
     // The first unfinished part in the video, whichever finished first.
-    let first = counts.iter().find_map(|(.., cause)| cause.clone());
+    let first = results.iter().find_map(|result| result.cause.clone());
     Ok(PolishReport {
         attempted,
         succeeded,
         failed: attempted.saturating_sub(succeeded),
-        kind: first.as_ref().and_then(|(_, kind)| *kind),
-        note: first.map(|(note, _)| note),
+        kind: first.as_ref().and_then(|cause| cause.kind),
+        first_failure: first.as_ref().map(|cause| cause.first.clone()),
+        note: first.map(|cause| cause.note),
         batches: total,
-        failed_batches: counts.iter().filter(|(_, failed, _)| *failed).count(),
+        failed_batches: results
+            .iter()
+            .filter(|result| result.done < result.size)
+            .count(),
     })
 }
+
+/// What one batch of a step came to.
+struct BatchResult<'a> {
+    done: usize,
+    size: usize,
+    cause: Option<Cause>,
+    /// The batch, to try once more after the others.
+    again: Option<(Option<String>, Vec<&'a mut TranscriptEvent>)>,
+}
+
+/// Why a batch stayed unfinished, as the step records it.
+#[derive(Clone)]
+struct Cause {
+    note: String,
+    kind: Option<c2m_core::outcome::FailureKind>,
+    first: c2m_core::outcome::FirstFailure,
+}
+
+/// The least a step may spend asking for parts of batches on their own.
+const MIN_ISOLATION_BUDGET: usize = 16;
+
+/// The wait before the batches that met a passing failure are tried once more.
+const SECOND_PASS_PAUSE: Duration = if cfg!(test) {
+    Duration::from_millis(10)
+} else {
+    Duration::from_secs(10)
+};
 
 /// 对已合并的 Section 做校对（在 merge 之后调用；配置已由调用方校验）。
 /// - 失败批次保留原文（校对失败不阻断转换），不拆分、不改发另一种请求
@@ -980,15 +1169,12 @@ pub(crate) fn restore_latex(text: &str) -> String {
     out
 }
 
-/// One `{"id":…,"text":…}` item. A `null` text is an empty one: what a model
-/// writes for a filler paragraph it was told to return empty.
+/// One `{"id":…,"text":…}` item. Only a string is a text: a `null` one is not
+/// an answer for that paragraph (it is asked again), and only an explicit ""
+/// removes a filler paragraph.
 fn segment(item: &serde_json::Value) -> Option<(usize, String)> {
     let id = item.get("id")?.as_u64()? as usize;
-    let text = match item.get("text")? {
-        serde_json::Value::Null => "",
-        text => text.as_str()?,
-    };
-    Some((id, restore_latex(text)))
+    Some((id, restore_latex(item.get("text")?.as_str()?)))
 }
 
 fn parse_items(items: &[serde_json::Value]) -> Option<Vec<(usize, String)>> {
@@ -1140,6 +1326,26 @@ impl<'a> Chat<'a> {
         full_budget: bool,
         validate: &dyn Fn(&str, bool) -> Result<()>,
     ) -> Result<Answer> {
+        self.send_with(
+            &self.policy,
+            body,
+            description,
+            delivery,
+            full_budget,
+            validate,
+        )
+    }
+
+    /// [`Self::send`], retried by `policy`.
+    fn send_with(
+        &self,
+        policy: &crate::pool::RetryPolicy,
+        body: &serde_json::Value,
+        description: &str,
+        delivery: crate::provider::Delivery,
+        full_budget: bool,
+        validate: &dyn Fn(&str, bool) -> Result<()>,
+    ) -> Result<Answer> {
         let s = self.settings;
         let mut body = body.clone();
         let mut delivery = delivery;
@@ -1147,7 +1353,7 @@ impl<'a> Chat<'a> {
         let reply = loop {
             let identity = identity_for(&body, delivery, reasoning_kept, full_budget);
             let sent = crate::provider::sent_body(s, &body, delivery);
-            let error = match crate::pool::retry_with(self.control, &self.policy, || {
+            let error = match crate::pool::retry_with(self.control, policy, || {
                 self.once(&identity, &sent, description, validate)
             }) {
                 Ok(reply) => break reply,
@@ -1180,6 +1386,9 @@ impl<'a> Chat<'a> {
                 return Err(error);
             }
         };
+        if !reply.replayed {
+            SENT.with(|sent| sent.set(true));
+        }
         let resp = reply.value;
         // token 用量实时反馈：GUI 阶段行据此跳动（上传=prompt，下载=completion）。
         // 各方言的流已在 provider 归一成 chat/completions 同一形状。
@@ -1306,8 +1515,19 @@ impl<'a> Chat<'a> {
         description: &str,
         items: &[&str],
         max_tokens: Option<u32>,
+        single_attempt: bool,
     ) -> Result<Segments> {
         let expected = items.len();
+        // A part of a batch asked on its own is sent once: the batch it came from
+        // already had its retries. A request refused only for now still waits.
+        let policy = crate::pool::RetryPolicy {
+            max_attempts: if single_attempt {
+                1
+            } else {
+                self.policy.max_attempts
+            },
+            ..self.policy
+        };
         let proofreading = self.purpose == Purpose::Proofreading;
         let parsed = |content: &str| {
             parse_segments(content).context(if proofreading {
@@ -1330,7 +1550,8 @@ impl<'a> Chat<'a> {
             no_reasoning: true,
             ..Default::default()
         };
-        let answer = self.send(
+        let answer = self.send_with(
+            &policy,
             body,
             description,
             delivery,
@@ -1392,17 +1613,19 @@ struct Reconciled {
 }
 
 /// How an answer that was not cut off lines up with the `items` asked, or None
-/// when it cannot be trusted at all.
+/// when nothing in it can be trusted.
 ///
 /// One entry per id is complete. An answer numbered from 1 instead of 0, every id
 /// once, is the same answer. One that left some ids out (a model that drops a
 /// filler paragraph instead of returning it empty, or merges two paragraphs into
-/// one) keeps the paragraphs that are certainly their own, and the rest is asked
-/// again: an id given twice counts as left out, and a neighbor of a missing id is
-/// asked again unless it is a proofreading answer no longer than its own text
-/// and half the missing one, since a merge puts the missing text into a
-/// neighbor. An id past the batch means the numbering is off, and nothing can be
-/// matched to its paragraph.
+/// one) may also have numbered the rest anew, so that an id carries the next
+/// paragraph's text: an id is no evidence there. A proofreading keeps only the
+/// paragraphs whose text is clearly their own — more like their own original
+/// than like either neighbor's, and, beside a missing one, no longer than their
+/// own and half of it, where a merge would have put its text — and the rest is
+/// asked again. A translation cannot be told apart from its original that way,
+/// and keeps nothing: the batch is asked again as it was. An id given twice
+/// counts as left out; an id past the batch means the numbering is off.
 fn reconcile(answer: Vec<(usize, String)>, items: &[&str], purpose: Purpose) -> Option<Reconciled> {
     let expected = items.len();
     if segment_ids_match(&answer, expected) {
@@ -1421,7 +1644,7 @@ fn reconcile(answer: Vec<(usize, String)>, items: &[&str], purpose: Purpose) -> 
             complete: true,
         });
     }
-    if answer.iter().any(|(id, _)| *id >= expected) {
+    if purpose != Purpose::Proofreading || answer.iter().any(|(id, _)| *id >= expected) {
         return None;
     }
     let mut count = vec![0usize; expected];
@@ -1431,14 +1654,27 @@ fn reconcile(answer: Vec<(usize, String)>, items: &[&str], purpose: Purpose) -> 
     let missing = |id: usize| count.get(id).is_some_and(|n| *n != 1);
     let length = |id: usize| items.get(id).map_or(0, |text| text.chars().count());
     let own = |id: usize, text: &str| {
-        let gap: usize = [id.checked_sub(1), Some(id + 1)]
+        let neighbors = [id.checked_sub(1), Some(id + 1)]
             .into_iter()
             .flatten()
-            .filter(|&neighbor| neighbor < expected && missing(neighbor))
+            .filter(|&neighbor| neighbor < expected);
+        let gap: usize = neighbors
+            .clone()
+            .filter(|&neighbor| missing(neighbor))
             .map(length)
             .sum();
-        gap == 0
-            || (purpose == Purpose::Proofreading && text.chars().count() <= length(id) + gap / 2)
+        // A paragraph returned empty is removed as filler; only a short one can
+        // be, whatever the numbering.
+        if text.trim().is_empty() {
+            return length(id) <= FILLER_CHARS;
+        }
+        let likeness = resemblance(text, items[id]);
+        // Room for the punctuation a proofreading adds, not for half the
+        // missing paragraph.
+        (gap == 0 || text.chars().count() <= length(id) + (gap / 2).max(3))
+            && neighbors
+                .into_iter()
+                .all(|neighbor| likeness > resemblance(text, items[neighbor]))
     };
     let segments: Vec<(usize, String)> = answer
         .into_iter()
@@ -1450,6 +1686,39 @@ fn reconcile(answer: Vec<(usize, String)>, items: &[&str], purpose: Purpose) -> 
     })
 }
 
+/// The longest paragraph an answer that left others out may remove as filler.
+const FILLER_CHARS: usize = 8;
+
+/// How alike two texts are, from 0 to 1: the share of their pairs of adjacent
+/// characters they have in common (single characters for a text of one). A
+/// proofread paragraph stays far more like its own original than like another.
+fn resemblance(a: &str, b: &str) -> f64 {
+    fn pieces(text: &str) -> std::collections::HashMap<String, usize> {
+        let chars: Vec<char> = text.chars().filter(|c| !c.is_whitespace()).collect();
+        let mut out = std::collections::HashMap::new();
+        if chars.len() < 2 {
+            for c in &chars {
+                *out.entry(c.to_string()).or_insert(0) += 1;
+            }
+        } else {
+            for pair in chars.windows(2) {
+                *out.entry(pair.iter().collect::<String>()).or_insert(0) += 1;
+            }
+        }
+        out
+    }
+    let (a, b) = (pieces(a), pieces(b));
+    let size = |p: &std::collections::HashMap<String, usize>| p.values().sum::<usize>();
+    let total = size(&a) + size(&b);
+    if total == 0 {
+        return 0.;
+    }
+    let shared: usize = a
+        .iter()
+        .map(|(piece, n)| (*n).min(b.get(piece).copied().unwrap_or(0)))
+        .sum();
+    2. * shared as f64 / total as f64
+}
 fn output_limit_message() -> &'static str {
     tr!("这一段的结果超出了输出上限 / The answer for this paragraph exceeds the output limit")
 }
@@ -2306,7 +2575,8 @@ mod tests {
         assert_eq!((report.batches, report.failed_batches), (3, 1));
         assert_eq!((report.succeeded, report.failed), (40, 20));
         assert_eq!(texts(&sections)[25], "坏", "a failed batch keeps its text");
-        assert_eq!(bodies.lock().unwrap().len(), 3);
+        // The failed batch had one more try once the others were done.
+        assert_eq!(bodies.lock().unwrap().len(), 4);
 
         // The service recovers; the same step again sends the failed batch alone.
         failing.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -2317,10 +2587,10 @@ mod tests {
         let bodies = bodies.lock().unwrap();
         assert_eq!(
             bodies.len(),
-            4,
+            5,
             "finished batches come back from their receipts"
         );
-        assert!(bodies[3].to_string().contains("坏"));
+        assert!(bodies[4].to_string().contains("坏"));
         assert!(texts(&sections).iter().all(|text| text.ends_with('!')));
     }
 
@@ -2793,17 +3063,28 @@ mod tests {
 
     #[test]
     fn an_answer_that_leaves_paragraphs_out_keeps_the_rest_and_asks_for_those() {
-        let items = ["一二三四五", "啊", "七八九十", "甲乙丙丁", "戊己庚辛"];
+        let items = [
+            "今天我们讲编译原理的基本概念",
+            "啊",
+            "词法分析把字符流变成记号流",
+            "语法分析根据文法构造语法树",
+            "语义分析检查类型和作用域规则",
+        ];
         let answer = |pairs: &[(usize, &str)]| -> Vec<(usize, String)> {
             pairs.iter().map(|(id, t)| (*id, (*t).to_owned())).collect()
         };
-        // A filler paragraph left out: its neighbors kept their own length.
+        let ids = |reconciled: Option<Reconciled>| -> Vec<usize> {
+            reconciled
+                .map(|r| r.segments.iter().map(|(id, _)| *id).collect())
+                .unwrap_or_default()
+        };
+        // A filler paragraph left out: the rest is clearly its own.
         let dropped = reconcile(
             answer(&[
-                (0, "一二三四五"),
-                (2, "七八九十"),
-                (3, "甲乙丙丁"),
-                (4, "戊己庚辛"),
+                (0, "今天我们讲编译原理的基本概念。"),
+                (2, "词法分析把字符流变成记号流。"),
+                (3, "语法分析根据文法构造语法树。"),
+                (4, "语义分析检查类型和作用域规则。"),
             ]),
             &items,
             Purpose::Proofreading,
@@ -2812,41 +3093,60 @@ mod tests {
         assert!(!dropped.complete);
         assert_eq!(dropped.segments.len(), 4);
         // Two paragraphs merged into one: the merged one is asked again with the
-        // one it swallowed; the other neighbor kept its own length.
-        let merged = reconcile(
+        // one it swallowed.
+        let merged = ids(reconcile(
             answer(&[
-                (0, "一二三四五"),
-                (1, "啊"),
-                (2, "七八九十甲乙丙丁"),
-                (4, "戊己庚辛"),
+                (0, "今天我们讲编译原理的基本概念。"),
+                (1, ""),
+                (
+                    2,
+                    "词法分析把字符流变成记号流，语法分析根据文法构造语法树。",
+                ),
+                (4, "语义分析检查类型和作用域规则。"),
             ]),
             &items,
             Purpose::Proofreading,
-        )
-        .unwrap();
-        assert_eq!(
-            merged
-                .segments
-                .iter()
-                .map(|(id, _)| *id)
-                .collect::<Vec<_>>(),
-            [0, 1, 4]
-        );
-        // A translation's length says nothing: neighbors of a gap are asked again.
+        ));
+        assert_eq!(merged, [0, 1, 4]);
+        // Paragraph 2 left out and the rest numbered anew: each id carries the
+        // next paragraph's text. Only what is clearly its own is kept.
+        let renumbered = ids(reconcile(
+            answer(&[
+                (0, "今天我们讲编译原理的基本概念。"),
+                (1, ""),
+                (2, "语法分析根据文法构造语法树。"),
+                (3, "语义分析检查类型和作用域规则。"),
+            ]),
+            &items,
+            Purpose::Proofreading,
+        ));
+        assert_eq!(renumbered, [0, 1]);
+        // A merge that kept its length within the limit is still not its own:
+        // it is as much like the paragraph it swallowed.
+        let swallowed = ids(reconcile(
+            answer(&[
+                (0, "今天我们讲编译原理的基本概念。"),
+                (1, ""),
+                (2, "词法分析把字符流变成记号流"),
+                (3, "语法分析构造语法树，语义分析检查类型和作用域"),
+            ]),
+            &items,
+            Purpose::Proofreading,
+        ));
+        assert_eq!(swallowed, [0, 1, 2]);
+        // A translation cannot be matched to its original: nothing is kept, and
+        // the batch is asked again as it was.
         let translated = reconcile(
-            answer(&[(0, "a"), (2, "b"), (3, "c"), (4, "d")]),
+            answer(&[
+                (0, "Today: compilers."),
+                (1, "Lexing makes tokens."),
+                (2, "Parsing builds a tree."),
+                (3, "Semantics checks types."),
+            ]),
             &items,
             Purpose::Translation,
-        )
-        .unwrap();
-        assert_eq!(
-            translated
-                .segments
-                .iter()
-                .map(|(id, _)| *id)
-                .collect::<Vec<_>>(),
-            [3, 4]
         );
+        assert!(translated.is_none());
         // Numbered from one: the same complete answer.
         let shifted = reconcile(
             answer(&[(1, "a"), (2, "b"), (3, "c"), (4, "d"), (5, "e")]),
@@ -2858,28 +3158,25 @@ mod tests {
         assert_eq!(shifted.segments[0], (0, "a".to_owned()));
         // An id past the batch: nothing can be matched.
         assert!(reconcile(answer(&[(0, "a"), (7, "b")]), &items, Purpose::Proofreading).is_none());
-        // An id given twice is left out with its neighbors.
-        let twice = reconcile(
+        // An id given twice counts as left out.
+        let twice = ids(reconcile(
             answer(&[
-                (0, "a"),
-                (0, "b"),
-                (1, "啊"),
-                (2, "七八九十"),
-                (3, "甲乙丙丁"),
-                (4, "戊"),
+                (0, "今天我们讲编译原理的基本概念。"),
+                (0, "今天我们讲编译原理。"),
+                (1, ""),
+                (2, "词法分析把字符流变成记号流。"),
+                (3, "语法分析根据文法构造语法树。"),
+                (4, "语义分析检查类型和作用域规则。"),
             ]),
             &items,
-            Purpose::Translation,
-        )
-        .unwrap();
+            Purpose::Proofreading,
+        ));
+        assert_eq!(twice, [1, 2, 3, 4]);
+        // A `null` text is no answer for its paragraph: it is asked again, and
+        // only an explicit "" removes a filler paragraph.
         assert_eq!(
-            twice.segments.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
-            [2, 3, 4]
-        );
-        // A `null` text is an empty one: a filler paragraph removed.
-        assert_eq!(
-            parse_segments(r#"{"segments":[{"id":0,"text":null}]}"#),
-            Some(vec![(0, String::new())])
+            parse_segments(r#"{"segments":[{"id":0,"text":"a"},{"id":1,"text":null}]}"#),
+            Some(vec![(0, "a".to_owned())])
         );
     }
 
@@ -3023,5 +3320,196 @@ mod tests {
         .unwrap();
         assert_eq!(report.succeeded, 1);
         assert_eq!(bodies.lock().unwrap().len(), 4);
+    }
+
+    /// With every retry allowed, a batch whose answers stay unusable costs its
+    /// retries once; its parts are asked once each, not with retries of their own.
+    #[test]
+    fn asking_for_parts_of_an_unusable_batch_costs_one_request_each() {
+        let (url, bodies) = scripted_service(|_, items| {
+            if items.iter().any(|text| text == "坏") {
+                streamed("抱歉，我无法处理。", "stop")
+            } else {
+                streamed(&proofread(items), "stop")
+            }
+        });
+        let mut texts_in: Vec<String> = (0..40).map(|i| format!("段{i}")).collect();
+        texts_in[25] = "坏".into();
+        let mut sections = timed_section(&texts_in);
+        let report = polish_sections_report(
+            &mut sections,
+            Path::new(""),
+            &polish_settings(url, MAX_RETRY_ATTEMPTS),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!((report.succeeded, report.failed), (35, 5));
+        // The first batch; the second with all its retries; two halves, then
+        // two quarters, once each.
+        let sent = bodies.lock().unwrap().len();
+        assert_eq!(
+            sent,
+            1 + MAX_RETRY_ATTEMPTS as usize + 2 + 2,
+            "{sent} requests"
+        );
+    }
+
+    /// A refusal of both halves is about the request as a whole (its image, its
+    /// size), not a paragraph: halving stops there.
+    #[test]
+    fn a_batch_refused_whole_is_not_split_further() {
+        let (url, bodies) = scripted_service(|_, items| {
+            if items.iter().any(|text| text.starts_with('图')) {
+                status(400)
+            } else {
+                streamed(&proofread(items), "stop")
+            }
+        });
+        let texts_in: Vec<String> = (0..40)
+            .map(|i| {
+                if i < 20 {
+                    format!("段{i}")
+                } else {
+                    format!("图{i}")
+                }
+            })
+            .collect();
+        let mut sections = timed_section(&texts_in);
+        let report = polish_sections_report(
+            &mut sections,
+            Path::new(""),
+            &polish_settings(url, 4),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!((report.succeeded, report.failed), (20, 20));
+        // The good batch, the refused one and its two halves.
+        assert_eq!(bodies.lock().unwrap().len(), 4);
+    }
+
+    /// An answer that left a paragraph out and numbered the rest anew is not
+    /// read by its ids: the paragraphs after the gap are asked again, and no
+    /// paragraph ends up with another's text.
+    #[test]
+    fn a_renumbered_answer_does_not_move_text_between_paragraphs() {
+        let paragraphs = [
+            "今天我们讲编译原理的基本概念",
+            "这一段被模型漏掉了",
+            "词法分析把字符流变成记号流",
+            "语法分析根据文法构造语法树",
+            "语义分析检查类型和作用域规则",
+        ];
+        let (url, bodies) = scripted_service(|_, items| {
+            // Leaves out the second paragraph and numbers the rest from where it was.
+            let kept: Vec<_> = items
+                .iter()
+                .filter(|text| !text.contains("漏掉"))
+                .enumerate()
+                .map(|(id, text)| serde_json::json!({"id": id, "text": format!("{text}。")}))
+                .collect();
+            if kept.len() == items.len() {
+                streamed(&proofread(items), "stop")
+            } else if kept.is_empty() {
+                streamed(
+                    r#"{"segments":[{"id":0,"text":"这一段被模型漏掉了。"}]}"#,
+                    "stop",
+                )
+            } else {
+                streamed(&serde_json::json!({ "segments": kept }).to_string(), "stop")
+            }
+        });
+        let mut sections = one_section(&paragraphs);
+        let report = polish_sections_report(
+            &mut sections,
+            Path::new(""),
+            &polish_settings(url, 1),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(report.failed, 0);
+        let out = texts(&sections);
+        for (text, original) in out.iter().zip(paragraphs) {
+            assert!(text.starts_with(original), "{out:?}");
+        }
+        assert!(bodies.lock().unwrap().len() <= 6);
+    }
+
+    /// A translation that left a paragraph out is asked again whole: nothing in
+    /// it can be matched to its original.
+    #[test]
+    fn a_translation_that_left_a_paragraph_out_is_asked_again() {
+        let (url, bodies) = scripted_service(|index, items| {
+            if index == 0 {
+                let kept: Vec<_> = items
+                    .iter()
+                    .skip(1)
+                    .enumerate()
+                    .map(|(id, text)| serde_json::json!({"id": id, "text": format!("EN {text}")}))
+                    .collect();
+                streamed(&serde_json::json!({ "segments": kept }).to_string(), "stop")
+            } else {
+                let all: Vec<_> = items
+                    .iter()
+                    .enumerate()
+                    .map(|(id, text)| serde_json::json!({"id": id, "text": format!("EN {text}")}))
+                    .collect();
+                streamed(&serde_json::json!({ "segments": all }).to_string(), "stop")
+            }
+        });
+        let mut sections = one_section(&["一", "二", "三"]);
+        let report = translate_sections_report(
+            &mut sections,
+            &polish_settings(url, 2),
+            "en",
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(report.succeeded, 3);
+        let translations: Vec<_> = sections[0]
+            .speech
+            .iter()
+            .map(|event| event.translation.clone().unwrap_or_default())
+            .collect();
+        assert_eq!(translations, ["EN 一", "EN 二", "EN 三"]);
+        assert_eq!(bodies.lock().unwrap().len(), 2);
+    }
+
+    /// A batch that met only passing failures (a busy service) gets one more try
+    /// once the other batches are done.
+    #[test]
+    fn a_busy_batch_is_tried_once_more_at_the_end() {
+        let busy = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = busy.clone();
+        let (url, bodies) = scripted_service(move |_, items| {
+            if items.iter().any(|text| text == "忙")
+                && count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 2
+            {
+                status(502)
+            } else {
+                streamed(&proofread(items), "stop")
+            }
+        });
+        let mut texts_in: Vec<String> = (0..40).map(|i| format!("段{i}")).collect();
+        texts_in[30] = "忙".into();
+        let mut sections = timed_section(&texts_in);
+        let report = polish_sections_report(
+            &mut sections,
+            Path::new(""),
+            &polish_settings(url, 2),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(report.failed, 0);
+        // Two batches, the second's retry, then its try at the end.
+        assert_eq!(bodies.lock().unwrap().len(), 4);
+    }
+
+    /// A batch read back from its receipt is not timed as a request.
+    #[test]
+    fn work_read_back_takes_no_request_time() {
+        let ((), read_back) = answered_now(|| ());
+        assert!(!read_back);
+        let ((), sent) = answered_now(|| SENT.with(|sent| sent.set(true)));
+        assert!(sent);
     }
 }

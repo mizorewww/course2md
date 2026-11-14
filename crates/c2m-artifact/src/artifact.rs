@@ -6,7 +6,7 @@
 //! `locks/<note>.lock`, `swap/<note>/` (the note being built and the note being
 //! replaced) and `work/<task>` (task progress).
 
-pub use crate::outcome::{FailureKind, Outcome, Outcomes, Status};
+pub use crate::outcome::{FailureKind, FirstFailure, Outcome, Outcomes, Status};
 use crate::tr;
 use crate::{
     digest::file_digest,

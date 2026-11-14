@@ -1901,6 +1901,7 @@ mod tests {
             completed: Some(1),
             total: Some(2),
             kind: Some(c2m_artifact::artifact::FailureKind::Authentication),
+            first_failure: None,
         };
         outcomes.exports.insert("md".into(), Outcome::succeeded());
         outcomes

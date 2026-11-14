@@ -165,6 +165,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {} 段中 {} 段保留原文	{} 段中 {} 段保留原文	Out of {} paragraphs, {} kept the original text	{} 段中 {} 段保留原文	{} 段落中 {} 段落は元のテキストのままです
 {} 段中 {} 段未翻译	{} 段中 {} 段未翻译	Out of {} paragraphs, {} were not translated	{} 段中 {} 段未翻譯	{} 段落中 {} 段落は翻訳されていません
 服务拒绝处理这部分内容：{}	服务拒绝处理这部分内容：{}	The service refused to process this part: {}	服務拒絕處理這部分內容：{}	サービスがこの部分の処理を拒否しました：{}
+服务拒绝处理这部分内容	服务拒绝处理这部分内容	The service refused to process this part	服務拒絕處理這部分內容	サービスがこの部分の処理を拒否しました
 {} 已准备完成	{} 已准备完成	{} is ready	{} 已準備完成	{} の準備ができました
 {} 张	{} 张	{} matched	{} 張	{} 枚
 {} 张截图 / {} 段文字	{} 张截图 / {} 段文字	Screenshots: {} / text paragraphs: {}	{} 張截圖 / {} 段文字	スクリーンショット {} 枚 / テキスト {} 段落

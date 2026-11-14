@@ -964,27 +964,46 @@ fn batch_failure_message(
             grouped(unfinished as u64)
         )
     };
-    // The engine records "…；首个错误：<range>：<cause>".
+    // The engine's own words for the first unfinished part: "…；首个错误：<range>：
+    // <cause>" in the record of a run-task engine, which writes Chinese.
     let first = outcome
         .message
         .as_deref()
         .and_then(|message| message.split_once("；首个错误："))
         .map(|(_, first)| first.trim());
-    let (range, worded) = match first.and_then(|first| first.split_once('：')) {
+    let (parsed_range, worded) = match first.and_then(|first| first.split_once('：')) {
         Some((range, cause)) if is_time_range(range) => (Some(range), Some(cause.trim())),
         _ => (None, first),
     };
+    let structured = outcome.first_failure.as_ref();
+    let range = structured
+        .map(|first| first.range.as_str())
+        .or(parsed_range);
     // A part the service refused while it accepted the rest is about that
-    // part's text, not the settings the engine's generic refusal names: what
-    // the service said is the cause.
-    let refused = worded
-        .filter(|cause| cause.contains("（HTTP 400）") || cause.contains("（HTTP 422）"))
-        .and_then(|cause| cause.split_once("（服务说明："))
-        .map(|(_, said)| c2m_i18n::tr!("服务拒绝处理这部分内容：{}", said.trim_end_matches('）')));
-    let cause = classified_cause(outcome)
-        .map(str::to_owned)
-        .or(refused)
-        .or(worded.map(str::to_owned));
+    // part's text, not the settings a generic refusal names: what the service
+    // said is the cause. Records from before the structured fields only have
+    // the engine's words to go by.
+    let refused = match structured {
+        Some(first) if first.refused => Some(match &first.detail {
+            Some(said) => c2m_i18n::tr!("服务拒绝处理这部分内容：{}", said),
+            None => c2m_i18n::tr!("服务拒绝处理这部分内容").to_owned(),
+        }),
+        Some(_) => None,
+        None => worded
+            .filter(|cause| cause.contains("（HTTP 400）") || cause.contains("（HTTP 422）"))
+            .and_then(|cause| cause.split_once("（服务说明："))
+            .map(|(_, said)| {
+                c2m_i18n::tr!("服务拒绝处理这部分内容：{}", said.trim_end_matches('）'))
+            }),
+    };
+    // A classified cause in the interface language, with what the service said.
+    let classified = classified_cause(outcome).map(|cause| {
+        match structured.and_then(|first| first.detail.as_deref()) {
+            Some(said) => c2m_i18n::tr!("{}（服务说明：{}）", cause, said),
+            None => cause.to_owned(),
+        }
+    });
+    let cause = classified.or(refused).or(worded.map(str::to_owned));
     let detail = match (range, cause) {
         (Some(range), Some(cause)) => c2m_i18n::tr!("{}：{}", range, cause),
         (range, cause) => cause.or(range.map(str::to_owned)).unwrap_or_default(),
@@ -1801,7 +1820,37 @@ mod tests {
             completed: Some(164),
             total: Some(165),
             kind,
+            first_failure: None,
         };
+        // Where and why, as fields of their own: no message to read, which an
+        // engine running in another language words differently.
+        let structured = Outcome {
+            first_failure: Some(c2m_artifact::artifact::FirstFailure {
+                range: "12:30–12:41".into(),
+                detail: Some("Content Exists Risk".into()),
+                refused: true,
+            }),
+            ..partial(
+                None,
+                "Proofreading incomplete (1/165 failed); first error: whatever",
+            )
+        };
+        assert_eq!(
+            outcome_failure_message(NotePart::Proofreading, &structured),
+            "校对未完成：165 段中 1 段保留原文；首个错误：12:30–12:41：服务拒绝处理这部分内容：Content Exists Risk"
+        );
+        let busy = Outcome {
+            first_failure: Some(c2m_artifact::artifact::FirstFailure {
+                range: "1:02:03–1:02:30".into(),
+                detail: Some("upstream overloaded".into()),
+                refused: false,
+            }),
+            ..partial(Some(FailureKind::Service), "")
+        };
+        assert_eq!(
+            outcome_failure_message(NotePart::Proofreading, &busy),
+            "校对未完成：165 段中 1 段保留原文；首个错误：1:02:03–1:02:30：服务暂时无法完成请求（服务说明：upstream overloaded）"
+        );
         // A refused part: what the service said about it.
         let refused = partial(
             None,

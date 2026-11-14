@@ -1639,6 +1639,7 @@ fn outcome_from_report(report: &crate::llm::PolishReport) -> Outcome {
         ),
         completed: Some(report.succeeded),
         total: Some(report.attempted),
+        first_failure: report.first_failure.clone().filter(|_| report.failed > 0),
     }
 }
 

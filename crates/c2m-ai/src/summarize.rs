@@ -259,21 +259,27 @@ fn summarize_blocking(
         control,
         |(index, chunk)| {
             let (first, last) = range(&chunk);
-            let part = summary_of(
-                &chunk,
-                &tr!(
-                    "生成第 {}/{} 部分摘要（{}–{}） / Generate summary part {}/{} ({}–{})",
-                    index + 1,
-                    total,
-                    first,
-                    last,
-                    index + 1,
-                    total,
-                    first,
-                    last
-                ),
-            );
-            pb.advance(1);
+            let (part, sent) = llm::answered_now(|| {
+                summary_of(
+                    &chunk,
+                    &tr!(
+                        "生成第 {}/{} 部分摘要（{}–{}） / Generate summary part {}/{} ({}–{})",
+                        index + 1,
+                        total,
+                        first,
+                        last,
+                        index + 1,
+                        total,
+                        first,
+                        last
+                    ),
+                )
+            });
+            if sent {
+                pb.advance(1);
+            } else {
+                pb.advance_replayed(1);
+            }
             part
         },
     )?;
