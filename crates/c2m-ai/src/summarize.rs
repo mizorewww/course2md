@@ -243,28 +243,47 @@ fn summarize_blocking(
         "summary map-reduce"
     );
     let total = chunks.len();
+    // The parts answered so far, for the desktop to time the rest by; the merge
+    // that follows is the stage's finishing step.
+    let pb = crate::progress::Bar::new(crate::progress::Stage::Summary, total as u64)
+        .with_template("{spinner:.green} summary {pos}/{len} [{bar:32.cyan/blue}] {msg}")
+        .with_unit(crate::progress::Unit::Batches);
+    crate::progress::workers(
+        crate::progress::Stage::Summary,
+        SUMMARIZE_CONCURRENCY.min(total),
+    );
+    pb.set_position(0);
     let partials = crate::pool::map_pool(
         chunks.into_iter().enumerate().collect(),
         SUMMARIZE_CONCURRENCY,
         control,
         |(index, chunk)| {
             let (first, last) = range(&chunk);
-            summary_of(
-                &chunk,
-                &tr!(
-                    "生成第 {}/{} 部分摘要（{}–{}） / Generate summary part {}/{} ({}–{})",
-                    index + 1,
-                    total,
-                    first,
-                    last,
-                    index + 1,
-                    total,
-                    first,
-                    last
-                ),
-            )
+            let (part, sent) = llm::answered_now(|| {
+                summary_of(
+                    &chunk,
+                    &tr!(
+                        "生成第 {}/{} 部分摘要（{}–{}） / Generate summary part {}/{} ({}–{})",
+                        index + 1,
+                        total,
+                        first,
+                        last,
+                        index + 1,
+                        total,
+                        first,
+                        last
+                    ),
+                )
+            });
+            if sent {
+                pb.advance(1);
+            } else {
+                pb.advance_replayed(1);
+            }
+            part
         },
     )?;
+    pb.finish();
     // 合并分段摘要
     let mut input = ctx.to_owned();
     for (idx, sm) in partials.iter().enumerate() {

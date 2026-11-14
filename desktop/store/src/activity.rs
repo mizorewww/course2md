@@ -41,6 +41,12 @@ pub struct Activity {
     started: Instant,
     baseline: u64,
     updated: Instant,
+    /// The remaining time shown, measured from `started` and `baseline`.
+    eta: crate::eta::Eta,
+    /// How much of `current` was read back from earlier work, not done now; and
+    /// how much of `baseline` was.
+    replayed: u64,
+    baseline_replayed: u64,
 }
 /// A request that stopped a job, as the task card explains it.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -180,14 +186,18 @@ impl JobEvents {
                 phase,
                 unit,
                 found,
+                replayed,
             } => {
+                let now = Instant::now();
                 let activity = self.stage(stage);
-                activity.update(*current, *total, message.clone());
-                activity.set_phase(*phase);
+                activity.replayed = replayed.unwrap_or(0);
+                activity.update_at(now, *current, *total, message.clone());
+                activity.set_phase_at(now, *phase);
                 activity.unit = *unit;
                 if found.is_some() {
                     activity.found = *found;
                 }
+                activity.estimate(stage, now);
                 false
             }
             Event::Tokens {
@@ -335,14 +345,22 @@ impl Activity {
             started: now,
             baseline: 0,
             updated: now,
+            eta: crate::eta::Eta::default(),
+            replayed: 0,
+            baseline_replayed: 0,
         }
     }
     pub fn update(&mut self, current: u64, total: u64, message: Option<String>) {
+        self.update_at(Instant::now(), current, total, message);
+    }
+    /// [`Self::update`] with the report received at `now`.
+    pub fn update_at(&mut self, now: Instant, current: u64, total: u64, message: Option<String>) {
         self.sampled = true;
-        let now = Instant::now();
         if current < self.current || total != self.total {
             self.started = now;
             self.baseline = current;
+            self.baseline_replayed = self.replayed;
+            self.eta.reset();
         }
         if current != self.current {
             self.updated = now;
@@ -363,14 +381,55 @@ impl Activity {
         self.completion_tokens += completion;
     }
     pub fn elapsed(&self) -> Duration {
-        self.finished.unwrap_or_else(Instant::now) - self.created
+        self.elapsed_at(Instant::now())
+    }
+    fn elapsed_at(&self, now: Instant) -> Duration {
+        self.finished
+            .unwrap_or(now)
+            .saturating_duration_since(self.created)
     }
     /// Unmeasured work shows that it is moving: how long it has run and, for
     /// AI requests, how much was sent to the service and how much it sent back.
     pub fn live_counter(&self) -> String {
-        let mut parts = vec![elapsed_label(self.elapsed())];
+        self.live_counter_at(Instant::now())
+    }
+    fn live_counter_at(&self, now: Instant) -> String {
+        let mut parts = vec![elapsed_label(self.elapsed_at(now))];
         parts.extend(self.tokens_label());
         parts.join(" · ")
+    }
+    /// An AI step that counts the batches answered ([`Unit::Batches`]): "3 / 9
+    /// 批 · 预计剩余 2 分 30 秒", then, in full, its clock and tokens; in a
+    /// compact line its clock only until there is an estimate. None from an
+    /// engine that counted the requests sent, which measure nothing.
+    pub fn ai_detail(&self, compact: bool) -> Option<String> {
+        self.ai_detail_at(compact, Instant::now())
+    }
+    fn ai_detail_at(&self, compact: bool, now: Instant) -> Option<String> {
+        if self.unit != Some(Unit::Batches) || self.total == 0 {
+            return None;
+        }
+        let mut parts = vec![c2m_i18n::tr!(
+            "{} / {} 批",
+            grouped(self.current),
+            grouped(self.total)
+        )];
+        let eta = if self.current >= self.total {
+            // A summary merges its parts after the last one.
+            Some(c2m_i18n::tr!("收尾中…").to_owned())
+        } else {
+            self.eta
+                .label(now)
+                .map(|remaining| c2m_i18n::tr!("预计剩余 {}", remaining))
+        };
+        let has_eta = eta.is_some();
+        parts.extend(eta);
+        if !compact {
+            parts.push(self.live_counter_at(now));
+        } else if !has_eta {
+            parts.push(elapsed_label(self.elapsed_at(now)));
+        }
+        Some(parts.join(" · "))
     }
     /// "↑ 4,740 · ↓ 4,289 词元": the tokens sent and received, once a response
     /// reported any. It stays with the stage as its record after it finishes.
@@ -413,16 +472,48 @@ impl Activity {
     /// sample at the current count: a transfer that resumes a partial file
     /// (or reconnects) may report the bytes already on disk only once it is
     /// under way, and those bytes did not cross the network in this session.
-    pub(crate) fn set_phase(&mut self, phase: Option<Phase>) {
+    fn set_phase_at(&mut self, now: Instant, phase: Option<Phase>) {
         if phase != self.phase {
-            let now = Instant::now();
             if phase == Some(Phase::Download) {
                 self.started = now;
                 self.baseline = self.current;
+                self.baseline_replayed = self.replayed;
+                self.eta.reset();
             }
             self.updated = now;
         }
         self.phase = phase;
+    }
+    /// Feeds the report just applied to the stage's remaining-time estimate.
+    /// Apple loading and compilation report weighted steps, not throughput, and
+    /// are not timed. Apple ranges land a wave at a time, so they are timed once
+    /// a wave has landed in this session (or 5% of what it fetches); concurrent
+    /// AI requests once one round of them has been answered.
+    pub fn estimate(&mut self, stage: &Stage, now: Instant) {
+        let byte_download = self.counts_bytes(stage);
+        if *stage == Stage::ModelApple && !byte_download {
+            return;
+        }
+        let warmup = if *stage == Stage::ModelApple {
+            BLOCK_WAVE.min(self.total.saturating_sub(self.baseline).div_ceil(20))
+        } else if self.unit == Some(Unit::Batches) {
+            self.workers.max(1) as u64
+        } else {
+            1
+        };
+        // Work read back from earlier runs (AI answers from their receipts) is
+        // neither speed nor left to do: the estimate sees only the rest.
+        let replayed = self.replayed.min(self.current);
+        self.eta.observe(
+            now,
+            (
+                self.started,
+                self.baseline.saturating_sub(self.baseline_replayed),
+            ),
+            self.current - replayed,
+            self.total.saturating_sub(replayed),
+            warmup,
+        );
     }
     /// Units per second since the sample began, counting only work done in
     /// this sample. Between reports it decays toward zero as time passes.
@@ -546,11 +637,11 @@ impl Activity {
         let speed = rate
             .filter(|_| byte_download)
             .map(|rate| format!("{}/s", throughput(rate)));
+        // The one shared estimate (crate::eta): smoothed, steady between reports
+        // and worded in steps.
         let eta = if self.total > self.current {
-            match rate {
-                Some(rate) => Some(TransferEta::Remaining(duration(
-                    (self.total - self.current) as f64 / rate,
-                ))),
+            match self.eta.label(now).filter(|_| settled) {
+                Some(remaining) => Some(TransferEta::Remaining(remaining)),
                 None if byte_download => {
                     Some(TransferEta::Remaining(c2m_i18n::tr!("计算中").into()))
                 }
@@ -820,19 +911,118 @@ pub fn outcome_failure_message(
     part: NotePart,
     outcome: &c2m_artifact::artifact::Outcome,
 ) -> String {
-    use c2m_artifact::artifact::FailureKind;
-    let cause = match outcome.kind {
-        Some(FailureKind::Authentication) => c2m_i18n::tr!("服务拒绝了 API Key"),
-        Some(FailureKind::Model) => c2m_i18n::tr!("服务地址或模型名称有误"),
-        Some(FailureKind::Parameters) => c2m_i18n::tr!("服务不支持当前的模型设置"),
-        Some(FailureKind::RateLimit) => c2m_i18n::tr!("服务暂时限制了请求次数"),
-        Some(FailureKind::Service) => c2m_i18n::tr!("服务暂时无法完成请求"),
-        Some(FailureKind::Uncertain) => c2m_i18n::tr!("请求结果未确认"),
-        Some(FailureKind::Local | FailureKind::Other) | None => {
-            return legacy_outcome_message(part, outcome.message.as_deref());
-        }
+    if let Some(message) = batch_failure_message(part, outcome) {
+        return message;
+    }
+    let Some(cause) = classified_cause(outcome) else {
+        return legacy_outcome_message(part, outcome.message.as_deref());
     };
     c2m_i18n::tr!("{}：{}", missing_term(part), cause)
+}
+
+/// The cause a classified failure words in the interface language.
+fn classified_cause(outcome: &c2m_artifact::artifact::Outcome) -> Option<&'static str> {
+    use c2m_artifact::artifact::FailureKind;
+    Some(match outcome.kind? {
+        FailureKind::Authentication => c2m_i18n::tr!("服务拒绝了 API Key"),
+        FailureKind::Model => c2m_i18n::tr!("服务地址或模型名称有误"),
+        FailureKind::Parameters => c2m_i18n::tr!("服务不支持当前的模型设置"),
+        FailureKind::RateLimit => c2m_i18n::tr!("服务暂时限制了请求次数"),
+        FailureKind::Service => c2m_i18n::tr!("服务暂时无法完成请求"),
+        FailureKind::Uncertain => c2m_i18n::tr!("请求结果未确认"),
+        FailureKind::Local | FailureKind::Other => return None,
+    })
+}
+
+/// A proofreading or translation that finished only some of its paragraphs:
+/// how many of how many kept their original text or stayed untranslated, then
+/// where the first unfinished one is and why — in the interface language when
+/// the failure is classified, otherwise as the engine and the service worded
+/// it, which is the actual error. "校对未完成：165 段中 1 段保留原文；首个错误：
+/// 12:30–12:41：…".
+fn batch_failure_message(
+    part: NotePart,
+    outcome: &c2m_artifact::artifact::Outcome,
+) -> Option<String> {
+    if !matches!(part, NotePart::Proofreading | NotePart::Translation)
+        || outcome.status != c2m_artifact::artifact::Status::Partial
+    {
+        return None;
+    }
+    let total = outcome.total?;
+    let unfinished = total.checked_sub(outcome.completed?).filter(|n| *n > 0)?;
+    let count = if part == NotePart::Proofreading {
+        c2m_i18n::tr!(
+            "{} 段中 {} 段保留原文",
+            grouped(total as u64),
+            grouped(unfinished as u64)
+        )
+    } else {
+        c2m_i18n::tr!(
+            "{} 段中 {} 段未翻译",
+            grouped(total as u64),
+            grouped(unfinished as u64)
+        )
+    };
+    // The engine's own words for the first unfinished part: "…；首个错误：<range>：
+    // <cause>" in the record of a run-task engine, which writes Chinese.
+    let first = outcome
+        .message
+        .as_deref()
+        .and_then(|message| message.split_once("；首个错误："))
+        .map(|(_, first)| first.trim());
+    let (parsed_range, worded) = match first.and_then(|first| first.split_once('：')) {
+        Some((range, cause)) if is_time_range(range) => (Some(range), Some(cause.trim())),
+        _ => (None, first),
+    };
+    let structured = outcome.first_failure.as_ref();
+    let range = structured
+        .map(|first| first.range.as_str())
+        .or(parsed_range);
+    // A part the service refused while it accepted the rest is about that
+    // part's text, not the settings a generic refusal names: what the service
+    // said is the cause. Records from before the structured fields only have
+    // the engine's words to go by.
+    let refused = match structured {
+        Some(first) if first.refused => Some(match &first.detail {
+            Some(said) => c2m_i18n::tr!("服务拒绝处理这部分内容：{}", said),
+            None => c2m_i18n::tr!("服务拒绝处理这部分内容").to_owned(),
+        }),
+        Some(_) => None,
+        None => worded
+            .filter(|cause| cause.contains("（HTTP 400）") || cause.contains("（HTTP 422）"))
+            .and_then(|cause| cause.split_once("（服务说明："))
+            .map(|(_, said)| {
+                c2m_i18n::tr!("服务拒绝处理这部分内容：{}", said.trim_end_matches('）'))
+            }),
+    };
+    // A classified cause in the interface language, with what the service said.
+    let classified = classified_cause(outcome).map(|cause| {
+        match structured.and_then(|first| first.detail.as_deref()) {
+            Some(said) => c2m_i18n::tr!("{}（服务说明：{}）", cause, said),
+            None => cause.to_owned(),
+        }
+    });
+    let cause = classified.or(refused).or(worded.map(str::to_owned));
+    let detail = match (range, cause) {
+        (Some(range), Some(cause)) => c2m_i18n::tr!("{}：{}", range, cause),
+        (range, cause) => cause.or(range.map(str::to_owned)).unwrap_or_default(),
+    };
+    let body = if detail.is_empty() {
+        count
+    } else {
+        c2m_i18n::tr!("{}；首个错误：{}", count, detail)
+    };
+    Some(c2m_i18n::tr!("{}：{}", missing_term(part), body))
+}
+
+/// "12:30–12:41", "1:02:03–1:02:30": where in the video a part is.
+fn is_time_range(text: &str) -> bool {
+    text.split_once('–').is_some_and(|(from, to)| {
+        [from, to]
+            .iter()
+            .all(|time| !time.is_empty() && time.chars().all(|c| c.is_ascii_digit() || c == ':'))
+    })
 }
 
 /// Older saved outcomes combined a stage label, retention message and English
@@ -942,10 +1132,6 @@ fn throughput(bytes_per_sec: f64) -> String {
         return c2m_i18n::tr!("{} 字节", format!("{value:.0}"));
     }
     bytes(value as u64)
-}
-/// A remaining time rounds up, so an estimate never reaches zero early.
-fn duration(seconds: f64) -> String {
-    duration_label(seconds.ceil() as u64)
 }
 
 #[cfg(test)]
@@ -1080,34 +1266,36 @@ mod tests {
 
     #[test]
     fn apple_downloads_report_bytes_speed_and_remaining_time() {
-        let now = Instant::now();
+        let t0 = Instant::now();
+        let at = |seconds| t0 + Duration::from_secs(seconds);
         let apple = Stage::parse("model/apple");
         let mut activity = Activity::new();
         // Cached files arrive in the first sample and are not throughput.
-        activity.update(
+        activity.update_at(
+            at(0),
             300 * 1024 * 1024,
             1600 * 1024 * 1024,
             Some("huggingface.co".into()),
         );
         activity.phase = Some(Phase::Download);
         activity.unit = Some(Unit::Bytes);
-        let measuring = activity.transfer_metrics_at(&apple, true, now);
+        activity.estimate(&apple, at(0));
+        let measuring = activity.transfer_metrics_at(&apple, true, at(0));
         assert_eq!(measuring.quantity, "300.0 MB / 1.56 GB");
         assert_eq!(measuring.note.as_deref(), Some("正在等待第一块数据"));
         assert_eq!(measuring.eta, Some(TransferEta::Remaining("计算中".into())));
 
         // Configuration files and the first ranges are too little to time.
-        activity.started = now - Duration::from_secs(20);
-        activity.update(340 * 1024 * 1024, 1600 * 1024 * 1024, None);
-        let early = activity.transfer_metrics_at(&apple, true, now);
+        report(&mut activity, &apple, at(20), 340 * 1024 * 1024);
+        let early = activity.transfer_metrics_at(&apple, true, at(20));
         assert!(early.speed.is_none(), "{early:?}");
         assert_eq!(early.eta, Some(TransferEta::Remaining("计算中".into())));
 
-        activity.update(500 * 1024 * 1024, 1600 * 1024 * 1024, None);
-        let metrics = activity.transfer_metrics_at(&apple, true, now);
+        report(&mut activity, &apple, at(20), 500 * 1024 * 1024);
+        let metrics = activity.transfer_metrics_at(&apple, true, at(20));
         assert_eq!(metrics.quantity, "500.0 MB / 1.56 GB");
         assert_eq!(metrics.speed.as_deref(), Some("10.0 MB/s"));
-        // 1100 MB left at 10 MB/s, measured at one instant.
+        // 1100 MB left at 10 MB/s.
         assert!(
             matches!(&metrics.eta, Some(TransferEta::Remaining(v)) if v == "1 分 50 秒"),
             "{metrics:?}"
@@ -1122,10 +1310,11 @@ mod tests {
         assert_eq!(model_transfer_phase(&apple, activity.phase), "下载识别模型");
 
         // Loading after the download reports a weighted fraction again.
-        activity.update(2000, 10000, Some("正在加载本机模型…".into()));
+        activity.update_at(at(30), 2000, 10000, Some("正在加载本机模型…".into()));
         activity.phase = Some(Phase::Load);
         activity.unit = None;
-        let loading = activity.transfer_metrics_at(&apple, true, now).summary();
+        activity.estimate(&apple, at(30));
+        let loading = activity.transfer_metrics_at(&apple, true, at(30)).summary();
         assert!(
             loading.contains("20%") && loading.contains("已用"),
             "{loading}"
@@ -1133,14 +1322,87 @@ mod tests {
         assert!(!loading.contains("/s") && !loading.contains("预计剩余"));
     }
 
+    /// Applies a report of `current` (of the total it has) at `at`, as a live
+    /// event does.
+    fn report(activity: &mut Activity, stage: &Stage, at: Instant, current: u64) {
+        let total = activity.total;
+        activity.update_at(at, current, total, None);
+        activity.estimate(stage, at);
+    }
+
+    #[test]
+    fn ai_steps_count_answered_batches_and_time_the_rest() {
+        let mut llm = Activity::new();
+        let t0 = Instant::now();
+        let at = |seconds| t0 + Duration::from_secs(seconds);
+        llm.workers = 2;
+        llm.unit = Some(Unit::Batches);
+        llm.update_at(at(0), 0, 10, None);
+        llm.estimate(&Stage::Llm, at(0));
+        // One answer while two requests run: not yet timed.
+        report(&mut llm, &Stage::Llm, at(20), 1);
+        assert_eq!(
+            llm.ai_detail_at(true, at(20)).as_deref(),
+            Some("1 / 10 批 · 用时 20 秒")
+        );
+        // Both answered: eight more at that pace.
+        report(&mut llm, &Stage::Llm, at(22), 2);
+        assert_eq!(
+            llm.ai_detail_at(true, at(22)).as_deref(),
+            Some("2 / 10 批 · 预计剩余 1 分 30 秒")
+        );
+        assert_eq!(llm.fraction(), Some(0.2));
+        llm.note_tokens(4_740, 4_289);
+        assert_eq!(
+            llm.ai_detail_at(false, at(22)).as_deref(),
+            Some("2 / 10 批 · 预计剩余 1 分 30 秒 · 用时 22 秒 · ↑ 4,740 · ↓ 4,289 词元")
+        );
+        // A summary merges its parts after the last one.
+        report(&mut llm, &Stage::Llm, at(100), 10);
+        assert_eq!(
+            llm.ai_detail_at(true, at(100)).as_deref(),
+            Some("10 / 10 批 · 收尾中…")
+        );
+        // An engine that counted the requests it sent measured nothing.
+        let mut older = Activity::new();
+        older.update_at(at(0), 3, 10, None);
+        assert_eq!(older.ai_detail_at(true, at(5)), None);
+    }
+
+    /// A retry reads most batches back from their receipts at once; only the
+    /// requests it sends are speed.
+    #[test]
+    fn batches_read_back_from_receipts_are_not_timed() {
+        let mut llm = Activity::new();
+        let t0 = Instant::now();
+        let at = |seconds| t0 + Duration::from_secs(seconds);
+        llm.workers = 1;
+        llm.unit = Some(Unit::Batches);
+        llm.update_at(at(0), 0, 20, None);
+        llm.estimate(&Stage::Llm, at(0));
+        // Ten answers come back from receipts in the first moment.
+        for replayed in 1..=10 {
+            llm.replayed = replayed;
+            report(&mut llm, &Stage::Llm, at(0), replayed);
+        }
+        // Then a request every 5 s.
+        for live in 1..=3 {
+            report(&mut llm, &Stage::Llm, at(5 * live), 10 + live);
+        }
+        // Seven left at 5 s each, not at the pace the replays implied.
+        let left = llm.eta.remaining(at(15)).unwrap().as_secs_f64();
+        assert!((30. ..=40.).contains(&left), "{left}");
+    }
+
     #[test]
     fn byte_downloads_keep_measured_speed_and_remaining_time() {
-        let now = Instant::now();
+        let t0 = Instant::now();
+        let at = |seconds| t0 + Duration::from_secs(seconds);
+        let file = Stage::parse("model/model.gguf");
         let mut activity = Activity::new();
-        activity.update(0, 8 * 1024 * 1024, None);
-        activity.started = now - Duration::from_secs(10);
-        activity.update(4 * 1024 * 1024, 8 * 1024 * 1024, None);
-        let metrics = activity.transfer_metrics_at(&Stage::parse("model/model.gguf"), true, now);
+        activity.update_at(at(0), 0, 8 * 1024 * 1024, None);
+        report(&mut activity, &file, at(10), 4 * 1024 * 1024);
+        let metrics = activity.transfer_metrics_at(&file, true, at(10));
         assert_eq!(metrics.quantity, "4.0 MB / 8.0 MB");
         assert!(
             metrics
@@ -1150,19 +1412,16 @@ mod tests {
             "{metrics:?}"
         );
         assert!(
-            matches!(&metrics.eta, Some(TransferEta::Remaining(value)) if value.ends_with("秒")),
+            matches!(&metrics.eta, Some(TransferEta::Remaining(value)) if value == "10 秒"),
             "{metrics:?}"
         );
-        let detail = activity
-            .transfer_metrics_at(&Stage::parse("model/model.gguf"), true, now)
-            .summary();
+        let detail = metrics.summary();
         assert!(detail.contains("4.0 MB / 8.0 MB"), "{detail}");
         assert!(
             detail.contains("速度 ") && detail.contains("预计剩余"),
             "{detail}"
         );
     }
-
     #[test]
     fn model_download_metrics_stay_labeled_while_speed_is_measured() {
         let now = Instant::now();
@@ -1258,6 +1517,7 @@ mod tests {
                 phase: None,
                 unit: None,
                 found: None,
+                replayed: None,
             },
             Event::Log {
                 level: c2m_protocol::progress::LogLevel::Info,
@@ -1404,6 +1664,7 @@ mod tests {
             phase: None,
             unit: None,
             found,
+            replayed: None,
         };
         let mut events = JobEvents::default();
         events.apply(&Event::Stage {
@@ -1549,6 +1810,86 @@ mod tests {
             "摘要未生成"
         );
     }
+
+    #[test]
+    fn a_partly_finished_proofreading_says_how_much_where_and_why() {
+        use c2m_artifact::artifact::{FailureKind, Outcome, Status};
+        let partial = |kind, message: &str| Outcome {
+            status: Status::Partial,
+            message: Some(message.into()),
+            completed: Some(164),
+            total: Some(165),
+            kind,
+            first_failure: None,
+        };
+        // Where and why, as fields of their own: no message to read, which an
+        // engine running in another language words differently.
+        let structured = Outcome {
+            first_failure: Some(c2m_artifact::artifact::FirstFailure {
+                range: "12:30–12:41".into(),
+                detail: Some("Content Exists Risk".into()),
+                refused: true,
+            }),
+            ..partial(
+                None,
+                "Proofreading incomplete (1/165 failed); first error: whatever",
+            )
+        };
+        assert_eq!(
+            outcome_failure_message(NotePart::Proofreading, &structured),
+            "校对未完成：165 段中 1 段保留原文；首个错误：12:30–12:41：服务拒绝处理这部分内容：Content Exists Risk"
+        );
+        let busy = Outcome {
+            first_failure: Some(c2m_artifact::artifact::FirstFailure {
+                range: "1:02:03–1:02:30".into(),
+                detail: Some("upstream overloaded".into()),
+                refused: false,
+            }),
+            ..partial(Some(FailureKind::Service), "")
+        };
+        assert_eq!(
+            outcome_failure_message(NotePart::Proofreading, &busy),
+            "校对未完成：165 段中 1 段保留原文；首个错误：1:02:03–1:02:30：服务暂时无法完成请求（服务说明：upstream overloaded）"
+        );
+        // A refused part: what the service said about it.
+        let refused = partial(
+            None,
+            "校对未全部完成（1/165 失败），原文已保留；首个错误：12:30–12:41：服务拒绝了请求参数（HTTP 400）。（服务说明：Content Exists Risk）",
+        );
+        assert_eq!(
+            outcome_failure_message(NotePart::Proofreading, &refused),
+            "校对未完成：165 段中 1 段保留原文；首个错误：12:30–12:41：服务拒绝处理这部分内容：Content Exists Risk"
+        );
+        // A classified cause is worded in the interface language.
+        let limited = partial(
+            Some(FailureKind::RateLimit),
+            "校对未全部完成（1/165 失败），原文已保留；首个错误：1:02:03–1:02:30：服务请求次数达到限制，请稍后重试。",
+        );
+        assert_eq!(
+            outcome_failure_message(NotePart::Proofreading, &limited),
+            "校对未完成：165 段中 1 段保留原文；首个错误：1:02:03–1:02:30：服务暂时限制了请求次数"
+        );
+        // An older record without a range still names its cause.
+        let older = partial(
+            None,
+            "校对未全部完成（1/165 失败），原文已保留；首个错误：HTTP 503",
+        );
+        assert_eq!(
+            outcome_failure_message(NotePart::Proofreading, &older),
+            "校对未完成：165 段中 1 段保留原文；首个错误：HTTP 503"
+        );
+        let translation = Outcome {
+            message: Some("翻译未全部完成（3/40 失败）".into()),
+            completed: Some(37),
+            total: Some(40),
+            ..partial(None, "")
+        };
+        assert_eq!(
+            outcome_failure_message(NotePart::Translation, &translation),
+            "翻译未完成：40 段中 3 段未翻译"
+        );
+    }
+
     #[test]
     fn retry_and_cached_work_do_not_inflate_eta() {
         let now = Instant::now();
@@ -1587,15 +1928,16 @@ mod tests {
     /// the progress fraction still includes the bytes already on disk.
     #[test]
     fn resumed_downloads_time_only_this_sessions_bytes() {
-        let now = Instant::now();
+        let t0 = Instant::now();
+        let at = |seconds| t0 + Duration::from_secs(seconds);
+        let now = at(10);
         let file = Stage::parse("model/model.gguf");
         // The built-in client reports the partial file before it connects.
         let mut native = Activity::new();
-        native.update(600 * MIB, 1000 * MIB, None);
-        native.set_phase(Some(Phase::Connect));
-        native.set_phase(Some(Phase::Download));
-        native.started = now - Duration::from_secs(10);
-        native.update(700 * MIB, 1000 * MIB, None);
+        native.update_at(at(0), 600 * MIB, 1000 * MIB, None);
+        native.set_phase_at(at(0), Some(Phase::Connect));
+        native.set_phase_at(at(0), Some(Phase::Download));
+        report(&mut native, &file, at(10), 700 * MIB);
         let rate = native.rate(now).unwrap();
         assert!(
             (9.9 * MIB as f64..10.1 * MIB as f64).contains(&rate),
@@ -1606,13 +1948,12 @@ mod tests {
         // aria2 starts from zero and reports the resumed bytes only once it
         // runs; entering the download phase starts the sample there.
         let mut aria2 = Activity::new();
-        aria2.update(0, 1000 * MIB, None);
-        aria2.set_phase(Some(Phase::Connect));
-        aria2.update(600 * MIB, 1000 * MIB, None);
-        aria2.set_phase(Some(Phase::Download));
-        assert!(aria2.rate(now).is_none());
-        aria2.started = now - Duration::from_secs(10);
-        aria2.update(700 * MIB, 1000 * MIB, None);
+        aria2.update_at(at(0), 0, 1000 * MIB, None);
+        aria2.set_phase_at(at(0), Some(Phase::Connect));
+        aria2.update_at(at(0), 600 * MIB, 1000 * MIB, None);
+        aria2.set_phase_at(at(0), Some(Phase::Download));
+        assert!(aria2.rate(at(0)).is_none());
+        report(&mut aria2, &file, at(10), 700 * MIB);
         let metrics = aria2.transfer_metrics_at(&file, true, now);
         assert_eq!(metrics.speed.as_deref(), Some("10.0 MB/s"), "{metrics:?}");
         // 300 MB left at 10 MB/s, not at the 70 MB/s the resumed bytes imply.
@@ -1623,12 +1964,17 @@ mod tests {
         assert_eq!(aria2.fraction(), Some(0.7));
 
         // Repeated phase reports within the download keep the sample.
-        aria2.set_phase(Some(Phase::Download));
+        aria2.set_phase_at(now, Some(Phase::Download));
         assert!(aria2.rate(now).is_some());
-        // Reconnecting and resuming starts a new sample at the resumed count.
-        aria2.set_phase(Some(Phase::Retry));
-        aria2.set_phase(Some(Phase::Download));
+        // Reconnecting and resuming starts a new sample at the resumed count,
+        // and the estimate with it.
+        aria2.set_phase_at(now, Some(Phase::Retry));
+        aria2.set_phase_at(now, Some(Phase::Download));
         assert!(aria2.rate(now).is_none());
+        assert_eq!(
+            aria2.transfer_metrics_at(&file, true, now).eta,
+            Some(TransferEta::Remaining("计算中".into()))
+        );
         assert_eq!(aria2.fraction(), Some(0.7));
     }
 
@@ -1636,18 +1982,17 @@ mod tests {
     /// spell between them is a slow link, not a stall.
     #[test]
     fn apple_downloads_between_blocks_stay_informative() {
-        let now = Instant::now();
+        let t0 = Instant::now();
+        let at = |seconds| t0 + Duration::from_secs(seconds);
         let apple = Stage::parse("model/apple");
         let mut activity = Activity::new();
-        activity.update(200 * MIB, 1600 * MIB, Some("hf-mirror.com".into()));
-        activity.set_phase(Some(Phase::Download));
+        activity.update_at(at(0), 200 * MIB, 1600 * MIB, Some("hf-mirror.com".into()));
+        activity.set_phase_at(at(0), Some(Phase::Download));
         activity.unit = Some(Unit::Bytes);
 
         // The first sixteen ranges are still in flight after a minute; the
         // 200 MB were on disk, so nothing has landed in this session.
-        activity.started = now - Duration::from_secs(60);
-        activity.updated = now - Duration::from_secs(60);
-        let first = activity.transfer_metrics_at(&apple, true, now);
+        let first = activity.transfer_metrics_at(&apple, true, at(60));
         assert_eq!(first.quantity, "200.0 MB / 1.56 GB");
         assert_eq!(first.speed, None);
         assert_eq!(first.eta, Some(TransferEta::Remaining("计算中".into())));
@@ -1655,22 +2000,22 @@ mod tests {
         assert_eq!(first.aside, None);
 
         // One block landed: too little of a wave to time.
-        activity.update(208 * MIB, 1600 * MIB, None);
-        activity.started = now - Duration::from_secs(70);
-        let early = activity.transfer_metrics_at(&apple, true, now);
+        report(&mut activity, &apple, at(70), 208 * MIB);
+        let early = activity.transfer_metrics_at(&apple, true, at(70));
         assert_eq!(early.speed, None);
+        assert_eq!(early.eta, Some(TransferEta::Remaining("计算中".into())));
         assert_eq!(early.note.as_deref(), Some("正在测量速度"));
 
         // 160 MB landed in 100 s; 40 s later the next block has not.
-        activity.update(360 * MIB, 1600 * MIB, None);
-        activity.started = now - Duration::from_secs(140);
-        activity.updated = now - Duration::from_secs(40);
+        report(&mut activity, &apple, at(100), 360 * MIB);
+        let now = at(140);
         let slow = activity.transfer_metrics_at(&apple, true, now);
         assert_eq!(slow.quantity, "360.0 MB / 1.56 GB");
         // The average falls between blocks instead of disappearing.
         assert_eq!(slow.speed.as_deref(), Some("1.1 MB/s"), "{slow:?}");
+        // 1240 MB at the 1.6 MB/s of the blocks so far, counting down since.
         assert!(
-            matches!(&slow.eta, Some(TransferEta::Remaining(v)) if v == "18 分 05 秒"),
+            matches!(&slow.eta, Some(TransferEta::Remaining(v)) if v == "13 分钟"),
             "{slow:?}"
         );
         assert_eq!(slow.note, None);
@@ -1687,15 +2032,14 @@ mod tests {
             .transfer_metrics_at(&apple, true, now)
             .compact_summary();
         assert!(
-            compact.starts_with("360.0 MB / 1.56 GB · 速度 1.1 MB/s · 预计剩余 18 分")
+            compact.starts_with("360.0 MB / 1.56 GB · 速度 1.1 MB/s · 预计剩余 13 分钟")
                 && !compact.contains("上一块")
                 && !compact.contains("来源"),
             "{compact}"
         );
 
         // Five minutes without a block is the downloader's own stall.
-        activity.updated = now - Duration::from_secs(305);
-        let stalled = activity.transfer_metrics_at(&apple, true, now);
+        let stalled = activity.transfer_metrics_at(&apple, true, at(405));
         assert_eq!(stalled.quantity, "360.0 MB / 1.56 GB");
         assert_eq!(stalled.speed.as_deref(), Some("—"));
         assert_eq!(stalled.eta, None);
@@ -1705,33 +2049,39 @@ mod tests {
     /// blocks rather than waiting for 5% of the whole model.
     #[test]
     fn apple_resume_with_little_left_still_shows_speed() {
-        let now = Instant::now();
+        let t0 = Instant::now();
+        let at = |seconds| t0 + Duration::from_secs(seconds);
         let apple = Stage::parse("model/apple");
         let mut activity = Activity::new();
-        activity.update(1560 * MIB, 1600 * MIB, Some("hf-mirror.com".into()));
-        activity.set_phase(Some(Phase::Download));
+        activity.update_at(at(0), 1560 * MIB, 1600 * MIB, Some("hf-mirror.com".into()));
+        activity.set_phase_at(at(0), Some(Phase::Download));
         activity.unit = Some(Unit::Bytes);
-        activity.started = now - Duration::from_secs(4);
-        activity.update(1576 * MIB, 1600 * MIB, None);
-        let metrics = activity.transfer_metrics_at(&apple, true, now);
+        report(&mut activity, &apple, at(4), 1576 * MIB);
+        let metrics = activity.transfer_metrics_at(&apple, true, at(4));
         assert_eq!(metrics.speed.as_deref(), Some("4.0 MB/s"), "{metrics:?}");
-        // 24 MB left at 4 MB/s, measured at one instant.
+        // 24 MB left at 4 MB/s, in steps of five seconds.
         assert!(
-            matches!(&metrics.eta, Some(TransferEta::Remaining(v)) if v == "6 秒"),
+            matches!(&metrics.eta, Some(TransferEta::Remaining(v)) if v == "10 秒"),
             "{metrics:?}"
         );
         assert_eq!(metrics.note, None);
 
         // A fresh download is timed once a full wave of ranges has landed.
         let mut fresh = Activity::new();
-        fresh.update(0, 16_000 * MIB, Some("hf-mirror.com".into()));
-        fresh.set_phase(Some(Phase::Download));
+        fresh.update_at(at(0), 0, 16_000 * MIB, Some("hf-mirror.com".into()));
+        fresh.set_phase_at(at(0), Some(Phase::Download));
         fresh.unit = Some(Unit::Bytes);
-        fresh.started = now - Duration::from_secs(60);
-        fresh.update(120 * MIB, 16_000 * MIB, None);
-        assert!(fresh.transfer_metrics_at(&apple, true, now).speed.is_none());
-        fresh.update(128 * MIB, 16_000 * MIB, None);
-        assert!(fresh.transfer_metrics_at(&apple, true, now).speed.is_some());
+        report(&mut fresh, &apple, at(60), 120 * MIB);
+        let waiting = fresh.transfer_metrics_at(&apple, true, at(60));
+        assert!(waiting.speed.is_none());
+        assert_eq!(waiting.eta, Some(TransferEta::Remaining("计算中".into())));
+        report(&mut fresh, &apple, at(64), 128 * MIB);
+        let timed = fresh.transfer_metrics_at(&apple, true, at(64));
+        assert!(timed.speed.is_some());
+        assert!(
+            matches!(&timed.eta, Some(TransferEta::Remaining(v)) if v == "2 小时 15 分"),
+            "{timed:?}"
+        );
     }
 
     #[test]

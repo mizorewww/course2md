@@ -553,6 +553,7 @@ impl CloudSpeech {
                     identity,
                     former: &[],
                     resend: crate::dispatch::Resend::AskUser,
+                    secrets: &[],
                 },
                 send,
                 |value| {
@@ -1476,6 +1477,8 @@ mod cloud_tests {
             unsupported_response_format: false,
             refused_parameter: None,
             repeats: false,
+            unusable: false,
+            detail: None,
             retry_authorized: None,
         };
         std::fs::write(&receipt_path, serde_json::to_vec(&receipt).unwrap()).unwrap();

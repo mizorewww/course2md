@@ -195,9 +195,10 @@ pub enum StageStatus {
 /// A stage's measurement: in full for the task details, or `compact` for a
 /// one-line card status, which leaves out supplementary context.
 ///
-/// AI counters describe dispatched batches, including requests still in flight.
-/// Only the worker's stage result can move these stages into completed history.
-/// A returned response is the live signal instead, without inventing a fraction.
+/// AI steps count the batches answered, with the time the rest will take; older
+/// engines counted batches sent, including requests still in flight, which
+/// measure nothing. Only the worker's stage result can move these stages into
+/// completed history.
 pub(crate) fn stage_progress(
     name: &Stage,
     done: bool,
@@ -206,10 +207,15 @@ pub(crate) fn stage_progress(
     compact: bool,
 ) -> (String, Option<f32>) {
     let total = stored.total;
-    // AI requests have no measurable fraction; their clock and the tokens sent
-    // and returned show them moving, and the tokens stay as the record once the
-    // task no longer runs (a saved record has no clock).
     if name.is_ai() {
+        if let Some(live) = live.filter(|_| !done)
+            && let Some(detail) = live.ai_detail(compact)
+        {
+            return (detail, live.fraction());
+        }
+        // Without a measured count, their clock and the tokens sent and returned
+        // show them moving, and the tokens stay as the record once the task no
+        // longer runs (a saved record has no clock).
         return (
             live.map(|live| live.live_counter())
                 .or_else(|| stored.tokens_label())
@@ -1895,6 +1901,7 @@ mod tests {
             completed: Some(1),
             total: Some(2),
             kind: Some(c2m_artifact::artifact::FailureKind::Authentication),
+            first_failure: None,
         };
         outcomes.exports.insert("md".into(), Outcome::succeeded());
         outcomes

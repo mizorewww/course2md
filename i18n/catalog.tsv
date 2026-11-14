@@ -154,12 +154,18 @@ stable 模式的画面稳定时间（秒）/ Seconds to wait for a stable frame	
 stderr 管道已配置	stderr 管道已配置	The stderr pipe is configured	stderr 管道已配置	stderr パイプが構成されています
 stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdout 管道已配置	stdout パイプが構成されています
 {} / {} 段	{} / {} 段	{} / {} segments	{} / {} 段	{} / {} セグメント
+{} / {} 批	{} / {} 批	{} / {} batches	{} / {} 批	{} / {} バッチ
 {} · 构建 {}	{} · 构建 {}	{} · Build {}	{} · 建置 {}	{} · ビルド {}
 {} 不支持「{}」，已改用 {}。	{} 不支持「{}」，已改用 {}。	{} does not support “{}”; switched to {}.	{} 不支援「{}」，已改用 {}。	{} は「{}」に対応していないため、{} に切り替えました。
 {} 个无法识别，已跳过	{} 个无法识别，已跳过	{} unrecognized, skipped	{} 個無法辨識，已跳過	{} 件は認識できなかったため、スキップしました
 {} 分 {} 秒	{} 分 {} 秒	{}m {}s	{} 分 {} 秒	{} 分 {} 秒
+{} 分钟	{} 分钟	{} min	{} 分鐘	{} 分
 {} 字节	{} 字节	{} bytes	{} 位元組	{}バイト
 {} 小时 {} 分	{} 小时 {} 分	{}h {}m	{} 小時 {} 分	{} 時間 {} 分
+{} 段中 {} 段保留原文	{} 段中 {} 段保留原文	Out of {} paragraphs, {} kept the original text	{} 段中 {} 段保留原文	{} 段落中 {} 段落は元のテキストのままです
+{} 段中 {} 段未翻译	{} 段中 {} 段未翻译	Out of {} paragraphs, {} were not translated	{} 段中 {} 段未翻譯	{} 段落中 {} 段落は翻訳されていません
+服务拒绝处理这部分内容：{}	服务拒绝处理这部分内容：{}	The service refused to process this part: {}	服務拒絕處理這部分內容：{}	サービスがこの部分の処理を拒否しました：{}
+服务拒绝处理这部分内容	服务拒绝处理这部分内容	The service refused to process this part	服務拒絕處理這部分內容	サービスがこの部分の処理を拒否しました
 {} 已准备完成	{} 已准备完成	{} is ready	{} 已準備完成	{} の準備ができました
 {} 张	{} 张	{} matched	{} 張	{} 枚
 {} 张截图 / {} 段文字	{} 张截图 / {} 段文字	Screenshots: {} / text paragraphs: {}	{} 張截圖 / {} 段文字	スクリーンショット {} 枚 / テキスト {} 段落
@@ -189,6 +195,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {}需要是有效的非负数	{}需要是有效的非负数	{} needs to be a valid non-negative number	{}需要是有效的非負數	{}は有効な非負の数値である必要があります
 {}（具体内容未记录）	{}（具体内容未记录）	{} (specific content not recorded)	{}（具體內容未記錄）	{}（詳細は記録されていません）
 {}（自动选择）	{}（自动选择）	{} (automatic)	{}（自動選擇）	{}（自動）
+{}（服务说明：{}）	{}（服务说明：{}）	{} (the service said: {})	{}（服務說明：{}）	{}（サービスの説明：{}）
 {}，{}	{}，{}	{}, {}	{}，{}	{}、{}
 {}：{}	{}：{}	{}: {}	{}：{}	{}:{}
 {}：{}{}	{}：{}{}	{}: {}{}	{}：{}{}	{}：{}{}

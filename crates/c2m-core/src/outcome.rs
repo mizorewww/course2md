@@ -37,6 +37,26 @@ pub struct Outcome {
     pub total: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<FailureKind>,
+    /// For a step in batches that finished only some: where its first
+    /// unfinished part is, and what the service said about it, so a reader
+    /// words them in its own language instead of parsing `message`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_failure: Option<FirstFailure>,
+}
+
+/// The first unfinished part of a step in batches.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FirstFailure {
+    /// "12:30–12:41": where in the video it is.
+    pub range: String,
+    /// What the service said, when it said anything.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// The service refused that part as it is (its content), while it accepted
+    /// the rest.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub refused: bool,
 }
 
 impl Default for Outcome {
@@ -53,6 +73,7 @@ impl Outcome {
             completed: None,
             total: None,
             kind: None,
+            first_failure: None,
         }
     }
     pub fn not_requested() -> Self {
@@ -356,6 +377,13 @@ pub struct Failure {
     /// The answer was unusable in a way the same request would only repeat
     /// ([`Repeats`]); the caller has to ask differently.
     pub repeats: bool,
+    /// What the service said about a refused or failed request, as its receipt
+    /// keeps it ([`crate::outcome`] callers word the cause from it).
+    pub detail: Option<String>,
+    /// The service answered, but the answer did not fit what was asked (a
+    /// paragraph missing or out of place, no readable structure). Asking for
+    /// less at once may get a usable one.
+    pub unusable: bool,
     pub kind: FailureKind,
     /// The wait the service asked for before another attempt, if it named one.
     pub retry_after: Option<std::time::Duration>,
@@ -379,6 +407,8 @@ impl Failure {
             unsupported_response_format: false,
             refused_parameter: None,
             repeats: false,
+            detail: None,
+            unusable: false,
             kind: FailureKind::Local,
             retry_after: None,
         }

@@ -838,6 +838,9 @@ impl Task<'_> {
                 || (translation_target.is_some() && improved(Component::Translation)));
         let translation_redone = has(Component::Translation) && improved(Component::Translation);
         let summary_redone = has(Component::Summary) && improved(Component::Summary);
+        // Why this run's parts ended as they did, before a part that finished
+        // nothing more falls back to the note's own record.
+        let this_run = outcomes.clone();
         if has(Component::Proofreading) && !text_redone {
             document.sections = before_ai.0;
             outcomes.proofreading = base.outcomes.proofreading.clone();
@@ -860,8 +863,58 @@ impl Task<'_> {
             }
             let unfinished = redone
                 .iter()
-                .map(|&component| part(&outcomes, component))
+                .map(|&component| part(&this_run, component))
                 .find(|outcome| outcome.status != Status::Succeeded);
+            // A retry of a partial note's unfinished parts that finished nothing
+            // more leaves the note as it was: still partial, for the same reasons,
+            // with the same retry. It reports that note, unchanged, instead of an
+            // error. A request left without a known result still stops the task
+            // for the person's decision.
+            if base.partial
+                && !job.control.has_unresolved()
+                && unfinished
+                    .as_ref()
+                    .is_none_or(|outcome| outcome.kind != Some(artifact::FailureKind::Uncertain))
+            {
+                tracing::warn!(
+                    "补做没有完成更多内容，笔记未改动 / Nothing more was finished; the note is unchanged"
+                );
+                // The note's record, with each part retried now saying why it is
+                // still unfinished this time (a rejected key, a rate limit).
+                // Only the cause is this run's: the note's status and counts are
+                // what it holds, even when this run could not read back answers
+                // it had and finished none.
+                let mut reported = base.outcomes.clone();
+                for &component in &redone {
+                    let now = part(&this_run, component);
+                    let note = match component {
+                        Component::Proofreading => &mut reported.proofreading,
+                        Component::Translation => &mut reported.translation,
+                        _ => &mut reported.summary,
+                    };
+                    if now.status != Status::Succeeded
+                        && now.status != Status::NotRequested
+                        && note.status != Status::Succeeded
+                    {
+                        note.kind = now.kind;
+                        note.first_failure = now.first_failure;
+                        note.message = retried_cause(note.message.as_deref(), now.message);
+                    }
+                }
+                progress::emit(&progress::Event::Done(Box::new(progress::Done {
+                    task_id: request.task_id.clone(),
+                    course_id: base.course_id.clone(),
+                    out_dir: base_dir.to_path_buf(),
+                    manifest: Some(base_dir.join("manifest.json")),
+                    title: base.title.clone(),
+                    slides: base.frames.len(),
+                    outputs: base.outputs.iter().map(PathBuf::from).collect(),
+                    partial: Some(true),
+                    outcomes: Some(reported),
+                    ..done_counts(&document.sections, self.started)
+                })));
+                return Ok(());
+            }
             let message = unfinished
                 .as_ref()
                 .and_then(|outcome| outcome.message.clone())
@@ -1024,10 +1077,15 @@ impl Task<'_> {
             identity["source_id"].as_str() == Some(request.source_id.as_str()),
             tr!("旧进度与此视频来源不符 / Prior work belongs to another source")
         );
+        // The note's own task, or a repair of that note that left it as it was:
+        // its receipts hold what the note's task paid for, and what it added.
+        let repair_of_base = identity["operation"]["kind"] == "reprocess"
+            && identity["operation"]["base_version_id"].as_str() == Some(base.task_id.as_str());
         anyhow::ensure!(
-            identity["task_id"]
-                .as_str()
-                .is_none_or(|id| id == base.task_id),
+            repair_of_base
+                || identity["task_id"]
+                    .as_str()
+                    .is_none_or(|id| id == base.task_id),
             tr!("旧进度与原笔记任务不符 / Prior work belongs to another task")
         );
         let ledger_dir = job.dir.join("requests");
@@ -1565,6 +1623,27 @@ fn cached_transcript(cache_path: &Path) -> Result<Option<TranscriptCache>> {
 
 /// A batch report's message: nothing when every batch worked, else `base` and the
 /// first error.
+/// The record of a part a retry left unfinished: the note's own words for what
+/// is unfinished (its counts), with this run's first error, when it names one;
+/// this run's words otherwise.
+fn retried_cause(note: Option<&str>, now: Option<String>) -> Option<String> {
+    let separator = tr!("{}；首个错误：{}", "", "");
+    let first_error = now
+        .as_deref()
+        .and_then(|now| now.split_once(separator.as_str()))
+        .map(|(_, first)| first.to_owned());
+    match (note, first_error) {
+        (Some(note), Some(first)) => {
+            let head = note
+                .split_once(separator.as_str())
+                .map_or(note, |(head, _)| head);
+            Some(tr!("{}；首个错误：{}", head, first))
+        }
+        (note, None) => now.or(note.map(str::to_owned)),
+        (None, Some(_)) => now,
+    }
+}
+
 fn report_message(base: String, report: &crate::llm::PolishReport) -> Option<String> {
     (report.failed > 0).then(|| match &report.note {
         Some(note) => tr!("{}；首个错误：{}", base, note),
@@ -1573,16 +1652,34 @@ fn report_message(base: String, report: &crate::llm::PolishReport) -> Option<Str
 }
 
 /// Map a polish run onto the version outcome.
+///
+/// Its kind is the first unfinished part's, so the desktop words the cause in
+/// its own language. A part the service refused while the rest was accepted is
+/// about that part's text, not the key, model or settings, which work: it names
+/// no kind that would send the person to repair the service.
 fn outcome_from_report(report: &crate::llm::PolishReport) -> Outcome {
+    let status = if report.failed == 0 {
+        Status::Succeeded
+    } else if report.succeeded > 0 {
+        Status::Partial
+    } else {
+        Status::Failed
+    };
+    let kind = report
+        .kind
+        .filter(|_| status != Status::Succeeded)
+        .filter(|kind| {
+            status == Status::Failed
+                || !matches!(
+                    kind,
+                    artifact::FailureKind::Authentication
+                        | artifact::FailureKind::Model
+                        | artifact::FailureKind::Parameters
+                )
+        });
     Outcome {
-        kind: None,
-        status: if report.failed == 0 {
-            Status::Succeeded
-        } else if report.succeeded > 0 {
-            Status::Partial
-        } else {
-            Status::Failed
-        },
+        kind,
+        status,
         message: report_message(
             tr!(
                 "校对未全部完成（{}/{} 失败），原文已保留",
@@ -1593,6 +1690,7 @@ fn outcome_from_report(report: &crate::llm::PolishReport) -> Outcome {
         ),
         completed: Some(report.succeeded),
         total: Some(report.attempted),
+        first_failure: report.first_failure.clone().filter(|_| report.failed > 0),
     }
 }
 
@@ -1658,6 +1756,8 @@ mod tests {
             unsupported_response_format: false,
             refused_parameter: None,
             repeats: false,
+            unusable: false,
+            detail: None,
             retry_authorized: None,
         };
         let current = "version-2".to_string();
@@ -1898,6 +1998,29 @@ mod tests {
         let msg = outcome.message.unwrap();
         assert!(msg.contains("137/200"), "应包含失败计数: {msg}");
         assert!(msg.contains("HTTP 404"), "应包含首个错误原因: {msg}");
+
+        // The kind is the first unfinished part's; a refusal of one part while the
+        // rest was accepted does not say the settings are wrong.
+        use crate::artifact::FailureKind;
+        let with = |succeeded, kind| {
+            super::outcome_from_report(&crate::llm::PolishReport {
+                attempted: 165,
+                succeeded,
+                failed: 165 - succeeded,
+                kind: Some(kind),
+                ..Default::default()
+            })
+            .kind
+        };
+        assert_eq!(
+            with(164, FailureKind::RateLimit),
+            Some(FailureKind::RateLimit)
+        );
+        assert_eq!(with(164, FailureKind::Parameters), None);
+        assert_eq!(
+            with(0, FailureKind::Authentication),
+            Some(FailureKind::Authentication)
+        );
 
         let clean = crate::llm::PolishReport {
             attempted: 3,

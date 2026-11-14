@@ -938,6 +938,19 @@ impl State {
     pub fn task(&self, id: &str) -> Option<&TaskRecord> {
         self.tasks.iter().find(|t| t.id == id)
     }
+    /// The task that speaks for the note task `id` published: `id` itself, or the
+    /// repair that took it over and left the note as it was, so its state and its
+    /// retry are the ones the note shows.
+    pub fn note_task(&self, id: &str) -> Option<&TaskRecord> {
+        let mut task = self.task(id)?;
+        for _ in 0..self.tasks.len() {
+            match task.handled_by.as_deref().and_then(|next| self.task(next)) {
+                Some(next) => task = next,
+                None => break,
+            }
+        }
+        Some(task)
+    }
     pub fn task_mut(&mut self, id: &str) -> Option<&mut TaskRecord> {
         self.tasks.iter_mut().find(|t| t.id == id)
     }
@@ -1359,9 +1372,15 @@ impl State {
             c2m_i18n::tr!("笔记来源与任务不匹配")
         );
         // A repair redoes what this task's note lacks; a note another task has
-        // replaced since lacks other things.
+        // replaced since lacks other things. A repair that finished nothing more
+        // left its base's note as it was, which is still the note it works on.
+        let unchanged_base = matches!(
+            &original.plan.operation,
+            c2m_engine::execution::Operation::Reprocess { base_task_id, .. }
+                if *base_task_id == manifest.task_id
+        );
         ensure!(
-            manifest.task_id == original.note_owner(),
+            manifest.task_id == original.note_owner() || unchanged_base,
             c2m_i18n::tr!("这份笔记已被之后的任务更新，请从最新的任务补做")
         );
         if !resend.is_empty() {
@@ -1445,13 +1464,21 @@ impl State {
         let resend_services = (!resend.is_empty())
             .then(|| original.ran_with.clone())
             .flatten();
+        // A repair works from what the note's own task paid for; a retry that
+        // left that note as it was is not its task.
+        let prior_work_dir = if manifest.task_id == original.note_owner() {
+            original.work_dir
+        } else {
+            self.task(&manifest.task_id)
+                .map_or(original.work_dir, |owner| owner.work_dir.clone())
+        };
         let mut plan = original.plan;
         plan.repair = Some(RepairScope { translate, formats });
         plan.operation = c2m_engine::execution::Operation::Reprocess {
             note_dir: base,
             base_task_id: manifest.task_id.clone(),
             components,
-            prior_work_dir: Some(original.work_dir),
+            prior_work_dir: Some(prior_work_dir),
         };
         let (next, created) = self.enqueue(plan, Some(id.to_owned()))?;
         if created && let Some(task) = self.task_mut(&next) {
@@ -1830,6 +1857,12 @@ enum ArtifactFact {
         base: PathBuf,
         outcomes: BTreeMap<String, c2m_artifact::artifact::Outcome>,
     },
+    /// A repair an older app ended in an error when it finished nothing more:
+    /// its base's note is still there, as partial as it was.
+    Unchanged {
+        note: PathBuf,
+        outcomes: Box<c2m_artifact::artifact::Outcomes>,
+    },
 }
 
 /// The task the note in `note` is the result of, read without checking its files.
@@ -1850,8 +1883,9 @@ fn probe_artifact(task: &TaskRecord, location: &LibraryLocation) -> Result<Artif
     let note = task_note(task, location);
     if task.artifact.is_some() && !task.exports_only() {
         // Finished: only whose note it is now is read, never hashed.
+        // A repair that left its base's note as it was keeps it as its result.
         return Ok(match note_task(&note) {
-            Some(owner) if owner == task.id => {
+            Some(owner) if owner == task.id || repairs_unchanged(task, &owner) => {
                 if task.artifact.as_ref() == Some(&note) {
                     ArtifactFact::Nothing
                 } else {
@@ -1921,6 +1955,32 @@ fn probe_artifact(task: &TaskRecord, location: &LibraryLocation) -> Result<Artif
                 outcomes: record.outcomes,
             });
         }
+        // A repair that finished nothing more ended in an error before this
+        // version, waiting for the person with the engine's message; it now ends
+        // partial with the note it left as it was, and its retry is the note's.
+        // Only that error: one that names the note's own unfinished part (what
+        // such an engine reported) or says nothing more was finished. A repair
+        // that failed for its own reason (a download, the disk, a crash) keeps
+        // its error, and one with a request left without a known result in its
+        // ledger waits for the person.
+        if !task.exports_only()
+            && task.artifact.is_none()
+            && task.state == TaskState::NeedsAttention
+            && note_task(&note).as_ref() == Some(base_task_id)
+            && let Some(manifest) = c2m_artifact::artifact::note_manifest(&note)?
+                .filter(|manifest| manifest.partial && manifest.source_id == task.plan.source_id)
+            && task
+                .events
+                .error
+                .as_deref()
+                .is_some_and(|error| finished_nothing_more(error, &manifest.outcomes))
+            && !ledger_unresolved(task)?
+        {
+            return Ok(ArtifactFact::Unchanged {
+                note,
+                outcomes: Box::new(manifest.outcomes),
+            });
+        }
         // Exports an older app wrote beside a version, now in the flat note.
         if task
             .artifact
@@ -1960,6 +2020,18 @@ fn apply_artifact(task: &mut TaskRecord, fact: ArtifactFact) {
             task.unread = true;
         }
         ArtifactFact::Moved { note } => task.artifact = Some(note),
+        // Not for a task that has a request to decide about, or that ran meanwhile.
+        ArtifactFact::Unchanged { note, outcomes }
+            if task.state == TaskState::NeedsAttention
+                && task.artifact.is_none()
+                && !task.has_uncertain() =>
+        {
+            task.artifact = Some(note);
+            task.events.outcomes = Some(*outcomes);
+            task.state = TaskState::Partial;
+            task.events.error = None;
+        }
+        ArtifactFact::Unchanged { .. } => {}
         ArtifactFact::Replaced { by } => {
             task.replaced_by = Some(by);
             task.artifact = None;
@@ -2000,6 +2072,48 @@ fn output_format(key: &str) -> Option<c2m_config::config::OutputFormat> {
 type ReceiptFacts = (Vec<BlockedRequest>, BTreeSet<String>, BTreeSet<String>);
 
 /// Requests whose result is unknown, read from the task's receipts.
+/// Whether `task` is a repair of the note task `owner` published: a note that
+/// names `owner` is one the repair left as it was, and still its result.
+fn repairs_unchanged(task: &TaskRecord, owner: &str) -> bool {
+    !task.exports_only()
+        && matches!(
+            &task.plan.operation,
+            c2m_engine::execution::Operation::Reprocess { base_task_id, .. }
+                if base_task_id == owner
+        )
+}
+
+/// Whether `error` is what an engine before this version ended a repair with
+/// when it finished nothing more: the message of the note's own unfinished AI
+/// part, or that nothing more was finished.
+fn finished_nothing_more(error: &str, outcomes: &c2m_artifact::artifact::Outcomes) -> bool {
+    let error = error.trim();
+    error.starts_with("补做没有完成更多内容")
+        || error.starts_with("Nothing more was finished")
+        || [
+            &outcomes.proofreading,
+            &outcomes.translation,
+            &outcomes.summary,
+        ]
+        .into_iter()
+        .filter(|outcome| failed_outcome(outcome))
+        .filter_map(|outcome| outcome.message.as_deref())
+        .any(|message| message.trim() == error)
+}
+
+/// Whether the task's ledger holds a request without a known result (sent and
+/// unconfirmed, or uncertain), whether or not its events reported it.
+fn ledger_unresolved(task: &TaskRecord) -> Result<bool> {
+    Ok(c2m_dispatch::dispatch::receipts(&task.work_dir)?
+        .iter()
+        .any(|receipt| {
+            matches!(
+                receipt.state,
+                c2m_dispatch::dispatch::State::Sending | c2m_dispatch::dispatch::State::Uncertain
+            )
+        }))
+}
+
 fn uncertain_requests(task: &TaskRecord) -> Result<ReceiptFacts> {
     let receipts = c2m_dispatch::dispatch::receipts(&task.work_dir)?;
     let attempted = receipts
@@ -2282,7 +2396,9 @@ fn reconcile_task(task: &TaskRecord, location: &LibraryLocation) -> Result<TaskF
                 .ok()
                 .flatten()
         })
-        .filter(|manifest| manifest.task_id == task.id)
+        .filter(|manifest| {
+            manifest.task_id == task.id || repairs_unchanged(task, &manifest.task_id)
+        })
         .map(|manifest| Box::new(manifest.outcomes));
     // Catches up on writes made while disconnected. A failure here says nothing about
     // the receipts just read, so it must not turn an uncertain task into a failed one.
@@ -3533,6 +3649,7 @@ mod tests {
             phase: None,
             unit: None,
             found: None,
+            replayed: None,
         };
         ws.state.apply_task_event(&id, &counted);
         assert_eq!(ws.state.revision, revision);
@@ -4320,6 +4437,8 @@ mod tests {
             unsupported_response_format: false,
             refused_parameter: None,
             repeats: false,
+            unusable: false,
+            detail: None,
             retry_authorized: None,
         };
         std::fs::create_dir_all(task.work_dir.join("requests")).unwrap();
@@ -4636,6 +4755,8 @@ mod tests {
             unsupported_response_format: false,
             refused_parameter: None,
             repeats: false,
+            unusable: false,
+            detail: None,
             retry_authorized: None,
         };
         std::fs::create_dir_all(task.work_dir.join("requests")).unwrap();
@@ -4715,6 +4836,8 @@ mod tests {
             unsupported_response_format: false,
             refused_parameter: None,
             repeats: false,
+            unusable: false,
+            detail: None,
             retry_authorized: None,
         };
         std::fs::create_dir_all(task.work_dir.join("requests")).unwrap();
@@ -5078,6 +5201,8 @@ mod tests {
                 unsupported_response_format: false,
                 refused_parameter: None,
                 repeats: false,
+                unusable: false,
+                detail: None,
                 retry_authorized: None,
             };
             std::fs::write(
@@ -6117,5 +6242,174 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("之后的任务"), "{error:#}");
         assert_eq!(ws.state.tasks.len(), 1);
+    }
+
+    /// The record an alpha.8 app left when "Retry unfinished proofreading"
+    /// finished nothing new: the retry waits for the person with the engine's
+    /// message and no note of its own, its note unchanged. Opened now, it is the
+    /// partial result it is, with the note's reasons, and retrying it again plans
+    /// from the note's own task.
+    #[test]
+    fn a_retry_an_older_app_ended_in_an_error_opens_partial_and_retries() {
+        let (dir, id, retry, note, outcomes) = alpha8_retry("校对未完成", |_| {});
+        let reopened = reopen(dir.path());
+        let task = reopened.state.task(&retry).unwrap();
+        assert_eq!(task.state, TaskState::Partial);
+        assert_eq!(task.artifact.as_ref(), Some(&note));
+        assert_eq!(task.events.error, None);
+        assert_eq!(task.events.outcomes.as_ref(), Some(&outcomes));
+        assert_eq!(reopened.state.note_task(&id).unwrap().id, retry);
+        // A second opening's checks keep it the note's result: the note names
+        // its base, which is the note it left as it was.
+        reopened.save().unwrap();
+        drop(reopened);
+        let mut reopened = reopen(dir.path());
+        let task = reopened.state.task(&retry).unwrap();
+        assert_eq!(task.state, TaskState::Partial);
+        assert_eq!(task.artifact.as_ref(), Some(&note));
+        assert_eq!(task.replaced_by, None);
+        // Its retry plans from the note's own task, whose receipts the engine takes.
+        let again = reopened
+            .state
+            .reprocess(&retry, vec![Component::Proofreading], vec![])
+            .unwrap();
+        let base_work = reopened.state.task(&id).unwrap().work_dir.clone();
+        match &reopened.state.task(&again).unwrap().plan.operation {
+            c2m_engine::execution::Operation::Reprocess {
+                base_task_id,
+                prior_work_dir,
+                ..
+            } => {
+                assert_eq!(base_task_id, &id);
+                assert_eq!(prior_work_dir.as_ref(), Some(&base_work));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// A repair of a partial note that failed for its own reason keeps its
+    /// error: it is not one that finished nothing more.
+    #[test]
+    fn a_repair_that_failed_for_its_own_reason_keeps_its_error() {
+        let error = "读取视频画面失败 / Frame sampling failed";
+        let (dir, _, retry, _, _) = alpha8_retry(error, |_| {});
+        let reopened = reopen(dir.path());
+        let task = reopened.state.task(&retry).unwrap();
+        assert_eq!(task.state, TaskState::NeedsAttention);
+        assert_eq!(task.events.error.as_deref(), Some(error));
+        assert!(task.artifact.is_none());
+    }
+
+    /// A request without a known result in the repair's ledger, even one its
+    /// events never reported, leaves the decision to the person.
+    #[test]
+    fn an_unconfirmed_request_in_the_ledger_keeps_the_repair_waiting() {
+        let (dir, _, retry, _, _) = alpha8_retry("校对未完成", |task| {
+            write_unknown(task, 1);
+        });
+        let reopened = reopen(dir.path());
+        let task = reopened.state.task(&retry).unwrap();
+        assert_ne!(task.state, TaskState::Partial);
+        assert!(task.artifact.is_none());
+    }
+
+    /// A workspace saved by an alpha.8 app after "Retry unfinished proofreading"
+    /// finished nothing new: the note's task is partial and handled by the retry,
+    /// which waits for the person with `error` and no note of its own. `edit`
+    /// adjusts the retry's files before saving. Returns the folder, the note's
+    /// task, the retry, the note and its outcomes.
+    fn alpha8_retry(
+        error: &str,
+        edit: impl FnOnce(&TaskRecord),
+    ) -> (
+        tempfile::TempDir,
+        String,
+        String,
+        PathBuf,
+        c2m_artifact::artifact::Outcomes,
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
+        let note = publish_note(&ws.state, &id, true);
+        let outcomes = c2m_artifact::artifact::note_manifest(&note)
+            .unwrap()
+            .unwrap()
+            .outcomes;
+        let original = ws.state.task_mut(&id).unwrap();
+        original.state = TaskState::Partial;
+        original.artifact = Some(note.clone());
+        original.events.outcomes = Some(outcomes.clone());
+        let retry = ws
+            .state
+            .reprocess(&id, vec![Component::Proofreading], vec![])
+            .unwrap();
+        let alpha8 = ws.state.task_mut(&retry).unwrap();
+        alpha8.state = TaskState::NeedsAttention;
+        alpha8.events.error = Some(error.into());
+        assert!(alpha8.artifact.is_none());
+        edit(ws.state.task(&retry).unwrap());
+        ws.save().unwrap();
+        (dir, id, retry, note, outcomes)
+    }
+
+    /// Opens the workspace in `dir` and applies its startup checks.
+    fn reopen(dir: &Path) -> Workspace {
+        let mut reopened =
+            Workspace::open_at(dir.join("workspace.json"), dir.join("library")).unwrap();
+        let reconciliation = reopened.reconciliation().unwrap();
+        reopened.apply_reconciliation(reconciliation.run()).unwrap();
+        reopened
+    }
+
+    /// A retry that finished nothing more left the note as its base published it.
+    /// The note speaks through that retry, which can be retried again.
+    #[test]
+    fn a_repair_that_left_the_note_as_it_was_can_be_retried_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
+        let note = publish_note(&ws.state, &id, true);
+        let outcomes = c2m_artifact::artifact::note_manifest(&note)
+            .unwrap()
+            .unwrap()
+            .outcomes;
+        let original = ws.state.task_mut(&id).unwrap();
+        original.state = TaskState::Partial;
+        original.artifact = Some(note.clone());
+        original.events.outcomes = Some(outcomes.clone());
+        let retry = ws
+            .state
+            .reprocess(&id, vec![Component::Proofreading], vec![])
+            .unwrap();
+        assert_ne!(retry, id);
+        // The retry reported the unchanged, still partial note of its base.
+        let task = ws.state.task_mut(&retry).unwrap();
+        task.state = TaskState::Partial;
+        task.artifact = Some(note.clone());
+        task.events.outcomes = Some(outcomes);
+        assert_eq!(ws.state.note_task(&id).unwrap().id, retry);
+        let again = ws
+            .state
+            .reprocess(&retry, vec![Component::Proofreading], vec![])
+            .unwrap();
+        assert_ne!(again, retry);
+        assert_eq!(ws.state.note_task(&id).unwrap().id, again);
+        // It works from what the note's own task paid for, which the engine
+        // checks belongs to that note.
+        let base_work = ws.state.task(&id).unwrap().work_dir.clone();
+        match &ws.state.task(&again).unwrap().plan.operation {
+            c2m_engine::execution::Operation::Reprocess {
+                base_task_id,
+                prior_work_dir,
+                ..
+            } => {
+                assert_eq!(base_task_id, &id);
+                assert_eq!(prior_work_dir.as_ref(), Some(&base_work));
+            }
+            other => panic!("{other:?}"),
+        }
     }
 }

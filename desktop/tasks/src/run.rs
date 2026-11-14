@@ -1523,6 +1523,56 @@ mod tests {
         assert_eq!(events.kept_edits, kept);
         assert!(kept_edits_notice(&[]).is_none());
     }
+    /// A retry of a partial note's unfinished part that finished nothing more
+    /// reports that note unchanged: the retry ends partial, for the note's own
+    /// reasons, not waiting for the person with the engine's message.
+    #[test]
+    fn a_retry_that_finished_nothing_more_stays_partial() {
+        let (_root, mut workspace, id) = queued_task();
+        let state = &mut workspace.state;
+        let note = state
+            .library(&state.default_library)
+            .unwrap()
+            .root
+            .join("course");
+        let outcomes = serde_json::json!({
+            "transcript": {"status": "succeeded"},
+            "proofreading": {
+                "status": "partial", "completed": 36, "total": 37,
+                "message": "校对未全部完成（1/37 失败），原文已保留；首个错误：11:33–12:05：服务拒绝了请求参数（HTTP 400），请检查此任务使用的模型与服务设置。（服务说明：Content Exists Risk）"
+            },
+        });
+        let manifest: Manifest = serde_json::from_value(serde_json::json!({
+            "schema": 2, "task_id": "base-task", "course_id": "course", "source_id": "source",
+            "title": "课程", "created_at_ms": 1, "document": "document.json",
+            "markdown": "course.md", "frames": [], "assets": [], "outputs": [],
+            "outcomes": outcomes, "partial": true,
+        }))
+        .unwrap();
+        let done = Done {
+            task_id: id.clone(),
+            out_dir: note.clone(),
+            partial: Some(true),
+            outcomes: Some(manifest.outcomes.clone()),
+            ..Default::default()
+        };
+        let task =
+            record_finish(state, &id, Some(&done), Some(&manifest), true, true, false).unwrap();
+        assert_eq!(task.state, TaskState::Partial);
+        assert_eq!(task.artifact.as_ref(), Some(&note));
+        assert_eq!(task.events.error, None);
+        assert_eq!(
+            task_view::task_reasons(&task),
+            [
+                "校对未完成：37 段中 1 段保留原文；首个错误：11:33–12:05：服务拒绝处理这部分内容：Content Exists Risk"
+            ]
+        );
+        assert_eq!(
+            task_view::task_retry_label(&task, "proofreading"),
+            "重试未完成的校对部分"
+        );
+    }
+
     /// A task that replaces a note leaves the task whose note it was replaced, at
     /// once, as the next opening would; one that left the note as it was does not.
     #[test]
