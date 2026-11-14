@@ -317,14 +317,16 @@ fn service_detail(value: Option<&Value>, body: &[u8], secrets: &[&str]) -> Optio
     (!detail.is_empty()).then_some(detail)
 }
 
-/// `text` with every word that could be a credential replaced by `***`: a run of
-/// 20 or more letters, digits, `-` or `_` mixing letters and digits, or one
-/// starting `sk-`.
+/// `text` with every word that could be a credential replaced by `***`: one
+/// starting `sk-`, or a run of 20 or more letters, digits and `_` mixing letters
+/// and digits. A run with hyphens is words joined, as model names are
+/// (`gpt-4o-mini-2024-07-18`), and is kept.
 fn redact_secrets(text: &str) -> String {
     let secret = |word: &str| {
         let letters = word.chars().any(|c| c.is_ascii_alphabetic());
         let digits = word.chars().any(|c| c.is_ascii_digit());
-        (word.len() >= 20 && letters && digits) || (word.starts_with("sk-") && word.len() > 6)
+        (word.starts_with("sk-") && word.len() > 6)
+            || (word.len() >= 20 && letters && digits && !word.contains('-'))
     };
     let mut out = String::with_capacity(text.len());
     let mut word = String::new();
@@ -1443,6 +1445,12 @@ mod tests {
         assert!(
             echoed.starts_with("Incorrect API key provided: ***."),
             "{echoed}"
+        );
+        // A model name is not a credential.
+        assert_eq!(
+            said(r#"{"error":{"message":"The model gpt-4o-mini-2024-07-18 is overloaded"}}"#)
+                .as_deref(),
+            Some("The model gpt-4o-mini-2024-07-18 is overloaded")
         );
         // A gateway's HTML page and an empty body say nothing.
         assert_eq!(said("<html><body>502 Bad Gateway</body></html>"), None);
