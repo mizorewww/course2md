@@ -146,16 +146,31 @@ const MAX_ATTEMPTS: u32 = 3;
 /// The most sends `retry_attempts` may ask for.
 const MAX_RETRY_ATTEMPTS: u32 = 8;
 
+/// The first wait after a service said it is busy (429, 5xx). A rate limit
+/// usually clears within a minute, which waits of 1 s, 2 s and 4 s used up in seconds.
+const BUSY_BASE: Duration = if cfg!(test) {
+    Duration::from_millis(20)
+} else {
+    Duration::from_secs(4)
+};
+/// The most sends for a request refused only for now (429, 503): it was not
+/// processed, so the wait for a rate limit to clear may take more tries.
+const BUSY_ATTEMPTS: u32 = 6;
+
 /// How a failed AI request is retried. With automatic retries on: the configured
-/// number of sends, waiting 1 s, 2 s, 4 s… up to 30 s, plus jitter. Off: the
-/// requests that provably cost nothing more (never sent, rate limited) as before.
+/// number of sends, waiting 1 s, 2 s, 4 s… up to 60 s, plus jitter; after the
+/// service said it is busy 4 s, 8 s, 16 s…, and up to [`BUSY_ATTEMPTS`] sends for
+/// a rate limit, about two minutes in all. Off: the requests that provably cost
+/// nothing more (never sent, rate limited) as before.
 fn retry_policy(s: &LlmSettings) -> crate::pool::RetryPolicy {
     if s.auto_retry {
         crate::pool::RetryPolicy {
             max_attempts: s.retry_attempts.clamp(1, MAX_RETRY_ATTEMPTS),
             base: Duration::from_secs(1),
-            cap: Duration::from_secs(30),
+            cap: Duration::from_secs(60),
             follows_service: true,
+            busy_base: BUSY_BASE,
+            busy_attempts: BUSY_ATTEMPTS,
         }
     } else {
         crate::pool::RetryPolicy {

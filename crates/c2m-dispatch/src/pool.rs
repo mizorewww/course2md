@@ -17,6 +17,14 @@ pub struct RetryPolicy {
     /// [`RETRY_AFTER_LIMIT`]) and send again after a 408. Off, only the backoff
     /// counts and a 408 ends the retries, as before either existed.
     pub follows_service: bool,
+    /// The first wait after the service said it is busy (HTTP 429 or a server
+    /// error), doubling from there up to `cap`: a rate limit or an overloaded
+    /// gateway takes longer to clear than a dropped connection.
+    pub busy_base: Duration,
+    /// The most sends for a request the service refused only for now (HTTP 429
+    /// or 503), when more than `max_attempts`: it was not processed, so another
+    /// try costs nothing but time.
+    pub busy_attempts: u32,
 }
 
 /// The random part of every wait.
@@ -33,20 +41,37 @@ impl RetryPolicy {
         base: Duration::from_secs(1),
         cap: Duration::from_secs(64),
         follows_service: false,
+        busy_base: Duration::from_secs(1),
+        busy_attempts: 0,
     };
 
     /// The wait after the `attempt`-th failure, with `jitter` in `0.0..1.0` of [`JITTER`].
     pub fn delay(&self, attempt: u32, jitter: f64) -> Duration {
-        let doubled = self
-            .base
-            .saturating_mul(1 << attempt.saturating_sub(1).min(16));
+        self.delay_from(self.base, attempt, jitter)
+    }
+
+    fn delay_from(&self, base: Duration, attempt: u32, jitter: f64) -> Duration {
+        let doubled = base.saturating_mul(1 << attempt.saturating_sub(1).min(16));
         doubled.min(self.cap) + JITTER.mul_f64(jitter.clamp(0.0, 1.0))
+    }
+
+    /// How many sends `failure` may have in all.
+    pub fn attempts_for(&self, failure: &Failure) -> u32 {
+        if matches!(failure.status, Some(429 | 503)) {
+            self.max_attempts.max(self.busy_attempts)
+        } else {
+            self.max_attempts
+        }
     }
 
     /// The wait before sending again after `failure`, or None when the service
     /// asked for longer than [`RETRY_AFTER_LIMIT`].
     pub fn wait_after(&self, attempt: u32, failure: &Failure, jitter: f64) -> Option<Duration> {
-        let backoff = self.delay(attempt, jitter);
+        let busy = failure
+            .status
+            .is_some_and(|status| status == 429 || (500..600).contains(&status));
+        let base = if busy { self.busy_base } else { self.base };
+        let backoff = self.delay_from(base, attempt, jitter);
         if !self.follows_service {
             return (failure.status != Some(408)).then_some(backoff);
         }
@@ -102,7 +127,8 @@ pub fn retry_with<T>(
             Ok(value) => return Ok(value),
             Err(failure) => failure,
         };
-        let wait = (failure.retryable && attempt < policy.max_attempts)
+        let attempts = policy.attempts_for(&failure);
+        let wait = (failure.retryable && attempt < attempts)
             .then(|| policy.wait_after(attempt, &failure, random_fraction()))
             .flatten();
         let Some(wait) = wait else {
@@ -110,7 +136,7 @@ pub fn retry_with<T>(
         };
         tracing::warn!(
             attempt,
-            of = policy.max_attempts,
+            of = attempts,
             ?wait,
             "请求失败，稍后重试 / Request failed; retrying shortly: {}",
             failure.message
@@ -203,6 +229,7 @@ mod tests {
             base: Duration::from_secs(2),
             cap: Duration::from_secs(10),
             follows_service: true,
+            ..RetryPolicy::DEFAULT
         };
         let waits: Vec<_> = (1..=5).map(|n| policy.delay(n, 0.0).as_secs()).collect();
         assert_eq!(waits, [2, 4, 8, 10, 10]);
@@ -254,6 +281,7 @@ mod tests {
             base: Duration::ZERO,
             cap: Duration::ZERO,
             follows_service: true,
+            ..RetryPolicy::DEFAULT
         };
         let calls = std::cell::Cell::new(0);
         let rejected = retry_with(&control, &policy, || -> std::result::Result<(), _> {
@@ -279,6 +307,39 @@ mod tests {
             }
         });
         assert_eq!(recovered.unwrap(), 2);
+    }
+
+    #[test]
+    fn a_busy_service_is_given_longer_and_a_rate_limit_more_tries() {
+        let policy = RetryPolicy {
+            max_attempts: 4,
+            base: Duration::from_secs(1),
+            cap: Duration::from_secs(60),
+            follows_service: true,
+            busy_base: Duration::from_secs(5),
+            busy_attempts: 6,
+        };
+        let failure = |status| Failure::with_status(Some(status), true, "x");
+        let lost = Failure::with_status(None, true, "lost");
+        let waits = |failure: &Failure| -> Vec<u64> {
+            (1..=5)
+                .map(|n| policy.wait_after(n, failure, 0.0).unwrap().as_secs())
+                .collect()
+        };
+        assert_eq!(waits(&lost), [1, 2, 4, 8, 16]);
+        assert_eq!(waits(&failure(429)), [5, 10, 20, 40, 60]);
+        assert_eq!(waits(&failure(502)), [5, 10, 20, 40, 60]);
+        assert_eq!(policy.attempts_for(&failure(429)), 6);
+        assert_eq!(policy.attempts_for(&failure(503)), 6);
+        assert_eq!(policy.attempts_for(&failure(500)), 4);
+        assert_eq!(policy.attempts_for(&lost), 4);
+        // Speech recognition keeps its schedule.
+        let plain = RetryPolicy::DEFAULT;
+        assert_eq!(
+            plain.wait_after(1, &failure(429), 0.0),
+            Some(Duration::from_secs(1))
+        );
+        assert_eq!(plain.attempts_for(&failure(429)), 3);
     }
 
     #[test]
