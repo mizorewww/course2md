@@ -938,6 +938,19 @@ impl State {
     pub fn task(&self, id: &str) -> Option<&TaskRecord> {
         self.tasks.iter().find(|t| t.id == id)
     }
+    /// The task that speaks for the note task `id` published: `id` itself, or the
+    /// repair that took it over and left the note as it was, so its state and its
+    /// retry are the ones the note shows.
+    pub fn note_task(&self, id: &str) -> Option<&TaskRecord> {
+        let mut task = self.task(id)?;
+        for _ in 0..self.tasks.len() {
+            match task.handled_by.as_deref().and_then(|next| self.task(next)) {
+                Some(next) => task = next,
+                None => break,
+            }
+        }
+        Some(task)
+    }
     pub fn task_mut(&mut self, id: &str) -> Option<&mut TaskRecord> {
         self.tasks.iter_mut().find(|t| t.id == id)
     }
@@ -1359,9 +1372,15 @@ impl State {
             c2m_i18n::tr!("笔记来源与任务不匹配")
         );
         // A repair redoes what this task's note lacks; a note another task has
-        // replaced since lacks other things.
+        // replaced since lacks other things. A repair that finished nothing more
+        // left its base's note as it was, which is still the note it works on.
+        let unchanged_base = matches!(
+            &original.plan.operation,
+            c2m_engine::execution::Operation::Reprocess { base_task_id, .. }
+                if *base_task_id == manifest.task_id
+        );
         ensure!(
-            manifest.task_id == original.note_owner(),
+            manifest.task_id == original.note_owner() || unchanged_base,
             c2m_i18n::tr!("这份笔记已被之后的任务更新，请从最新的任务补做")
         );
         if !resend.is_empty() {
@@ -1445,13 +1464,21 @@ impl State {
         let resend_services = (!resend.is_empty())
             .then(|| original.ran_with.clone())
             .flatten();
+        // A repair works from what the note's own task paid for; a retry that
+        // left that note as it was is not its task.
+        let prior_work_dir = if manifest.task_id == original.note_owner() {
+            original.work_dir
+        } else {
+            self.task(&manifest.task_id)
+                .map_or(original.work_dir, |owner| owner.work_dir.clone())
+        };
         let mut plan = original.plan;
         plan.repair = Some(RepairScope { translate, formats });
         plan.operation = c2m_engine::execution::Operation::Reprocess {
             note_dir: base,
             base_task_id: manifest.task_id.clone(),
             components,
-            prior_work_dir: Some(original.work_dir),
+            prior_work_dir: Some(prior_work_dir),
         };
         let (next, created) = self.enqueue(plan, Some(id.to_owned()))?;
         if created && let Some(task) = self.task_mut(&next) {
@@ -6125,5 +6152,55 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("之后的任务"), "{error:#}");
         assert_eq!(ws.state.tasks.len(), 1);
+    }
+
+    /// A retry that finished nothing more left the note as its base published it.
+    /// The note speaks through that retry, which can be retried again.
+    #[test]
+    fn a_repair_that_left_the_note_as_it_was_can_be_retried_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
+        let note = publish_note(&ws.state, &id, true);
+        let outcomes = c2m_artifact::artifact::note_manifest(&note)
+            .unwrap()
+            .unwrap()
+            .outcomes;
+        let original = ws.state.task_mut(&id).unwrap();
+        original.state = TaskState::Partial;
+        original.artifact = Some(note.clone());
+        original.events.outcomes = Some(outcomes.clone());
+        let retry = ws
+            .state
+            .reprocess(&id, vec![Component::Proofreading], vec![])
+            .unwrap();
+        assert_ne!(retry, id);
+        // The retry reported the unchanged, still partial note of its base.
+        let task = ws.state.task_mut(&retry).unwrap();
+        task.state = TaskState::Partial;
+        task.artifact = Some(note.clone());
+        task.events.outcomes = Some(outcomes);
+        assert_eq!(ws.state.note_task(&id).unwrap().id, retry);
+        let again = ws
+            .state
+            .reprocess(&retry, vec![Component::Proofreading], vec![])
+            .unwrap();
+        assert_ne!(again, retry);
+        assert_eq!(ws.state.note_task(&id).unwrap().id, again);
+        // It works from what the note's own task paid for, which the engine
+        // checks belongs to that note.
+        let base_work = ws.state.task(&id).unwrap().work_dir.clone();
+        match &ws.state.task(&again).unwrap().plan.operation {
+            c2m_engine::execution::Operation::Reprocess {
+                base_task_id,
+                prior_work_dir,
+                ..
+            } => {
+                assert_eq!(base_task_id, &id);
+                assert_eq!(prior_work_dir.as_ref(), Some(&base_work));
+            }
+            other => panic!("{other:?}"),
+        }
     }
 }

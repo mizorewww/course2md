@@ -862,6 +862,34 @@ impl Task<'_> {
                 .iter()
                 .map(|&component| part(&outcomes, component))
                 .find(|outcome| outcome.status != Status::Succeeded);
+            // A retry of a partial note's unfinished parts that finished nothing
+            // more leaves the note as it was: still partial, for the same reasons,
+            // with the same retry. It reports that note, unchanged, instead of an
+            // error. A request left without a known result still stops the task
+            // for the person's decision.
+            if base.partial
+                && !job.control.has_unresolved()
+                && unfinished
+                    .as_ref()
+                    .is_none_or(|outcome| outcome.kind != Some(artifact::FailureKind::Uncertain))
+            {
+                tracing::warn!(
+                    "补做没有完成更多内容，笔记未改动 / Nothing more was finished; the note is unchanged"
+                );
+                progress::emit(&progress::Event::Done(Box::new(progress::Done {
+                    task_id: request.task_id.clone(),
+                    course_id: base.course_id.clone(),
+                    out_dir: base_dir.to_path_buf(),
+                    manifest: Some(base_dir.join("manifest.json")),
+                    title: base.title.clone(),
+                    slides: base.frames.len(),
+                    outputs: base.outputs.iter().map(PathBuf::from).collect(),
+                    partial: Some(true),
+                    outcomes: Some(base.outcomes.clone()),
+                    ..done_counts(&document.sections, self.started)
+                })));
+                return Ok(());
+            }
             let message = unfinished
                 .as_ref()
                 .and_then(|outcome| outcome.message.clone())

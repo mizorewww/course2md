@@ -431,6 +431,16 @@ impl TaskControl {
         Ok(())
     }
 
+    /// Whether a request of this task is left without a known result (sent and
+    /// unconfirmed, or uncertain): the person has a decision to make about it.
+    pub fn has_unresolved(&self) -> bool {
+        self.0.as_ref().is_some_and(|ledger| {
+            ledger
+                .unresolved_receipts()
+                .map_or(true, |unresolved| !unresolved.is_empty())
+        })
+    }
+
     /// 轮询任务控制文件，意图不再是 run 时返回 Err。配合 `tokio::select!` 打断
     /// 长时间运行的分支：子进程句柄的 kill_on_drop 随分支 drop 生效；spawn_blocking
     /// 里的工作不会因 drop 停止，要靠它自己在安全边界调用 check。

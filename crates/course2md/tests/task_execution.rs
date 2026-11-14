@@ -682,12 +682,14 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
     let second = run(root.path(), &retry);
     let second_events = events(&second);
     // The summary was the only thing asked for and failed again, so the note
-    // stays as it was; the error says why.
-    assert!(!second.status.success(), "{second_events:#?}");
+    // stays as it was, still partial, and is reported with the reason it has.
+    assert!(second.status.success(), "{second_events:#?}");
     assert!(second_events.iter().any(|event| {
-        event["type"] == "error"
-            && event["code"] == "parameters"
-            && event["message"]
+        let summary = &event["outcomes"]["summary"];
+        event["type"] == "done"
+            && event["partial"] == true
+            && summary["kind"] == "parameters"
+            && summary["message"]
                 .as_str()
                 .is_some_and(|m| m.contains("HTTP 400"))
     }));
@@ -718,8 +720,15 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
         receipt.retry_authorized.is_none(),
         "a consumed authorization must not survive the retried attempt"
     );
+    // Running that retry again sends nothing and reports the same partial note.
     let resumed = run(root.path(), &retry);
-    assert!(!resumed.status.success(), "{:?}", events(&resumed));
+    assert!(
+        events(&resumed)
+            .iter()
+            .any(|event| event["type"] == "done" && event["partial"] == true),
+        "{:?}",
+        events(&resumed)
+    );
     assert_eq!(
         mock.calls.load(Ordering::SeqCst),
         3,
@@ -1645,6 +1654,64 @@ fn a_failed_part_of_a_mixed_repair_keeps_what_the_note_had() {
     assert_eq!(
         serde_json::to_value(repaired.summary.unwrap()).unwrap(),
         summary
+    );
+}
+
+/// Retrying the unfinished part of a partial note that fails again leaves the note
+/// as it was and reports it, still partial for the same reason, rather than an
+/// error: the person sees the same unfinished part and the same retry.
+#[test]
+fn a_retry_that_finishes_nothing_more_reports_the_partial_note_unchanged() {
+    if !common::ffmpeg_available() {
+        return;
+    }
+    let mock = MockAi::respond_with(|_, _| {
+        Some((
+            400,
+            serde_json::json!({"error":{"message":"Content Exists Risk"}}),
+        ))
+    });
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("video.mp4");
+    std::fs::write(&source, b"broken video, readable selected subtitles").unwrap();
+    let mut original = request(root.path(), &source);
+    original.config.llm.summarize = true;
+    original.config.llm.base_url = mock.url.clone();
+    original.config.llm.model = "summary-model".into();
+    original.config.llm.api_key = "private-task-key".into();
+    original
+        .service_versions
+        .insert("llm".into(), "service-v1".into());
+    assert!(run(root.path(), &original).status.success());
+    let note = original.course_dir.clone();
+    let before = std::fs::read(note.join("manifest.json")).unwrap();
+    let manifest = artifact::read_manifest(&note.join("manifest.json")).unwrap();
+    assert!(manifest.partial);
+    assert_eq!(manifest.outcomes.summary.status, artifact::Status::Failed);
+
+    let mut retry = original.clone();
+    retry.task_id = "retry".into();
+    retry.work_dir = root.path().join("retry-work");
+    retry.operation = course2md::execution::Operation::Reprocess {
+        note_dir: note.clone(),
+        base_task_id: original.task_id.clone(),
+        components: vec![Component::Summary],
+        prior_work_dir: Some(original.work_dir.clone()),
+    };
+    let output = run(root.path(), &retry);
+    let observed = events(&output);
+    assert!(output.status.success(), "{observed:#?}");
+    assert!(!observed.iter().any(|event| event["type"] == "error"));
+    let done = observed
+        .iter()
+        .find(|event| event["type"] == "done")
+        .expect("the unchanged note is reported");
+    assert_eq!(done["partial"], true);
+    assert_eq!(done["outcomes"]["summary"]["status"], "failed");
+    assert_eq!(
+        std::fs::read(note.join("manifest.json")).unwrap(),
+        before,
+        "the note is unchanged"
     );
 }
 

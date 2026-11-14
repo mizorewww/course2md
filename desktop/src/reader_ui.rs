@@ -2646,7 +2646,7 @@ impl ReaderPage {
             .course
             .manifest
             .as_ref()
-            .and_then(|manifest| self.workspace(cx)?.state.task(&manifest.task_id));
+            .and_then(|manifest| self.workspace(cx)?.state.note_task(&manifest.task_id));
         let requires_repair =
             task.is_some_and(desktop_tasks::task_view::task_requires_service_repair);
         let can_retry = task.is_some_and(|task| {
