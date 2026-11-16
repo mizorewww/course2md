@@ -875,11 +875,18 @@ impl Resource {
         let scale = TileScale::Regular;
         let mut text = v_flex().flex_1().min_w_0().gap(rem(2.)).child(
             h_flex()
+                .w_full()
                 .min_w_0()
                 .flex_wrap()
                 .gap(rem(8.))
                 .items_center()
-                .child(scale.label(child("title"), self.title))
+                .child(
+                    scale
+                        .label(child("title"), self.title)
+                        .min_w_0()
+                        .max_w_full()
+                        .whitespace_normal(),
+                )
                 .when(self.busy, |row| {
                     row.child(spinner(child("busy"), c2m_i18n::tr!("正在检查"), cx))
                 }),
