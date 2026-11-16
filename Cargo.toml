@@ -82,6 +82,9 @@ strip = true
 
 # Only the workspace root's patches count, so the desktop's stack is pinned here.
 [patch.crates-io]
+gpui-base = { git = "https://github.com/ObsidianArch02/gpui-kit-material", rev = "29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09" }
+gpui-component = { git = "https://github.com/ObsidianArch02/gpui-kit-material", rev = "29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09" }
+accesskit_macos = { git = "https://github.com/ObsidianArch02/gpui-kit-material", rev = "29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09" }
 # gpui-kit-material's optional Git patch set (its README's quick start, 0.1.4), which
 # changes engine behavior only: spaces that overflow a wrapped row hang instead of
 # starting the next one, and a wheel over nested scroll containers (a list inside a
@@ -89,8 +92,11 @@ strip = true
 # of every container under the pointer. Each crate is the same version crates.io has
 # (gpui-fast 0.1.15, which releases the `measure_all` list's remeasurement, #42); drop
 # the set once both patches are released upstream.
-gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "403dae86156a83a5e0e077523ccf8f094b49f5bb" }
-gpui-pre = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "403dae86156a83a5e0e077523ccf8f094b49f5bb" }
-gpui-pre-apple = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "403dae86156a83a5e0e077523ccf8f094b49f5bb" }
-gpui-pre-web = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "403dae86156a83a5e0e077523ccf8f094b49f5bb" }
-gpui-fast = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "403dae86156a83a5e0e077523ccf8f094b49f5bb" }
+gpui-kit-material = { git = "https://github.com/ObsidianArch02/gpui-kit-material", rev = "29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09" }
+gpui-kit-material-color = { git = "https://github.com/ObsidianArch02/gpui-kit-material", rev = "29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09" }
+gpui-kit = { git = "https://github.com/ObsidianArch02/gpui-kit-material", rev = "29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09" }
+gpui-pre = { git = "https://github.com/ObsidianArch02/gpui-kit-material", rev = "29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09" }
+gpui-pre-apple = { git = "https://github.com/ObsidianArch02/gpui-kit-material", rev = "29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09" }
+gpui-pre-web = { git = "https://github.com/ObsidianArch02/gpui-kit-material", rev = "29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09" }
+gpui-fast = { git = "https://github.com/ObsidianArch02/gpui-kit-material", rev = "29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09" }
+gpui-fast-apple = { git = "https://github.com/ObsidianArch02/gpui-kit-material", rev = "29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09" }

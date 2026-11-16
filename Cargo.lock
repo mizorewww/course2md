@@ -55,8 +55,7 @@ dependencies = [
 [[package]]
 name = "accesskit_macos"
 version = "0.26.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce02dc63b43f0c9296af9ac946312a2dc8814427d7a64d2d600971dac55b6076"
+source = "git+https://github.com/ObsidianArch02/gpui-kit-material?rev=29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09#29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09"
 dependencies = [
  "accesskit",
  "accesskit_consumer",
@@ -2877,8 +2876,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3e9ae5237737cfd110d0ff513fcd9c20f97d98ebabd0a73164068177f0aca4f"
+source = "git+https://github.com/ObsidianArch02/gpui-kit-material?rev=29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09#29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2910,6 +2908,7 @@ dependencies = [
  "smallvec",
  "smol",
  "tracing",
+ "unicode-bidi",
  "unicode-linebreak",
  "unicode-segmentation",
  "web-time",
@@ -2919,8 +2918,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e155c4914bd809d966660610d596f7b57c5cd38979ca2c132215057a91f23f03"
+source = "git+https://github.com/ObsidianArch02/gpui-kit-material?rev=29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09#29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2979,7 +2977,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast"
 version = "0.1.15"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=403dae86156a83a5e0e077523ccf8f094b49f5bb#403dae86156a83a5e0e077523ccf8f094b49f5bb"
+source = "git+https://github.com/ObsidianArch02/gpui-kit-material?rev=29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09#29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -3050,8 +3048,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-apple"
 version = "0.1.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94395e1c8cc1e0795d3bac933d8701582eb3e6b274db09919dca24eab379d801"
+source = "git+https://github.com/ObsidianArch02/gpui-kit-material?rev=29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09#29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09"
 dependencies = [
  "anyhow",
  "async-task",
@@ -3293,7 +3290,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit"
 version = "0.9.1"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=403dae86156a83a5e0e077523ccf8f094b49f5bb#403dae86156a83a5e0e077523ccf8f094b49f5bb"
+source = "git+https://github.com/ObsidianArch02/gpui-kit-material?rev=29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09#29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09"
 dependencies = [
  "gpui-base",
  "gpui-component",
@@ -3326,8 +3323,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-material"
 version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6938855e1399bc102be0a1f461be52200e940faf2b15f3df4cf381bf0b01f43"
+source = "git+https://github.com/ObsidianArch02/gpui-kit-material?rev=29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09#29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09"
 dependencies = [
  "gpui-base",
  "gpui-kit",
@@ -3340,8 +3336,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-material-color"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94c4246166376753d28ba209629c4176839820bb8ca4c946dd9c0c2eee565cfc"
+source = "git+https://github.com/ObsidianArch02/gpui-kit-material?rev=29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09#29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09"
 dependencies = [
  "serde",
 ]
@@ -3374,7 +3369,7 @@ checksum = "124f5f8f97c034ca4666123891d2869625523770eae849958614594370068706"
 [[package]]
 name = "gpui-pre"
 version = "0.3.12"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=403dae86156a83a5e0e077523ccf8f094b49f5bb#403dae86156a83a5e0e077523ccf8f094b49f5bb"
+source = "git+https://github.com/ObsidianArch02/gpui-kit-material?rev=29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09#29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -3445,7 +3440,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-apple"
 version = "0.3.12"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=403dae86156a83a5e0e077523ccf8f094b49f5bb#403dae86156a83a5e0e077523ccf8f094b49f5bb"
+source = "git+https://github.com/ObsidianArch02/gpui-kit-material?rev=29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09#29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09"
 dependencies = [
  "anyhow",
  "async-task",
@@ -3785,7 +3780,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-web"
 version = "0.3.12"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=403dae86156a83a5e0e077523ccf8f094b49f5bb#403dae86156a83a5e0e077523ccf8f094b49f5bb"
+source = "git+https://github.com/ObsidianArch02/gpui-kit-material?rev=29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09#29eec44a4de905cb1a1d73ea54e29ebf5cfdaf09"
 dependencies = [
  "anyhow",
  "async-channel",
