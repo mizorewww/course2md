@@ -2360,7 +2360,11 @@ impl Desktop {
                                         // The state and action move under a title that
                                         // needs the width, not one character of it.
                                         .flex_1()
-                                        .flex_basis(rem(240.)),
+                                        .flex_basis(rem(240.))
+                                        .min_w_0()
+                                        .whitespace_normal()
+                                        .line_clamp(2)
+                                        .text_ellipsis(),
                                 )
                                 // The same colour as on Tasks: a failure is red, a pause amber.
                                 // A notice below that says why already says it waits.
