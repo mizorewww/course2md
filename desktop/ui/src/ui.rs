@@ -488,6 +488,7 @@ impl Field {
                         scale
                             .button(ElementId::Name(id), button_corners)
                             .accessibility_label(label.clone())
+                            .aria_expanded(open)
                             .on_click(on_toggle)
                             .child(
                                 scale
@@ -896,7 +897,15 @@ impl Resource {
         let chips: Vec<AnyElement> = self
             .status
             .into_iter()
-            .map(|(kind, label)| status_chip(kind).child(label).into_any_element())
+            .enumerate()
+            .map(|(index, (kind, label))| {
+                status_chip(kind)
+                    .child(accessible_text(
+                        ElementId::Name(format!("{id}-status-{index}").into()),
+                        label,
+                    ))
+                    .into_any_element()
+            })
             .collect();
         for (index, (line, failed)) in self.lines.into_iter().enumerate() {
             let line_id = ElementId::NamedChild(Arc::new(child("line")), index.to_string().into());

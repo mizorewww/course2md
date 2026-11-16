@@ -65,11 +65,19 @@ pub(crate) fn app_bar(height: Pixels, window: &Window, cx: &mut Context<Desktop>
 
 /// The course2md mark, with the wordmark when there is room.
 fn brand(wordmark: bool) -> Div {
+    let logo = img("images/course2md.png").size(rem(32.)).flex_shrink_0();
     h_flex()
         .items_center()
         .gap(rem(10.))
         // The mark carries its own rounded square, as on 关于, so nothing clips it.
-        .child(img("images/course2md.png").size(rem(32.)).flex_shrink_0())
+        .child(if wordmark {
+            logo.into_any_element()
+        } else {
+            logo.id("brand-logo")
+                .role(Role::Image)
+                .aria_label("course2md")
+                .into_any_element()
+        })
         .when(wordmark, |brand| {
             brand.child(
                 div()
