@@ -969,23 +969,34 @@ impl Desktop {
             })
             .child(
                 div()
-                    .id("app-font-scale-control")
                     .w_full()
-                    .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                        if event.button == MouseButton::Left {
-                            this.begin_font_scale(cx);
-                        }
-                    }))
-                    .capture_any_mouse_up(cx.listener(|this, event: &MouseUpEvent, _, cx| {
-                        if event.button == MouseButton::Left {
-                            this.release_font_scale(cx);
-                        }
-                    }))
-                    .on_mouse_up_out(
-                        MouseButton::Left,
-                        cx.listener(|this, _, _, cx| this.release_font_scale(cx)),
-                    )
-                    .child(self.settings_ui.scale_slider.clone()),
+                    .px(ui::FOCUS_RING_ROOM)
+                    .pt(ui::FOCUS_RING_ROOM)
+                    .pb(rem(4.))
+                    .child(
+                        div()
+                            .id("app-font-scale-control")
+                            .w_full()
+                            .capture_any_mouse_down(cx.listener(
+                                |this, event: &MouseDownEvent, _, cx| {
+                                    if event.button == MouseButton::Left {
+                                        this.begin_font_scale(cx);
+                                    }
+                                },
+                            ))
+                            .capture_any_mouse_up(cx.listener(
+                                |this, event: &MouseUpEvent, _, cx| {
+                                    if event.button == MouseButton::Left {
+                                        this.release_font_scale(cx);
+                                    }
+                                },
+                            ))
+                            .on_mouse_up_out(
+                                MouseButton::Left,
+                                cx.listener(|this, _, _, cx| this.release_font_scale(cx)),
+                            )
+                            .child(self.settings_ui.scale_slider.clone()),
+                    ),
             );
         let previews = ui::Field::tile("palette-previews", move |_| {
             div()
