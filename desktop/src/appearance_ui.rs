@@ -3,7 +3,7 @@ use crate::preferences::{InterfaceLanguage, PreferenceGroup};
 use crate::{Desktop, symbols, ui};
 use gpui::{prelude::*, *};
 use gpui_base::slider::SliderState;
-use gpui_base::{h_flex, v_flex};
+use gpui_base::{Placement, Positioner, h_flex, v_flex};
 use gpui_kit_material::{
     color::{Scheme, palette::ALL},
     prelude::*,
@@ -21,8 +21,6 @@ const CARD_MIN_WIDTH: f32 = 150.;
 /// The picker's widest, in dp: four previews across with their names on one line.
 const PICKER_WIDTH: f32 = 920.;
 
-/// https://docs.rs/gpui-kit-material/0.1.4/gpui_kit_material/components/struct.MaterialSlider.html
-/// Keeps the press coordinates while live scaling moves the track.
 pub(crate) struct ScaleSlider {
     state: Entity<SliderState>,
     gesture: Rc<Cell<Option<Bounds<Pixels>>>>,
@@ -47,10 +45,17 @@ impl ScaleSlider {
 }
 
 impl Render for ScaleSlider {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.clone();
         let gesture = self.gesture.clone();
         let dragging = self.dragging.clone();
+        let view = cx.weak_entity();
+        let preview = self.dragging.get().then(|| self.gesture.get()).flatten();
+        let target = self.state.read(cx).value().end();
+        let preview_size = size(
+            px(480.).min(window.viewport_size().width - px(112.)),
+            px(380.).min(window.viewport_size().height - px(112.)),
+        );
         div()
             .relative()
             .w_full()
@@ -64,6 +69,7 @@ impl Render for ScaleSlider {
                         let pressed = gesture.clone();
                         let slider = state.clone();
                         let held = dragging.clone();
+                        let pressed_view = view.clone();
                         window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
                             if phase == DispatchPhase::Capture
                                 && event.button == MouseButton::Left
@@ -72,37 +78,32 @@ impl Render for ScaleSlider {
                                 let bounds = slider.read(cx).bounds();
                                 pressed.set(Some(bounds));
                                 held.set(true);
+                                let _ = pressed_view.update(cx, |_, cx| cx.notify());
                             }
                         });
                         let moved = gesture.clone();
                         let slider = state.clone();
                         let held = dragging.clone();
+                        let moved_view = view.clone();
                         window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
                             if phase != DispatchPhase::Capture {
                                 return;
                             }
-                            let Some(anchor) = moved.get() else {
+                            if moved.get().is_none() {
                                 return;
-                            };
-                            slider.update(cx, |state, cx| {
-                                if event.pressed_button == Some(MouseButton::Left) {
-                                    let bounds = state.bounds();
-                                    state.set_bounds(anchor);
-                                    state.update_value_by_position(
-                                        Axis::Horizontal,
-                                        event.position,
-                                        false,
-                                        window,
-                                        cx,
-                                    );
-                                    state.set_bounds(bounds);
-                                    cx.stop_propagation();
-                                } else {
-                                    moved.set(None);
-                                    held.set(false);
-                                    state.handle_release(cx);
-                                }
-                            });
+                            }
+                            if !held.get() && event.pressed_button == Some(MouseButton::Left) {
+                                cx.stop_active_drag(window);
+                                slider.update(cx, |state, cx| state.handle_release(cx));
+                                cx.stop_propagation();
+                                return;
+                            }
+                            if event.pressed_button != Some(MouseButton::Left) {
+                                moved.set(None);
+                                held.set(false);
+                                slider.update(cx, |state, cx| state.handle_release(cx));
+                                let _ = moved_view.update(cx, |_, cx| cx.notify());
+                            }
                         });
                         let released = gesture.clone();
                         let slider = state.clone();
@@ -114,6 +115,7 @@ impl Render for ScaleSlider {
                             {
                                 held.set(false);
                                 slider.update(cx, |state, cx| state.handle_release(cx));
+                                let _ = view.update(cx, |_, cx| cx.notify());
                             }
                         });
                     },
@@ -127,6 +129,127 @@ impl Render for ScaleSlider {
                     .stops(true)
                     .format(|value| format!("{value:.0}%").into()),
             )
+            .when_some(preview, |control, anchor| {
+                control.child(deferred(
+                    Positioner::side(anchor)
+                        .placement(Placement::Top)
+                        .offset(px(12.))
+                        .margin(crate::views::title_bar_height(window))
+                        .child(
+                            MaterialCard::new("scale-preview", CardVariant::Elevated)
+                                .w(preview_size.width)
+                                .h(preview_size.height)
+                                .p(px(16.))
+                                .child(
+                                    v_flex()
+                                        .size_full()
+                                        .gap(px(12.))
+                                        .child(TileScale::Regular.label(
+                                            "scale-preview-value",
+                                            course2md::tr!("缩放预览：{}%", target as u16),
+                                        ))
+                                        .child(LocalScale {
+                                            rem_size: px(
+                                                gpui_kit_material::tokens::typography::BASE_PX
+                                                    * target
+                                                    / 100.,
+                                            ),
+                                            child: v_flex()
+                                                .w_full()
+                                                .gap(rem(12.))
+                                                .child(TileScale::Regular.label(
+                                                    "scale-preview-title",
+                                                    course2md::tr!("笔记库"),
+                                                ))
+                                                .child(TileScale::Regular.support(
+                                                    "scale-preview-text",
+                                                    course2md::tr!("显示最近的笔记"),
+                                                ))
+                                                .child(
+                                                    material_button(
+                                                        "scale-preview-button",
+                                                        ButtonVariant::Tonal,
+                                                    )
+                                                    .disabled(true)
+                                                    .icon(symbols::article())
+                                                    .child(course2md::tr!("生成笔记")),
+                                                )
+                                                .into_any_element(),
+                                        })
+                                        .child(TileScale::Regular.support(
+                                            "scale-preview-apply",
+                                            course2md::tr!("松开鼠标后应用"),
+                                        )),
+                                ),
+                        ),
+                ))
+            })
+    }
+}
+
+struct LocalScale {
+    rem_size: Pixels,
+    child: AnyElement,
+}
+
+impl IntoElement for LocalScale {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl Element for LocalScale {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        let layout = window.with_rem_size(Some(self.rem_size), |window| {
+            self.child.request_layout(window, cx)
+        });
+        (layout, ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        window.with_rem_size(Some(self.rem_size), |window| {
+            self.child.prepaint(window, cx)
+        });
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        window.with_rem_size(Some(self.rem_size), |window| self.child.paint(window, cx));
     }
 }
 
@@ -516,7 +639,7 @@ impl Desktop {
         let light = self.palette_preset(false, appearance.light, light_corners, cx);
         let dark = self.palette_preset(true, appearance.dark, dark_corners, cx);
         let application = self.preferences.application();
-        let percent = self.settings_ui.font_scale.read(cx).value().end().round() as u16;
+        let percent = (application.font_scale * 100.).round() as u16;
         let pending_percent = pending_scale_percent(
             application.font_scale,
             self.settings_ui
@@ -564,7 +687,7 @@ impl Desktop {
                     .w_full()
                     .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _, _| {
                         if event.button == MouseButton::Left {
-                            this.settings_ui.scale_dragging.set(true);
+                            this.begin_font_scale();
                         }
                     }))
                     .capture_any_mouse_up(cx.listener(|this, event: &MouseUpEvent, _, cx| {

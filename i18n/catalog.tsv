@@ -1457,6 +1457,8 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 界面偏好	界面偏好	Interface preferences	介面偏好	表示設定
 界面文字大小	界面文字大小	Text size	介面文字大小	文字サイズ
 界面缩放	界面缩放	UI scale	介面縮放	UI の拡大率
+缩放预览：{}%	缩放预览：{}%	Scale preview: {}%	縮放預覽：{}%	拡大率のプレビュー：{}%
+松开鼠标后应用	松开鼠标后应用	Release to apply	放開滑鼠後套用	マウスを離すと適用されます
 界面语言	界面语言	Interface language	介面語言	表示言語
 界面语言：auto、en、zh-Hans、zh-Hant、ja / Interface language: auto, en, zh-Hans, zh-Hant, ja	界面语言：auto、en、zh-Hans、zh-Hant、ja / Interface language: auto, en, zh-Hans, zh-Hant, ja	Interface language: auto, en, zh-Hans, zh-Hant, ja	介面語言：auto、en、zh-Hans、zh-Hant、ja	表示言語：auto、en、zh-Hans、zh-Hant、ja
 登录 Bilibili	登录 Bilibili	Sign in to Bilibili	登入 Bilibili	Bilibili にログイン

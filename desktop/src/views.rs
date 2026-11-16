@@ -526,12 +526,7 @@ impl Desktop {
     fn theme_target(&self, cx: &App) -> (Scheme, f32) {
         let application = self.preferences.application();
         #[allow(unused_mut)]
-        let (mut appearance, mut scale) = (
-            application.appearance.clone(),
-            self.settings_ui
-                .scale_preview
-                .unwrap_or(application.font_scale),
-        );
+        let (mut appearance, mut scale) = (application.appearance.clone(), application.font_scale);
         #[cfg(feature = "capture")]
         {
             crate::capture::override_appearance(&mut appearance);
@@ -554,7 +549,7 @@ impl Desktop {
     /// transition; the kit refreshes the window for each step.
     pub(crate) fn prepare_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (scheme, scale) = self.theme_target(cx);
-        let percent = (scale * 100.).round();
+        let percent = (self.settings_ui.scale_preview.unwrap_or(scale) * 100.).round();
         if self.settings_ui.font_scale.read(cx).value().end() != percent {
             self.settings_ui.font_scale.update(cx, |state, cx| {
                 state.set_value(percent, window, cx);

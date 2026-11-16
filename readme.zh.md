@@ -88,7 +88,7 @@ macOS 也可以用 Homebrew 安装：`brew install --cask mizorewww/tap/course2m
 
 ### 按自己的习惯设置
 
-在「设置 → 外观」选择 10 套主题之一，或减少动态效果。界面缩放支持 75% 到 200%，每次调整 5%，拖动滑条即可实时预览。点击「恢复 100%」可恢复默认比例。
+在「设置 → 外观」选择 10 套主题之一，或减少动态效果。界面缩放支持 75% 到 200%，每次调整 5%。拖动滑条时在浮窗中预览，松开鼠标后应用。点击「恢复 100%」可恢复默认比例。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/zh/settings-dark.png">

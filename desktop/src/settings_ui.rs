@@ -495,10 +495,19 @@ impl Desktop {
             .as_ref()
             .unwrap_or_else(|| self.preferences.application())
             .clone();
-        if let Some(scale) = self.settings_ui.scale_preview {
+        if let Some(scale) = self
+            .settings_ui
+            .scale_preview
+            .filter(|_| !self.settings_ui.scale_dragging.get())
+        {
             next.font_scale = scale;
         }
         next
+    }
+
+    pub(crate) fn begin_font_scale(&mut self) {
+        self.settings_ui.scale_save = None;
+        self.settings_ui.scale_dragging.set(true);
     }
 
     pub(crate) fn preview_font_scale(&mut self, percent: f32, cx: &mut Context<Self>) {
@@ -515,12 +524,16 @@ impl Desktop {
                     .await;
                 let _ = this.update(cx, |this, cx| this.flush_font_scale(cx));
             }));
+            cx.notify();
         }
-        cx.notify();
     }
 
     pub(crate) fn flush_font_scale(&mut self, cx: &mut Context<Self>) {
         self.settings_ui.scale_save = None;
+        if self.settings_ui.scale_dragging.replace(false) {
+            self.settings_ui.scale_preview = None;
+            return;
+        }
         let next = self.application_edit_base();
         if self.settings_ui.scale_preview.take().is_some()
             && (next != *self.preferences.application()
