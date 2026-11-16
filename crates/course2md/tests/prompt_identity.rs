@@ -5,7 +5,7 @@ use course2md::dispatch::{ControlSource, TaskControl};
 use course2md::i18n::{self, Lang};
 use course2md::llm::{self, LlmProvider, LlmSettings};
 use course2md::timeline::{Section, TranscriptEvent};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -17,45 +17,17 @@ fn language_lock() -> MutexGuard<'static, ()> {
 
 /// Answers every request with one valid proofreading result and records bodies.
 fn serve() -> (String, Arc<Mutex<Vec<String>>>) {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let address = listener.local_addr().unwrap();
     let bodies = Arc::new(Mutex::new(Vec::new()));
     let seen = bodies.clone();
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let mut stream = stream.unwrap();
-            let body = read_body(&mut stream);
-            seen.lock().unwrap().push(body);
-            let content = r#"{\"segments\":[{\"id\":0,\"text\":\"校对后\"}]}"#;
-            let reply = format!(r#"{{"choices":[{{"message":{{"content":"{content}"}}}}]}}"#);
-            let _ = write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{reply}",
-                reply.len()
-            );
-        }
+    let base = c2m_test_http::serve_stream(move |req, stream| {
+        seen.lock()
+            .unwrap()
+            .push(String::from_utf8_lossy(&req.body).into_owned());
+        let content = r#"{\"segments\":[{\"id\":0,\"text\":\"校对后\"}]}"#;
+        let reply = format!(r#"{{"choices":[{{"message":{{"content":"{content}"}}}}]}}"#);
+        let _ = stream.write_all(c2m_test_http::json_response(&reply).as_bytes());
     });
-    (format!("http://{address}/v1"), bodies)
-}
-
-fn read_body(stream: &mut std::net::TcpStream) -> String {
-    let mut data = Vec::new();
-    let mut chunk = [0u8; 8192];
-    loop {
-        if let Some(end) = data.windows(4).position(|window| window == b"\r\n\r\n") {
-            let head = String::from_utf8_lossy(&data[..end]).to_ascii_lowercase();
-            let length: usize = head
-                .lines()
-                .find_map(|line| line.strip_prefix("content-length:"))
-                .map_or(0, |value| value.trim().parse().unwrap());
-            if data.len() >= end + 4 + length {
-                return String::from_utf8_lossy(&data[end + 4..end + 4 + length]).into_owned();
-            }
-        }
-        let read = stream.read(&mut chunk).unwrap();
-        assert!(read > 0, "connection closed mid-request");
-        data.extend_from_slice(&chunk[..read]);
-    }
+    (format!("{base}/v1"), bodies)
 }
 
 fn sections() -> Vec<Section> {

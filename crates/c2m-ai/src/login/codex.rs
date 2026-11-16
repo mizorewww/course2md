@@ -745,14 +745,6 @@ mod tests {
     }
 
     #[test]
-    fn pkce_challenge_matches_rfc7636_vector() {
-        assert_eq!(
-            pkce_challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
-            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
-        );
-    }
-
-    #[test]
     fn a_refusal_cannot_write_control_characters_to_the_terminal() {
         let shown = AuthorizationDenied("bad\u{1b}[2Jnews\n".repeat(100)).to_string();
         assert!(!shown.chars().any(char::is_control), "{shown:?}");

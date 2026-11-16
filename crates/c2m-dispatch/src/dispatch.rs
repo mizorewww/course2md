@@ -875,19 +875,21 @@ impl Ledger {
                     );
                     return Err(Failure::with_status(None, true, error.message));
                 }
-                return Err(self.block(BlockReason::Uncertain, Some(&receipt), crate::tr!("未收到服务的确定结果。服务可能已处理这部分，再次提交可能产生额外费用 / Service result is uncertain; resending may incur additional charges")));
+                let mut blocked = self.block(BlockReason::Uncertain, Some(&receipt), crate::tr!("未收到服务的确定结果。服务可能已处理这部分，再次提交可能产生额外费用 / Service result is uncertain; resending may incur additional charges"));
+                blocked.sent = true;
+                return Err(blocked);
             }
         };
         receipt.http_status = Some(response.status);
         let value = serde_json::from_slice::<Value>(&response.body);
-        // What an AI service said is kept for a refusal of the request's content
-        // or size and for a busy or failing service: the actual cause, which
+        // What an AI or speech service said is kept for a refusal of the request's
+        // content or size and for a busy or failing service: the actual cause, which
         // nothing else names. Not for a refused key, where an error body is the
-        // likeliest to echo it, and not for other services, which word their
-        // refusals themselves.
-        let detail = (service == "llm" && !matches!(response.status, 200..=299 | 401 | 403))
-            .then(|| service_detail(value.as_ref().ok(), &response.body, secrets))
-            .flatten();
+        // likeliest to echo it.
+        let detail = (matches!(service, "llm" | "asr")
+            && !matches!(response.status, 200..=299 | 401 | 403))
+        .then(|| service_detail(value.as_ref().ok(), &response.body, secrets))
+        .flatten();
         receipt.detail.clone_from(&detail);
         if (400..500).contains(&response.status) {
             let unsupported = rejects_response_format(response.status, value.as_ref().ok());
@@ -907,6 +909,7 @@ impl Ledger {
                 refused_parameter: refused,
                 detail: detail.clone(),
                 retry_after: response.retry_after,
+                sent: true,
                 ..Failure::with_status(
                     Some(response.status),
                     retryable_status(response.status),
@@ -931,6 +934,7 @@ impl Ledger {
                 return Err(Failure {
                     retry_after: response.retry_after,
                     detail: detail.clone(),
+                    sent: true,
                     ..Failure::with_status(
                         Some(response.status),
                         true,
@@ -938,7 +942,9 @@ impl Ledger {
                     )
                 });
             }
-            return Err(self.block(BlockReason::Uncertain, Some(&receipt), crate::tr!("服务返回错误，无法确认是否已处理。再次提交可能产生额外费用 / Service processing is uncertain")));
+            let mut blocked = self.block(BlockReason::Uncertain, Some(&receipt), crate::tr!("服务返回错误，无法确认是否已处理。再次提交可能产生额外费用 / Service processing is uncertain"));
+            blocked.sent = true;
+            return Err(blocked);
         }
         let value = match value {
             Ok(value) => value,
@@ -951,6 +957,7 @@ impl Ledger {
                 self.save(&receipt)?;
                 return Err(Failure {
                     retryable: resend.retries_failures(),
+                    sent: true,
                     ..Failure::local(receipt.message.unwrap())
                 });
             }
@@ -969,6 +976,7 @@ impl Ledger {
                 retryable: resend.retries_failures() && !repeats,
                 repeats,
                 unusable: !repeats,
+                sent: true,
                 ..Failure::local(receipt.message.unwrap())
             });
         }
@@ -1230,27 +1238,13 @@ mod tests {
     }
     /// Reads one request, then runs `answer` on its connection. Counts requests.
     fn answering_server(
-        answer: impl Fn(&mut std::net::TcpStream) + Send + 'static,
+        answer: impl Fn(&mut std::net::TcpStream) + Send + Sync + 'static,
     ) -> (String, Arc<AtomicUsize>) {
-        use std::io::Read;
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
         let count = Arc::new(AtomicUsize::new(0));
         let seen = count.clone();
-        std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                let mut stream = stream.unwrap();
-                let mut request = Vec::new();
-                let mut chunk = [0u8; 4096];
-                while !request.windows(1).any(|b| b == b"}") {
-                    match stream.read(&mut chunk) {
-                        Ok(0) | Err(_) => break,
-                        Ok(n) => request.extend_from_slice(&chunk[..n]),
-                    }
-                }
-                seen.fetch_add(1, Ordering::SeqCst);
-                answer(&mut stream);
-            }
+        let url = c2m_test_http::serve_stream(move |_, stream| {
+            seen.fetch_add(1, Ordering::SeqCst);
+            answer(stream);
         });
         (url, count)
     }
@@ -1537,6 +1531,28 @@ mod tests {
         let receipt = &receipts(dir.path()).unwrap()[0];
         assert_eq!(receipt.detail.as_deref(), Some("Content Exists Risk"));
         assert_eq!(receipt.state, State::Rejected);
+
+        let asr_failure = ledger
+            .send(
+                "asr",
+                "transcription",
+                "https://example.test",
+                &serde_json::json!({"chunk": 1}),
+                || {
+                    Ok(HttpResponse {
+                        status: 400,
+                        body: br#"{"error":{"message":"audio file exceeds 25MB"}}"#.to_vec(),
+                        retry_after: None,
+                    })
+                },
+                |_| Ok(()),
+            )
+            .unwrap_err();
+        assert!(asr_failure.sent);
+        assert_eq!(
+            asr_failure.detail.as_deref(),
+            Some("audio file exceeds 25MB")
+        );
     }
 
     #[test]

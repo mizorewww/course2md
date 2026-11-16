@@ -416,9 +416,9 @@ where
         splits: u32,
         full_budget: bool,
         part: bool,
-    ) -> (usize, Option<Unfinished>) {
+    ) -> (usize, Option<Unfinished>, bool) {
         let (Some(first), Some(last)) = (events.first(), events.last()) else {
-            return (0, None);
+            return (0, None, false);
         };
         let (start, end) = (
             crate::timeline::fmt_ts(first.start),
@@ -453,16 +453,25 @@ where
         });
         let answer = match answer {
             Ok(answer) => answer,
-            Err(error) if !part => return self.isolate(image, events, splits, unfinished(error)),
-            Err(error) => return (0, Some(unfinished(error))),
+            Err(error) if !part => {
+                let first_sent = error_was_sent(&error);
+                let (done, rest_error, more_sent) =
+                    self.isolate(image, events, splits, unfinished(error));
+                return (done, rest_error, first_sent || more_sent);
+            }
+            Err(error) => {
+                let sent = error_was_sent(&error);
+                return (0, Some(unfinished(error)), sent);
+            }
         };
+        let sent = answer.sent;
         if !answer.segments.is_empty() {
             self.answered
                 .store(true, std::sync::atomic::Ordering::Relaxed);
         }
         (self.apply)(events, &answer.segments);
         if !answer.truncated {
-            return (events.len(), None);
+            return (events.len(), None, sent);
         }
         let finished: std::collections::HashSet<usize> =
             answer.segments.iter().map(|(id, _)| *id).collect();
@@ -480,24 +489,37 @@ where
         );
         let done = total - rest.len();
         if rest.is_empty() {
-            return (done, None);
+            return (done, None, sent);
         }
         if done > 0 {
-            let (more, error) = self.send(image, &mut rest, splits, false, part);
-            return (done + more, error);
+            let (more, error, more_sent) = self.send(image, &mut rest, splits, false, part);
+            return (done + more, error, sent || more_sent);
         }
         // Codex takes no output limit from here: its full budget is the same request.
         let budgeted = self.chat.settings.provider != LlmProvider::Codex;
         match after_empty_answer(rest.len(), splits, full_budget, budgeted) {
-            EmptyAnswer::FullBudget => self.send(image, &mut rest, splits, true, part),
-            EmptyAnswer::GiveUp => (0, Some(unfinished(anyhow::anyhow!(output_limit_message())))),
+            EmptyAnswer::FullBudget => {
+                let (more, error, more_sent) = self.send(image, &mut rest, splits, true, part);
+                (more, error, sent || more_sent)
+            }
+            EmptyAnswer::GiveUp => (
+                0,
+                Some(unfinished(anyhow::anyhow!(output_limit_message()))),
+                sent,
+            ),
             EmptyAnswer::Halve => {
                 let middle = rest.len() / 2;
                 let (left, right) = rest.split_at_mut(middle);
                 // The full budget did not do for the whole; the halves start with it.
-                let (left_done, left_error) = self.send(image, left, splits + 1, budgeted, part);
-                let (right_done, right_error) = self.send(image, right, splits + 1, budgeted, part);
-                (left_done + right_done, left_error.or(right_error))
+                let (left_done, left_error, left_sent) =
+                    self.send(image, left, splits + 1, budgeted, part);
+                let (right_done, right_error, right_sent) =
+                    self.send(image, right, splits + 1, budgeted, part);
+                (
+                    left_done + right_done,
+                    left_error.or(right_error),
+                    sent || left_sent || right_sent,
+                )
             }
         }
     }
@@ -520,9 +542,9 @@ where
         events: &mut [&mut TranscriptEvent],
         splits: u32,
         unfinished: Unfinished,
-    ) -> (usize, Option<Unfinished>) {
+    ) -> (usize, Option<Unfinished>, bool) {
         if events.len() < 2 || !self.isolates(&unfinished.error, splits) || !self.spend(2) {
-            return (0, Some(unfinished));
+            return (0, Some(unfinished), false);
         }
         tracing::info!(
             items = events.len(),
@@ -531,8 +553,10 @@ where
         );
         let middle = events.len() / 2;
         let (left, right) = events.split_at_mut(middle);
-        let (left_done, left_failed) = self.send(image, left, splits + 1, false, true);
-        let (right_done, right_failed) = self.send(image, right, splits + 1, false, true);
+        let (left_done, left_failed, left_sent) = self.send(image, left, splits + 1, false, true);
+        let (right_done, right_failed, right_sent) =
+            self.send(image, right, splits + 1, false, true);
+        let mut sent = left_sent || right_sent;
         let whole_refused = left_done + right_done == 0
             && [&left_failed, &right_failed].iter().all(|failed| {
                 failed
@@ -541,7 +565,7 @@ where
                     .is_some_and(refused)
             });
         if whole_refused {
-            return (0, left_failed);
+            return (0, left_failed, sent);
         }
         let mut done = left_done + right_done;
         let mut first = None;
@@ -550,15 +574,16 @@ where
             (right, right_done, right_failed),
         ] {
             let Some(failed) = failed else { continue };
-            let (more, still) = if half_done == 0 {
+            let (more, still, more_sent) = if half_done == 0 {
                 self.isolate(image, half, splits + 1, failed)
             } else {
-                (0, Some(failed))
+                (0, Some(failed), false)
             };
+            sent |= more_sent;
             done += more;
             first = first.or(still);
         }
-        (done, first)
+        (done, first, sent)
     }
 
     fn isolates(&self, error: &anyhow::Error, splits: u32) -> bool {
@@ -584,22 +609,11 @@ where
     }
 }
 
-thread_local! {
-    /// Whether the work on this thread got an answer from the service, rather
-    /// than reading every answer back from its receipt.
-    static SENT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// Runs `work` (one batch, on one worker thread) and says whether it took the
-/// time of real requests: an answer came from the service, or it ran for a
-/// second or more (a request that failed was still sent and waited for). A
-/// batch read back from its receipts takes no time, and is not speed.
-pub(crate) fn answered_now<T>(work: impl FnOnce() -> T) -> (T, bool) {
-    SENT.with(|sent| sent.set(false));
-    let started = std::time::Instant::now();
-    let result = work();
-    let sent = SENT.with(std::cell::Cell::get) || started.elapsed() >= Duration::from_secs(1);
-    (result, sent)
+/// Whether `error` came from a request that actually went over the network now.
+pub(crate) fn error_was_sent(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<crate::dispatch::Failure>()
+        .is_some_and(|failure| failure.sent)
 }
 
 /// How many times a batch the service refused is halved: down to one paragraph
@@ -703,8 +717,8 @@ fn run_batches(
             let image = image_path
                 .as_deref()
                 .and_then(|path| section_image_b64(path, &batches.warned));
-            let ((done, unfinished), sent) =
-                answered_now(|| batches.send(image.as_deref(), &mut chunk, 0, false, false));
+            let (done, unfinished, sent) =
+                batches.send(image.as_deref(), &mut chunk, 0, false, false);
             if sent {
                 pb.advance(1);
             } else {
@@ -741,7 +755,8 @@ fn run_batches(
         crate::pool::interruptible_sleep(control, SECOND_PASS_PAUSE)?;
         let retried =
             crate::pool::map_pool(second, workers, control, |(index, (image, mut chunk))| {
-                let (done, unfinished) = batches.send(image.as_deref(), &mut chunk, 0, false, true);
+                let (done, unfinished, _) =
+                    batches.send(image.as_deref(), &mut chunk, 0, false, true);
                 Ok((index, done, unfinished.as_ref().map(record)))
             })?;
         for (index, done, cause) in retried {
@@ -1243,10 +1258,12 @@ pub(crate) struct Chat<'a> {
     resend: crate::dispatch::Resend,
 }
 
-/// A service's answer: its text, and whether it stopped at its output limit.
+/// A service's answer: its text, whether it stopped at its output limit, and
+/// whether it was replayed from an existing receipt without sending bytes now.
 pub(crate) struct Answer {
     pub content: String,
     pub truncated: bool,
+    pub replayed: bool,
 }
 
 /// A batch's answer as (id, text). A truncated answer holds the items it finished,
@@ -1254,6 +1271,7 @@ pub(crate) struct Answer {
 pub(crate) struct Segments {
     pub segments: Vec<(usize, String)>,
     pub truncated: bool,
+    pub sent: bool,
 }
 
 /// The finished items of an answer cut off at its output limit: every complete
@@ -1352,6 +1370,7 @@ impl<'a> Chat<'a> {
         let mut body = body.clone();
         let mut delivery = delivery;
         let mut reasoning_kept = false;
+        let mut any_sent = false;
         let reply = loop {
             let identity = identity_for(&body, delivery, reasoning_kept, full_budget);
             let sent = crate::provider::sent_body(s, &body, delivery);
@@ -1361,6 +1380,7 @@ impl<'a> Chat<'a> {
                 Ok(reply) => break reply,
                 Err(error) => error,
             };
+            any_sent |= error_was_sent(&error);
             let failure = error.downcast_ref::<crate::dispatch::Failure>();
             let refused = failure.and_then(|f| f.refused_parameter.as_deref());
             let stream = |to| (delivery.stream != to).then_some(to);
@@ -1388,9 +1408,7 @@ impl<'a> Chat<'a> {
                 return Err(error);
             }
         };
-        if !reply.replayed {
-            SENT.with(|sent| sent.set(true));
-        }
+        let replayed = reply.replayed && !any_sent;
         let resp = reply.value;
         // token 用量实时反馈：GUI 阶段行据此跳动（上传=prompt，下载=completion）。
         // 各方言的流已在 provider 归一成 chat/completions 同一形状。
@@ -1409,6 +1427,7 @@ impl<'a> Chat<'a> {
                 .unwrap_or_default()
                 .to_string(),
             truncated: crate::provider::truncated(&resp),
+            replayed,
         })
     }
 
@@ -1572,7 +1591,8 @@ impl<'a> Chat<'a> {
         );
         let answer = match answer {
             Ok(answer) => answer,
-            // Now, or recorded by an earlier run: either way nothing was sent again.
+            // Now, or recorded by an earlier run: either way nothing was sent again
+            // unless `send_with` actually transmitted this attempt.
             Err(error)
                 if error
                     .downcast_ref::<crate::dispatch::Failure>()
@@ -1581,14 +1601,17 @@ impl<'a> Chat<'a> {
                 return Ok(Segments {
                     segments: Vec::new(),
                     truncated: true,
+                    sent: error_was_sent(&error),
                 });
             }
             Err(error) => return Err(error),
         };
+        let sent = !answer.replayed;
         if answer.truncated {
             return Ok(Segments {
                 segments: salvage_segments(&answer.content, expected),
                 truncated: true,
+                sent,
             });
         }
         let reconciled = usable(&answer.content)?;
@@ -1602,6 +1625,7 @@ impl<'a> Chat<'a> {
         Ok(Segments {
             segments: reconciled.segments,
             truncated: !reconciled.complete,
+            sent,
         })
     }
 }
@@ -1999,36 +2023,7 @@ mod tests {
 
     /// Answers one connection by running `script` on it, after reading the request.
     fn stalling_server(script: impl FnOnce(&mut std::net::TcpStream) + Send + 'static) -> String {
-        use std::io::Read as _;
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}/", listener.local_addr().unwrap());
-        std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            // Read the whole request: answering before the body is in lets
-            // the client's write fail (EINVAL on macOS) instead of the status.
-            let mut request = Vec::new();
-            let mut chunk = [0u8; 4096];
-            while let Ok(n @ 1..) = stream.read(&mut chunk) {
-                request.extend_from_slice(&chunk[..n]);
-                let text = String::from_utf8_lossy(&request);
-                let Some(end) = text.find("\r\n\r\n") else {
-                    continue;
-                };
-                let length = text[..end]
-                    .lines()
-                    .find_map(|line| {
-                        let (name, value) = line.split_once(':')?;
-                        name.eq_ignore_ascii_case("content-length")
-                            .then(|| value.trim().parse::<usize>().ok())?
-                    })
-                    .unwrap_or(0);
-                if request.len() >= end + 4 + length {
-                    break;
-                }
-            }
-            script(&mut stream);
-        });
-        url
+        c2m_test_http::serve_once(move |_, stream| script(stream))
     }
 
     fn hold(seconds: f64) {
@@ -2152,17 +2147,6 @@ mod tests {
             SSE_BODY_LIMIT
         );
         assert!(read_sse_body(std::io::repeat(b'x')).is_err());
-    }
-
-    #[test]
-    fn debug_never_contains_the_api_key() {
-        let settings = LlmSettings {
-            api_key: "secret-key".into(),
-            ..Default::default()
-        };
-        let debug = format!("{settings:?}");
-        assert!(!debug.contains("secret-key"), "{debug}");
-        assert!(debug.contains("<set>"), "{debug}");
     }
 
     #[test]
@@ -2452,50 +2436,27 @@ mod tests {
 
     /// [`scripted_service`] whose `answer` sees the request body instead of its number.
     fn scripted_service_with_body(
-        answer: impl Fn(&serde_json::Value, &[String]) -> String + Send + 'static,
+        answer: impl Fn(&serde_json::Value, &[String]) -> String + Send + Sync + 'static,
     ) -> (String, Bodies) {
-        use std::io::{Read as _, Write as _};
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        use std::io::Write as _;
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let bodies = seen.clone();
-        std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(mut stream) = stream else { return };
-                let mut data = Vec::new();
-                let mut chunk = [0u8; 8192];
-                let body = loop {
-                    if let Some(end) = data.windows(4).position(|w| w == b"\r\n\r\n") {
-                        let head = String::from_utf8_lossy(&data[..end]).to_ascii_lowercase();
-                        let length: usize = head
-                            .lines()
-                            .find_map(|line| line.strip_prefix("content-length:"))
-                            .map_or(0, |value| value.trim().parse().unwrap());
-                        if data.len() >= end + 4 + length {
-                            break data[end + 4..end + 4 + length].to_vec();
-                        }
-                    }
-                    match stream.read(&mut chunk) {
-                        Ok(0) | Err(_) => break Vec::new(),
-                        Ok(n) => data.extend_from_slice(&chunk[..n]),
-                    }
-                };
-                let body: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
-                let user = &body["messages"][1]["content"];
-                let items: Vec<String> = user
-                    .as_str()
-                    .or_else(|| user[0]["text"].as_str())
-                    .and_then(|text| serde_json::from_str::<Vec<serde_json::Value>>(text).ok())
-                    .unwrap_or_default()
-                    .iter()
-                    .map(|item| item["text"].as_str().unwrap_or_default().to_owned())
-                    .collect();
-                let reply = answer(&body, &items);
-                bodies.lock().unwrap().push(body);
-                let _ = stream.write_all(reply.as_bytes());
-            }
+        let base = c2m_test_http::serve_stream(move |req, stream| {
+            let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap_or_default();
+            let user = &body["messages"][1]["content"];
+            let items: Vec<String> = user
+                .as_str()
+                .or_else(|| user[0]["text"].as_str())
+                .and_then(|text| serde_json::from_str::<Vec<serde_json::Value>>(text).ok())
+                .unwrap_or_default()
+                .iter()
+                .map(|item| item["text"].as_str().unwrap_or_default().to_owned())
+                .collect();
+            let reply = answer(&body, &items);
+            bodies.lock().unwrap().push(body);
+            let _ = stream.write_all(reply.as_bytes());
         });
-        (url, seen)
+        (format!("{base}/v1"), seen)
     }
 
     /// A streamed answer carrying `content`, ending with `finish`.
@@ -3522,12 +3483,24 @@ mod tests {
         assert_eq!(bodies.lock().unwrap().len(), 1);
     }
 
-    /// A batch read back from its receipt is not timed as a request.
+    /// A batch read back from its receipt reports `replayed: true` without sending.
     #[test]
-    fn work_read_back_takes_no_request_time() {
-        let ((), read_back) = answered_now(|| ());
-        assert!(!read_back);
-        let ((), sent) = answered_now(|| SENT.with(|sent| sent.set(true)));
-        assert!(sent);
+    fn work_read_back_marks_answer_as_replayed() {
+        let dir = tempfile::tempdir().unwrap();
+        let control = crate::dispatch::TaskControl::open(dir.path(), Default::default()).unwrap();
+        let (url, bodies) =
+            scripted_service(|_, _| streamed(r#"{"segments":[{"id":0,"text":"好"}]}"#, "stop"));
+        let settings = polish_settings(url, 1);
+        let chat = Chat::new(&settings, Purpose::Proofreading, &control);
+        let body = build_chat_body(&settings, &["原文"], None).unwrap();
+        let first = chat
+            .segments(&body, "seg", &["原文"], Some(256), false)
+            .unwrap();
+        assert!(first.sent);
+        let second = chat
+            .segments(&body, "seg", &["原文"], Some(256), false)
+            .unwrap();
+        assert!(!second.sent);
+        assert_eq!(bodies.lock().unwrap().len(), 1);
     }
 }

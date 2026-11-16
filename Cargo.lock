@@ -1019,6 +1019,7 @@ dependencies = [
  "c2m-i18n",
  "c2m-process",
  "c2m-protocol",
+ "c2m-test-http",
  "getrandom 0.4.3",
  "serde",
  "serde_json",

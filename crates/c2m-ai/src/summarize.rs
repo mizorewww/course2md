@@ -106,7 +106,7 @@ fn request_summary(
     s: &LlmSettings,
     user: &str,
     description: &str,
-) -> Result<String> {
+) -> Result<(String, bool)> {
     let body = crate::provider::chat_body(s, &system_prompt(), user, llm::CHAT_MAX_TOKENS);
     chat.send(
         &body,
@@ -121,7 +121,7 @@ fn request_summary(
             Ok(())
         },
     )
-    .map(|answer| answer.content)
+    .map(|answer| (answer.content, !answer.replayed))
     .context(tr!("生成摘要请求失败 / Summary request failed"))
 }
 
@@ -213,10 +213,11 @@ fn summarize_blocking(
             edge(chunk.last(), |e| e.end),
         )
     };
-    let summary_of = |chunk: &[TranscriptEvent], description: &str| -> Result<Summary> {
+    let summary_of = |chunk: &[TranscriptEvent], description: &str| -> Result<(Summary, bool)> {
         let user = user_prompt(&format!("{ctx}{}", build_transcript(chunk)));
-        let content = request_summary(&chat, s, &user, description)?;
-        parse_summary(&content).context(invalid())
+        let (content, sent) = request_summary(&chat, s, &user, description)?;
+        let summary = parse_summary(&content).context(invalid())?;
+        Ok((summary, sent))
     };
     let total_chars: usize = events
         .iter()
@@ -233,7 +234,8 @@ fn summarize_blocking(
                 first,
                 last
             ),
-        );
+        )
+        .map(|(summary, _)| summary);
     }
     // ---- map-reduce：分段按 SUMMARIZE_CONCURRENCY 并发 ----
     let chunks = split_chunks(events, CHUNK_CHAR_LIMIT);
@@ -259,28 +261,33 @@ fn summarize_blocking(
         control,
         |(index, chunk)| {
             let (first, last) = range(&chunk);
-            let (part, sent) = llm::answered_now(|| {
-                summary_of(
-                    &chunk,
-                    &tr!(
-                        "生成第 {}/{} 部分摘要（{}–{}） / Generate summary part {}/{} ({}–{})",
-                        index + 1,
-                        total,
-                        first,
-                        last,
-                        index + 1,
-                        total,
-                        first,
-                        last
-                    ),
-                )
-            });
+            let outcome = summary_of(
+                &chunk,
+                &tr!(
+                    "生成第 {}/{} 部分摘要（{}–{}） / Generate summary part {}/{} ({}–{})",
+                    index + 1,
+                    total,
+                    first,
+                    last,
+                    index + 1,
+                    total,
+                    first,
+                    last
+                ),
+            );
+            let sent = match &outcome {
+                Ok((_, sent)) => *sent,
+                Err(error) => error
+                    .chain()
+                    .find_map(|cause| cause.downcast_ref::<crate::dispatch::Failure>())
+                    .is_some_and(|failure| failure.sent),
+            };
             if sent {
                 pb.advance(1);
             } else {
                 pb.advance_replayed(1);
             }
-            part
+            outcome.map(|(summary, _)| summary)
         },
     )?;
     pb.finish();
@@ -299,7 +306,7 @@ fn summarize_blocking(
         }
         input.push('\n');
     }
-    let combined = request_summary(
+    let (combined, _) = request_summary(
         &chat,
         s,
         &format!(

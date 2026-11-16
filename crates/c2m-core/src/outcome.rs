@@ -387,6 +387,9 @@ pub struct Failure {
     pub kind: FailureKind,
     /// The wait the service asked for before another attempt, if it named one.
     pub retry_after: Option<std::time::Duration>,
+    /// Whether this attempt transmitted a network request now (as opposed to
+    /// replaying a recorded receipt or stopping before bytes left the host).
+    pub sent: bool,
 }
 
 impl std::fmt::Display for Failure {
@@ -411,6 +414,7 @@ impl Failure {
             unusable: false,
             kind: FailureKind::Local,
             retry_after: None,
+            sent: false,
         }
     }
     pub fn with_status(status: Option<u16>, retryable: bool, message: impl Into<String>) -> Self {

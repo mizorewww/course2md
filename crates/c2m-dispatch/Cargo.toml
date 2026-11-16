@@ -19,4 +19,5 @@ tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+c2m-test-http = { path = "../c2m-test-http" }
 tempfile.workspace = true

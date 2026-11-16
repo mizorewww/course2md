@@ -805,7 +805,7 @@ struct MissingModel {
 #[cfg(unix)]
 impl MissingModel {
     fn new() -> Option<Self> {
-        use std::io::{BufRead, Write};
+        use std::io::Write;
         use std::os::unix::fs::PermissionsExt;
         if !common::ffmpeg_available() {
             return None;
@@ -818,21 +818,20 @@ impl MissingModel {
         let llama = bin.join("llama-server");
         std::fs::write(&llama, "#!/bin/sh\nexit 1\n").unwrap();
         std::fs::set_permissions(&llama, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let host = format!("http://{}", listener.local_addr().unwrap());
         let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let seen = requests.clone();
-        std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(mut stream) = stream else { continue };
-                let mut line = String::new();
-                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
-                let _ = reader.read_line(&mut line);
-                seen.lock().unwrap().push(line.trim().to_owned());
-                let _ = stream.write_all(
-                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                );
-            }
+        let host = c2m_test_http::serve_stream(move |req, stream| {
+            let line = req
+                .head
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_owned();
+            seen.lock().unwrap().push(line);
+            let _ = stream.write_all(
+                c2m_test_http::status_response(404, "Not Found", "text/plain", "").as_bytes(),
+            );
         });
         Some(Self {
             cli,
