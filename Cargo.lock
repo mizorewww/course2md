@@ -2980,7 +2980,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast"
 version = "0.1.15"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=403dae86156a83a5e0e077523ccf8f094b49f5bb#403dae86156a83a5e0e077523ccf8f094b49f5bb"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2#1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -3294,7 +3294,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit"
 version = "0.9.1"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=403dae86156a83a5e0e077523ccf8f094b49f5bb#403dae86156a83a5e0e077523ccf8f094b49f5bb"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2#1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2"
 dependencies = [
  "gpui-base",
  "gpui-component",
@@ -3326,11 +3326,11 @@ dependencies = [
 
 [[package]]
 name = "gpui-kit-material"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6938855e1399bc102be0a1f461be52200e940faf2b15f3df4cf381bf0b01f43"
+version = "0.1.5"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2#1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2"
 dependencies = [
  "gpui-base",
+ "gpui-fast",
  "gpui-kit",
  "gpui-kit-material-color",
  "gpui-material-symbols",
@@ -3341,8 +3341,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-material-color"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94c4246166376753d28ba209629c4176839820bb8ca4c946dd9c0c2eee565cfc"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2#1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2"
 dependencies = [
  "serde",
 ]
@@ -3375,7 +3374,7 @@ checksum = "124f5f8f97c034ca4666123891d2869625523770eae849958614594370068706"
 [[package]]
 name = "gpui-pre"
 version = "0.3.12"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=403dae86156a83a5e0e077523ccf8f094b49f5bb#403dae86156a83a5e0e077523ccf8f094b49f5bb"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2#1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -3446,7 +3445,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-apple"
 version = "0.3.12"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=403dae86156a83a5e0e077523ccf8f094b49f5bb#403dae86156a83a5e0e077523ccf8f094b49f5bb"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2#1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2"
 dependencies = [
  "anyhow",
  "async-task",
@@ -3786,7 +3785,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-web"
 version = "0.3.12"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=403dae86156a83a5e0e077523ccf8f094b49f5bb#403dae86156a83a5e0e077523ccf8f094b49f5bb"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2#1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2"
 dependencies = [
  "anyhow",
  "async-channel",

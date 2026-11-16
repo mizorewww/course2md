@@ -48,8 +48,8 @@ sys-locale = "0.3"
 # they use. The root's [patch] applies Material's optional engine patches to these.
 gpui-kit = { version = "0.9.1", features = ["gpui-fast"] }
 gpui-base = "0.9.1"
-gpui-kit-material = { version = "0.1.4", default-features = false, features = ["serde", "gpui-fast"] }
-gpui-kit-material-color = { version = "0.1.1", features = ["serde"] }
+gpui-kit-material = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2", default-features = false, features = ["serde", "gpui-fast"] }
+gpui-kit-material-color = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2", features = ["serde"] }
 # The release gpui-kit-material depends on.
 gpui-material-symbols = { version = "0.1", default-features = false }
 smol = "2"
@@ -89,8 +89,8 @@ strip = true
 # of every container under the pointer. Each crate is the same version crates.io has
 # (gpui-fast 0.1.15, which releases the `measure_all` list's remeasurement, #42); drop
 # the set once both patches are released upstream.
-gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "403dae86156a83a5e0e077523ccf8f094b49f5bb" }
-gpui-pre = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "403dae86156a83a5e0e077523ccf8f094b49f5bb" }
-gpui-pre-apple = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "403dae86156a83a5e0e077523ccf8f094b49f5bb" }
-gpui-pre-web = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "403dae86156a83a5e0e077523ccf8f094b49f5bb" }
-gpui-fast = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "403dae86156a83a5e0e077523ccf8f094b49f5bb" }
+gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2" }
+gpui-pre = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2" }
+gpui-pre-apple = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2" }
+gpui-pre-web = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2" }
+gpui-fast = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2" }
