@@ -1752,13 +1752,20 @@ impl Desktop {
                 )
             })
             .map(|task| task.state);
+        let status_id = SharedString::from(format!("note-status-{}", course.dir.display()));
         if self.opened(cx).opening_course.as_ref() == Some(&course.dir) {
-            Some(status_chip(StatusKind::Progress).child(course2md::tr!("正在打开笔记…")))
+            Some(
+                status_chip(StatusKind::Progress)
+                    .child(accessible_text(status_id, course2md::tr!("正在打开笔记…"))),
+            )
         } else if let Some(state) = task {
             let (kind, label) = task_status(state);
-            Some(status_chip(kind).child(label))
+            Some(status_chip(kind).child(accessible_text(status_id, label)))
         } else if course.incomplete() {
-            Some(status_chip(StatusKind::Warning).child(course2md::tr!("部分内容待补全")))
+            Some(
+                status_chip(StatusKind::Warning)
+                    .child(accessible_text(status_id, course2md::tr!("部分内容待补全"))),
+            )
         } else {
             None
         }
@@ -1987,6 +1994,7 @@ impl Desktop {
                     SharedString::from(format!("workbench-task-open-{id}")),
                     list_corners(index, count),
                 )
+                .accessibility_label(task.plan.title.clone())
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.select_task(&id, cx);
                     this.navigate(Page::Task, cx);
@@ -2371,7 +2379,13 @@ impl Desktop {
                                 .when(!has_notice, |row| {
                                     row.child(
                                         status_chip(crate::task_ui::task_status_kind(task.state))
-                                            .child(task.state.label()),
+                                            .child(accessible_text(
+                                                SharedString::from(format!(
+                                                    "recent-task-status-{}",
+                                                    task.id
+                                                )),
+                                                task.state.label(),
+                                            )),
                                     )
                                 }),
                         )

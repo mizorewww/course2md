@@ -245,12 +245,48 @@ enum TreeTarget {
 struct PlaceRow {
     target: TreeTarget,
     depth: usize,
+    position: TreePosition,
     icon: SymbolIcon,
     label: SharedString,
     count: Option<usize>,
     /// Whether it holds folders, and whether they show.
     disclosure: Option<bool>,
     commands: Vec<Command>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TreePosition {
+    level: usize,
+    position: usize,
+    size: usize,
+}
+
+fn folder_tree_positions(library: &organize::Library, several: bool) -> HashMap<u64, TreePosition> {
+    let mut sets = HashMap::new();
+    library
+        .tree()
+        .into_iter()
+        .map(|(id, depth)| {
+            let parent = library.parent(id);
+            let prefix = if parent.is_some() {
+                0
+            } else if several {
+                1
+            } else {
+                2
+            };
+            let (position, size) = sets
+                .entry(parent)
+                .or_insert_with(|| (prefix, library.children(parent).len() + prefix));
+            *position += 1;
+            let position = TreePosition {
+                level: depth + 1 + usize::from(several),
+                position: *position,
+                size: *size,
+            };
+            (id, position)
+        })
+        .collect()
 }
 
 impl Desktop {
@@ -621,6 +657,7 @@ impl Desktop {
         let PlaceRow {
             target,
             depth,
+            position,
             icon,
             label,
             count,
@@ -640,6 +677,21 @@ impl Desktop {
         let id = folder.unwrap_or(0);
         // A sidebar row is 44 tall, as before the migration (L1).
         let item = ListItem::new(SharedString::from(key.clone()), label.clone())
+            .role(Role::TreeItem)
+            .aria_level(position.level)
+            .aria_position_in_set(position.position)
+            .aria_size_of_set(position.size)
+            .when_some(disclosure, |item, open| {
+                let item = item.aria_expanded(open);
+                let Some(root) = root.clone() else {
+                    return item;
+                };
+                item.on_expanded_change(cx.listener(move |this, expanded: &bool, _, cx| {
+                    if this.tree_node_open(&root, id) != *expanded {
+                        this.toggle_tree_node(&root, id, cx);
+                    }
+                }))
+            })
             .density(ListDensity::Minus3)
             .leading(ListLeading::Icon(icon.into()))
             .container(ground)
@@ -716,11 +768,14 @@ impl Desktop {
                                 } else {
                                     symbols::chevron_right()
                                 },
-                                if open {
-                                    course2md::tr!("收起")
-                                } else {
-                                    course2md::tr!("展开")
-                                },
+                                SharedString::from(format!(
+                                    "{} {label}",
+                                    if open {
+                                        course2md::tr!("收起")
+                                    } else {
+                                        course2md::tr!("展开")
+                                    }
+                                )),
                             )
                             .button_size(ButtonSize::ExtraSmall)
                             .tab_stop(false)
@@ -747,11 +802,13 @@ impl Desktop {
         root: &Path,
         name: String,
         open: bool,
+        position: TreePosition,
         ground: ColorRole,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let commands = self.root_commands(root, cx);
         let toggle = root.to_path_buf();
+        let expand_root = root.to_path_buf();
         with_context_menu(
             SharedString::from(format!("folder-tree-library-{}", root.display())),
             command_context_menu(
@@ -759,20 +816,33 @@ impl Desktop {
                 Some(COMMAND_MENU_WIDTH),
                 commands,
             ),
-            ListItem::new("library-header", name)
-                .density(ListDensity::Compact)
-                .container(ground)
-                .segment([true; 4])
-                .leading(ListLeading::Icon(symbols::database().into()))
-                .trailing(ListTrailing::Icon(
-                    if open {
-                        symbols::keyboard_arrow_down()
-                    } else {
-                        symbols::chevron_right()
-                    }
-                    .into(),
-                ))
-                .on_click(cx.listener(move |this, _, _, cx| this.toggle_tree_node(&toggle, 0, cx))),
+            ListItem::new(
+                SharedString::from(format!("folder-tree-library-header-{}", root.display())),
+                name,
+            )
+            .role(Role::TreeItem)
+            .aria_level(position.level)
+            .aria_position_in_set(position.position)
+            .aria_size_of_set(position.size)
+            .aria_expanded(open)
+            .on_expanded_change(cx.listener(move |this, expanded: &bool, _, cx| {
+                if this.tree_node_open(&expand_root, 0) != *expanded {
+                    this.toggle_tree_node(&expand_root, 0, cx);
+                }
+            }))
+            .density(ListDensity::Compact)
+            .container(ground)
+            .segment([true; 4])
+            .leading(ListLeading::Icon(symbols::database().into()))
+            .trailing(ListTrailing::Icon(
+                if open {
+                    symbols::keyboard_arrow_down()
+                } else {
+                    symbols::chevron_right()
+                }
+                .into(),
+            ))
+            .on_click(cx.listener(move |this, _, _, cx| this.toggle_tree_node(&toggle, 0, cx))),
         )
         .w_full()
         .mt(rem(8.))
@@ -784,6 +854,14 @@ impl Desktop {
         let counts = self.nav_counts(cx);
         let libraries = self.tree_libraries(cx);
         let several = libraries.len() > 1;
+        let top_size = if several {
+            libraries.len() + 1
+        } else {
+            2 + libraries
+                .first()
+                .and_then(|(_, _, library)| library.as_ref())
+                .map_or(0, |library| library.children(None).len())
+        };
         let nested = libraries.iter().any(|(_, _, library)| {
             library.as_ref().is_some_and(|library| {
                 library
@@ -801,6 +879,11 @@ impl Desktop {
                 PlaceRow {
                     target: TreeTarget::All,
                     depth: 0,
+                    position: TreePosition {
+                        level: 1,
+                        position: 1,
+                        size: top_size,
+                    },
                     icon: symbols::book_2(),
                     label: course2md::tr!("全部笔记").into(),
                     count: Some(counts.all),
@@ -811,12 +894,23 @@ impl Desktop {
                 ground,
                 cx,
             ));
-        for (root, name, library) in libraries {
+        for (index, (root, name, library)) in libraries.into_iter().enumerate() {
             // One library opens straight onto its places; several each get
             // a row that folds them.
             let open = !several || self.tree_node_open(&root, 0);
             if several {
-                tree = tree.child(self.library_row(&root, name, open, ground, cx));
+                tree = tree.child(self.library_row(
+                    &root,
+                    name,
+                    open,
+                    TreePosition {
+                        level: 1,
+                        position: index + 2,
+                        size: top_size,
+                    },
+                    ground,
+                    cx,
+                ));
             }
             if !open {
                 continue;
@@ -826,6 +920,17 @@ impl Desktop {
                     PlaceRow {
                         target: TreeTarget::Root(root.clone()),
                         depth: 0,
+                        position: TreePosition {
+                            level: 1 + usize::from(several),
+                            position: if several { 1 } else { 2 },
+                            size: if several {
+                                1 + library
+                                    .as_ref()
+                                    .map_or(0, |library| library.children(None).len())
+                            } else {
+                                top_size
+                            },
+                        },
                         icon: symbols::inbox(),
                         label: course2md::tr!("未分类").into(),
                         count: library
@@ -851,6 +956,7 @@ impl Desktop {
             }
             // A closed folder hides everything deeper than itself.
             let mut hidden_below: Option<usize> = None;
+            let positions = folder_tree_positions(&library, several);
             for (id, depth) in library.tree() {
                 if hidden_below.is_some_and(|limit| depth > limit) {
                     continue;
@@ -866,6 +972,7 @@ impl Desktop {
                         PlaceRow {
                             target: TreeTarget::Folder(root.clone(), id),
                             depth,
+                            position: positions[&id],
                             icon: if open && has_children {
                                 symbols::folder_open()
                             } else {
@@ -1003,5 +1110,104 @@ pub(crate) fn note_count(count: usize) -> String {
         course2md::tr!("1 篇笔记").to_owned()
     } else {
         course2md::tr!("{} 篇笔记", count)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TreePosition, folder_tree_positions, organize};
+
+    #[test]
+    fn single_library_folders_share_the_top_level_with_all_and_unfiled() {
+        let mut library = organize::Library::default();
+        let beta = library.create(None, "Beta").unwrap();
+        let alpha = library.create(None, "Alpha").unwrap();
+        let child = library.create(Some(alpha), "Child").unwrap();
+        let positions = folder_tree_positions(&library, false);
+        assert_eq!(
+            positions[&alpha],
+            TreePosition {
+                level: 1,
+                position: 3,
+                size: 4
+            }
+        );
+        assert_eq!(
+            positions[&beta],
+            TreePosition {
+                level: 1,
+                position: 4,
+                size: 4
+            }
+        );
+        assert_eq!(
+            positions[&child],
+            TreePosition {
+                level: 2,
+                position: 1,
+                size: 1
+            }
+        );
+    }
+
+    #[test]
+    fn multiple_library_folders_share_their_library_with_unfiled() {
+        let mut library = organize::Library::default();
+        let parent = library.create(None, "Parent").unwrap();
+        let beta = library.create(Some(parent), "Beta").unwrap();
+        let alpha = library.create(Some(parent), "Alpha").unwrap();
+        let positions = folder_tree_positions(&library, true);
+        assert_eq!(
+            positions[&parent],
+            TreePosition {
+                level: 2,
+                position: 2,
+                size: 2
+            }
+        );
+        assert_eq!(
+            positions[&alpha],
+            TreePosition {
+                level: 3,
+                position: 1,
+                size: 2
+            }
+        );
+        assert_eq!(
+            positions[&beta],
+            TreePosition {
+                level: 3,
+                position: 2,
+                size: 2
+            }
+        );
+    }
+
+    #[test]
+    fn sibling_positions_resume_after_a_nested_branch() {
+        let mut library = organize::Library::default();
+        let alpha = library.create(None, "Alpha").unwrap();
+        let beta = library.create(None, "Beta").unwrap();
+        let first_child = library.create(Some(alpha), "First").unwrap();
+        let second_child = library.create(Some(alpha), "Second").unwrap();
+        let grandchild = library.create(Some(first_child), "Grandchild").unwrap();
+        let positions = folder_tree_positions(&library, false);
+        assert_eq!(positions[&beta].position, 4);
+        assert_eq!(
+            positions[&second_child],
+            TreePosition {
+                level: 2,
+                position: 2,
+                size: 2
+            }
+        );
+        assert_eq!(
+            positions[&grandchild],
+            TreePosition {
+                level: 3,
+                position: 1,
+                size: 1
+            }
+        );
     }
 }
