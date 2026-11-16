@@ -6,6 +6,7 @@ use gpui_base::slider::SliderState;
 use gpui_base::{Placement, Positioner, h_flex, v_flex};
 use gpui_kit_material::{
     color::{Scheme, palette::ALL},
+    icons::Icon,
     prelude::*,
     theme::{is_dark, rgba},
     tokens::shape::OuterCorners,
@@ -52,9 +53,11 @@ impl Render for ScaleSlider {
         let view = cx.weak_entity();
         let preview = self.dragging.get().then(|| self.gesture.get()).flatten();
         let target = self.state.read(cx).value().end();
+        let preview_margin = crate::views::title_bar_height(window) + px(8.);
+        let preview_edge = preview_margin + window.client_inset().unwrap_or(px(0.));
         let preview_size = size(
-            px(480.).min(window.viewport_size().width - px(112.)),
-            px(380.).min(window.viewport_size().height - px(112.)),
+            px(520.).min(window.viewport_size().width - preview_edge * 2.),
+            px(416.).min(window.viewport_size().height - preview_edge * 2.),
         );
         div()
             .relative()
@@ -134,56 +137,145 @@ impl Render for ScaleSlider {
                     Positioner::side(anchor)
                         .placement(Placement::Top)
                         .offset(px(12.))
-                        .margin(crate::views::title_bar_height(window))
-                        .child(
-                            MaterialCard::new("scale-preview", CardVariant::Elevated)
-                                .w(preview_size.width)
-                                .h(preview_size.height)
-                                .p(px(16.))
-                                .child(
-                                    v_flex()
-                                        .size_full()
-                                        .gap(px(12.))
-                                        .child(TileScale::Regular.label(
-                                            "scale-preview-value",
-                                            course2md::tr!("缩放预览：{}%", target as u16),
-                                        ))
-                                        .child(LocalScale {
-                                            rem_size: px(
-                                                gpui_kit_material::tokens::typography::BASE_PX
-                                                    * target
-                                                    / 100.,
-                                            ),
-                                            child: v_flex()
-                                                .w_full()
-                                                .gap(rem(12.))
-                                                .child(TileScale::Regular.label(
-                                                    "scale-preview-title",
-                                                    course2md::tr!("笔记库"),
-                                                ))
-                                                .child(TileScale::Regular.support(
-                                                    "scale-preview-text",
-                                                    course2md::tr!("显示最近的笔记"),
-                                                ))
-                                                .child(
-                                                    material_button(
-                                                        "scale-preview-button",
-                                                        ButtonVariant::Tonal,
-                                                    )
-                                                    .disabled(true)
-                                                    .icon(symbols::article())
-                                                    .child(course2md::tr!("生成笔记")),
-                                                )
-                                                .into_any_element(),
-                                        })
-                                        .child(TileScale::Regular.support(
-                                            "scale-preview-apply",
-                                            course2md::tr!("松开鼠标后应用"),
-                                        )),
-                                ),
-                        ),
+                        .margin(preview_margin)
+                        .child(scale_preview_surface(target, preview_size)),
                 ))
             })
+    }
+}
+
+fn scale_preview_surface(target: f32, panel_size: Size<Pixels>) -> LocalScale {
+    let value_type = TypeRole::TitleLarge.scale();
+    let title_type = TypeRole::TitleMedium.scale();
+    let body_type = TypeRole::BodyLarge.scale();
+    let note_content = v_flex()
+        .w_full()
+        .min_w_0()
+        .flex_shrink_0()
+        .gap(rem(8.))
+        .child(
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .flex_shrink_0()
+                .items_center()
+                .gap(rem(12.))
+                .child(
+                    h_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .items_center()
+                        .gap(rem(8.))
+                        .child(
+                            Icon::from(symbols::article())
+                                .size(rem(24.))
+                                .color(color(ColorRole::PRIMARY)),
+                        )
+                        .child(
+                            accessible_text("scale-preview-note-title", course2md::tr!("示例笔记"))
+                                .min_w_0()
+                                .whitespace_normal()
+                                .text_size(title_type.font_size)
+                                .line_height(title_type.line_height)
+                                .font_weight(FontWeight(title_type.font_weight as f32)),
+                        ),
+                )
+                .child(
+                    TileScale::Compact
+                        .support("scale-preview-note-time", course2md::render::fmt_ts(750.))
+                        .flex_shrink_0(),
+                ),
+        )
+        .child(
+            accessible_text(
+                "scale-preview-note-body",
+                course2md::tr!("把重点整理成清晰的笔记。"),
+            )
+            .w_full()
+            .min_w_0()
+            .flex_shrink_0()
+            .whitespace_normal()
+            .text_size(body_type.font_size)
+            .line_height(body_type.line_height)
+            .text_color(color(ColorRole::ON_SURFACE)),
+        );
+    let note = v_flex()
+        .size_full()
+        .min_w_0()
+        .justify_between()
+        .gap(rem(8.))
+        .child(note_content)
+        .child(
+            h_flex().flex_shrink_0().child(
+                material_button("scale-preview-button", ButtonVariant::Tonal)
+                    .button_size(ButtonSize::Small)
+                    .preview_state(InteractionPreview::Enabled)
+                    .icon(symbols::menu_book())
+                    .child(course2md::tr!("阅读笔记")),
+            ),
+        );
+    LocalScale {
+        rem_size: px(gpui_kit_material::tokens::typography::BASE_PX),
+        child: MaterialCard::new("scale-preview", CardVariant::Elevated)
+            .w(panel_size.width)
+            .h(panel_size.height)
+            .rounded(RADIUS_LARGE_INCREASED)
+            .p(rem(16.))
+            .child(
+                v_flex()
+                    .w_full()
+                    .h(panel_size.height - px(32.))
+                    .gap(rem(8.))
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .h(rem(28.))
+                            .flex_shrink_0()
+                            .items_center()
+                            .gap(rem(8.))
+                            .child(
+                                Icon::from(symbols::zoom_in())
+                                    .size(rem(20.))
+                                    .color(color(ColorRole::ON_SURFACE_VARIANT)),
+                            )
+                            .child(
+                                section_title("scale-preview-heading", course2md::tr!("缩放预览"))
+                                    .flex_1(),
+                            )
+                            .child(
+                                accessible_text("scale-preview-value", format!("{target:.0}%"))
+                                    .w(px(64.))
+                                    .text_right()
+                                    .text_size(value_type.font_size)
+                                    .line_height(value_type.line_height)
+                                    .font_weight(FontWeight(value_type.font_weight as f32))
+                                    .text_color(color(ColorRole::PRIMARY)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .h(panel_size.height - px(96.))
+                            .flex_shrink_0()
+                            .overflow_hidden()
+                            .rounded(RADIUS_LARGE)
+                            .bg(color(ColorRole::SURFACE_CONTAINER_LOW))
+                            .p(rem(16.))
+                            .child(LocalScale {
+                                rem_size: px(gpui_kit_material::tokens::typography::BASE_PX
+                                    * target
+                                    / 100.),
+                                child: note.into_any_element(),
+                            }),
+                    )
+                    .child(
+                        TileScale::Regular
+                            .support("scale-preview-apply", course2md::tr!("松开鼠标后应用"))
+                            .h(rem(20.))
+                            .flex_shrink_0(),
+                    ),
+            )
+            .into_any_element(),
     }
 }
 
