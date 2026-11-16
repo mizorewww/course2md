@@ -62,6 +62,9 @@ pub(crate) struct ServiceForm {
     pub(crate) draft: ServiceDraft,
     pub(crate) errors: Vec<FieldError>,
     pub(crate) models: model_discovery::State,
+    model_choices_focus: FocusHandle,
+    model_choices_scroll: UniformListScrollHandle,
+    model_choice: Option<usize>,
     pub(crate) show_key: bool,
     /// A key is being stored in, or checked against, the system vault.
     pub(crate) vault_busy: bool,
@@ -99,6 +102,9 @@ impl ServiceForm {
             draft: ServiceDraft::new(draft.protocol.purpose()),
             errors: Vec::new(),
             models: Default::default(),
+            model_choices_focus: cx.focus_handle(),
+            model_choices_scroll: UniformListScrollHandle::new(),
+            model_choice: None,
             show_key: false,
             vault_busy: false,
             _subscriptions: subscriptions,
@@ -170,6 +176,8 @@ impl ServiceForm {
         self.draft = draft;
         self.errors.clear();
         self.models.invalidate();
+        self.model_choice = None;
+        self.model_choices_scroll = UniformListScrollHandle::new();
         self.show_key = false;
         self.vault_busy = false;
     }
@@ -652,6 +660,7 @@ impl Desktop {
         };
         let toggle = (!state.models().is_empty()).then(|| {
             material_button(child("choose"), ButtonVariant::Text)
+                .aria_expanded(state.choices_open && !disabled)
                 .child(if state.choices_open {
                     course2md::tr!("收起模型列表")
                 } else {
@@ -665,29 +674,67 @@ impl Desktop {
             let models = state.models().to_vec();
             let count = models.len();
             let selected = input.read(cx).value().to_string();
+            let active = form
+                .model_choice
+                .filter(|index| *index < count)
+                .or_else(|| models.iter().position(|model| model == &selected))
+                .unwrap_or(0);
             let this = this.clone();
-            uniform_list(child("choices"), count, move |range, _, _| {
-                range
-                    .map(|index| {
-                        let (model, this) = (models[index].clone(), this.clone());
-                        ListItem::new(("model-choice", index), model.clone())
-                            .density(ListDensity::Compact)
-                            .selected(model == selected)
-                            .on_click(move |_, window, cx| {
-                                let _ = this.update(cx, |this, cx| {
-                                    this.service_model_event(
-                                        owner,
-                                        Choose(model.clone()),
-                                        window,
-                                        cx,
+            div()
+                .id(child("choices-listbox"))
+                .role(Role::ListBox)
+                .aria_label(course2md::tr!("模型"))
+                .aria_value(models[active].clone())
+                .track_focus(&form.model_choices_focus)
+                .tab_stop(true)
+                .on_key_down(cx.listener(move |this, event, window, cx| {
+                    this.service_model_picker_key(owner, None, event, window, cx);
+                }))
+                .w_full()
+                .h(rem(200.))
+                .child(
+                    uniform_list(child("choices"), count, move |range, _, _| {
+                        range
+                            .map(|index| {
+                                let (model, this) = (models[index].clone(), this.clone());
+                                let keys = this.clone();
+                                div()
+                                    .on_key_down(move |event, window, cx| {
+                                        let _ = keys.update(cx, |this, cx| {
+                                            this.service_model_picker_key(
+                                                owner,
+                                                Some(index),
+                                                event,
+                                                window,
+                                                cx,
+                                            );
+                                        });
+                                    })
+                                    .child(
+                                        ListItem::new(("model-choice", index), model.clone())
+                                            .role(Role::ListBoxOption)
+                                            .aria_position_in_set(index + 1)
+                                            .aria_size_of_set(count)
+                                            .density(ListDensity::Compact)
+                                            .selected(index == active)
+                                            .on_click(move |_, window, cx| {
+                                                let _ = this.update(cx, |this, cx| {
+                                                    this.service_model_event(
+                                                        owner,
+                                                        Choose(model.clone()),
+                                                        window,
+                                                        cx,
+                                                    )
+                                                });
+                                            }),
                                     )
-                                });
                             })
+                            .collect()
                     })
-                    .collect()
-            })
-            .h(rem(200.))
-            .w_full()
+                    .track_scroll(&form.model_choices_scroll)
+                    .h_full()
+                    .w_full(),
+                )
         });
         v_flex()
             .w_full()
@@ -696,6 +743,108 @@ impl Desktop {
             .child(field)
             .children(ui::async_status(child("status"), &status, toggle, cx))
             .children(choices)
+    }
+
+    fn service_model_picker_key(
+        &mut self,
+        owner: FormOwner,
+        origin: Option<usize>,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let modifiers = event.keystroke.modifiers;
+        if modifiers.control || modifiers.alt || modifiers.platform {
+            return;
+        }
+        let Some(form) = self
+            .service_form(owner)
+            .filter(|form| form.models.choices_open)
+        else {
+            return;
+        };
+        let models = form.models.models();
+        let current = origin
+            .or(form.model_choice)
+            .filter(|index| *index < models.len())
+            .or_else(|| {
+                let selected = form.value(FormField::Model, cx);
+                models.iter().position(|model| model == &selected)
+            })
+            .or_else(|| (!models.is_empty()).then_some(0));
+        let key = event.keystroke.key.as_str();
+        match key {
+            "escape" => {
+                self.service_model_event(
+                    owner,
+                    model_discovery::ModelFieldEvent::ToggleChoices,
+                    window,
+                    cx,
+                );
+            }
+            "enter" | "space"
+                if origin.is_none() && form.model_choices_focus.is_focused(window) =>
+            {
+                let Some(model) = current.and_then(|index| models.get(index)).cloned() else {
+                    return;
+                };
+                self.service_model_event(
+                    owner,
+                    model_discovery::ModelFieldEvent::Choose(model),
+                    window,
+                    cx,
+                );
+            }
+            _ => {
+                let Some(index) = model_choice_index(current, models.len(), key) else {
+                    return;
+                };
+                let Some(form) = self.service_form_mut(owner) else {
+                    return;
+                };
+                form.model_choice = Some(index);
+                form.model_choices_scroll
+                    .scroll_to_item(index, ScrollStrategy::Nearest);
+                form.model_choices_focus.focus(window, cx);
+                cx.notify();
+            }
+        }
+        cx.stop_propagation();
+    }
+
+    pub(crate) fn close_model_list_on_escape(
+        &mut self,
+        owner: FormOwner,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self
+            .service_form(owner)
+            .is_some_and(|form| form.models.choices_open)
+        {
+            return false;
+        }
+        self.service_model_event(
+            owner,
+            model_discovery::ModelFieldEvent::ToggleChoices,
+            window,
+            cx,
+        );
+        true
+    }
+
+    pub(crate) fn close_model_choices_on_escape(
+        &mut self,
+        owner: FormOwner,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if is_plain_escape_key(event.keystroke.modifiers, event.keystroke.key.as_str())
+            && self.close_model_list_on_escape(owner, window, cx)
+        {
+            cx.stop_propagation();
+        }
     }
 
     fn service_model_event(
@@ -711,15 +860,33 @@ impl Desktop {
             ToggleChoices => {
                 if let Some(form) = self.service_form_mut(owner) {
                     form.models.choices_open = !form.models.choices_open;
+                    if form.models.choices_open {
+                        let selected = form.value(FormField::Model, cx);
+                        form.model_choice = form
+                            .models
+                            .models()
+                            .iter()
+                            .position(|model| model == &selected)
+                            .or_else(|| (!form.models.models().is_empty()).then_some(0));
+                        if let Some(index) = form.model_choice {
+                            form.model_choices_scroll
+                                .scroll_to_item(index, ScrollStrategy::Nearest);
+                            form.model_choices_focus.focus(window, cx);
+                        }
+                    } else {
+                        form.focus(FormField::Model, window, cx);
+                    }
                 }
             }
             // A value set from here emits no change event, so this is the edit.
             Choose(model) => {
                 if let Some(form) = self.service_form_mut(owner) {
                     form.models.choices_open = false;
+                    form.model_choice = None;
                     form.errors.clear();
                     form.input(FormField::Model)
                         .update(cx, |input, cx| input.set_value(model, window, cx));
+                    form.focus(FormField::Model, window, cx);
                 }
                 self.service_form_edited(owner, true);
             }
@@ -752,6 +919,8 @@ impl Desktop {
             }
         };
         let ticket = form.models.begin(&request);
+        form.model_choice = None;
+        form.model_choices_scroll = UniformListScrollHandle::new();
         cx.spawn(async move |this, cx| {
             let result = model_discovery::discover(request, vault).await;
             let _ = this.update(cx, |this, cx| {
@@ -798,5 +967,82 @@ fn found_models(count: usize) -> String {
         course2md::tr!("找到 1 个模型").to_owned()
     } else {
         course2md::tr!("找到 {} 个模型", count)
+    }
+}
+
+fn model_choice_index(current: Option<usize>, count: usize, key: &str) -> Option<usize> {
+    let last = count.checked_sub(1)?;
+    let current = current.filter(|index| *index < count);
+    match key {
+        "up" => Some(current.map_or(last, |index| index.saturating_sub(1))),
+        "down" => Some(current.map_or(0, |index| index.saturating_add(1).min(last))),
+        "home" => Some(0),
+        "end" => Some(last),
+        _ => None,
+    }
+}
+
+fn is_plain_escape_key(modifiers: Modifiers, key: &str) -> bool {
+    !modifiers.control && !modifiers.alt && !modifiers.platform && key == "escape"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_plain_escape_key, model_choice_index};
+    use gpui::Modifiers;
+
+    #[test]
+    fn model_navigation_stops_at_both_ends() {
+        assert_eq!(model_choice_index(Some(0), 3, "up"), Some(0));
+        assert_eq!(model_choice_index(Some(2), 3, "down"), Some(2));
+        assert_eq!(model_choice_index(Some(1), 3, "up"), Some(0));
+        assert_eq!(model_choice_index(Some(1), 3, "down"), Some(2));
+    }
+
+    #[test]
+    fn model_navigation_jumps_to_first_and_last() {
+        assert_eq!(model_choice_index(Some(10), 1000, "home"), Some(0));
+        assert_eq!(model_choice_index(Some(10), 1000, "end"), Some(999));
+        assert_eq!(model_choice_index(Some(0), 1, "end"), Some(0));
+    }
+
+    #[test]
+    fn model_navigation_reaches_every_index_in_a_long_list() {
+        let mut current = Some(0);
+        for expected in 1..1000 {
+            current = model_choice_index(current, 1000, "down");
+            assert_eq!(current, Some(expected));
+        }
+        for expected in (0..999).rev() {
+            current = model_choice_index(current, 1000, "up");
+            assert_eq!(current, Some(expected));
+        }
+    }
+
+    #[test]
+    fn model_navigation_handles_absent_and_stale_indices() {
+        assert_eq!(model_choice_index(None, 3, "down"), Some(0));
+        assert_eq!(model_choice_index(None, 3, "up"), Some(2));
+        assert_eq!(model_choice_index(Some(9), 3, "down"), Some(0));
+        assert_eq!(model_choice_index(Some(9), 3, "up"), Some(2));
+    }
+
+    #[test]
+    fn model_navigation_ignores_empty_lists_and_other_keys() {
+        for key in ["up", "down", "home", "end"] {
+            assert_eq!(model_choice_index(Some(0), 0, key), None);
+        }
+        assert_eq!(model_choice_index(Some(0), 3, "tab"), None);
+        assert_eq!(model_choice_index(Some(0), 3, "escape"), None);
+        assert_eq!(model_choice_index(Some(0), 3, "enter"), None);
+    }
+
+    #[test]
+    fn plain_escape_key_rejects_modified_shortcuts() {
+        assert!(is_plain_escape_key(Modifiers::default(), "escape"));
+        assert!(!is_plain_escape_key(Modifiers::control(), "escape"));
+        assert!(!is_plain_escape_key(Modifiers::alt(), "escape"));
+        assert!(!is_plain_escape_key(Modifiers::command(), "escape"));
+        assert!(!is_plain_escape_key(Modifiers::default(), "enter"));
     }
 }

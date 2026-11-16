@@ -823,9 +823,10 @@ impl Desktop {
                                     )),
                             )
                             .when(is_dark() == dark, |row| {
-                                row.child(
-                                    status_chip(StatusKind::Tonal).child(course2md::tr!("使用中")),
-                                )
+                                row.child(status_chip(StatusKind::Tonal).child(accessible_text(
+                                    ("palette-in-use", usize::from(dark)),
+                                    course2md::tr!("使用中"),
+                                )))
                             })
                             .child(tile_chevron()),
                     ),

@@ -485,8 +485,13 @@ impl Desktop {
             .modal(open)
             .on_dismiss({
                 let this = cx.weak_entity();
-                move |_, cx| {
-                    let _ = this.update(cx, |this, cx| this.close_service_editor(cx));
+                move |window, cx| {
+                    let _ = this.update(cx, |this, cx| {
+                        if this.close_model_list_on_escape(FormOwner::Editor, window, cx) {
+                            return;
+                        }
+                        this.close_service_editor(cx);
+                    });
                 }
             })
             .into_any_element()
@@ -673,6 +678,9 @@ impl Desktop {
             .min_w_0()
             .max_h(super::dialog_body_height(window))
             .gap(rem(12.))
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                this.close_model_choices_on_escape(FormOwner::Editor, event, window, cx);
+            }))
             .child(
                 div()
                     .relative()

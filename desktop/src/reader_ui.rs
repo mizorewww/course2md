@@ -649,6 +649,9 @@ fn screenshot_slot(id: impl Into<ElementId>, loaded: Option<Loaded>) -> Div {
     match loaded {
         Some(Loaded::Ready(image, fresh)) => {
             let picture = img(image)
+                .id((id.clone(), "image"))
+                .role(Role::Image)
+                .aria_label(course2md::tr!("截图"))
                 .absolute()
                 .inset_0()
                 .size_full()
@@ -2380,6 +2383,7 @@ impl ReaderPage {
             .chain(Some(meta.uploader.trim()).filter(|uploader| !uploader.is_empty()))
             .collect();
         let origin = (!origin.is_empty()).then(|| {
+            let label = origin.join(" · ");
             status_chip(StatusKind::Neutral)
                 .child(
                     Icon::from(if meta.is_local() {
@@ -2389,7 +2393,7 @@ impl ReaderPage {
                     })
                     .size(rem(16.)),
                 )
-                .child(origin.join(" · "))
+                .child(accessible_text("reader-meta-origin", label))
         });
         let mut facts: Vec<String> = Vec::new();
         if meta.duration > 0. {
@@ -2410,11 +2414,10 @@ impl ReaderPage {
                         .gap_x(rem(12.))
                         .gap_y(rem(8.))
                         .children(origin)
-                        .children(
-                            facts
-                                .into_iter()
-                                .map(|fact| status_chip(StatusKind::Neutral).child(fact)),
-                        ),
+                        .children(facts.into_iter().enumerate().map(|(index, fact)| {
+                            status_chip(StatusKind::Neutral)
+                                .child(accessible_text(("reader-meta-fact", index), fact))
+                        })),
                 )
             })
             .children(self.reader_obstacles(cx))
@@ -3044,12 +3047,14 @@ impl ReaderPage {
             );
         }
         let label = course2md::tr!("复制与导出");
+        let key_toggle = ui::menu_key_toggle(&"export-note-menu".into(), window, cx);
         let trigger: AnyElement = if icon_only {
             ui::tip_button("export-note", symbols::content_copy(), label, |button| {
                 button
                     .variant(IconButtonVariant::Tonal)
                     .tone(ButtonTone::Neutral)
                     .disabled(exporting)
+                    .on_click(key_toggle)
             })
             .into_any_element()
         } else {
@@ -3064,6 +3069,7 @@ impl ReaderPage {
                 .child(Icon::from(symbols::keyboard_arrow_down()).size(rem(18.)))
                 .loading(current, label)
                 .disabled(exporting)
+                .on_click(key_toggle)
                 .into_any_element()
         };
         ui::menu(
@@ -3145,9 +3151,12 @@ impl ReaderPage {
             );
         }
         let label = course2md::tr!("更多笔记操作");
+        let more_toggle = ui::menu_key_toggle(&"reader-more-menu".into(), window, cx);
         ui::menu(
             "reader-more-menu",
-            ui::tip_button("reader-more", symbols::more_vert(), label, |button| button),
+            ui::tip_button("reader-more", symbols::more_vert(), label, |button| {
+                button.on_click(more_toggle)
+            }),
             MaterialMenu::new("reader-more-items")
                 .width(280.)
                 .items(items),

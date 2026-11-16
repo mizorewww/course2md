@@ -1361,6 +1361,7 @@ impl Desktop {
         }
         .row(cx);
         let open_version = id.clone();
+        let service_name: SharedString = version.config.name.clone().into();
         let open = cx.listener(move |this, _, window, cx| {
             this.open_settings_service_editor(purpose, Some(open_version.clone()), window, cx);
         });
@@ -1374,6 +1375,7 @@ impl Desktop {
                 ),
                 TileScale::Regular
                     .button(SharedString::from(format!("saved-service-{id}")), outer)
+                    .accessibility_label(service_name)
                     .on_click(open)
                     .child(row),
             )

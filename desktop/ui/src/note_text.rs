@@ -339,6 +339,12 @@ impl MarkdownPlugin for InlineFormula {
         Some(
             InlineElement::new(
                 div()
+                    .id((
+                        "inline-formula-accessible",
+                        node.source_range().map_or(0, |range| range.start),
+                    ))
+                    .role(Role::Math)
+                    .aria_label(node.accessibility_name().to_owned())
                     .h(px(f32::from(height).ceil()))
                     .pt(above)
                     .child(content),
@@ -385,6 +391,9 @@ impl MarkdownPlugin for DisplayFormula {
         let em = style.font_size.to_pixels(window.rem_size());
         let image = formula_image(formula, em, style.color, window);
         scrolling_row(id.into(), image, window, cx)
+            .id(("formula-accessible", id.1))
+            .role(Role::Math)
+            .aria_label(node.accessibility_name().to_owned())
             .py(rems(0.5))
             .into_any_element()
     }

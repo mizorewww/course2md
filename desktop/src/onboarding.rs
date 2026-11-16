@@ -1257,6 +1257,9 @@ impl Desktop {
             .w_full()
             .min_w_0()
             .gap(rem(24.))
+            .capture_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                this.close_model_choices_on_escape(FormOwner::Setup(purpose), event, window, cx);
+            }))
             .child(types)
             .child(form)
             .children(uses)
