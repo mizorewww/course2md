@@ -1294,6 +1294,35 @@ impl Desktop {
         cx.notify();
     }
 
+    pub(crate) fn clear_completed_tasks(&mut self, cx: &mut Context<Self>) {
+        if let Some(removed) = self.transact(
+            course2md::tr!("任务记录尚未保存：{}"),
+            |state| Ok(state.clear_completed_tasks()),
+            cx,
+        ) && !removed.is_empty()
+        {
+            self.tasks.update(cx, |page, _| page.forget_tasks(&removed));
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn remove_task_record(&mut self, id: &str, cx: &mut Context<Self>) {
+        let target = id.to_owned();
+        if self
+            .transact(
+                course2md::tr!("任务记录尚未保存：{}"),
+                |state| state.remove_task_record(&target),
+                cx,
+            )
+            .is_some()
+        {
+            self.tasks.update(cx, |page, _| {
+                page.forget_tasks(std::slice::from_ref(&target))
+            });
+        }
+        cx.notify();
+    }
+
     fn open_task_note(&mut self, task: &TaskRecord, cx: &mut Context<Self>) {
         let Some(path) = &task.artifact else {
             return;
@@ -1394,6 +1423,7 @@ impl Desktop {
                     );
             }
             TaskAction::Adjust => self.adjust_task(id, window, cx),
+            TaskAction::Remove => self.remove_task_record(&id, cx),
             TaskAction::ViewTask => {
                 self.select_task(&id, cx);
                 self.navigate(Page::Task, cx);
@@ -1426,6 +1456,7 @@ impl Desktop {
             TasksEvent::Move { id, position } => self.move_waiting_task(id, *position, cx),
             TasksEvent::PauseAll => self.pause_all_tasks(cx),
             TasksEvent::ResumeAll => self.resume_all_tasks(cx),
+            TasksEvent::ClearCompleted => self.clear_completed_tasks(cx),
             TasksEvent::Navigate(page) => self.navigate(*page, cx),
             TasksEvent::Import => {
                 if self.prepare_workbench_input(window, cx) {

@@ -1238,9 +1238,15 @@ impl ReaderPage {
         let course = &self.opened.preview.as_ref()?.course;
         let manifest = course.manifest.as_ref()?;
         let state = &self.workspace(cx)?.state;
-        let task = state.task(&manifest.task_id)?;
-        let library = state.library(&task.plan.library_id)?;
-        OfflineVideoRequest::for_note(course, task, library)
+        if let Some(task) = state.task(&manifest.task_id) {
+            let library = state.library(&task.plan.library_id)?;
+            return OfflineVideoRequest::for_note(course, task, library);
+        }
+        let library = state
+            .libraries
+            .iter()
+            .find(|library| course.dir.starts_with(&library.root))?;
+        OfflineVideoRequest::for_library_note(course, library)
     }
     fn play_reader_offline_video(&mut self, cx: &mut Context<Self>) {
         if self.offline_opening {

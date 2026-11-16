@@ -91,6 +91,8 @@ pub struct TaskCounts {
     /// Work still meant to run that this session can pause: not a held task, whose
     /// worker it does not command.
     pub pausable: usize,
+    /// Settled task records that "清空已完成" removes without touching notes.
+    pub clearable: usize,
 }
 
 pub fn task_counts(tasks: &[TaskRecord]) -> TaskCounts {
@@ -109,6 +111,7 @@ pub fn task_counts(tasks: &[TaskRecord]) -> TaskCounts {
                     && task.handled_by.is_none()
                     && !task.held,
             );
+            counts.clearable += usize::from(workspace::can_clear_completed_task_in(tasks, task));
             counts
         })
 }
@@ -580,6 +583,7 @@ pub enum TaskAction {
     Resend,
     Adjust,
     Cancel,
+    Remove,
     ViewTask,
 }
 
@@ -901,7 +905,7 @@ impl TaskAction {
             | Self::CopyLink => 0,
             Self::Details | Self::Log | Self::Followup(_) | Self::ViewTask => 1,
             Self::Move { .. } => 2,
-            Self::Cancel => 4,
+            Self::Cancel | Self::Remove => 4,
             _ => 3,
         }
     }
@@ -1059,6 +1063,8 @@ pub fn task_actions_for(
             }
             if !task.state.finished() {
                 actions.push(Cancel);
+            } else if workspace::can_remove_task_record(task) && !active {
+                actions.push(Remove);
             }
         }
         TaskSurface::Card if running || (queued && active) => {

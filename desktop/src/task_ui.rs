@@ -10,6 +10,7 @@ use desktop_tasks::job::Work;
 use desktop_tasks::task_view::*;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, scroll::Scrollbar};
 use gpui_kit_material::components::MaterialContextMenu;
 use gpui_kit_material::{
     color::ColorRole,
@@ -38,6 +39,8 @@ pub(crate) struct TaskListUi {
     pub rem: f32,
     /// Disclosure open state that outlives a virtualized row's unmount.
     pub logs_open: std::collections::HashSet<String>,
+    pub log_scrolls: HashMap<String, ScrollHandle>,
+    pub copied_logs: HashSet<String>,
     /// The task row showing its details on the task page.
     pub expanded: Option<String>,
 }
@@ -51,6 +54,8 @@ impl TaskListUi {
             focus: Vec::new(),
             rem: f32::NAN,
             logs_open: Default::default(),
+            log_scrolls: HashMap::new(),
+            copied_logs: HashSet::new(),
             expanded: None,
         }
     }
@@ -209,6 +214,7 @@ pub(crate) enum TasksEvent {
     },
     PauseAll,
     ResumeAll,
+    ClearCompleted,
     Navigate(Page),
     /// Import a video, from the empty page.
     Import,
@@ -586,6 +592,7 @@ impl TasksPage {
         let TaskCounts {
             resumable,
             pausable,
+            clearable,
             ..
         } = task_counts(tasks);
         // Each group below names its kind of work; the title does not count it again.
@@ -607,6 +614,7 @@ impl TasksPage {
             .child(
                 h_flex()
                     .gap(rem(8.))
+                    .flex_wrap()
                     .when(pausable > 1, |row| {
                         row.child(
                             material_button("tasks-pause-all", ButtonVariant::Outlined)
@@ -625,6 +633,23 @@ impl TasksPage {
                                 .on_click(
                                     cx.listener(|_, _, _, cx| cx.emit(TasksEvent::ResumeAll)),
                                 ),
+                        )
+                    })
+                    .when(clearable > 0, |row| {
+                        row.child(
+                            MaterialTooltip::plain(
+                                "tasks-clear-completed-tip",
+                                course2md::tr!("仅清空任务记录，不会删除已生成的笔记"),
+                            )
+                            .trigger(
+                                material_button("tasks-clear-completed", ButtonVariant::Outlined)
+                                    .tone(ButtonTone::Neutral)
+                                    .icon(symbols::delete_sweep())
+                                    .child(course2md::tr!("清空已完成"))
+                                    .on_click(cx.listener(|_, _, _, cx| {
+                                        cx.emit(TasksEvent::ClearCompleted)
+                                    })),
+                            ),
                         )
                     }),
             )
@@ -798,7 +823,7 @@ impl TasksPage {
         move |_, _| {
             MaterialMenu::new(SharedString::from(format!("task-more-items-{id}"))).items(
                 items.iter().map(|((text, icon, disabled), ends, action)| {
-                    let danger = *action == TaskAction::Cancel;
+                    let danger = matches!(action, TaskAction::Cancel | TaskAction::Remove);
                     MaterialMenuItem::new(*text)
                         .leading(
                             Icon::from(*icon)
@@ -872,6 +897,187 @@ impl TasksPage {
     pub(crate) fn close_task_details(&mut self, id: &str) {
         self.entered.remove(&format!("task-detail-{id}"));
         self.task_list.logs_open.remove(id);
+        self.task_list.log_scrolls.remove(id);
+        self.task_list.copied_logs.remove(id);
+    }
+
+    pub(crate) fn forget_tasks(&mut self, ids: &[String]) {
+        for id in ids {
+            self.close_task_details(id);
+            if self.task_list.expanded.as_deref() == Some(id.as_str()) {
+                self.task_list.expanded = None;
+            }
+        }
+    }
+
+    fn copy_task_log(&mut self, id: String, text: String, cx: &mut Context<Self>) {
+        crate::clipboard::write(ClipboardItem::new_string(text), cx);
+        self.task_list.copied_logs.insert(id.clone());
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_secs(2))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.task_list.copied_logs.remove(&id) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn task_log_panel(&mut self, id: &str, text: String, cx: &mut Context<Self>) -> AnyElement {
+        let scroll = self
+            .task_list
+            .log_scrolls
+            .entry(id.to_owned())
+            .or_default()
+            .clone();
+        let copied = self.task_list.copied_logs.contains(id);
+        let mono_font = cx.theme().mono_font_family.clone();
+        let lines: Vec<&str> = text.lines().collect();
+        let line_count = lines.len().max(1);
+        let gutter_digits = line_count.to_string().len().max(2);
+        let gutter_width = rem((gutter_digits as f32) * 8. + 8.);
+        let task_id = id.to_owned();
+        let copy_text = text.clone();
+
+        let header = h_flex()
+            .w_full()
+            .min_w_0()
+            .px(rem(12.))
+            .py(rem(6.))
+            .gap(rem(8.))
+            .items_center()
+            .justify_between()
+            .bg(color(ColorRole::SURFACE_CONTAINER))
+            .border_b_1()
+            .border_color(color(ColorRole::OUTLINE_VARIANT))
+            .child(
+                h_flex()
+                    .min_w_0()
+                    .gap(rem(8.))
+                    .items_center()
+                    .child(
+                        Icon::from(symbols::terminal())
+                            .size(ICON_SLOT)
+                            .color(color(ColorRole::ON_SURFACE_VARIANT)),
+                    )
+                    .child(
+                        accessible_text(
+                            SharedString::from(format!("task-log-title-{id}")),
+                            course2md::tr!("运行日志"),
+                        )
+                        .text_size(TEXT_AUX)
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(color(ColorRole::ON_SURFACE)),
+                    )
+                    .child(
+                        accessible_text(
+                            SharedString::from(format!("task-log-count-{id}")),
+                            course2md::tr!("{} 行", line_count),
+                        )
+                        .text_size(TEXT_AUX)
+                        .text_color(color(ColorRole::ON_SURFACE_VARIANT)),
+                    ),
+            )
+            .child(
+                material_button(
+                    SharedString::from(format!("task-log-copy-{id}")),
+                    ButtonVariant::Text,
+                )
+                .tone(if copied {
+                    ButtonTone::Accent
+                } else {
+                    ButtonTone::Neutral
+                })
+                .icon(if copied {
+                    symbols::check()
+                } else {
+                    symbols::content_copy()
+                })
+                .child(if copied {
+                    course2md::tr!("已复制")
+                } else {
+                    course2md::tr!("复制日志")
+                })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.copy_task_log(task_id.clone(), copy_text.clone(), cx);
+                })),
+            );
+
+        let rendered_lines = lines.into_iter().enumerate().map(|(index, raw_line)| {
+            let line_no = index + 1;
+            let tone = log_line_color(raw_line);
+            let display_line = preserve_leading_indent(raw_line);
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .items_start()
+                .gap(rem(10.))
+                .child(
+                    div()
+                        .w(gutter_width)
+                        .flex_shrink_0()
+                        .text_right()
+                        .font_family(mono_font.clone())
+                        .text_size(TEXT_AUX)
+                        .line_height(rems(1.45))
+                        .text_color(color(ColorRole::OUTLINE))
+                        .child(line_no.to_string()),
+                )
+                .child(
+                    accessible_text(
+                        SharedString::from(format!("task-log-line-{id}-{line_no}")),
+                        display_line,
+                    )
+                    .flex_1()
+                    .min_w_0()
+                    .font_family(mono_font.clone())
+                    .text_size(TEXT_AUX)
+                    .line_height(rems(1.45))
+                    .text_color(color(tone))
+                    .whitespace_normal(),
+                )
+        });
+
+        let viewport = div()
+            .relative()
+            .w_full()
+            .min_w_0()
+            .child(
+                div()
+                    .id(SharedString::from(format!("task-log-{id}")))
+                    .w_full()
+                    .min_w_0()
+                    .max_h(rem(260.))
+                    .track_scroll(&scroll)
+                    .overflow_y_scroll()
+                    .px(rem(12.))
+                    .py(rem(10.))
+                    .child(
+                        v_flex()
+                            .id(SharedString::from(format!("task-log-text-{id}")))
+                            .w_full()
+                            .min_w_0()
+                            .gap(rem(2.))
+                            .children(rendered_lines),
+                    ),
+            )
+            .child(Scrollbar::vertical(&scroll));
+
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .rounded(RADIUS_LARGE)
+            .border_1()
+            .border_color(color(ColorRole::OUTLINE_VARIANT))
+            .bg(color(ColorRole::INSET))
+            .overflow_hidden()
+            .child(header)
+            .child(viewport)
+            .into_any_element()
     }
 
     /// Where a task saves, as its supporting line.
@@ -1622,6 +1828,7 @@ impl TasksPage {
                     | TaskAction::Details
                     | TaskAction::Log
                     | TaskAction::Cancel
+                    | TaskAction::Remove
                     | TaskAction::ViewTask => ButtonVariant::Text,
                     _ => ButtonVariant::Outlined,
                 }
@@ -1635,7 +1842,10 @@ impl TasksPage {
                 .when(
                     matches!(
                         action,
-                        TaskAction::Cancel | TaskAction::Details | TaskAction::Log
+                        TaskAction::Cancel
+                            | TaskAction::Remove
+                            | TaskAction::Details
+                            | TaskAction::Log
                     ),
                     |b| b.tone(ButtonTone::Neutral),
                 )
@@ -1719,7 +1929,7 @@ impl TasksPage {
         });
         let log = task_log_text(task)
             .filter(|_| self.task_list.logs_open.contains(&id))
-            .map(|text| ui::log_box(&id, text));
+            .map(|text| self.task_log_panel(&id, text, cx));
         v_flex()
             .w_full()
             .min_w_0()
@@ -1892,6 +2102,7 @@ impl TasksPage {
             TaskAction::Adjust => (adjust_label(task), symbols::home(), false),
             TaskAction::Cancel if cancelling => (tr!("正在取消…"), symbols::close(), true),
             TaskAction::Cancel => (tr!("取消任务"), symbols::close(), false),
+            TaskAction::Remove => (tr!("移除任务记录"), symbols::delete(), false),
             TaskAction::ViewTask => (tr!("查看任务"), symbols::task(), false),
         }
     }
@@ -1937,6 +2148,57 @@ impl StageStatusView for StageStatus {
             Self::Failed | Self::Uncertain => symbols::warning(),
             Self::Waiting => symbols::schedule(),
         }
+    }
+}
+
+fn log_line_color(line: &str) -> ColorRole {
+    let trimmed = line.trim_start();
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("error:")
+        || lower.starts_with("[error]")
+        || lower.starts_with("fatal:")
+        || lower.starts_with("traceback")
+        || lower.contains(" error: ")
+        || trimmed.starts_with("错误")
+        || trimmed.starts_with("失败")
+    {
+        ColorRole::ERROR
+    } else if lower.starts_with("warning:")
+        || lower.starts_with("warn:")
+        || lower.starts_with("[warn")
+        || lower.contains(" warning: ")
+        || trimmed.starts_with("警告")
+    {
+        ColorRole::WARNING
+    } else {
+        ColorRole::ON_SURFACE
+    }
+}
+
+fn preserve_leading_indent(line: &str) -> String {
+    if line.is_empty() {
+        return "\u{00A0}".into();
+    }
+    let mut prefix = String::new();
+    let mut rest_start = 0;
+    for (idx, ch) in line.char_indices() {
+        match ch {
+            ' ' => {
+                prefix.push('\u{00A0}');
+                rest_start = idx + 1;
+            }
+            '\t' => {
+                prefix.push_str("\u{00A0}\u{00A0}\u{00A0}\u{00A0}");
+                rest_start = idx + 1;
+            }
+            _ => break,
+        }
+    }
+    if prefix.is_empty() {
+        line.to_owned()
+    } else {
+        prefix.push_str(&line[rest_start..]);
+        prefix
     }
 }
 
@@ -2136,5 +2398,26 @@ mod tests {
             ai_answered_by: Vec::new(),
             ran_with: None,
         }
+    }
+
+    #[test]
+    fn log_panel_helpers_classify_severity_and_preserve_indentation() {
+        assert_eq!(
+            super::log_line_color("ERROR: Unable to download"),
+            super::ColorRole::ERROR
+        );
+        assert_eq!(
+            super::log_line_color("WARNING: [youtube] Retrying"),
+            super::ColorRole::WARNING
+        );
+        assert_eq!(
+            super::log_line_color("[download] 100% of 12.4MiB"),
+            super::ColorRole::ON_SURFACE
+        );
+        assert_eq!(
+            super::preserve_leading_indent("  frame=42"),
+            "\u{00A0}\u{00A0}frame=42"
+        );
+        assert_eq!(super::preserve_leading_indent(""), "\u{00A0}");
     }
 }

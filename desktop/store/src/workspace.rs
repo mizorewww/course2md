@@ -1286,6 +1286,75 @@ impl State {
         Ok(())
     }
 
+    /// Removes all finished, cancelled, and settled superseded task records while
+    /// leaving every published note folder (`course-*`) and active/attention task intact.
+    pub fn clear_completed_tasks(&mut self) -> Vec<String> {
+        let removed: BTreeSet<String> = self
+            .tasks
+            .iter()
+            .filter(|task| can_clear_completed_task_in(&self.tasks, task))
+            .map(|task| task.id.clone())
+            .collect();
+        if removed.is_empty() {
+            return Vec::new();
+        }
+        self.detach_task_records(&removed);
+        removed.into_iter().collect()
+    }
+
+    /// Removes a single stopped task record without touching any published note folder.
+    pub fn remove_task_record(&mut self, id: &str) -> Result<()> {
+        let task = self.task(id).context(c2m_i18n::tr!("任务记录不存在"))?;
+        ensure!(
+            can_remove_task_record(task),
+            c2m_i18n::tr!("当前任务还在处理或等待确认，暂时不能移除记录")
+        );
+        let removed = BTreeSet::from([id.to_owned()]);
+        self.detach_task_records(&removed);
+        Ok(())
+    }
+
+    fn detach_task_records(&mut self, removed: &BTreeSet<String>) {
+        self.tasks.retain(|task| !removed.contains(&task.id));
+        for task in &mut self.tasks {
+            if task
+                .parent
+                .as_deref()
+                .is_some_and(|parent| removed.contains(parent))
+            {
+                task.parent = None;
+            }
+        }
+        self.link_tasks();
+        if self
+            .selected_task
+            .as_deref()
+            .is_some_and(|selected| removed.contains(selected))
+        {
+            self.selected_task = self.tasks.last().map(|task| task.id.clone());
+        }
+        for draft in &mut self.drafts {
+            if draft
+                .submitted_task
+                .as_deref()
+                .is_some_and(|submitted| removed.contains(submitted))
+            {
+                let id = draft.id.clone();
+                let online = draft.online;
+                *draft = Draft {
+                    id,
+                    ..Draft::new(online)
+                };
+            } else if draft
+                .retry_of
+                .as_deref()
+                .is_some_and(|retry| removed.contains(retry))
+            {
+                draft.retry_of = None;
+            }
+        }
+    }
+
     /// Queued tasks in the order they will run.
     pub fn queued_tasks(&self) -> impl Iterator<Item = &TaskRecord> {
         self.tasks
@@ -1622,9 +1691,123 @@ struct TaskMirror {
 /// run in order on the blocking pool, and a newer write of a file replaces one still
 /// waiting. A mirror is recovery evidence and reading the library rewrites it; a failed
 /// control write stops the job, which then sends nothing new.
+/// Whether `task` is settled history that "清空已完成" clears: completed, cancelled,
+/// superseded by a newer note, or part of a repair chain whose terminal task is itself
+/// completed/cancelled. Active, queued, paused, partial, failed, and uncertain tasks stay.
+pub fn can_clear_completed_task_in(tasks: &[TaskRecord], task: &TaskRecord) -> bool {
+    let terminal_settled = |t: &TaskRecord| {
+        !t.held
+            && !matches!(
+                t.state,
+                TaskState::Running | TaskState::Pausing | TaskState::Queued
+            )
+            && !t.has_uncertain()
+            && (matches!(t.state, TaskState::Complete | TaskState::Cancelled)
+                || t.replaced_by.is_some())
+    };
+    if task.held
+        || matches!(
+            task.state,
+            TaskState::Running | TaskState::Pausing | TaskState::Queued
+        )
+        || task.has_uncertain()
+    {
+        return false;
+    }
+    if terminal_settled(task) {
+        return true;
+    }
+    if task.handled_by.is_some() {
+        let mut latest = task;
+        for _ in 0..tasks.len() {
+            match latest
+                .handled_by
+                .as_deref()
+                .and_then(|next| tasks.iter().find(|candidate| candidate.id == next))
+            {
+                Some(next) => latest = next,
+                None => break,
+            }
+        }
+        return latest.id != task.id && terminal_settled(latest);
+    }
+    false
+}
+
+/// Whether a single task record can be dismissed from its menu without affecting any
+/// running worker, unconfirmed remote request, or active follow-up chain.
+pub fn can_remove_task_record(task: &TaskRecord) -> bool {
+    !task.held
+        && !matches!(
+            task.state,
+            TaskState::Running | TaskState::Pausing | TaskState::Queued
+        )
+        && !task.has_uncertain()
+        && task.handled_by.is_none()
+}
+
+/// Scratch directory cleanup for a removed task record; never touches any note folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClearedTaskWork {
+    pub work_dir: PathBuf,
+    pub keep_cached_materials: bool,
+    pub keep_offline_media: bool,
+}
+
+pub fn clean_cleared_task_work(item: &ClearedTaskWork) {
+    let valid_work_dir = item
+        .work_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(c2m_engine::execution::valid_id)
+        && item
+            .work_dir
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .is_some_and(|name| name == "work")
+        && item
+            .work_dir
+            .parent()
+            .and_then(|parent| parent.parent())
+            .and_then(|dot| dot.file_name())
+            .is_some_and(|name| name == ".course2md");
+    if !valid_work_dir {
+        return;
+    }
+    let Ok(meta) = std::fs::symlink_metadata(&item.work_dir) else {
+        return;
+    };
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return;
+    }
+    // Always remove the library mirror so a cleared task is not re-adopted on scan.
+    let _ = std::fs::remove_file(item.work_dir.join("task-record.json"));
+    if item.keep_cached_materials {
+        return;
+    }
+    if item.keep_offline_media && item.work_dir.join("media.mp4").is_file() {
+        if let Ok(entries) = std::fs::read_dir(&item.work_dir) {
+            for entry in entries.flatten() {
+                if entry.file_name() == "media.mp4" {
+                    continue;
+                }
+                let path = entry.path();
+                if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                    let _ = std::fs::remove_dir_all(path);
+                } else {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+        }
+        return;
+    }
+    let _ = std::fs::remove_dir_all(&item.work_dir);
+}
+
 #[derive(Clone, Default)]
 pub struct LibraryWrites {
     pending: Arc<Mutex<BTreeMap<PathBuf, LibraryWrite>>>,
+    cleans: Arc<Mutex<Vec<ClearedTaskWork>>>,
     writing: Arc<Mutex<()>>,
     failure: Arc<Mutex<Option<WriteFailure>>>,
     wake: Arc<Mutex<Option<smol::channel::Sender<()>>>>,
@@ -1647,10 +1830,26 @@ impl LibraryWrites {
         drop(desktop_prefs::spawn_blocking_io(move || this.drain()));
     }
 
+    fn queue_cleans(&self, removed: Vec<ClearedTaskWork>) {
+        if removed.is_empty() {
+            return;
+        }
+        {
+            let mut pending = c2m_process::runtime::lock_recover(&self.pending);
+            for item in &removed {
+                pending.retain(|path, _| !path.starts_with(&item.work_dir));
+            }
+        }
+        c2m_process::runtime::lock_recover(&self.cleans).extend(removed);
+        let this = self.clone();
+        drop(desktop_prefs::spawn_blocking_io(move || this.drain()));
+    }
+
     /// Performs everything queued so far, waiting for any write already running.
     pub fn drain(&self) {
         let _writing = c2m_process::runtime::lock_recover(&self.writing);
         let writes = std::mem::take(&mut *c2m_process::runtime::lock_recover(&self.pending));
+        let cleans = std::mem::take(&mut *c2m_process::runtime::lock_recover(&self.cleans));
         for (path, (bytes, mirror_of)) in writes {
             let control = mirror_of.is_none();
             let result = match mirror_of {
@@ -1666,6 +1865,9 @@ impl LibraryWrites {
                     let _ = wake.try_send(());
                 }
             }
+        }
+        for item in &cleans {
+            clean_cleared_task_work(item);
         }
     }
 
@@ -3171,6 +3373,33 @@ impl Workspace {
                 || previous.library(&task.plan.library_id)
                     != self.state.library(&task.plan.library_id)
         }));
+        let removed_work: Vec<ClearedTaskWork> = previous
+            .tasks
+            .iter()
+            .filter(|old| self.state.task(&old.id).is_none())
+            .map(|old| {
+                let keep_cached_materials = self.state.tasks.iter().any(|remaining| {
+                    matches!(
+                        &remaining.plan.operation,
+                        c2m_engine::execution::Operation::Reprocess {
+                            prior_work_dir: Some(prior),
+                            ..
+                        } if *prior == old.work_dir
+                    )
+                });
+                let keep_offline_media = old.artifact.as_ref().is_some_and(|dir| dir.is_dir())
+                    && old
+                        .ran_with
+                        .as_ref()
+                        .is_some_and(|ran| ran.options().keep_video);
+                ClearedTaskWork {
+                    work_dir: old.work_dir.clone(),
+                    keep_cached_materials,
+                    keep_offline_media,
+                }
+            })
+            .collect();
+        self.library_writes.queue_cleans(removed_work);
         Ok(result)
     }
 
@@ -6413,5 +6642,104 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn clearing_completed_tasks_keeps_published_notes_and_active_work_intact() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let library = ws.state.default_library.clone();
+
+        let make_plan = |slug: &str| {
+            let mut p = plan(&library);
+            p.source_id = slug.into();
+            p.source.identity = slug.into();
+            p.source.input = format!("https://example.test/{slug}");
+            p.title = format!("Title {slug}");
+            p
+        };
+
+        let done_id = ws
+            .transaction(|s| Ok(s.enqueue(make_plan("done-course"), None)?.0))
+            .unwrap();
+        let done_note = publish_note(&ws.state, &done_id, false);
+        let done_work = ws.state.task(&done_id).unwrap().work_dir.clone();
+        std::fs::create_dir_all(&done_work).unwrap();
+        std::fs::write(done_work.join("media.mp4"), b"retained offline video").unwrap();
+        std::fs::write(done_work.join("events.jsonl"), b"{}").unwrap();
+        ws.transaction(|s| {
+            let t = s.task_mut(&done_id).unwrap();
+            t.state = TaskState::Complete;
+            t.artifact = Some(done_note.clone());
+            t.ran_with = Some(RunSettings::new(
+                &c2m_config::settings::ConfigFile {
+                    defaults: c2m_config::settings::Defaults {
+                        keep_video: Some(true),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                None,
+                None,
+            ));
+            Ok(())
+        })
+        .unwrap();
+
+        let cancelled_id = ws
+            .transaction(|s| Ok(s.enqueue(make_plan("cancelled-course"), None)?.0))
+            .unwrap();
+        let cancelled_work = ws.state.task(&cancelled_id).unwrap().work_dir.clone();
+        ws.transaction(|s| s.set_intent(&cancelled_id, Intent::Cancel))
+            .unwrap();
+
+        let queued_id = ws
+            .transaction(|s| Ok(s.enqueue(make_plan("queued-course"), None)?.0))
+            .unwrap();
+        let failed_id = ws
+            .transaction(|s| Ok(s.enqueue(make_plan("failed-course"), None)?.0))
+            .unwrap();
+        ws.transaction(|s| {
+            s.task_mut(&failed_id).unwrap().state = TaskState::NeedsAttention;
+            Ok(())
+        })
+        .unwrap();
+        ws.library_writes.drain();
+        assert!(done_work.join("task-record.json").is_file());
+        assert!(cancelled_work.join("task-record.json").is_file());
+
+        let cleared = ws.transaction(|s| Ok(s.clear_completed_tasks())).unwrap();
+        ws.library_writes.drain();
+
+        assert!(cleared.contains(&done_id) && cleared.contains(&cancelled_id));
+        assert_eq!(ws.state.tasks.len(), 2);
+        assert!(ws.state.task(&queued_id).is_some());
+        assert!(ws.state.task(&failed_id).is_some());
+
+        // Published note in library is 100% untouched and readable.
+        assert!(done_note.join("manifest.json").is_file());
+        assert!(done_note.join("document.json").is_file());
+        let root = ws.state.library(&library).unwrap().root.clone();
+        let scanned = crate::notes::scan_library(&root).unwrap();
+        assert_eq!(scanned.courses.len(), 1);
+        assert_eq!(scanned.courses[0].dir, done_note);
+
+        // Kept offline video survives, while task-record.json & scratch files are cleaned.
+        assert!(done_work.join("media.mp4").is_file());
+        assert!(!done_work.join("task-record.json").exists());
+        assert!(!done_work.join("events.jsonl").exists());
+        assert!(!cancelled_work.exists());
+
+        // Cleared tasks are not resurrected when scanning library mirrors.
+        let (adopted, _) = read_library_tasks(ws.state.library(&library).unwrap());
+        let adopted_ids: Vec<_> = adopted.into_iter().map(|t| t.id).collect();
+        assert!(!adopted_ids.contains(&done_id) && !adopted_ids.contains(&cancelled_id));
+
+        // Single failed task record can also be removed explicitly without touching notes.
+        ws.transaction(|s| s.remove_task_record(&failed_id))
+            .unwrap();
+        ws.library_writes.drain();
+        assert!(ws.state.task(&failed_id).is_none());
+        assert!(done_note.join("manifest.json").is_file());
     }
 }

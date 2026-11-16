@@ -13,7 +13,7 @@
 //! | `Confirm`, `confirm_host`, `dismiss_confirm`, `modal_open` | `MaterialDialog` is an element in the tree; a question asked from a handler needs one host |
 //! | `status_line` | Text with " · " between parts, breaking only between parts |
 //! | `transfer_status` | A download's title, status line and bar |
-//! | `page_title`, `tip_button`, `log_box` | A page title one step up, an icon button named by its tooltip, a task log |
+//! | `page_title`, `tip_button` | A page title one step up, an icon button named by its tooltip |
 //!
 //! `task_actions` is not here: the choice of actions is about tasks, not generic, so it
 //! stays in `task_ui.rs`, rendered to both buttons and menu items.
@@ -956,24 +956,6 @@ pub fn fact_row(
         .row()
         .children(icon.map(|icon| Icon::from(icon).color(color(ColorRole::ON_SURFACE_VARIANT))))
         .child(scale.text(ElementId::Name(id.into()), label, Some(value.into())))
-}
-
-pub fn log_box(id: &str, text: String) -> Stateful<Div> {
-    div()
-        .id(SharedString::from(format!("task-log-{id}")))
-        .w_full()
-        .min_w_0()
-        .max_h(rem(224.))
-        .overflow_y_scroll()
-        .p(rem(16.))
-        .rounded(RADIUS_LARGE)
-        .bg(color(ColorRole::INSET))
-        .child(
-            accessible_text(SharedString::from(format!("task-log-text-{id}")), text)
-                .text_size(TEXT_AUX)
-                .text_color(color(ColorRole::ON_SURFACE_VARIANT))
-                .whitespace_normal(),
-        )
 }
 
 #[cfg(test)]

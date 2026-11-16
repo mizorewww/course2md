@@ -140,6 +140,22 @@ impl OfflineVideoRequest {
         })
     }
 
+    /// Fallback for a note whose completed task record was cleared from history while
+    /// keeping its retained `media.mp4` under `<library>/.course2md/work/<task_id>/`.
+    pub fn for_library_note(course: &Course, library: &workspace::LibraryLocation) -> Option<Self> {
+        let manifest = course.manifest.as_ref()?;
+        if manifest.source_id.starts_with("local:") || !course.dir.starts_with(&library.root) {
+            return None;
+        }
+        let work_dir = library.root.join(".course2md/work").join(&manifest.task_id);
+        Some(Self {
+            library_root: library.root.clone(),
+            task_id: manifest.task_id.clone(),
+            work_dir,
+            note_dir: course.dir.clone(),
+        })
+    }
+
     /// Called only by reader workers, including the final check before opening.
     pub fn inspect(&self) -> OfflineVideo {
         self.checked_path()
@@ -1018,6 +1034,8 @@ mod tests {
             request.inspect(),
             OfflineVideo::Available(c2m_config::config::canonicalize(&media).unwrap())
         );
+        let cleared_fallback = OfflineVideoRequest::for_library_note(&first, &library).unwrap();
+        assert_eq!(cleared_fallback.inspect(), request.inspect());
         // Another task replaced the note: its video is not this note's.
         let second = fixture_note(root.path(), 2, &[20.]);
         assert_eq!(second.dir, first.dir);
