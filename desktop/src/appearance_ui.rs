@@ -936,13 +936,17 @@ impl Desktop {
             .child(
                 h_flex()
                     .w_full()
+                    .min_w_0()
                     .flex_wrap()
                     .items_center()
+                    .justify_between()
                     .gap(rem(12.))
                     .child(
                         TileScale::Regular
-                            .label("app-font-scale-value", format!("{percent}%"))
-                            .flex_1(),
+                            .label("app-font-scale-row-label", course2md::tr!("界面缩放"))
+                            .flex_1()
+                            .min_w_0()
+                            .whitespace_normal(),
                     )
                     .child(
                         material_button("app-font-scale-reset", ButtonVariant::Text)
@@ -968,34 +972,44 @@ impl Desktop {
                 ))
             })
             .child(
-                div()
+                h_flex()
                     .w_full()
-                    .px(ui::FOCUS_RING_ROOM)
-                    .pt(ui::FOCUS_RING_ROOM)
-                    .pb(rem(4.))
+                    .min_w_0()
+                    .items_center()
+                    .gap(rem(16.))
+                    .child(div().min_w(rem(56.)).flex_shrink_0().child(
+                        TileScale::Regular.label("app-font-scale-value", format!("{percent}%")),
+                    ))
                     .child(
                         div()
-                            .id("app-font-scale-control")
-                            .w_full()
-                            .capture_any_mouse_down(cx.listener(
-                                |this, event: &MouseDownEvent, _, cx| {
-                                    if event.button == MouseButton::Left {
-                                        this.begin_font_scale(cx);
-                                    }
-                                },
-                            ))
-                            .capture_any_mouse_up(cx.listener(
-                                |this, event: &MouseUpEvent, _, cx| {
-                                    if event.button == MouseButton::Left {
-                                        this.release_font_scale(cx);
-                                    }
-                                },
-                            ))
-                            .on_mouse_up_out(
-                                MouseButton::Left,
-                                cx.listener(|this, _, _, cx| this.release_font_scale(cx)),
-                            )
-                            .child(self.settings_ui.scale_slider.clone()),
+                            .flex_1()
+                            .min_w_0()
+                            .px(ui::FOCUS_RING_ROOM)
+                            .py(rem(4.))
+                            .child(
+                                div()
+                                    .id("app-font-scale-control")
+                                    .w_full()
+                                    .capture_any_mouse_down(cx.listener(
+                                        |this, event: &MouseDownEvent, _, cx| {
+                                            if event.button == MouseButton::Left {
+                                                this.begin_font_scale(cx);
+                                            }
+                                        },
+                                    ))
+                                    .capture_any_mouse_up(cx.listener(
+                                        |this, event: &MouseUpEvent, _, cx| {
+                                            if event.button == MouseButton::Left {
+                                                this.release_font_scale(cx);
+                                            }
+                                        },
+                                    ))
+                                    .on_mouse_up_out(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _, _, cx| this.release_font_scale(cx)),
+                                    )
+                                    .child(self.settings_ui.scale_slider.clone()),
+                            ),
                     ),
             );
         let previews = ui::Field::tile("palette-previews", move |_| {
@@ -1018,11 +1032,7 @@ impl Desktop {
                 course2md::tr!("界面偏好"),
                 vec![
                     self.interface_language_field(cx),
-                    ui::Field::below(
-                        "app-font-scale-row",
-                        course2md::tr!("界面缩放"),
-                        font_scale,
-                    ),
+                    ui::Field::content("app-font-scale-row", font_scale),
                     ui::Field::switch(
                         "app-reduce-motion",
                         course2md::tr!("减少动态效果"),
