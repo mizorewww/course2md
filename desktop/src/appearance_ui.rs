@@ -2,6 +2,7 @@
 use crate::preferences::{InterfaceLanguage, PreferenceGroup};
 use crate::{Desktop, symbols, ui};
 use gpui::{prelude::*, *};
+use gpui_base::slider::SliderState;
 use gpui_base::{h_flex, v_flex};
 use gpui_kit_material::{
     color::{Scheme, palette::ALL},
@@ -9,6 +10,7 @@ use gpui_kit_material::{
     theme::{is_dark, rgba},
     tokens::shape::OuterCorners,
 };
+use std::{cell::Cell, rc::Rc};
 
 /// Between palette cards, and the narrowest a card gets, in design px.
 const CARD_GAP: f32 = 16.;
@@ -19,9 +21,125 @@ const CARD_MIN_WIDTH: f32 = 150.;
 /// The picker's widest, in dp: four previews across with their names on one line.
 const PICKER_WIDTH: f32 = 920.;
 
+/// https://docs.rs/gpui-kit-material/0.1.4/gpui_kit_material/components/struct.MaterialSlider.html
+/// Keeps the press coordinates while live scaling moves the track.
+pub(crate) struct ScaleSlider {
+    state: Entity<SliderState>,
+    gesture: Rc<Cell<Option<Bounds<Pixels>>>>,
+    dragging: Rc<Cell<bool>>,
+    _subscription: Subscription,
+}
+
+impl ScaleSlider {
+    pub(crate) fn new(
+        state: Entity<SliderState>,
+        dragging: Rc<Cell<bool>>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let subscription = cx.observe(&state, |_, _, cx| cx.notify());
+        Self {
+            state,
+            gesture: Rc::new(Cell::new(None)),
+            dragging,
+            _subscription: subscription,
+        }
+    }
+}
+
+impl Render for ScaleSlider {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let state = self.state.clone();
+        let gesture = self.gesture.clone();
+        let dragging = self.dragging.clone();
+        div()
+            .relative()
+            .w_full()
+            .child(
+                canvas(
+                    |bounds, window, _| {
+                        let room = ui::FOCUS_RING_ROOM.to_pixels(window.rem_size());
+                        window.insert_hitbox(bounds.dilate(room), HitboxBehavior::Normal)
+                    },
+                    move |_, hitbox, window, _| {
+                        let pressed = gesture.clone();
+                        let slider = state.clone();
+                        let held = dragging.clone();
+                        window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+                            if phase == DispatchPhase::Capture
+                                && event.button == MouseButton::Left
+                                && hitbox.is_hovered(window)
+                            {
+                                let bounds = slider.read(cx).bounds();
+                                pressed.set(Some(bounds));
+                                held.set(true);
+                            }
+                        });
+                        let moved = gesture.clone();
+                        let slider = state.clone();
+                        let held = dragging.clone();
+                        window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+                            if phase != DispatchPhase::Capture {
+                                return;
+                            }
+                            let Some(anchor) = moved.get() else {
+                                return;
+                            };
+                            slider.update(cx, |state, cx| {
+                                if event.pressed_button == Some(MouseButton::Left) {
+                                    let bounds = state.bounds();
+                                    state.set_bounds(anchor);
+                                    state.update_value_by_position(
+                                        Axis::Horizontal,
+                                        event.position,
+                                        false,
+                                        window,
+                                        cx,
+                                    );
+                                    state.set_bounds(bounds);
+                                    cx.stop_propagation();
+                                } else {
+                                    moved.set(None);
+                                    held.set(false);
+                                    state.handle_release(cx);
+                                }
+                            });
+                        });
+                        let released = gesture.clone();
+                        let slider = state.clone();
+                        let held = dragging.clone();
+                        window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                            if phase == DispatchPhase::Capture
+                                && event.button == MouseButton::Left
+                                && released.take().is_some()
+                            {
+                                held.set(false);
+                                slider.update(cx, |state, cx| state.handle_release(cx));
+                            }
+                        });
+                    },
+                )
+                .absolute()
+                .size_full(),
+            )
+            .child(
+                MaterialSlider::new(&self.state, course2md::tr!("界面缩放"))
+                    .id("app-font-scale")
+                    .stops(true)
+                    .format(|value| format!("{value:.0}%").into()),
+            )
+    }
+}
+
 fn palette_columns(width: f32, rem_size: f32) -> u16 {
     let unit = rem_size / 14.;
     (((width + CARD_GAP * unit) / ((CARD_MIN_WIDTH + CARD_GAP) * unit)).floor() as u16).clamp(1, 4)
+}
+
+fn pending_scale_percent(active_scale: f32, pending_scale: Option<f32>) -> Option<u16> {
+    let active = (active_scale * 100.).round() as u16;
+    pending_scale
+        .map(|scale| (scale * 100.).round() as u16)
+        .filter(|percent| *percent != active)
 }
 
 /// A miniature window in the palette's own colors, not application chrome: window
@@ -398,25 +516,68 @@ impl Desktop {
         let light = self.palette_preset(false, appearance.light, light_corners, cx);
         let dark = self.palette_preset(true, appearance.dark, dark_corners, cx);
         let application = self.preferences.application();
-        let scales = crate::preferences::FONT_SCALES;
-        let font_scale =
-            ConnectedButtonGroup::new("app-font-scale", course2md::tr!("界面文字大小"))
-                .tone(ButtonTone::Neutral)
-                .segmented()
-                .button_size(ButtonSize::Small)
-                .options(scales.into_iter().map(|scale| {
-                    let percent = (scale * 100.).round() as u32;
-                    (percent.to_string(), format!("{percent}%"))
-                }))
-                .selected(((application.font_scale * 100.).round() as u32).to_string())
-                .on_change(cx.listener(|this, selected: &SharedString, _, cx| {
-                    let Ok(percent) = selected.parse::<f32>() else {
-                        return;
-                    };
-                    let mut next = this.application_edit_base();
-                    next.font_scale = percent / 100.;
-                    this.commit_application(next, cx);
-                }));
+        let percent = self.settings_ui.font_scale.read(cx).value().end().round() as u16;
+        let pending_percent = pending_scale_percent(
+            application.font_scale,
+            self.settings_ui
+                .pending_application
+                .as_ref()
+                .map(|pending| pending.font_scale),
+        );
+        let font_scale = v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(rem(12.))
+            .child(
+                h_flex()
+                    .w_full()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(rem(12.))
+                    .child(
+                        TileScale::Regular
+                            .label("app-font-scale-value", format!("{percent}%"))
+                            .flex_1(),
+                    )
+                    .child(
+                        material_button("app-font-scale-reset", ButtonVariant::Text)
+                            .tone(ButtonTone::Neutral)
+                            .icon(symbols::restart_alt())
+                            .child(course2md::tr!("恢复 100%"))
+                            .accessibility_label(course2md::tr!("恢复 100%"))
+                            .disabled(percent == 100 && pending_percent.is_none())
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.preview_font_scale(100., cx);
+                                this.flush_font_scale(cx);
+                            })),
+                    ),
+            )
+            .when_some(pending_percent, |field, pending| {
+                field.child(supporting_info(
+                    "app-font-scale-unsaved",
+                    course2md::tr!("尚未保存的界面缩放：{}%", pending),
+                ))
+            })
+            .child(
+                div()
+                    .id("app-font-scale-control")
+                    .w_full()
+                    .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _, _| {
+                        if event.button == MouseButton::Left {
+                            this.settings_ui.scale_dragging.set(true);
+                        }
+                    }))
+                    .capture_any_mouse_up(cx.listener(|this, event: &MouseUpEvent, _, cx| {
+                        if event.button == MouseButton::Left {
+                            this.release_font_scale(cx);
+                        }
+                    }))
+                    .on_mouse_up_out(
+                        MouseButton::Left,
+                        cx.listener(|this, _, _, cx| this.release_font_scale(cx)),
+                    )
+                    .child(self.settings_ui.scale_slider.clone()),
+            );
         let previews = ui::Field::tile("palette-previews", move |_| {
             div()
                 .grid()
@@ -447,7 +608,7 @@ impl Desktop {
                     self.interface_language_field(cx),
                     ui::Field::below(
                         "app-font-scale-row",
-                        course2md::tr!("界面文字大小"),
+                        course2md::tr!("界面缩放"),
                         font_scale,
                     ),
                     ui::Field::switch(
@@ -486,7 +647,16 @@ impl Desktop {
 
 #[cfg(test)]
 mod tests {
-    use super::palette_columns;
+    use super::{palette_columns, pending_scale_percent};
+
+    #[test]
+    fn pending_scale_is_shown_only_when_its_percentage_differs_from_active() {
+        assert_eq!(pending_scale_percent(0.75, None), None);
+        assert_eq!(pending_scale_percent(0.75, Some(0.75)), None);
+        assert_eq!(pending_scale_percent(0.75, Some(1.0)), Some(100));
+        assert_eq!(pending_scale_percent(1.0, Some(0.75)), Some(75));
+        assert_eq!(pending_scale_percent(0.95, Some(0.95000005)), None);
+    }
 
     #[test]
     fn larger_text_and_narrower_panes_reduce_the_palette_columns() {

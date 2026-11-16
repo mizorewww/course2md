@@ -131,7 +131,7 @@ pub(crate) use crate::ui::shaped_width;
 
 /// The height of the app bar at the current text scale.
 pub(crate) fn title_bar_height(window: &Window) -> Pixels {
-    rem(40.).to_pixels(window.rem_size()) + px(16.)
+    crate::reader_ui::title_bar_height_for_rem(window.rem_size())
 }
 
 /// The width of a `nav_destination` showing `shown`, from `ButtonSize::Small`'s
@@ -264,7 +264,7 @@ impl Desktop {
             // The reader draws its own part, so the shell does not read it. Drawn cached:
             // it is built again when it, the reader, the records or the exports change,
             // not with every repaint of a task's progress in the shell around it.
-            let height = crate::reader_ui::TITLE_BAR_HEIGHT.to_pixels(window.rem_size());
+            let height = title_bar_height(window);
             return app_bar(height, window, cx).child(
                 self.reader_bar.clone().cached(
                     StyleRefinement::default()
@@ -526,7 +526,12 @@ impl Desktop {
     fn theme_target(&self, cx: &App) -> (Scheme, f32) {
         let application = self.preferences.application();
         #[allow(unused_mut)]
-        let (mut appearance, mut scale) = (application.appearance.clone(), application.font_scale);
+        let (mut appearance, mut scale) = (
+            application.appearance.clone(),
+            self.settings_ui
+                .scale_preview
+                .unwrap_or(application.font_scale),
+        );
         #[cfg(feature = "capture")]
         {
             crate::capture::override_appearance(&mut appearance);
@@ -549,6 +554,12 @@ impl Desktop {
     /// transition; the kit refreshes the window for each step.
     pub(crate) fn prepare_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (scheme, scale) = self.theme_target(cx);
+        let percent = (scale * 100.).round();
+        if self.settings_ui.font_scale.read(cx).value().end() != percent {
+            self.settings_ui.font_scale.update(cx, |state, cx| {
+                state.set_value(percent, window, cx);
+            });
+        }
         let running = advance_component_theme(scheme, scale, window, cx);
         if running && !self.theme_frame.pending {
             self.theme_frame.pending = true;

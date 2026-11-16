@@ -22,6 +22,7 @@ use crate::{
 use anyhow::{Result, anyhow};
 use course2md::execution::Component;
 use gpui::{prelude::*, *};
+use gpui_base::slider::{SliderEvent, SliderState};
 use gpui_base::{h_flex, v_flex};
 use gpui_kit::component::{
     input::{InputEvent, InputState, TextareaState},
@@ -39,6 +40,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 use std::time::Duration;
+use std::{cell::Cell, rc::Rc};
 
 actions!(
     course2md_settings,
@@ -120,6 +122,11 @@ pub(crate) struct State {
     generation_block_messages: BTreeSet<String>,
     pub(crate) pending_generation: Option<GenerationPreferences>,
     pub(crate) pending_application: Option<ApplicationPreferences>,
+    pub(crate) font_scale: Entity<SliderState>,
+    pub(crate) scale_slider: Entity<crate::appearance_ui::ScaleSlider>,
+    pub(crate) scale_preview: Option<f32>,
+    pub(crate) scale_dragging: Rc<Cell<bool>>,
+    scale_save: Option<Task<()>>,
     /// Typed text not yet written to disk; flushed after a pause, on blur and on exit.
     unsaved_text: Option<GenerationPreferences>,
     text_flush: Option<Task<()>>,
@@ -127,7 +134,7 @@ pub(crate) struct State {
 }
 
 impl State {
-    pub fn new(window: &mut Window, cx: &mut Context<Desktop>) -> Self {
+    pub fn new(scale: f32, window: &mut Window, cx: &mut Context<Desktop>) -> Self {
         cx.bind_keys([
             KeyBinding::new("right", NextSettingsTab, Some("SettingsTabs")),
             KeyBinding::new("down", NextSettingsTab, Some("SettingsTabs")),
@@ -166,6 +173,28 @@ impl State {
             InputEvent::Blur => this.flush_generation_text(cx),
             _ => {}
         }));
+        let font_scale = cx.new(|_| {
+            SliderState::new()
+                .min(f32::from(preferences::FONT_SCALE_MIN_PERCENT))
+                .max(f32::from(preferences::FONT_SCALE_MAX_PERCENT))
+                .step(f32::from(preferences::FONT_SCALE_STEP_PERCENT))
+                .default_value((scale * 100.).round())
+        });
+        let scale_dragging = Rc::new(Cell::new(false));
+        let scale_slider = cx.new(|cx| {
+            crate::appearance_ui::ScaleSlider::new(font_scale.clone(), scale_dragging.clone(), cx)
+        });
+        subscriptions.push(cx.subscribe_in(
+            &font_scale,
+            window,
+            |this, _, event, _, cx| match event {
+                SliderEvent::Change(value) => this.preview_font_scale(value.end(), cx),
+                SliderEvent::Release(_) => {
+                    this.settings_ui.scale_dragging.set(false);
+                    this.flush_font_scale(cx);
+                }
+            },
+        ));
         Self {
             model_diagnostics: Default::default(),
             navigation_focus: cx.focus_handle(),
@@ -189,6 +218,11 @@ impl State {
             generation_block_messages: Default::default(),
             pending_generation: None,
             pending_application: None,
+            font_scale,
+            scale_slider,
+            scale_preview: None,
+            scale_dragging,
+            scale_save: None,
             unsaved_text: None,
             text_flush: None,
             _subscriptions: subscriptions,
@@ -455,11 +489,50 @@ impl Desktop {
             .clone()
     }
     pub(crate) fn application_edit_base(&self) -> ApplicationPreferences {
-        self.settings_ui
+        let mut next = self
+            .settings_ui
             .pending_application
             .as_ref()
             .unwrap_or_else(|| self.preferences.application())
-            .clone()
+            .clone();
+        if let Some(scale) = self.settings_ui.scale_preview {
+            next.font_scale = scale;
+        }
+        next
+    }
+
+    pub(crate) fn preview_font_scale(&mut self, percent: f32, cx: &mut Context<Self>) {
+        let scale = percent / 100.;
+        if !preferences::is_supported_font_scale(scale) {
+            return;
+        }
+        self.settings_ui.scale_preview = Some(scale);
+        self.settings_ui.scale_save = None;
+        if !self.settings_ui.scale_dragging.get() {
+            self.settings_ui.scale_save = Some(cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(TEXT_SAVE_DELAY_MS))
+                    .await;
+                let _ = this.update(cx, |this, cx| this.flush_font_scale(cx));
+            }));
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn flush_font_scale(&mut self, cx: &mut Context<Self>) {
+        self.settings_ui.scale_save = None;
+        let next = self.application_edit_base();
+        if self.settings_ui.scale_preview.take().is_some()
+            && (next != *self.preferences.application()
+                || self.settings_ui.pending_application.is_some())
+        {
+            self.commit_application(next, cx);
+        }
+    }
+
+    pub(crate) fn release_font_scale(&mut self, cx: &mut Context<Self>) {
+        self.settings_ui.scale_dragging.set(false);
+        self.flush_font_scale(cx);
     }
     fn setting_input(&self, field: EditField, cx: &App) -> String {
         match field {
@@ -553,6 +626,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.flush_font_scale(cx);
         self.settings_tab = tab;
         self.scrolls[Page::Settings as usize].set_offset(point(px(0.), px(0.)));
         // Capture builds can review the lower part of a category.
@@ -1741,6 +1815,9 @@ impl Desktop {
         next: ApplicationPreferences,
         cx: &mut Context<Self>,
     ) -> bool {
+        self.settings_ui.scale_preview = None;
+        self.settings_ui.scale_save = None;
+        self.settings_ui.scale_dragging.set(false);
         let saved = match self.preferences.save_application(next.clone()) {
             Ok(()) => {
                 self.settings_ui.pending_application = None;
@@ -2255,6 +2332,7 @@ impl Desktop {
     /// Ordinary preferences save immediately. Service form edits become active
     /// only through Save and do not create a separate quit-time save workflow.
     pub fn flush_settings_for_exit(&mut self, cx: &mut Context<Self>) -> bool {
+        self.flush_font_scale(cx);
         if let Some(cancel) = self
             .settings_ui
             .editor

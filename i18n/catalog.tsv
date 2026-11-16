@@ -1456,6 +1456,7 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 画面间隔	画面间隔	Frame interval	畫面間隔	フレーム間隔
 界面偏好	界面偏好	Interface preferences	介面偏好	表示設定
 界面文字大小	界面文字大小	Text size	介面文字大小	文字サイズ
+界面缩放	界面缩放	UI scale	介面縮放	UI の拡大率
 界面语言	界面语言	Interface language	介面語言	表示言語
 界面语言：auto、en、zh-Hans、zh-Hant、ja / Interface language: auto, en, zh-Hans, zh-Hant, ja	界面语言：auto、en、zh-Hans、zh-Hant、ja / Interface language: auto, en, zh-Hans, zh-Hant, ja	Interface language: auto, en, zh-Hans, zh-Hant, ja	介面語言：auto、en、zh-Hans、zh-Hant、ja	表示言語：auto、en、zh-Hans、zh-Hant、ja
 登录 Bilibili	登录 Bilibili	Sign in to Bilibili	登入 Bilibili	Bilibili にログイン
@@ -1700,7 +1701,7 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 请输入服务提供的模型 ID	请输入服务提供的模型 ID	Please enter the model ID provided by the service	請輸入服務提供的模型 ID	サービスから提供されたモデルIDを入力してください
 请输入笔记名称	请输入笔记名称	Please enter a note name	請輸入筆記名稱	ノート名を入力してください
 请输入语音服务提供的模型 ID / Speech model ID is required	请输入语音服务提供的模型 ID	Speech model ID is required	請輸入語音服務提供的模型 ID	音声サービスから提供されたモデルIDを入力してください
-请选择 100%、125%、150% 或 200% 的文字大小	请选择 100%、125%、150% 或 200% 的文字大小	Please select 100%, 125%, 150% or 200% text size	請選擇 100%、125%、150% 或 200% 的文字大小	100%、125%、150%、または 200% のテキスト サイズを選択してください
+请选择 75% 到 200% 的界面缩放，步长为 5%	请选择 75% 到 200% 的界面缩放，步长为 5%	Select a UI scale from 75% to 200% in steps of 5%.	請選擇 75% 到 200% 的介面縮放，步長為 5%	UI の拡大率を 75% から 200% の範囲で 5% 刻みで選択してください。
 请选择 SRT 或 VTT 字幕文件	请选择 SRT 或 VTT 字幕文件	Please select SRT or VTT subtitle file	請選擇 SRT 或 VTT 字幕檔案	SRT または VTT 字幕ファイルを選択してください
 请选择可读取的视频文件	请选择可读取的视频文件	Please select a readable video file	請選擇可讀取的影片檔案	読み取り可能な動画ファイルを選択してください
 请选择字幕	请选择字幕	Please select subtitles	請選擇字幕	字幕を選択してください
@@ -2321,3 +2322,5 @@ AI 处理的设置已更改	AI 处理的设置已更改	The AI processing settin
 这个视频没有字幕，而文字来源设置为仅字幕	这个视频没有字幕，而文字来源设置为仅字幕	This video has no subtitles, and the transcript source is set to subtitles only	這部影片沒有字幕，而文字來源設定為僅字幕	この動画には字幕がありませんが、文字起こしのソースは「字幕のみ」に設定されています
 还没读取这个视频的字幕，而文字来源设置为仅字幕	还没读取这个视频的字幕，而文字来源设置为仅字幕	This video's subtitles haven't been read yet, and the transcript source is set to subtitles only	還沒讀取這部影片的字幕，而文字來源設定為僅字幕	この動画の字幕はまだ読み込まれていませんが、文字起こしのソースは「字幕のみ」に設定されています
 更改文字来源	更改文字来源	Change transcript source	更改文字來源	文字起こしのソースを変更
+恢复 100%	恢复 100%	Reset to 100%	恢復 100%	100% に戻す
+尚未保存的界面缩放：{}%	尚未保存的界面缩放：{}%	Unsaved UI scale: {}%	尚未儲存的介面縮放：{}%	未保存の UI の拡大率：{}%

@@ -88,7 +88,7 @@ Conversions run as tasks you can pause, resume and reorder. Each step shows its 
 
 ### Make it yours
 
-Choose from 10 themes, adjust the text size and reduce motion in **Settings → Appearance**.
+Choose from 10 themes and reduce motion in **Settings → Appearance**. Set the UI scale from 75% to 200% in steps of 5%. The slider previews changes immediately. **Reset to 100%** restores the default scale.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/en/settings-dark.png">
