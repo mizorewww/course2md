@@ -847,6 +847,29 @@ impl Desktop {
         }
     }
 
+    fn open_model_choices(
+        &mut self,
+        owner: FormOwner,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self.service_form_mut(owner) {
+            form.models.choices_open = true;
+            let selected = form.value(FormField::Model, cx);
+            form.model_choice = form
+                .models
+                .models()
+                .iter()
+                .position(|model| model == &selected)
+                .or_else(|| (!form.models.models().is_empty()).then_some(0));
+            if let Some(index) = form.model_choice {
+                form.model_choices_scroll
+                    .scroll_to_item(index, ScrollStrategy::Nearest);
+                form.model_choices_focus.focus(window, cx);
+            }
+        }
+    }
+
     fn service_model_event(
         &mut self,
         owner: FormOwner,
@@ -856,24 +879,16 @@ impl Desktop {
     ) {
         use model_discovery::ModelFieldEvent::*;
         match event {
-            Fetch => self.fetch_service_models(owner, cx),
+            Fetch => self.fetch_service_models(owner, window, cx),
             ToggleChoices => {
-                if let Some(form) = self.service_form_mut(owner) {
-                    form.models.choices_open = !form.models.choices_open;
-                    if form.models.choices_open {
-                        let selected = form.value(FormField::Model, cx);
-                        form.model_choice = form
-                            .models
-                            .models()
-                            .iter()
-                            .position(|model| model == &selected)
-                            .or_else(|| (!form.models.models().is_empty()).then_some(0));
-                        if let Some(index) = form.model_choice {
-                            form.model_choices_scroll
-                                .scroll_to_item(index, ScrollStrategy::Nearest);
-                            form.model_choices_focus.focus(window, cx);
-                        }
-                    } else {
+                if let Some(is_open) = self
+                    .service_form(owner)
+                    .map(|form| form.models.choices_open)
+                {
+                    if !is_open {
+                        self.open_model_choices(owner, window, cx);
+                    } else if let Some(form) = self.service_form_mut(owner) {
+                        form.models.choices_open = false;
                         form.focus(FormField::Model, window, cx);
                     }
                 }
@@ -894,7 +909,12 @@ impl Desktop {
         cx.notify();
     }
 
-    fn fetch_service_models(&mut self, owner: FormOwner, cx: &mut Context<Self>) {
+    fn fetch_service_models(
+        &mut self,
+        owner: FormOwner,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(form) = self.service_form(owner) else {
             return;
         };
@@ -921,9 +941,9 @@ impl Desktop {
         let ticket = form.models.begin(&request);
         form.model_choice = None;
         form.model_choices_scroll = UniformListScrollHandle::new();
-        cx.spawn(async move |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let result = model_discovery::discover(request, vault).await;
-            let _ = this.update(cx, |this, cx| {
+            let _ = this.update_in(cx, |this, window, cx| {
                 let current = this.service_form(owner).and_then(|form| {
                     model_discovery::RequestKey::from_draft(
                         &form.current_draft(cx),
@@ -933,10 +953,17 @@ impl Desktop {
                 });
                 // A reloaded or closed form has dropped this ticket. A list the person
                 // just asked for shows at once.
-                if let Some(form) = this.service_form_mut(owner)
-                    && form.models.complete(ticket, current.as_ref(), result)
-                {
-                    form.models.choices_open = !form.models.models().is_empty();
+                if let Some(has_models) = this.service_form_mut(owner).and_then(|form| {
+                    form.models
+                        .complete(ticket, current.as_ref(), result)
+                        .then(|| !form.models.models().is_empty())
+                }) {
+                    if has_models {
+                        this.open_model_choices(owner, window, cx);
+                    } else if let Some(form) = this.service_form_mut(owner) {
+                        form.models.choices_open = false;
+                        form.model_choice = None;
+                    }
                     cx.notify();
                 }
             });
