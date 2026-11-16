@@ -6,7 +6,6 @@ use gpui_base::slider::SliderState;
 use gpui_base::{Placement, h_flex, v_flex};
 use gpui_kit_material::{
     color::{Scheme, palette::ALL},
-    icons::Icon,
     prelude::*,
     theme::{is_dark, rgba},
     tokens::{elevation, shape::OuterCorners},
@@ -59,8 +58,8 @@ impl Render for ScaleSlider {
         let preview_margin = crate::views::title_bar_height(window) + px(8.);
         let preview_edge = preview_margin + window.client_inset().unwrap_or(px(0.));
         let preview_size = size(
-            px(460.).min(window.viewport_size().width - preview_edge * 2.),
-            px(312.).min(window.viewport_size().height - preview_edge * 2.),
+            px(440.).min(window.viewport_size().width - preview_edge * 2.),
+            px(300.).min(window.viewport_size().height - preview_edge * 2.),
         );
         div()
             .relative()
@@ -134,6 +133,7 @@ impl Render for ScaleSlider {
                 MaterialSlider::new(&self.state, course2md::tr!("界面缩放"))
                     .id("app-font-scale")
                     .stops(true)
+                    .value_indicator(false)
                     .format(|value| format!("{value:.0}%").into()),
             )
             .when(preview, |control| {
@@ -296,203 +296,168 @@ fn resolve_preview_bounds(
 fn scale_preview_surface(target: f32, panel_size: Size<Pixels>) -> LocalScale {
     let header_title_type = TypeRole::TitleSmall.scale();
     let header_hint_type = TypeRole::BodySmall.scale();
-    let badge_type = TypeRole::TitleMedium.scale();
+    let badge_type = TypeRole::TitleLarge.scale();
     let note_title_type = TypeRole::TitleMedium.scale();
     let note_meta_type = TypeRole::BodySmall.scale();
     let note_body_type = TypeRole::BodyMedium.scale();
-    let note = MaterialCard::new("scale-preview-card", CardVariant::Surface)
+    let note = v_flex()
         .w_full()
-        .rounded(RADIUS_CARD)
+        .min_w_0()
         .p(rem(14.))
+        .gap(rem(10.))
         .child(
-            v_flex()
+            h_flex()
                 .w_full()
                 .min_w_0()
+                .items_center()
                 .gap(rem(10.))
+                .child(tinted_icon(symbols::menu_book(), Tint::Blue, rem(28.)))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap(rem(1.))
+                        .child(
+                            accessible_text(
+                                "scale-preview-note-title",
+                                course2md::tr!("示例笔记"),
+                            )
+                            .min_w_0()
+                            .whitespace_normal()
+                            .text_size(note_title_type.font_size)
+                            .line_height(note_title_type.line_height)
+                            .font_weight(FontWeight(note_title_type.font_weight as f32))
+                            .text_color(color(ColorRole::ON_SURFACE)),
+                        )
+                        .child(
+                            accessible_text(
+                                "scale-preview-note-meta",
+                                format!(
+                                    "{} · {}",
+                                    course2md::render::fmt_ts(750.),
+                                    course2md::tr!("摘要"),
+                                ),
+                            )
+                            .min_w_0()
+                            .whitespace_normal()
+                            .text_size(note_meta_type.font_size)
+                            .line_height(note_meta_type.line_height)
+                            .text_color(color(ColorRole::ON_SURFACE_VARIANT)),
+                        ),
+                )
+                .child(outlined_status_chip(
+                    "scale-preview-source",
+                    course2md::tr!("字幕"),
+                )),
+        )
+        .child(
+            div()
+                .h(px(1.))
+                .w_full()
+                .flex_shrink_0()
+                .bg(color(ColorRole::OUTLINE_VARIANT)),
+        )
+        .child(
+            accessible_text(
+                "scale-preview-note-body",
+                course2md::tr!(
+                    "梳理课程核心要点与关键时间点，方便在回顾时快速定位重点章节，并结合原文字幕核对细节。"
+                ),
+            )
+            .w_full()
+            .min_w_0()
+            .whitespace_normal()
+            .text_size(note_body_type.font_size)
+            .line_height(note_body_type.line_height)
+            .text_color(color(ColorRole::ON_SURFACE)),
+        )
+        .child(
+            accessible_text(
+                "scale-preview-note-support",
+                course2md::tr!(
+                    "重要推导与示例画面都会关联对应时间点，方便回顾笔记时随时跳转并核对上下文。"
+                ),
+            )
+            .w_full()
+            .min_w_0()
+            .whitespace_normal()
+            .text_size(note_body_type.font_size)
+            .line_height(note_body_type.line_height)
+            .text_color(color(ColorRole::ON_SURFACE_VARIANT)),
+        );
+    LocalScale {
+        rem_size: px(gpui_kit_material::tokens::typography::BASE_PX),
+        child:
+            v_flex()
+                .id("scale-preview")
+                .w(panel_size.width)
+                .h(panel_size.height)
+                .overflow_hidden()
+                .rounded(RADIUS_HERO)
+                .bg(color(ColorRole::SURFACE_CONTAINER_HIGH))
+                .border_1()
+                .border_color(color(ColorRole::OUTLINE_VARIANT))
+                .shadow(elevation::level3())
+                .p(px(12.))
+                .gap(px(10.))
                 .child(
                     h_flex()
                         .w_full()
-                        .min_w_0()
+                        .flex_shrink_0()
+                        .px(px(8.))
+                        .pt(px(2.))
                         .items_center()
-                        .gap(rem(10.))
-                        .child(tinted_icon(symbols::menu_book(), Tint::Blue, rem(32.)))
+                        .justify_between()
+                        .gap(px(12.))
                         .child(
                             v_flex()
                                 .flex_1()
                                 .min_w_0()
-                                .gap(rem(2.))
+                                .gap(rem(1.))
                                 .child(
                                     accessible_text(
-                                        "scale-preview-note-title",
-                                        course2md::tr!("示例笔记"),
+                                        "scale-preview-heading",
+                                        course2md::tr!("缩放预览"),
                                     )
-                                    .min_w_0()
-                                    .whitespace_normal()
-                                    .text_size(note_title_type.font_size)
-                                    .line_height(note_title_type.line_height)
-                                    .font_weight(FontWeight(note_title_type.font_weight as f32))
+                                    .text_size(header_title_type.font_size)
+                                    .line_height(header_title_type.line_height)
+                                    .font_weight(FontWeight(header_title_type.font_weight as f32))
                                     .text_color(color(ColorRole::ON_SURFACE)),
                                 )
                                 .child(
                                     accessible_text(
-                                        "scale-preview-note-meta",
-                                        format!(
-                                            "{} · {}",
-                                            course2md::render::fmt_ts(750.),
-                                            course2md::tr!("摘要"),
-                                        ),
+                                        "scale-preview-apply",
+                                        course2md::tr!("松开鼠标后应用"),
                                     )
-                                    .min_w_0()
-                                    .whitespace_normal()
-                                    .text_size(note_meta_type.font_size)
-                                    .line_height(note_meta_type.line_height)
+                                    .text_size(header_hint_type.font_size)
+                                    .line_height(header_hint_type.line_height)
                                     .text_color(color(ColorRole::ON_SURFACE_VARIANT)),
                                 ),
-                        ),
-                )
-                .child(
-                    div()
-                        .h(px(1.))
-                        .w_full()
-                        .bg(color(ColorRole::OUTLINE_VARIANT)),
-                )
-                .child(
-                    accessible_text(
-                        "scale-preview-note-body",
-                        course2md::tr!("梳理课程重点与关键时间点，方便阅读时快速回顾并核对原文。"),
-                    )
-                    .w_full()
-                    .min_w_0()
-                    .whitespace_normal()
-                    .text_size(note_body_type.font_size)
-                    .line_height(note_body_type.line_height)
-                    .text_color(color(ColorRole::ON_SURFACE)),
-                )
-                .child(
-                    h_flex()
-                        .w_full()
-                        .min_w_0()
-                        .flex_wrap()
-                        .items_center()
-                        .justify_between()
-                        .gap(rem(8.))
-                        .child(outlined_status_chip(
-                            "scale-preview-source",
-                            course2md::tr!("字幕"),
-                        ))
+                        )
                         .child(
-                            material_button("scale-preview-button", ButtonVariant::Tonal)
-                                .button_size(ButtonSize::Small)
-                                .preview_state(InteractionPreview::Enabled)
-                                .icon(symbols::menu_book())
-                                .child(course2md::tr!("阅读笔记")),
+                            accessible_text("scale-preview-value", format!("{target:.0}%"))
+                                .flex_shrink_0()
+                                .text_size(badge_type.font_size)
+                                .line_height(badge_type.line_height)
+                                .font_weight(FontWeight(badge_type.font_weight as f32))
+                                .text_color(color(ColorRole::PRIMARY)),
                         ),
-                ),
-        );
-    LocalScale {
-        rem_size: px(gpui_kit_material::tokens::typography::BASE_PX),
-        child: MaterialCard::new("scale-preview", CardVariant::Elevated)
-            .w(panel_size.width)
-            .h(panel_size.height)
-            .rounded(RADIUS_HERO)
-            .bg(color(ColorRole::SURFACE_CONTAINER_HIGH))
-            .border_1()
-            .border_color(color(ColorRole::OUTLINE_VARIANT))
-            .shadow(elevation::level3())
-            .p(px(16.))
-            .child(
-                v_flex()
-                    .size_full()
-                    .min_w_0()
-                    .min_h_0()
-                    .gap(px(12.))
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .flex_shrink_0()
-                            .items_center()
-                            .gap(rem(10.))
-                            .child(
-                                Icon::from(symbols::zoom_in())
-                                    .size(rem(20.))
-                                    .color(color(ColorRole::ON_SURFACE_VARIANT)),
-                            )
-                            .child(
-                                v_flex()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .gap(rem(1.))
-                                    .child(
-                                        accessible_text(
-                                            "scale-preview-heading",
-                                            course2md::tr!("缩放预览"),
-                                        )
-                                        .text_size(header_title_type.font_size)
-                                        .line_height(header_title_type.line_height)
-                                        .font_weight(FontWeight(
-                                            header_title_type.font_weight as f32,
-                                        ))
-                                        .text_color(color(ColorRole::ON_SURFACE)),
-                                    )
-                                    .child(
-                                        accessible_text(
-                                            "scale-preview-apply",
-                                            course2md::tr!("松开鼠标后应用"),
-                                        )
-                                        .text_size(header_hint_type.font_size)
-                                        .line_height(header_hint_type.line_height)
-                                        .text_color(color(ColorRole::ON_SURFACE_VARIANT)),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_shrink_0()
-                                    .items_center()
-                                    .justify_center()
-                                    .min_w(rem(60.))
-                                    .px(rem(12.))
-                                    .py(rem(4.))
-                                    .rounded_full()
-                                    .bg(color(ColorRole::SECONDARY_CONTAINER))
-                                    .child(
-                                        accessible_text(
-                                            "scale-preview-value",
-                                            format!("{target:.0}%"),
-                                        )
-                                        .text_size(badge_type.font_size)
-                                        .line_height(badge_type.line_height)
-                                        .font_weight(FontWeight(badge_type.font_weight as f32))
-                                        .text_color(color(ColorRole::ON_SECONDARY_CONTAINER)),
-                                    ),
+                )
+                .child(
+                    CardSurface::new(CardVariant::Outlined)
+                        .rounded(RADIUS_LARGE)
+                        .w_full()
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_hidden()
+                        .child(LocalScale {
+                            rem_size: px(
+                                gpui_kit_material::tokens::typography::BASE_PX * target / 100.
                             ),
-                    )
-                    .child(
-                        div()
-                            .w_full()
-                            .flex_1()
-                            .min_h_0()
-                            .rounded(RADIUS_LARGE)
-                            .bg(color(ColorRole::SURFACE_CONTAINER))
-                            .border_1()
-                            .border_color(color(ColorRole::OUTLINE_VARIANT))
-                            .p(px(12.))
-                            .child(
-                                div()
-                                    .size_full()
-                                    .overflow_hidden()
-                                    .rounded(RADIUS_CARD)
-                                    .child(LocalScale {
-                                        rem_size: px(
-                                            gpui_kit_material::tokens::typography::BASE_PX * target
-                                                / 100.,
-                                        ),
-                                        child: note.into_any_element(),
-                                    }),
-                            ),
-                    ),
-            )
-            .into_any_element(),
+                            child: note.into_any_element(),
+                        }),
+                )
+                .into_any_element(),
     }
 }
 

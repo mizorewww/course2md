@@ -1459,7 +1459,8 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 界面缩放	界面缩放	UI scale	介面縮放	UI の拡大率
 缩放预览	缩放预览	Scale preview	縮放預覽	拡大率のプレビュー
 示例笔记	示例笔记	Sample note	範例筆記	サンプルノート
-梳理课程重点与关键时间点，方便阅读时快速回顾并核对原文。	梳理课程重点与关键时间点，方便阅读时快速回顾并核对原文。	Organize key points and timestamps for quick review while reading.	梳理課程重點與關鍵時間點，方便閱讀時快速回顧並核對原文。	講義の要点とタイムスタンプを整理し、読み返しながら原文を照らし合わせて確認できます。
+梳理课程核心要点与关键时间点，方便在回顾时快速定位重点章节，并结合原文字幕核对细节。	梳理课程核心要点与关键时间点，方便在回顾时快速定位重点章节，并结合原文字幕核对细节。	Organize key points and timestamps so you can locate chapters and check details against the transcript while reading.	梳理課程核心要點與關鍵時間點，方便在回顧時快速定位重點章節，並結合原文字幕核對細節。	講義の要点とタイムスタンプを整理し、読み返しながら重要な章を見つけて原文字幕と照合できます。
+重要推导与示例画面都会关联对应时间点，方便回顾笔记时随时跳转并核对上下文。	重要推导与示例画面都会关联对应时间点，方便回顾笔记时随时跳转并核对上下文。	Important steps and slides stay linked to timestamps so you can jump back to the video context anytime.	重要推導與範例畫面都會關聯對應時間點，方便回顧筆記時隨時跳轉並核對上下文。	重要な解説やスライドはタイムスタンプと連動しており、復習時にいつでも映像の文脈へ戻って確認できます。
 松开鼠标后应用	松开鼠标后应用	Release to apply	放開滑鼠後套用	マウスを離すと適用されます
 界面语言	界面语言	Interface language	介面語言	表示言語
 界面语言：auto、en、zh-Hans、zh-Hant、ja / Interface language: auto, en, zh-Hans, zh-Hant, ja	界面语言：auto、en、zh-Hans、zh-Hant、ja / Interface language: auto, en, zh-Hans, zh-Hant, ja	Interface language: auto, en, zh-Hans, zh-Hant, ja	介面語言：auto、en、zh-Hans、zh-Hant、ja	表示言語：auto、en、zh-Hans、zh-Hant、ja
