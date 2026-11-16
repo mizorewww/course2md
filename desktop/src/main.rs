@@ -633,7 +633,11 @@ impl Desktop {
             if ui::modal_open(window, cx) {
                 // A dialog can replace its own controls. Restore only inside its
                 // active trap; never send focus back to the obscured main page.
-                if let Some(trap) = gpui_base::active_focus_trap(window, cx) {
+                if let Some(trap) = gpui_base::active_focus_trap(window, cx).or_else(|| {
+                    ancestor
+                        .as_ref()
+                        .and_then(|focus| gpui_base::focus_trap_containing(focus, window, cx))
+                }) {
                     let target = ancestor
                         .filter(|focus| trap.contains(focus, window))
                         .unwrap_or(trap);
