@@ -50,15 +50,53 @@ pub fn is_youtube_url(input: &str) -> bool {
 /// preview/subtitle/download requests cannot corrupt the saved login; the caller
 /// keeps the returned file alive until the subprocess exits. YouTube: yt-dlp
 /// reads the chosen browser's session itself.
-pub fn configure_ytdlp(
+/// Configured yt-dlp session state: holds a private Bilibili cookie snapshot when
+/// used, and records whether `--cookies-from-browser` was attached for YouTube so
+/// a locked/unreadable browser cookie database can fall back cleanly for public URLs.
+pub struct YtDlpAuth {
+    _cookies: Option<tempfile::NamedTempFile>,
+    pub used_browser_cookies: bool,
+    pub skipped_blocked_cookies: bool,
+}
+
+pub fn configure_ytdlp(command: &mut std::process::Command, url: &str) -> Result<YtDlpAuth> {
+    configure_ytdlp_with_options(command, url, true)
+}
+
+pub fn configure_ytdlp_without_browser_cookies(
     command: &mut std::process::Command,
     url: &str,
-) -> Result<Option<tempfile::NamedTempFile>> {
+) -> Result<YtDlpAuth> {
+    configure_ytdlp_with_options(command, url, false)
+}
+
+fn configure_ytdlp_with_options(
+    command: &mut std::process::Command,
+    url: &str,
+    include_browser_cookies: bool,
+) -> Result<YtDlpAuth> {
     if is_youtube_url(url) {
-        youtube::configure(command)?;
-        return Ok(None);
+        let (used_browser_cookies, skipped_blocked_cookies) =
+            youtube::configure(command, include_browser_cookies)?;
+        return Ok(YtDlpAuth {
+            _cookies: None,
+            used_browser_cookies,
+            skipped_blocked_cookies,
+        });
     }
-    configure_with_path(command, url, &cookie_path())
+    Ok(YtDlpAuth {
+        _cookies: configure_with_path(command, url, &cookie_path())?,
+        used_browser_cookies: false,
+        skipped_blocked_cookies: false,
+    })
+}
+
+pub fn youtube_blocked_hint() -> &'static str {
+    if crate::progress::is_json() {
+        "提示：macOS 不允许读取所连接浏览器的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中允许 course2md（命令行则允许所用的终端应用），重新打开后重试。 / Hint: macOS does not allow reading the connected browser's data. Allow course2md (on the command line, your terminal app) in System Settings › Privacy & Security › Full Disk Access, reopen it, then retry."
+    } else {
+        youtube::terminal_hint()
+    }
 }
 
 /// What to suggest beside a failed run's own message, when an account could help.
@@ -75,11 +113,7 @@ pub fn login_hint(url: &str, cause: &str) -> Option<&'static str> {
         });
     }
     if is_youtube_url(url) && youtube::cookies_blocked(cause) {
-        return Some(if crate::progress::is_json() {
-            "提示：macOS 不允许读取所连接浏览器的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中允许 course2md（命令行则允许所用的终端应用），重新打开后重试。 / Hint: macOS does not allow reading the connected browser's data. Allow course2md (on the command line, your terminal app) in System Settings › Privacy & Security › Full Disk Access, reopen it, then retry."
-        } else {
-            youtube::terminal_hint()
-        });
+        return Some(youtube_blocked_hint());
     }
     if is_youtube_url(url) && youtube::wants_sign_in(cause) {
         return Some(if crate::progress::is_json() {

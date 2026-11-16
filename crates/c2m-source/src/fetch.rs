@@ -17,17 +17,22 @@ const TRANSIENT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_sec
 /// A yt-dlp command with what every run shares: the saved login (a private cookie
 /// snapshot the caller keeps alive until the process exits), no user configuration
 /// (`--ignore-config`: it would make one command behave differently per machine), a
-/// socket timeout, and the ffmpeg shipped with the app for merging video and audio.
-fn ytdlp_command(url: &str) -> Result<(Command, Option<tempfile::NamedTempFile>)> {
+/// socket timeout, and the located ffmpeg for merging video and audio.
+fn ytdlp_command_with_cookies(
+    url: &str,
+    include_browser_cookies: bool,
+) -> Result<(Command, crate::auth::YtDlpAuth)> {
     let mut cmd = Command::new(crate::ytdlp::program());
-    let cookies = crate::auth::configure_ytdlp(cmd.as_std_mut(), url)?;
+    let auth = if include_browser_cookies {
+        crate::auth::configure_ytdlp(cmd.as_std_mut(), url)?
+    } else {
+        crate::auth::configure_ytdlp_without_browser_cookies(cmd.as_std_mut(), url)?
+    };
     cmd.args(["--ignore-config", "--socket-timeout", YTDLP_SOCKET_TIMEOUT]);
-    if let Some(tool) =
-        crate::tools::locate("ffmpeg").filter(|tool| tool.origin != crate::tools::Origin::System)
-    {
+    if let Some(tool) = crate::tools::locate("ffmpeg") {
         cmd.arg("--ffmpeg-location").arg(tool.path);
     }
-    Ok((cmd, cookies))
+    Ok((cmd, auth))
 }
 
 /// 确定性错误（重试无意义）：4xx 拒绝、不支持的 URL、私有/不可用视频等。
@@ -531,8 +536,9 @@ fn subtitle_evidence(
             let readable: Vec<_> = formats
                 .iter()
                 .filter(|format| {
-                    const READABLE: [&str; 9] = [
-                        "srt", "vtt", "ttml", "srv1", "srv2", "srv3", "json3", "ass", "lrc",
+                    const READABLE: [&str; 12] = [
+                        "srt", "vtt", "json3", "bcc", "ttml", "dfxp", "srv1", "srv2", "srv3",
+                        "ass", "ssa", "lrc",
                     ];
                     format["ext"]
                         .as_str()
@@ -573,7 +579,15 @@ fn subtitle_evidence(
                 });
             let inline_text = readable
                 .iter()
-                .find(|format| matches!(format["ext"].as_str(), Some("srt" | "vtt")))
+                .find(|format| {
+                    matches!(format["ext"].as_str(), Some("srt" | "vtt"))
+                        && format["data"].as_str().is_some()
+                })
+                .or_else(|| {
+                    readable
+                        .iter()
+                        .find(|format| format["data"].as_str().is_some())
+                })
                 .and_then(|format| format["data"].as_str())
                 .map(str::to_owned);
             tracks.push(SubtitleTrack {
@@ -680,12 +694,18 @@ pub(crate) async fn probe_online(
     url: &str,
     control: &crate::dispatch::TaskControl,
 ) -> Result<OnlineProbe> {
-    let (mut cmd, _cookies) = ytdlp_command(url)?;
-    cmd.args(probe_args(true));
-    if crate::playback::names_youtube_video(url) {
-        cmd.arg("--no-playlist");
-    }
-    let out = run_ytdlp(url, &mut cmd, control, false).await?;
+    let out = run_ytdlp_with(
+        url,
+        |cmd| {
+            cmd.args(probe_args(true));
+            if crate::playback::names_youtube_video(url) {
+                cmd.arg("--no-playlist");
+            }
+        },
+        control,
+        false,
+    )
+    .await?;
     parse_online_probe(&out.stdout, url, &String::from_utf8_lossy(&out.stderr))
 }
 
@@ -843,7 +863,34 @@ pub fn exact_subtitle_language(key: &str) -> String {
     escaped
 }
 
-/// Fetch only the confirmed online track, rejecting a changed video identity.
+/// Shared yt-dlp arguments for downloading one online subtitle track into `template`
+/// without invoking FFmpeg's subtitle postprocessor (which rejects YouTube `json3`/`srv3`
+/// and Bilibili `bcc` payloads; `c2m_source::subtitle::parse_subtitle` decodes all of them).
+pub fn subtitle_download_args(language_key: &str, template: &str, automatic: bool) -> Vec<String> {
+    vec![
+        "--skip-download".into(),
+        "--no-simulate".into(),
+        "--no-playlist".into(),
+        "--no-write-auto-subs".into(),
+        "--no-write-subs".into(),
+        "--sub-format".into(),
+        "srt/vtt/json3/bcc/srv3/ttml/ass/lrc/best".into(),
+        "--sub-langs".into(),
+        exact_subtitle_language(language_key),
+        "--retries".into(),
+        "1".into(),
+        "-o".into(),
+        template.into(),
+        if automatic {
+            "--write-auto-subs"
+        } else {
+            "--write-subs"
+        }
+        .into(),
+    ]
+}
+
+/// Fetch only the confirmed online track.
 pub(crate) async fn fetch_selected_subtitle(
     url: &str,
     source_identity: &str,
@@ -879,41 +926,16 @@ pub(crate) async fn fetch_selected_subtitle(
         text.clone()
     } else {
         let template = temp.path().join("subtitle");
-        let (mut cmd, _cookies) = ytdlp_command(url)?;
-        cmd.args([
-            "--skip-download",
-            "--no-simulate",
-            "--dump-single-json",
-            "--no-playlist",
-            "--no-write-auto-subs",
-            "--no-write-subs",
-            "--convert-subs",
-            "srt",
-            "--sub-format",
-            "srt/vtt/best",
-            "--sub-langs",
-            &exact_subtitle_language(language_key),
-            "--retries",
-            "1",
-            "-o",
-        ]);
-        cmd.arg(&template).arg(if *automatic {
-            "--write-auto-subs"
-        } else {
-            "--write-subs"
-        });
-        let out = run_ytdlp(url, &mut cmd, control, false).await?;
-        match parse_online_probe(&out.stdout, url, &String::from_utf8_lossy(&out.stderr))? {
-            OnlineProbe::Video { video } => ensure!(
-                video.identity == source_identity,
-                tr!(
-                    "视频来源发生变化，请重新读取并选择字幕 / The video source changed; probe again and reselect the subtitle"
-                )
-            ),
-            _ => anyhow::bail!(tr!(
-                "无法确认字幕对应的视频，请重新读取 / Cannot confirm the video for the subtitle; probe again"
-            )),
-        }
+        let args = subtitle_download_args(language_key, &template.to_string_lossy(), *automatic);
+        run_ytdlp_with(
+            url,
+            |cmd| {
+                cmd.args(&args);
+            },
+            control,
+            false,
+        )
+        .await?;
         let path = crate::subtitle::pick_subtitle_file(temp.path())
             .context(tr!("所选字幕下载失败，请重新读取字幕，或改用语音识别 / The selected subtitle could not be downloaded; read subtitles again or use speech recognition"))?;
         crate::subtitle::read_subtitle_text(&path)?
@@ -965,28 +987,35 @@ pub async fn download(
     let work = tempfile::Builder::new()
         .prefix(".download-")
         .tempdir_in(parent)?;
-    let (mut cmd, _cookies) = ytdlp_command(url)?;
     let fmt = format!("bv*[height<={max_height}]+ba/b[height<={max_height}]/b");
-    cmd.args([
-        "-f",
-        &fmt,
-        "-S",
-        "ext:mp4:m4a",
-        "--merge-output-format",
-        "mp4",
-        "--no-playlist",
-        "--no-part",
-        // 结构化进度（2021.11 起的 yt-dlp 接口）：前缀行由 run_once 解析转发
-        "--newline",
-        "--progress-template",
-        "download:[C2MD] %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s",
-        "-o",
-    ]);
-    cmd.arg(work.path().join("media.%(ext)s"));
-    if verbose {
-        cmd.arg("-v");
-    }
-    run_ytdlp(url, &mut cmd, control, true).await?;
+    let target_template = work.path().join("media.%(ext)s");
+    run_ytdlp_with(
+        url,
+        |cmd| {
+            cmd.args([
+                "-f",
+                &fmt,
+                "-S",
+                "ext:mp4:m4a",
+                "--merge-output-format",
+                "mp4",
+                "--no-playlist",
+                "--no-part",
+                // 结构化进度（2021.11 起的 yt-dlp 接口）：前缀行由 run_once 解析转发
+                "--newline",
+                "--progress-template",
+                "download:[C2MD] %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s",
+                "-o",
+            ]);
+            cmd.arg(&target_template);
+            if verbose {
+                cmd.arg("-v");
+            }
+        },
+        control,
+        true,
+    )
+    .await?;
     let produced = downloaded_file(work.path())?;
     tokio::fs::rename(&produced, dest).await?;
     Ok(())
@@ -1085,11 +1114,26 @@ pub(crate) const BILIBILI_412_HINT: &str = "B 站暂时限制了访问。请稍�
 /// What a failed yt-dlp run suggests. Only a run that yt-dlp itself reports as
 /// refused can be helped by an account; a stopped task did not fail, a 412 carries
 /// its own advice, and a yt-dlp that never started says nothing about the site.
-fn login_tip(url: &str, mut error: anyhow::Error) -> anyhow::Error {
+fn login_tip(url: &str, error: anyhow::Error) -> anyhow::Error {
+    login_tip_with_blocked(url, error, false)
+}
+
+fn login_tip_with_blocked(
+    url: &str,
+    mut error: anyhow::Error,
+    skipped_blocked_cookies: bool,
+) -> anyhow::Error {
     if error.downcast_ref::<Bilibili412>().is_none()
         && let Some(failure) = error.downcast_mut::<YtDlpFailure>()
     {
-        failure.hint = crate::auth::login_hint(url, &failure.cause);
+        failure.hint = if skipped_blocked_cookies
+            && crate::auth::is_youtube_url(url)
+            && crate::auth::youtube::wants_sign_in(&failure.cause)
+        {
+            Some(crate::auth::youtube_blocked_hint())
+        } else {
+            crate::auth::login_hint(url, &failure.cause)
+        };
     }
     error
 }
@@ -1144,16 +1188,48 @@ impl std::fmt::Display for YtDlpFailure {
 
 impl std::error::Error for YtDlpFailure {}
 
-/// Runs yt-dlp, the URL last (`--` keeps it from reading as an option).
-async fn run_ytdlp(
+/// Runs yt-dlp with `configure`, putting the URL last (`--` keeps it from reading
+/// as an option). When a YouTube run fails reading/decrypting a local browser cookie
+/// database, retries once without `--cookies-from-browser` so public videos and
+/// subtitles remain readable; if YouTube then demands sign-in, returns the original
+/// failure with its cookie guidance.
+async fn run_ytdlp_with(
     url: &str,
-    cmd: &mut Command,
+    configure: impl Fn(&mut Command),
     control: &crate::dispatch::TaskControl,
     retry_transient: bool,
 ) -> Result<std::process::Output> {
-    run_retrying(cmd.arg("--").arg(url), control, retry_transient)
-        .await
-        .map_err(|error| login_tip(url, error))
+    let (mut cmd, auth) = ytdlp_command_with_cookies(url, true)?;
+    configure(&mut cmd);
+    cmd.arg("--").arg(url);
+    match run_retrying(&mut cmd, control, retry_transient).await {
+        Ok(out) => Ok(out),
+        Err(first_error) => {
+            let text = format!("{first_error:#}");
+            if auth.used_browser_cookies && crate::auth::youtube::browser_cookie_failed(&text) {
+                tracing::warn!(
+                    "读取浏览器 Cookie 失败，改用无登录状态重试 / Browser cookie read failed; retrying without browser cookies"
+                );
+                let (mut fallback_cmd, _fallback_auth) = ytdlp_command_with_cookies(url, false)?;
+                configure(&mut fallback_cmd);
+                fallback_cmd.arg("--").arg(url);
+                match run_retrying(&mut fallback_cmd, control, retry_transient).await {
+                    Ok(out) => return Ok(out),
+                    Err(second_error) => {
+                        let second_text = format!("{second_error:#}");
+                        if !crate::auth::youtube::wants_sign_in(&second_text) {
+                            return Err(login_tip(url, second_error));
+                        }
+                    }
+                }
+            }
+            Err(login_tip_with_blocked(
+                url,
+                first_error,
+                auth.skipped_blocked_cookies,
+            ))
+        }
+    }
 }
 
 /// Bilibili's transient 412 is retried with its own delays. With `retry_transient`

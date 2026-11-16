@@ -1119,6 +1119,7 @@ dependencies = [
  "rsa",
  "serde",
  "serde_json",
+ "strum 0.27.2",
  "subtitle-parse",
  "tempfile",
  "thiserror 2.0.21",

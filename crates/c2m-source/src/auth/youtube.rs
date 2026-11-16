@@ -16,8 +16,21 @@ use std::{
 };
 
 /// The browsers yt-dlp can read, by its names for them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    strum::VariantArray,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase", ascii_case_insensitive)]
 pub enum Browser {
     Chrome,
     Edge,
@@ -31,37 +44,15 @@ pub enum Browser {
 }
 
 impl Browser {
-    pub const ALL: [Self; 9] = [
-        Self::Chrome,
-        Self::Edge,
-        Self::Firefox,
-        Self::Safari,
-        Self::Brave,
-        Self::Chromium,
-        Self::Opera,
-        Self::Vivaldi,
-        Self::Whale,
-    ];
+    pub const ALL: &[Self] = <Self as strum::VariantArray>::VARIANTS;
 
     /// yt-dlp's name, as `--cookies-from-browser` takes it.
     pub fn id(self) -> &'static str {
-        match self {
-            Self::Chrome => "chrome",
-            Self::Edge => "edge",
-            Self::Firefox => "firefox",
-            Self::Safari => "safari",
-            Self::Brave => "brave",
-            Self::Chromium => "chromium",
-            Self::Opera => "opera",
-            Self::Vivaldi => "vivaldi",
-            Self::Whale => "whale",
-        }
+        self.into()
     }
 
     pub fn from_id(id: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|browser| browser.id().eq_ignore_ascii_case(id.trim()))
+        id.trim().parse().ok()
     }
 
     pub fn name(self) -> &'static str {
@@ -142,7 +133,8 @@ impl Browser {
             return Vec::new();
         };
         Self::ALL
-            .into_iter()
+            .iter()
+            .copied()
             .filter(|browser| browser.data_dir(&home).is_some_and(|dir| dir.exists()))
             .collect()
     }
@@ -351,56 +343,44 @@ pub fn clear_youtube_login() -> Result<bool> {
     }
 }
 
-/// A YouTube run reads the chosen browser's session, and has a JavaScript
-/// runtime for YouTube's player challenges when one is installed.
-pub(crate) fn configure(command: &mut std::process::Command) -> Result<()> {
-    if let Some(choice) = saved_choice()? {
-        command.arg("--cookies-from-browser").arg(choice.spec());
+/// A YouTube run reads the chosen browser's session when accessible, and passes
+/// an explicit JavaScript runtime for YouTube's player/caption challenges when
+/// installed. Returns `true` when `--cookies-from-browser` was attached.
+///
+/// When a saved browser's cookie directory is blocked by OS privacy (for example,
+/// macOS Full Disk Access not granted to this process), `--cookies-from-browser`
+/// is skipped rather than aborting yt-dlp before it even requests public metadata
+/// or subtitles; if YouTube itself then demands sign-in, [`cookies_blocked`] still
+/// points the person to the Full Disk Access setting.
+pub(crate) fn configure(
+    command: &mut std::process::Command,
+    include_browser_cookies: bool,
+) -> Result<(bool, bool)> {
+    let mut attached_cookies = false;
+    let mut skipped_blocked_cookies = false;
+    if include_browser_cookies && let Some(choice) = saved_choice()? {
+        if ensure_readable(&choice, Reader::App).is_ok() {
+            command.arg("--cookies-from-browser").arg(choice.spec());
+            attached_cookies = true;
+        } else {
+            skipped_blocked_cookies = true;
+        }
     }
     if let Some(runtime) = js_runtime(Path::new(command.get_program())) {
         command.arg("--js-runtimes").arg(runtime);
     }
-    Ok(())
+    Ok((attached_cookies, skipped_blocked_cookies))
 }
 
 /// yt-dlp solves YouTube's player challenges in JavaScript and enables only Deno
-/// by default; without a runtime some formats go missing. When Deno is absent
-/// but Node is installed, enable Node, if this yt-dlp knows the option.
+/// on `PATH` by default. Finder-launched `.app` sessions do not inherit `/opt/homebrew/bin`
+/// or `~/.deno/bin`, so pass the explicit `<runtime>:<path>` whenever supported.
 fn js_runtime(program: &Path) -> Option<String> {
-    if crate::tools::locate("deno").is_some() {
+    if !crate::ytdlp::supports_js_runtimes(program) {
         return None;
     }
-    let node = crate::tools::locate("node")?;
-    supports_js_runtimes(program).then(|| format!("node:{}", node.path.display()))
-}
-
-/// `--js-runtimes` arrived in yt-dlp 2025.11.12. Asked once per program.
-fn supports_js_runtimes(program: &Path) -> bool {
-    static SEEN: std::sync::Mutex<Vec<(PathBuf, bool)>> = std::sync::Mutex::new(Vec::new());
-    if let Some((_, known)) = SEEN
-        .lock()
-        .ok()
-        .and_then(|seen| seen.iter().find(|(path, _)| path == program).cloned())
-    {
-        return known;
-    }
-    let mut command = std::process::Command::new(program);
-    command.arg("--version");
-    let supported = crate::runtime::run_ok(&mut command, Duration::from_secs(30))
-        .is_some_and(|output| version_has_js_runtimes(output.stdout.trim()));
-    if let Ok(mut seen) = SEEN.lock() {
-        seen.push((program.to_path_buf(), supported));
-    }
-    supported
-}
-
-fn version_has_js_runtimes(version: &str) -> bool {
-    let parts: Vec<u32> = version
-        .split(['.', '-'])
-        .take(3)
-        .filter_map(|part| part.parse().ok())
-        .collect();
-    parts.len() == 3 && (parts[0], parts[1], parts[2]) >= (2025, 11, 12)
+    let (name, path) = crate::ytdlp::locate_js_runtime(None)?;
+    Some(format!("{name}:{}", path.display()))
 }
 
 /// A failure that signing in would answer: the bot check, age or membership gates.
@@ -421,14 +401,27 @@ pub fn wants_sign_in(cause: &str) -> bool {
     .any(|needle| lower.contains(needle))
 }
 
-/// A run failed reading the connected browser's cookies because the system keeps
-/// its folder from this app (yt-dlp words that as a missing database).
+/// Whether yt-dlp failed while reading/decrypting a local browser cookie database
+/// before (or instead of) reaching YouTube, so retrying without `--cookies-from-browser`
+/// can still read public videos and subtitles.
+pub fn browser_cookie_failed(stderr: &str) -> bool {
+    let lower = stderr.to_lowercase();
+    cookie_read_refused(stderr)
+        || lower.contains("database is locked")
+        || (lower.contains("cookie")
+            && (lower.contains("could not copy")
+                || lower.contains("failed to decrypt")
+                || lower.contains("cannot decrypt")))
+}
+
+/// A run failed reading the connected browser's cookies because OS permissions
+/// kept the browser's directory from this process.
 pub fn cookies_blocked(cause: &str) -> bool {
     cookie_read_refused(cause)
         && saved_choice()
             .ok()
             .flatten()
-            .is_some_and(|choice| choice.browser.blocked())
+            .is_some_and(|choice| ensure_readable(&choice, Reader::App).is_err())
 }
 
 fn cookie_read_refused(cause: &str) -> bool {
@@ -1107,11 +1100,12 @@ mod tests {
 
     #[test]
     fn js_runtime_option_follows_the_yt_dlp_version() {
-        assert!(version_has_js_runtimes("2026.10.26"));
-        assert!(version_has_js_runtimes("2025.11.12"));
-        assert!(!version_has_js_runtimes("2025.10.22"));
-        assert!(!version_has_js_runtimes("2024.12.06.232811"));
-        assert!(!version_has_js_runtimes("garbage"));
+        let has = |ver| crate::ytdlp::parse_version(ver).is_some_and(|v| v >= (2025, 11, 12));
+        assert!(has("2026.10.26"));
+        assert!(has("2025.11.12"));
+        assert!(!has("2025.10.22"));
+        assert!(!has("2024.12.06.232811"));
+        assert!(!has("garbage"));
     }
 
     #[test]

@@ -1008,8 +1008,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 无法检查（缺少 llama-server）	无法检查（缺少 llama-server）	Unable to check (missing llama-server)	無法檢查（缺少 llama-server）	確認できません (llama-server がありません)
 无法检测显卡：{}	无法检测显卡：{}	Unable to detect graphics card: {}	無法偵測顯示卡：{}	グラフィックス カードを検出できません: {}
 无法生成安全随机数 / Cannot generate secure random bytes	无法生成安全随机数	Cannot generate secure random bytes	無法生成安全隨機數	安全な乱数を生成できません
-无法确认字幕对应的视频，请重新读取	无法确认字幕对应的视频，请重新读取	Unable to confirm the video corresponding to the subtitles, please read again	無法確認字幕對應的影片，請重新讀取	字幕に対応する動画を確認できません。もう一度読み込んでください
-无法确认字幕对应的视频，请重新读取 / Cannot confirm the video for the subtitle; probe again	无法确认字幕对应的视频，请重新读取	Cannot confirm the video for the subtitle; probe again	無法確認字幕對應的影片，請重新讀取	字幕に対応する動画を確認できません。もう一度読み込んでください
 无法确认所选文件夹是这个笔记库，请选择移动后的完整笔记库文件夹	无法确认所选文件夹是这个笔记库，请选择移动后的完整笔记库文件夹	Unable to confirm that the selected folder is this note library, please select the moved complete note library folder	無法確認所選資料夾是這個筆記庫，請選擇移動後的完整筆記庫資料夾	選択したフォルダーがこのノート ライブラリであることを確認できません。移動された完全なノート ライブラリ フォルダーを選択してください
 无法确认这个文件夹是否属于本笔记库：{}	无法确认这个文件夹是否属于本笔记库：{}	Unable to confirm whether this folder belongs to this note library: {}	無法確認這個資料夾是否屬於本筆記庫：{}	このフォルダーがこのノートライブラリに属しているかどうかを確認できません: {}
 无法确认这是原来的笔记库，请检查后重新关联	无法确认这是原来的笔记库，请检查后重新关联	Can't confirm this is the original note library. Check it, then reconnect.	無法確認這是原來的筆記庫，請檢查後重新關聯	これが元のノート ライブラリであることを確認できません。確認してから再接続してください。
@@ -1623,8 +1621,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 视频文件已在读取后发生变化，请重新读取来源；原任务进度已保留 / Source content changed after confirmation; reread the source	视频文件已在读取后发生变化，请重新读取来源；原任务进度已保留	Source content changed after confirmation; reread the source	影片檔案已在讀取後發生變化，請重新讀取來源；原任務進度已保留	動画ファイルは読み込み後に変更されました。入力元をもう一度読み込んでください。元のタスクの進行状況は保持されています
 视频时长无效 / Invalid duration	视频时长无效	Invalid duration	影片時長無效	動画の長さが無効です
 视频来源	视频来源	Video source	影片來源	動画ソース
-视频来源发生变化，请重新读取并选择字幕	视频来源发生变化，请重新读取并选择字幕	The video source has changed. Please read it again and select subtitles.	影片來源發生變化，請重新讀取並選擇字幕	動画ソースが変更されました。もう一度読み込んで字幕を選択してください
-视频来源发生变化，请重新读取并选择字幕 / The video source changed; probe again and reselect the subtitle	视频来源发生变化，请重新读取并选择字幕	The video source changed; probe again and reselect the subtitle	影片來源發生變化，請重新讀取並選擇字幕	動画ソースが変更されました。もう一度読み込んで字幕を選択してください
 视频来源发生变化，请重新读取视频	视频来源发生变化，请重新读取视频	The video source has changed. Please read the video again.	影片來源發生變化，請重新讀取影片	動画ソースが変更されました。もう一度動画を読み込んでください。
 视频标题：{}\n	视频标题：{}\n	Video title: {}\n	影片標題：{}\n	動画のタイトル: {}\n
 视频链接	视频链接	Video link	影片連結	動画リンク

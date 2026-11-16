@@ -252,13 +252,19 @@ fn command(name: &str, args: &[&str], cancel: &AtomicBool) -> Result<Vec<u8>> {
 fn command_output(name: &str, args: &[&str], cancel: &AtomicBool) -> Result<CommandOutput> {
     let start = Instant::now();
     let mut retries = 0;
+    let mut include_browser_cookies = true;
     loop {
-        let result = command_once(name, args, cancel, start);
+        let (result, used_browser_cookies) =
+            command_once(name, args, include_browser_cookies, cancel, start);
         let Err(error) = &result else { return result };
         let message = error.to_string();
         if name != "yt-dlp" || cancel.load(Ordering::Relaxed) || start.elapsed() >= PREVIEW_TIMEOUT
         {
             return result;
+        }
+        if used_browser_cookies && c2m_source::auth::youtube::browser_cookie_failed(&message) {
+            include_browser_cookies = false;
+            continue;
         }
         let delay = if c2m_source::fetch::is_bilibili_412(&message) {
             let Some(delay) = c2m_source::fetch::bilibili_retry_delay(&message, retries) else {
@@ -298,92 +304,104 @@ fn check_preview_deadline(cancel: &AtomicBool, start: Instant) -> Result<()> {
 fn command_once(
     name: &str,
     args: &[&str],
+    include_browser_cookies: bool,
     cancel: &AtomicBool,
     start: Instant,
-) -> Result<CommandOutput> {
-    check_preview_deadline(cancel, start)?;
-    let stdout = tempfile::tempfile()?;
-    let stderr = tempfile::tempfile()?;
-    // yt-dlp 用共享搜索清单定位到绝对路径（随包自带 → PATH → 常见安装目录）；
-    // ffmpeg/ffprobe 走引擎的同一套查找（随包自带 → 扩展 PATH），预览读取视频
-    // 与转换用的是同一个 ffmpeg。
-    let program = if name == "yt-dlp" {
-        c2m_process::ytdlp::resolve_in(Some(&desktop_prefs::environment::tool_path()))
-            .unwrap_or_else(|| PathBuf::from(name))
-    } else {
-        c2m_process::tools::locate_in(name, Some(&desktop_prefs::environment::tool_path()))
-            .map_or_else(|| PathBuf::from(name), |tool| tool.path)
-    };
-    let mut command = Command::new(&program);
-    let _cookies = if name == "yt-dlp" {
-        c2m_source::auth::configure_ytdlp(&mut command, args.last().copied().unwrap_or_default())?
-    } else {
-        None
-    };
-    command
-        .args(args)
-        .env("PATH", desktop_prefs::environment::tool_path())
-        .stdin(Stdio::null())
-        .stdout(stdout.try_clone()?)
-        .stderr(stderr.try_clone()?);
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    let child = c2m_process::runtime::hide_console(&mut command)
-        .spawn()
-        .map_err(|error| {
-            eprintln!("cannot start {name}: {error}");
-            anyhow::anyhow!(c2m_i18n::tr!(
-                "缺少读取视频所需的组件，请在设置中检查运行环境"
-            ))
-        })?;
-    let (exited, exit) = std::sync::mpsc::channel();
-    let process = crate::backend::Watched::spawn(child, move |status, _| {
-        let _ = exited.send(status);
-    });
-    // Exit is delivered the moment the reaper sees it. The caller's cancel flag
-    // is a plain atomic, so it is still sampled between waits.
-    const CANCEL_CHECK: Duration = Duration::from_millis(100);
-    let status = loop {
-        if cancel.load(Ordering::Relaxed) || start.elapsed() >= PREVIEW_TIMEOUT {
-            process.kill();
-            let _ = exit.recv();
-            check_preview_deadline(cancel, start)?;
-        }
-        let wait = PREVIEW_TIMEOUT
-            .saturating_sub(start.elapsed())
-            .min(CANCEL_CHECK);
-        match exit.recv_timeout(wait) {
-            Ok(status) => break status?,
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                anyhow::bail!(desktop_prefs::interrupted())
+) -> (Result<CommandOutput>, bool) {
+    let mut used_browser_cookies = false;
+    let run = (|| -> Result<CommandOutput> {
+        check_preview_deadline(cancel, start)?;
+        let stdout = tempfile::tempfile()?;
+        let stderr = tempfile::tempfile()?;
+        let tool_path = desktop_prefs::environment::tool_path();
+        let program = if name == "yt-dlp" {
+            c2m_process::ytdlp::resolve_in(Some(&tool_path)).unwrap_or_else(|| PathBuf::from(name))
+        } else {
+            c2m_process::tools::locate_in(name, Some(&tool_path))
+                .map_or_else(|| PathBuf::from(name), |tool| tool.path)
+        };
+        let mut command = Command::new(&program);
+        let _auth = if name == "yt-dlp" {
+            let url = args.last().copied().unwrap_or_default();
+            let auth = if include_browser_cookies {
+                c2m_source::auth::configure_ytdlp(&mut command, url)?
+            } else {
+                c2m_source::auth::configure_ytdlp_without_browser_cookies(&mut command, url)?
+            };
+            used_browser_cookies = auth.used_browser_cookies;
+            if let Some(ffmpeg) = c2m_process::tools::locate_in("ffmpeg", Some(&tool_path)) {
+                command.arg("--ffmpeg-location").arg(ffmpeg.path);
             }
+            Some(auth)
+        } else {
+            None
+        };
+        command
+            .args(args)
+            .env("PATH", tool_path)
+            .stdin(Stdio::null())
+            .stdout(stdout.try_clone()?)
+            .stderr(stderr.try_clone()?);
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
         }
-    };
-    use std::io::{Read, Seek};
-    let read = |mut file: std::fs::File| -> Result<Vec<u8>> {
-        file.rewind()?;
-        let mut bytes = Vec::new();
-        file.take(32 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
-        ensure!(
-            bytes.len() <= 32 * 1024 * 1024,
-            c2m_i18n::tr!("返回的视频信息超过读取上限，请复制具体单集的链接")
-        );
-        Ok(bytes)
-    };
-    let error_bytes = read(stderr)?;
-    let error_text = String::from_utf8_lossy(&error_bytes);
-    if !status.success() {
-        return Err(preview_command_error(name, status.code(), &error_text));
-    }
-    check_cancel(cancel)?;
-    Ok(CommandOutput {
-        stdout: read(stdout)?,
-        stderr: error_text.into_owned(),
-    })
+        let child = c2m_process::runtime::hide_console(&mut command)
+            .spawn()
+            .map_err(|error| {
+                eprintln!("cannot start {name}: {error}");
+                anyhow::anyhow!(c2m_i18n::tr!(
+                    "缺少读取视频所需的组件，请在设置中检查运行环境"
+                ))
+            })?;
+        let (exited, exit) = std::sync::mpsc::channel();
+        let process = crate::backend::Watched::spawn(child, move |status, _| {
+            let _ = exited.send(status);
+        });
+        // Exit is delivered the moment the reaper sees it. The caller's cancel flag
+        // is a plain atomic, so it is still sampled between waits.
+        const CANCEL_CHECK: Duration = Duration::from_millis(100);
+        let status = loop {
+            if cancel.load(Ordering::Relaxed) || start.elapsed() >= PREVIEW_TIMEOUT {
+                process.kill();
+                let _ = exit.recv();
+                check_preview_deadline(cancel, start)?;
+            }
+            let wait = PREVIEW_TIMEOUT
+                .saturating_sub(start.elapsed())
+                .min(CANCEL_CHECK);
+            match exit.recv_timeout(wait) {
+                Ok(status) => break status?,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    anyhow::bail!(desktop_prefs::interrupted())
+                }
+            }
+        };
+        use std::io::{Read, Seek};
+        let read = |mut file: std::fs::File| -> Result<Vec<u8>> {
+            file.rewind()?;
+            let mut bytes = Vec::new();
+            file.take(32 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
+            ensure!(
+                bytes.len() <= 32 * 1024 * 1024,
+                c2m_i18n::tr!("返回的视频信息超过读取上限，请复制具体单集的链接")
+            );
+            Ok(bytes)
+        };
+        let error_bytes = read(stderr)?;
+        let error_text = String::from_utf8_lossy(&error_bytes);
+        if !status.success() {
+            return Err(preview_command_error(name, status.code(), &error_text));
+        }
+        check_cancel(cancel)?;
+        Ok(CommandOutput {
+            stdout: read(stdout)?,
+            stderr: error_text.into_owned(),
+        })
+    })();
+    (run, used_browser_cookies)
 }
 
 /// A file path typed or pasted where a link was expected: absolute, `~/`, or a
@@ -988,51 +1006,23 @@ fn read_subtitle_in(
                     text.clone()
                 } else {
                     let template = temp.path().join("subtitle");
-                    let output = command_output(
-                        "yt-dlp",
-                        &[
-                            "--ignore-config",
-                            "--skip-download",
-                            "--no-simulate",
-                            "--dump-single-json",
-                            "--no-playlist",
-                            "--no-write-auto-subs",
-                            "--no-write-subs",
-                            "--convert-subs",
-                            "srt",
-                            "--sub-format",
-                            "srt/vtt/best",
-                            "--sub-langs",
-                            &c2m_source::fetch::exact_subtitle_language(language_key),
-                            "--socket-timeout",
-                            "12",
-                            "--retries",
-                            "1",
-                            "-o",
-                            template
-                                .to_str()
-                                .context(c2m_i18n::tr!("字幕缓存路径无法编码"))?,
-                            if *automatic {
-                                "--write-auto-subs"
-                            } else {
-                                "--write-subs"
-                            },
-                            "--",
-                            &source.input,
-                        ],
-                        &cancel,
-                    )?;
-                    match c2m_source::fetch::parse_online_probe(
-                        &output.stdout,
-                        &source.input,
-                        &output.stderr,
-                    )? {
-                        c2m_source::fetch::OnlineProbe::Video { video } => ensure!(
-                            video.identity == source.identity,
-                            c2m_i18n::tr!("视频来源发生变化，请重新读取并选择字幕")
-                        ),
-                        _ => anyhow::bail!(c2m_i18n::tr!("无法确认字幕对应的视频，请重新读取")),
-                    }
+                    let template_str = template
+                        .to_str()
+                        .context(c2m_i18n::tr!("字幕缓存路径无法编码"))?;
+                    let mut args = vec![
+                        "--ignore-config".to_owned(),
+                        "--socket-timeout".to_owned(),
+                        c2m_source::fetch::YTDLP_SOCKET_TIMEOUT.to_owned(),
+                    ];
+                    args.extend(c2m_source::fetch::subtitle_download_args(
+                        language_key,
+                        template_str,
+                        *automatic,
+                    ));
+                    args.push("--".to_owned());
+                    args.push(source.input.clone());
+                    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+                    command_output("yt-dlp", &arg_refs, &cancel)?;
                     let file = c2m_source::subtitle::pick_subtitle_file(temp.path()).context(
                         c2m_i18n::tr!("所选字幕没有下载成功，请重新读取字幕或选择其他文字来源"),
                     )?;

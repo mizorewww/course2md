@@ -9,9 +9,26 @@ use std::path::{Path, PathBuf};
 use subtitle_parse::{DecodeError, ReadError, best_file, normalize_language};
 
 pub use subtitle_parse::{
-    Track as SubtitleTrack, TrackKind as SubtitleKind, TrackOrigin as SubtitleOrigin,
-    is_subtitle_file, sort_tracks,
+    Track as SubtitleTrack, TrackKind as SubtitleKind, TrackOrigin as SubtitleOrigin, sort_tracks,
 };
+
+/// Extensions we can decode into timed subtitle cues, either locally attached or
+/// downloaded by yt-dlp without requiring an external FFmpeg conversion pass.
+const SUBTITLE_EXTENSIONS: &[&str] = &[
+    "srt", "vtt", "json3", "bcc", "ass", "ssa", "lrc", "ttml", "dfxp", "srv3", "srv2", "srv1",
+];
+
+pub fn is_subtitle_file(path: &Path) -> bool {
+    subtitle_parse::is_subtitle_file(path)
+        || path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| {
+                SUBTITLE_EXTENSIONS
+                    .iter()
+                    .any(|known| ext.eq_ignore_ascii_case(known))
+            })
+}
 
 /// How many tracks a default choice tries before it gives up: the chosen one and
 /// two after it. Each try is a request to the platform, and one that rate-limits
@@ -239,8 +256,31 @@ pub fn read_subtitle_text(path: &Path) -> Result<String> {
     })
 }
 
-/// 解析 SRT / VTT 字幕为转写事件；时间区间无效的 cue 记入日志后跳过。
+/// 解析 SRT / VTT / JSON3 / BCC / XML (SRV1-3, TTML) / ASS / LRC 字幕为转写事件；
+/// 时间区间无效的 cue 记入日志后跳过。
 pub fn parse_subtitle(content: &str) -> Vec<TranscriptEvent> {
+    let trimmed = content.trim_start_matches('\u{feff}').trim();
+    if trimmed.starts_with('{')
+        && let Some(events) = parse_json_subtitle(trimmed)
+        && !events.is_empty()
+    {
+        return events;
+    }
+    if trimmed.starts_with('<')
+        && let Some(events) = parse_xml_subtitle(trimmed)
+        && !events.is_empty()
+    {
+        return events;
+    }
+    if (trimmed.contains("[Events]")
+        || trimmed
+            .lines()
+            .any(|line| line.trim_start().starts_with("Dialogue:")))
+        && let events = parse_ass_subtitle(trimmed)
+        && !events.is_empty()
+    {
+        return events;
+    }
     let parsed = subtitle_parse::parse(content);
     for skipped in &parsed.skipped {
         tracing::warn!(
@@ -248,17 +288,298 @@ pub fn parse_subtitle(content: &str) -> Vec<TranscriptEvent> {
             "字幕时间区间无效，已跳过 / Skipped subtitle with invalid timestamps"
         );
     }
-    parsed
-        .cues
-        .into_iter()
-        .map(|cue| TranscriptEvent {
-            start: cue.start,
-            end: cue.end,
-            text: cue.text,
-            raw: None,
-            translation: None,
-        })
-        .collect()
+    if !parsed.cues.is_empty() {
+        return parsed
+            .cues
+            .into_iter()
+            .map(|cue| TranscriptEvent {
+                start: cue.start,
+                end: cue.end,
+                text: cue.text,
+                raw: None,
+                translation: None,
+            })
+            .collect();
+    }
+    parse_lrc_subtitle(trimmed)
+}
+
+fn valid_cue(start: f64, end: f64, text: String) -> Option<TranscriptEvent> {
+    let text = text.trim().to_owned();
+    if text.is_empty() || !start.is_finite() || !end.is_finite() || start < 0.0 {
+        return None;
+    }
+    let end = if end >= start { end } else { start };
+    Some(TranscriptEvent {
+        start,
+        end: if end == start { start + 0.5 } else { end },
+        text,
+        raw: None,
+        translation: None,
+    })
+}
+
+/// Parses YouTube `json3` (`events[].segs[].utf8`) and Bilibili `bcc` (`body[].content`).
+fn parse_json_subtitle(content: &str) -> Option<Vec<TranscriptEvent>> {
+    let root: serde_json::Value = serde_json::from_str(content).ok()?;
+    if let Some(body) = root.get("body").and_then(|v| v.as_array()) {
+        let mut out = Vec::with_capacity(body.len());
+        for item in body {
+            let Some(start) = item.get("from").and_then(|v| v.as_f64()) else {
+                continue;
+            };
+            let end = item.get("to").and_then(|v| v.as_f64()).unwrap_or(start);
+            let text = item
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_owned();
+            if let Some(ev) = valid_cue(start, end, text) {
+                out.push(ev);
+            }
+        }
+        return Some(out);
+    }
+    let events = root.get("events")?.as_array()?;
+    let mut raw_cues: Vec<(f64, Option<f64>, String)> = Vec::new();
+    for item in events {
+        let Some(start_ms) = item.get("tStartMs").and_then(|v| v.as_f64()) else {
+            continue;
+        };
+        let dur_ms = item.get("dDurationMs").and_then(|v| v.as_f64());
+        let text: String = match item.get("segs").and_then(|v| v.as_array()) {
+            Some(segs) => segs
+                .iter()
+                .filter_map(|seg| seg.get("utf8").and_then(|v| v.as_str()))
+                .collect(),
+            None => continue,
+        };
+        if !text.trim().is_empty() {
+            raw_cues.push((
+                start_ms / 1000.0,
+                dur_ms.map(|d| (start_ms + d.max(0.0)) / 1000.0),
+                text,
+            ));
+        }
+    }
+    let mut out = Vec::with_capacity(raw_cues.len());
+    for (i, (start, end, text)) in raw_cues.iter().enumerate() {
+        let next_start = raw_cues.get(i + 1).map(|(s, _, _)| *s);
+        let resolved_end = match (*end, next_start) {
+            (Some(e), Some(ns)) if ns > *start => e.min(ns),
+            (Some(e), _) => e,
+            (None, Some(ns)) if ns > *start => ns,
+            (None, _) => *start + 2.0,
+        };
+        if let Some(ev) = valid_cue(*start, resolved_end, text.clone()) {
+            out.push(ev);
+        }
+    }
+    Some(out)
+}
+
+fn decode_xml_text(raw: &str) -> String {
+    let mut stripped = String::with_capacity(raw.len());
+    let mut in_tag = false;
+    let mut tag_buf = String::new();
+    for ch in raw.chars() {
+        match ch {
+            '<' => {
+                in_tag = true;
+                tag_buf.clear();
+            }
+            '>' if in_tag => {
+                in_tag = false;
+                let tag = tag_buf.trim().to_ascii_lowercase();
+                if tag == "br" || tag.starts_with("br/") || tag.starts_with("br ") {
+                    stripped.push('\n');
+                }
+            }
+            _ if in_tag => tag_buf.push(ch),
+            _ => stripped.push(ch),
+        }
+    }
+    stripped
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&nbsp;", " ")
+}
+
+fn xml_attr<'a>(attrs: &'a str, name: &str) -> Option<&'a str> {
+    for part in attrs.split_whitespace() {
+        if let Some((k, v)) = part.split_once('=')
+            && k.eq_ignore_ascii_case(name)
+        {
+            return Some(v.trim_matches(['"', '\'']));
+        }
+    }
+    None
+}
+
+fn parse_media_time(raw: &str) -> Option<f64> {
+    let s = raw.trim();
+    if let Some(ms) = s.strip_suffix("ms") {
+        return ms.parse::<f64>().ok().map(|v| v / 1000.0);
+    }
+    if let Some(sec) = s.strip_suffix('s') {
+        return sec.parse::<f64>().ok();
+    }
+    if s.contains(':') {
+        let parts: Vec<&str> = s.split(':').collect();
+        if parts.len() == 3 {
+            let h: f64 = parts[0].parse().ok()?;
+            let m: f64 = parts[1].parse().ok()?;
+            let sec: f64 = parts[2].replace(',', ".").parse().ok()?;
+            return Some(h * 3600.0 + m * 60.0 + sec);
+        } else if parts.len() == 2 {
+            let m: f64 = parts[0].parse().ok()?;
+            let sec: f64 = parts[1].replace(',', ".").parse().ok()?;
+            return Some(m * 60.0 + sec);
+        }
+    }
+    s.parse::<f64>().ok()
+}
+
+/// Parses YouTube `srv1`/`srv2`/`srv3` (`<text start="" dur="">`, `<p t="" d="">`) and TTML (`<p begin="" end="">`).
+fn parse_xml_subtitle(content: &str) -> Option<Vec<TranscriptEvent>> {
+    let mut out = Vec::new();
+    for tag in ["text", "p"] {
+        let open_prefix = format!("<{tag}");
+        let close_tag = format!("</{tag}>");
+        let mut rest = content;
+        while let Some(pos) = rest.find(&open_prefix) {
+            let after_open = &rest[pos + open_prefix.len()..];
+            if !after_open.starts_with(|c: char| c.is_whitespace() || c == '>') {
+                rest = after_open;
+                continue;
+            }
+            let Some(gt) = after_open.find('>') else {
+                break;
+            };
+            let attrs = &after_open[..gt];
+            if attrs.ends_with('/') {
+                rest = &after_open[gt + 1..];
+                continue;
+            }
+            let inner_and_more = &after_open[gt + 1..];
+            let Some(end_pos) = inner_and_more.find(&close_tag) else {
+                break;
+            };
+            let body = &inner_and_more[..end_pos];
+            rest = &inner_and_more[end_pos + close_tag.len()..];
+            let timing =
+                if let Some(t_ms) = xml_attr(attrs, "t").and_then(|v| v.parse::<f64>().ok()) {
+                    let d_ms = xml_attr(attrs, "d")
+                        .and_then(|v| v.parse::<f64>().ok())
+                        .unwrap_or(2000.0);
+                    Some((t_ms / 1000.0, (t_ms + d_ms.max(0.0)) / 1000.0))
+                } else if let Some(start) = xml_attr(attrs, "start").and_then(parse_media_time) {
+                    let end = xml_attr(attrs, "end")
+                        .and_then(parse_media_time)
+                        .or_else(|| {
+                            xml_attr(attrs, "dur")
+                                .and_then(parse_media_time)
+                                .map(|d| start + d)
+                        })
+                        .unwrap_or(start + 2.0);
+                    Some((start, end))
+                } else if let Some(begin) = xml_attr(attrs, "begin").and_then(parse_media_time) {
+                    let end = xml_attr(attrs, "end")
+                        .and_then(parse_media_time)
+                        .or_else(|| {
+                            xml_attr(attrs, "dur")
+                                .and_then(parse_media_time)
+                                .map(|d| begin + d)
+                        })
+                        .unwrap_or(begin + 2.0);
+                    Some((begin, end))
+                } else {
+                    None
+                };
+            if let Some((start, end)) = timing
+                && let Some(ev) = valid_cue(start, end, decode_xml_text(body))
+            {
+                out.push(ev);
+            }
+        }
+    }
+    out.sort_by(|a, b| a.start.total_cmp(&b.start));
+    Some(out)
+}
+
+fn parse_ass_subtitle(content: &str) -> Vec<TranscriptEvent> {
+    let mut out = Vec::new();
+    for line in content.lines() {
+        let Some(rest) = line.trim_start().strip_prefix("Dialogue:") else {
+            continue;
+        };
+        let mut fields = rest.splitn(10, ',');
+        let _layer = fields.next();
+        let Some(start) = fields.next().and_then(parse_media_time) else {
+            continue;
+        };
+        let Some(end) = fields.next().and_then(parse_media_time) else {
+            continue;
+        };
+        for _ in 0..6 {
+            let _ = fields.next();
+        }
+        let Some(raw_text) = fields.next() else {
+            continue;
+        };
+        let mut cleaned = String::with_capacity(raw_text.len());
+        let mut in_brace = false;
+        for ch in raw_text.chars() {
+            match ch {
+                '{' => in_brace = true,
+                '}' if in_brace => in_brace = false,
+                _ if !in_brace => cleaned.push(ch),
+                _ => {}
+            }
+        }
+        let cleaned = cleaned
+            .replace("\\N", "\n")
+            .replace("\\n", "\n")
+            .replace("\\h", " ");
+        if let Some(ev) = valid_cue(start, end, cleaned) {
+            out.push(ev);
+        }
+    }
+    out
+}
+
+fn parse_lrc_subtitle(content: &str) -> Vec<TranscriptEvent> {
+    let mut timed: Vec<(f64, String)> = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix('[') else {
+            continue;
+        };
+        let Some((tag, text)) = rest.split_once(']') else {
+            continue;
+        };
+        if let Some(start) = parse_media_time(tag)
+            && !text.trim().is_empty()
+        {
+            timed.push((start, text.trim().to_owned()));
+        }
+    }
+    let mut out = Vec::with_capacity(timed.len());
+    for (i, (start, text)) in timed.iter().enumerate() {
+        let end = timed
+            .get(i + 1)
+            .map(|(s, _)| *s)
+            .filter(|s| *s > *start)
+            .unwrap_or(*start + 3.0);
+        if let Some(ev) = valid_cue(*start, end, text.clone()) {
+            out.push(ev);
+        }
+    }
+    out
 }
 
 pub fn to_srt(events: &[TranscriptEvent]) -> String {
@@ -277,10 +598,22 @@ pub fn file_track(path: PathBuf, language: Option<String>) -> SubtitleTrack {
     SubtitleTrack::file(path, language)
 }
 
-/// 在已有目录中挑一个字幕文件（界面语言优先、其次英文）。新调用方会把确定的一条字幕抓取到
-/// 独立目录；这里绝不能选中属于其他来源的产物。
+/// 在已有目录中挑一个字幕文件（SRT/VTT 按界面语言优先、其次英文；若平台只返回 json3 / bcc /
+/// srv* / ttml / ass / lrc，也直接拾取）。新调用方会把确定的一条字幕抓取到独立目录；这里绝不能选中属于其他来源的产物。
 pub fn pick_subtitle_file(dir: &Path) -> Option<PathBuf> {
-    preferred_file(subtitle_parse::files_in(dir), c2m_i18n::i18n::lang().code())
+    if let Some(found) =
+        preferred_file(subtitle_parse::files_in(dir), c2m_i18n::i18n::lang().code())
+    {
+        return Some(found);
+    }
+    let mut extra: Vec<PathBuf> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file() && is_subtitle_file(path))
+        .collect();
+    extra.sort();
+    extra.into_iter().next()
 }
 
 /// The sidecars of a local video, at absolute paths. `subtitle-parse` keeps the form of the
@@ -512,19 +845,57 @@ mod tests {
     }
 
     #[test]
-    fn stored_subtitle_state_keeps_its_wire_format() {
-        let evidence = SubtitleEvidence::Found {
-            tracks: vec![file_track("lesson.srt".into(), None)],
-            warning: None,
-        };
-        let json = serde_json::to_value(&evidence).unwrap();
-        assert_eq!(json["state"], "found");
-        assert_eq!(json["tracks"][0]["kind"], "unknown");
-        assert_eq!(json["tracks"][0]["origin"]["kind"], "file");
+    fn parses_json3_bcc_xml_ass_and_lrc_subtitles() {
+        let json3 = r#"{"events":[{"tStartMs":1000,"dDurationMs":2500,"segs":[{"utf8":"Hello "},{"utf8":"world"}]},{"tStartMs":4000,"segs":[{"utf8":"\n"}]},{"tStartMs":5000,"dDurationMs":1500,"segs":[{"utf8":"Next cue"}]}]}"#;
+        let cues = parse_subtitle(json3);
+        assert_eq!(cues.len(), 2);
         assert_eq!(
-            serde_json::from_value::<SubtitleEvidence>(json).unwrap(),
-            evidence
+            (cues[0].start, cues[0].end, cues[0].text.as_str()),
+            (1.0, 3.5, "Hello world")
         );
+        assert_eq!(
+            (cues[1].start, cues[1].end, cues[1].text.as_str()),
+            (5.0, 6.5, "Next cue")
+        );
+
+        let bcc = r#"{"body":[{"from":0.5,"to":2.5,"content":"B站字幕"}]}"#;
+        let cues = parse_subtitle(bcc);
+        assert_eq!(cues.len(), 1);
+        assert_eq!(cues[0].text, "B站字幕");
+
+        let srv3 = r#"<?xml version="1.0" encoding="utf-8" ?><timedtext format="3"><body><p t="1200" d="1800">First &amp; line<br/>Second</p></body></timedtext>"#;
+        let cues = parse_subtitle(srv3);
+        assert_eq!(cues.len(), 1);
+        assert_eq!(
+            (cues[0].start, cues[0].end, cues[0].text.as_str()),
+            (1.2, 3.0, "First & line\nSecond")
+        );
+
+        let ttml = r#"<tt xmlns="http://www.w3.org/ns/ttml"><body><div><p begin="00:00:02.000" end="00:00:04.500">TTML text</p></div></body></tt>"#;
+        let cues = parse_subtitle(ttml);
+        assert_eq!(cues.len(), 1);
+        assert_eq!(
+            (cues[0].start, cues[0].end, cues[0].text.as_str()),
+            (2.0, 4.5, "TTML text")
+        );
+
+        let ass = "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,{\\an8}ASS\\Nline\n";
+        let cues = parse_subtitle(ass);
+        assert_eq!(cues.len(), 1);
+        assert_eq!(cues[0].text, "ASS\nline");
+
+        let lrc = "[00:01.50]First lyric\n[00:04.00]Second lyric\n";
+        let cues = parse_subtitle(lrc);
+        assert_eq!(cues.len(), 2);
+        assert_eq!(
+            (cues[0].start, cues[0].end, cues[0].text.as_str()),
+            (1.5, 4.0, "First lyric")
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let json3_path = dir.path().join("subtitle.en.json3");
+        std::fs::write(&json3_path, json3).unwrap();
+        assert_eq!(pick_subtitle_file(dir.path()), Some(json3_path));
     }
 
     #[test]

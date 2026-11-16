@@ -107,49 +107,129 @@ fn fallback_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-/// A candidate that exits successfully for `--version`. A bundled one-file
-/// PyInstaller build can be present and executable yet fail after macOS signing
-/// (the extracted Python has a different Team ID); treat that as unavailable and
-/// continue to the user's PATH/Homebrew installation.
-///
-/// A candidate that ran once is not run again in this process: every preview
-/// and download resolves yt-dlp, and each check is a full Python start. The
-/// limit allows for the first run after an install, which macOS spends
-/// scanning the new code; a broken build fails long before it.
-fn runs(path: &Path) -> bool {
-    static RAN: std::sync::Mutex<std::collections::BTreeSet<PathBuf>> =
-        std::sync::Mutex::new(std::collections::BTreeSet::new());
-    if RAN.lock().is_ok_and(|ran| ran.contains(path)) {
-        return true;
+/// Parses a yt-dlp release version (`YYYY.MM.DD`) for comparison and feature gates.
+pub fn parse_version(version: &str) -> Option<(u32, u32, u32)> {
+    let parts: Vec<u32> = version
+        .trim()
+        .split(['.', '-'])
+        .take(3)
+        .filter_map(|part| part.parse().ok())
+        .collect();
+    (parts.len() == 3).then(|| (parts[0], parts[1], parts[2]))
+}
+
+/// Runs `path --version` at most once in this process and caches its parsed version.
+/// Returns `None` when `path` cannot run `--version` cleanly (for example, a PyInstaller
+/// binary rejected by macOS code signing); `Some(None)` when it runs without a standard
+/// `YYYY.MM.DD` string (such as a test stub).
+fn probe_version(path: &Path) -> Option<Option<(u32, u32, u32)>> {
+    type VersionMap = std::collections::BTreeMap<PathBuf, Option<Option<(u32, u32, u32)>>>;
+    static PROBED: std::sync::Mutex<VersionMap> =
+        std::sync::Mutex::new(std::collections::BTreeMap::new());
+    if let Some(cached) = PROBED
+        .lock()
+        .ok()
+        .and_then(|probed| probed.get(path).copied())
+    {
+        return cached;
     }
     let mut command = std::process::Command::new(path);
     command.arg("--version");
-    let ok = crate::runtime::run_ok(&mut command, std::time::Duration::from_secs(30)).is_some();
-    if ok && let Ok(mut ran) = RAN.lock() {
-        ran.insert(path.to_path_buf());
+    let result = crate::runtime::run_ok(&mut command, std::time::Duration::from_secs(30))
+        .map(|out| parse_version(&out.stdout));
+    if let Ok(mut probed) = PROBED.lock() {
+        probed.insert(path.to_path_buf(), result);
     }
-    ok
+    result
 }
 
-/// 按优先级返回第一个存在、可执行且能运行 `--version` 的 yt-dlp。
-/// `path` 为 None 时用进程继承的 PATH；桌面端传入 `tool_path()` 的扩展版本。
+/// `--js-runtimes` arrived in yt-dlp 2025.11.12. Reuses the cached `--version` probe.
+pub fn supports_js_runtimes(program: &Path) -> bool {
+    probe_version(program)
+        .flatten()
+        .is_some_and(|version| version >= (2025, 11, 12))
+}
+
+/// Finds an installed JavaScript runtime (`deno`, `node` or `bun`) across `path`,
+/// common package-manager directories and runtime homes (`~/.deno/bin`, `~/.bun/bin`),
+/// so Finder-launched `.app` sessions can pass an explicit `--js-runtimes name:path`.
+pub fn locate_js_runtime(path: Option<&OsStr>) -> Option<(&'static str, PathBuf)> {
+    let search = tools::search_path(path);
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let mut extra = fallback_dirs();
+    if let Some(home) = crate::paths::home_dir() {
+        extra.push(home.join(".deno/bin"));
+        extra.push(home.join(".bun/bin"));
+    }
+    for name in ["deno", "node", "bun"] {
+        if let Some(found) = which::which_in_all(name, Some(&search), &cwd)
+            .into_iter()
+            .flatten()
+            .chain(extra.iter().map(|dir| dir.join(tools::file_name(name))))
+            .find(|candidate| tools::is_executable(candidate))
+        {
+            return Some((name, found));
+        }
+    }
+    None
+}
+
+/// 按优先级返回可运行的 yt-dlp：`COURSE2MD_YTDLP` 显式覆盖始终最优先；否则在随包自带、
+/// PATH 与常见安装目录中定位可运行候选，且当用户系统安装了比随包版本更新的正式版
+/// yt-dlp 时优先使用更新版本（避免旧版提取器因平台改版读不到字幕或元数据）。
 pub fn resolve_in(path: Option<&OsStr>) -> Option<PathBuf> {
-    let found = tools::candidates(
-        NAME,
-        ENV_OVERRIDE,
+    resolve_with(
         &bundled_dirs(),
         &tools::search_path(path),
-    );
-    let elsewhere = fallback_dirs()
-        .into_iter()
-        .map(|dir| dir.join(tools::file_name(NAME)));
+        &fallback_dirs(),
+        std::env::var_os("COURSE2MD_TOOL_PATH").is_some_and(|v| !v.is_empty()),
+    )
+}
+
+fn resolve_with(
+    bundled: &[PathBuf],
+    search: &OsStr,
+    fallbacks: &[PathBuf],
+    pinned_tool_path: bool,
+) -> Option<PathBuf> {
+    let found = tools::candidates(NAME, ENV_OVERRIDE, bundled, search);
+    let elsewhere = fallbacks
+        .iter()
+        .map(|dir| dir.join(tools::file_name(NAME)))
+        .filter(|candidate| tools::is_executable(candidate))
+        .map(|path| tools::Tool {
+            path,
+            origin: tools::Origin::System,
+        });
     let mut seen = std::collections::BTreeSet::new();
-    found
-        .into_iter()
-        .map(|tool| tool.path)
-        .chain(elsewhere.filter(|path| tools::is_executable(path)))
-        .filter(|candidate| seen.insert(candidate.clone()))
-        .find(|candidate| runs(candidate))
+    let mut first_bundled: Option<(PathBuf, (u32, u32, u32))> = None;
+    for tool in found.into_iter().chain(elsewhere) {
+        if !seen.insert(tool.path.clone()) {
+            continue;
+        }
+        let Some(version) = probe_version(&tool.path) else {
+            continue;
+        };
+        if tool.origin == tools::Origin::Override || pinned_tool_path {
+            return Some(tool.path);
+        }
+        match &first_bundled {
+            None => match (tool.origin, version) {
+                (tools::Origin::Bundled, Some(ver)) => first_bundled = Some((tool.path, ver)),
+                _ => return Some(tool.path),
+            },
+            Some((_, bundled_ver)) => {
+                if version.is_some_and(|candidate_ver| candidate_ver > *bundled_ver) {
+                    return Some(tool.path);
+                }
+                if tool.origin != tools::Origin::Bundled {
+                    // Checked the first runnable system candidate; keep bundled when >= system.
+                    break;
+                }
+            }
+        }
+    }
+    first_bundled.map(|(path, _)| path)
 }
 
 /// 继承 PATH 的版本（CLI/终端调用）。
@@ -201,5 +281,43 @@ mod tests {
             Some(working_path),
             "a broken bundled/earlier candidate must not hide a working installation"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn newer_system_ytdlp_beats_stale_bundled_copy() {
+        use std::os::unix::fs::PermissionsExt;
+        let versioned = |dir: &Path, ver: &str| {
+            let path = dir.join("yt-dlp");
+            std::fs::write(&path, format!("#!/bin/sh\necho {ver}\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        };
+        let old_bundled = tempfile::tempdir().unwrap();
+        let new_system = tempfile::tempdir().unwrap();
+        let old_system = tempfile::tempdir().unwrap();
+        let bundled_path = versioned(old_bundled.path(), "2026.08.19");
+        let newer_path = versioned(new_system.path(), "2026.10.26");
+        let older_path = versioned(old_system.path(), "2026.05.01");
+
+        assert_eq!(
+            resolve_with(
+                &[old_bundled.path().to_path_buf()],
+                new_system.path().as_os_str(),
+                &[],
+                false,
+            ),
+            Some(newer_path),
+        );
+        assert_eq!(
+            resolve_with(
+                &[old_bundled.path().to_path_buf()],
+                old_system.path().as_os_str(),
+                &[],
+                false,
+            ),
+            Some(bundled_path),
+        );
+        let _ = older_path;
     }
 }
