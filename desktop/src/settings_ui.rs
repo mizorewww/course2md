@@ -1091,7 +1091,7 @@ impl Desktop {
                             .w_full()
                             .min_w_0()
                             .flex_shrink_0()
-                            .pr(rem(12.))
+                            .pr(px(24.))
                             .gap(rem(8.))
                             .children(notices),
                     )
@@ -1100,7 +1100,7 @@ impl Desktop {
                     self.settings_content_scroll(
                         // A category arrives as one unit; the navigation stays a landmark.
                         // The right inset is the scrollbar's gutter, so it never covers a tile.
-                        div().w_full().min_w_0().pr(rem(12.)).pb(rem(64.)).child(
+                        div().w_full().min_w_0().pr(px(24.)).pb(rem(64.)).child(
                             motion::page_enter(
                                 ("settings-category", self.settings_tab.index()),
                                 v_flex()
@@ -1166,7 +1166,7 @@ impl Desktop {
                         .max_w(rem(760.))
                         .mx_auto()
                         .pt(rem(8.))
-                        .pr(rem(12.))
+                        .pr(px(24.))
                         .pb(rem(64.))
                         .gap(rem(16.))
                         .child(self.settings_header(cx))
