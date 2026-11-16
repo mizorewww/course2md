@@ -5,7 +5,7 @@
 Before designing, implementing, or reviewing any desktop UI, read and follow
 [course2md-design](.agents/skills/course2md-design/SKILL.md).
 It is the current design authority, including when older mockups or design documents disagree.
-The app is pure Material: colors, controls, icons and motion come from `gpui-kit-material`; do not create a new visual dialect in a page.
+The app is pure Material: colors, controls, icons and motion come from `gpui-kit-material`; do not create a new visual dialect in a page. The component library lives at `../gpui-kit-material`; when you find a component-library bug or missing generic capability, fix it there and open a PR directly to `gpui-kit-material` instead of working around it in the app.
 
 For a whole-product UI change, use subagents to independently review every affected page and its loading, empty, failure and completion states. Record concrete findings and their resolution. Verify the running native application, not just source or HTML mockups.
 
