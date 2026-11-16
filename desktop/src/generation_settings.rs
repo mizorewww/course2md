@@ -129,24 +129,22 @@ impl Desktop {
             }),
         ];
         if custom {
+            let lang_error = value
+                .subtitle_languages_draft
+                .as_deref()
+                .filter(|raw| !crate::settings_ui::valid_subtitle_languages(raw))
+                .map(|_| course2md::tr!("语言代码只能包含字母、数字和连字符，请用逗号分隔各语言"));
             fields.push(ui::Field::content(
                 "subtitle-language-details",
-                Self::field_with_apply(
-                    TextField::new("subtitle-languages", &self.settings_ui.languages)
-                        .outlined()
-                        .shape(TextFieldShape::Rounded)
-                        .w_full()
-                        .label(course2md::tr!("语言优先级"))
-                        .float_label(true)
-                        .placeholder(course2md::tr!("按优先顺序填写语言代码，如 zh-Hans, en")),
-                    material_button("apply-languages", ButtonVariant::Outlined)
-                        .tone(ButtonTone::Accent)
-                        .icon(symbols::check_circle())
-                        .child(course2md::tr!("应用"))
-                        .on_click(
-                            cx.listener(|this, _, _, cx| this.apply_language_preferences(cx)),
-                        ),
-                ),
+                TextField::new("subtitle-languages", &self.settings_ui.languages)
+                    .outlined()
+                    .shape(TextFieldShape::Rounded)
+                    .w_full()
+                    .label(course2md::tr!("语言优先级"))
+                    .float_label(true)
+                    .placeholder(course2md::tr!("按优先顺序填写语言代码，如 zh-Hans, en"))
+                    .error(lang_error.is_some())
+                    .when_some(lang_error, |field, msg| field.supporting_text(msg)),
             ));
         }
         fields
@@ -171,18 +169,6 @@ impl Desktop {
                 .languages
                 .update(cx, |input, cx| input.set_value(id.to_owned(), window, cx));
         }
-    }
-
-    /// A text field and the action that applies what was typed.
-    fn field_with_apply(field: TextField, apply: MaterialButton) -> Div {
-        h_flex()
-            .w_full()
-            .min_w_0()
-            .flex_wrap()
-            .gap(rem(12.))
-            .items_center()
-            .child(div().flex_1().flex_basis(rem(240.)).min_w_0().child(field))
-            .child(apply)
     }
 
     fn recognition_fields(&self, window: &mut Window, cx: &mut Context<Self>) -> Vec<ui::Field> {
@@ -326,28 +312,14 @@ impl Desktop {
         if provider == AsrProvider::Npu {
             fields.push(ui::Field::content(
                 "custom-npu-model",
-                Self::field_with_apply(
-                    TextField::new("custom-npu-model-input", &self.settings_ui.local_model)
-                        .outlined()
-                        .shape(TextFieldShape::Rounded)
-                        .w_full()
-                        .label(course2md::tr!(
-                            "模型名称或 Hugging Face 仓库（如 org/model）"
-                        ))
-                        .float_label(true),
-                    material_button("apply-custom-npu-model", ButtonVariant::Outlined)
-                        .tone(ButtonTone::Accent)
-                        .icon(symbols::check_circle())
-                        .child(course2md::tr!("应用"))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            let model = this.setting_input(EditField::LocalModel, cx);
-                            let model = model.trim().to_owned();
-                            let mut next = this.generation_edit_base();
-                            next.options.asr_model = (!model.is_empty()).then_some(model);
-                            next.local_model_draft = None;
-                            this.commit_generation(next, cx);
-                        })),
-                ),
+                TextField::new("custom-npu-model-input", &self.settings_ui.local_model)
+                    .outlined()
+                    .shape(TextFieldShape::Rounded)
+                    .w_full()
+                    .label(course2md::tr!(
+                        "模型名称或 Hugging Face 仓库（如 org/model）"
+                    ))
+                    .float_label(true),
             ));
         }
         let engines: Vec<_> = std::iter::once(None)
@@ -490,41 +462,22 @@ impl Desktop {
                     .w_full(),
             )
             .child(
-                h_flex()
-                    .gap(rem(8.))
-                    .flex_wrap()
-                    .child(
-                        material_button("apply-proofread-rules", ButtonVariant::Outlined)
-                            .tone(ButtonTone::Accent)
-                            .icon(symbols::save())
-                            .child(course2md::tr!("应用校对规则"))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                let prompt = this.settings_ui.prompt.read(cx).value();
-                                let prompt = prompt.trim().to_owned();
-                                let mut next = this.generation_edit_base();
-                                next.ai.prompt = (!prompt.is_empty()
-                                    && prompt != course2md::llm::DEFAULT_PROMPT.trim())
-                                .then_some(prompt);
-                                next.prompt_draft = None;
-                                this.commit_generation(next, cx);
-                            })),
-                    )
-                    .child(
-                        material_button("restore-proofread-rules", ButtonVariant::Text)
-                            .icon(symbols::refresh())
-                            .child(course2md::tr!("恢复标准规则"))
-                            .disabled(!customized)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                let mut next = this.generation_edit_base();
-                                next.ai.prompt = None;
-                                next.prompt_draft = None;
-                                if this.commit_generation(next, cx) {
-                                    this.settings_ui.prompt.update(cx, |input, cx| {
-                                        input.set_value(course2md::llm::DEFAULT_PROMPT, window, cx)
-                                    });
-                                }
-                            })),
-                    ),
+                h_flex().gap(rem(8.)).flex_wrap().child(
+                    material_button("restore-proofread-rules", ButtonVariant::Text)
+                        .icon(symbols::refresh())
+                        .child(course2md::tr!("恢复标准规则"))
+                        .disabled(!customized)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            let mut next = this.generation_edit_base();
+                            next.ai.prompt = None;
+                            next.prompt_draft = None;
+                            if this.commit_generation(next, cx) {
+                                this.settings_ui.prompt.update(cx, |input, cx| {
+                                    input.set_value(course2md::llm::DEFAULT_PROMPT, window, cx)
+                                });
+                            }
+                        })),
+                ),
             );
         ui::Field::disclosure(
             "show-proofread-rules",
@@ -554,18 +507,6 @@ impl Desktop {
     fn saving_fields(&self, cx: &mut Context<Self>) -> Vec<ui::Field> {
         let value = self.preferences.generation();
         let selected = value.options.formats.clone().unwrap_or_default();
-        let location = self.workspace(cx).and_then(|workspace| {
-            let state = &workspace.state;
-            state
-                .libraries
-                .iter()
-                .find(|library| library.id == state.default_library)
-                .map(|library| {
-                    course2md::config::simplify_verbatim(library.root.clone())
-                        .display()
-                        .to_string()
-                })
-        });
         let formats = [
             (OutputFormat::Md, "Markdown"),
             (OutputFormat::Html, course2md::tr!("网页")),
@@ -594,14 +535,6 @@ impl Desktop {
                 }),
         );
         vec![
-            ui::Field::link(
-                "settings-manage-storage",
-                course2md::tr!("保存位置"),
-                cx.listener(|this, _, window, cx| {
-                    this.select_settings_tab(SettingsTab::Storage, window, cx);
-                }),
-            )
-            .hint(location.unwrap_or_else(|| course2md::tr!("尚未设置").into())),
             ui::Field::below("export-format", course2md::tr!("同时导出"), formats),
             Self::generation_switch(
                 "default-keep-video",

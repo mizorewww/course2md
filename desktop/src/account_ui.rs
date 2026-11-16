@@ -149,14 +149,11 @@ impl AccountsView {
         if saved {
             let menu_id = ElementId::from("account-actions");
             let trigger = MaterialTooltip::plain("account-actions-tip", course2md::tr!("账号操作"))
-                .trigger(
-                    IconButton::new(
-                        "account-actions-button",
-                        symbols::more_vert(),
-                        course2md::tr!("{} 操作", course2md::tr!("Bilibili 账号")),
-                    )
-                    .on_click(ui::menu_key_toggle(&menu_id, window, cx)),
-                );
+                .trigger(IconButton::new(
+                    "account-actions-button",
+                    symbols::more_vert(),
+                    course2md::tr!("{} 操作", course2md::tr!("Bilibili 账号")),
+                ));
             let items = MaterialMenu::new("account-action-items")
                 .width(240.)
                 .item(

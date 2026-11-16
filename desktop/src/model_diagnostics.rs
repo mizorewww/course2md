@@ -718,14 +718,29 @@ impl Desktop {
         }
         view.children(transfers.into_iter().enumerate().map(
             |(index, (phase, summary, fraction))| {
-                ui::transfer_status(
-                    ("model-download-progress", index),
-                    phase,
-                    &summary,
-                    fraction,
-                    window,
-                    cx,
-                )
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(rem(8.))
+                    .child(
+                        accessible_text(("model-download-progress-title", index), phase)
+                            .text_size(TEXT_BODY)
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(color(ColorRole::ON_SURFACE)),
+                    )
+                    .child(
+                        ui::status_line(("model-download-progress-detail", index), &summary)
+                            .text_size(TEXT_AUX)
+                            .text_color(color(ColorRole::ON_SURFACE_VARIANT)),
+                    )
+                    .when_some(fraction, |row, fraction| {
+                        row.child(progress(
+                            ("model-download-progress-bar", index),
+                            fraction,
+                            window,
+                            cx,
+                        ))
+                    })
             },
         ))
     }

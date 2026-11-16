@@ -16,7 +16,7 @@ use gpui_base::{
     },
     v_flex,
 };
-use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
+use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit_material::{color::ColorRole, icons::Icon, prelude::*};
 use std::{
     ops::Range,
@@ -266,7 +266,6 @@ fn scrolling_row(id: ElementId, image: AnyElement, window: &mut Window, cx: &mut
         )
         .read(cx)
         .clone();
-    let overflows = scroll.max_offset().x > px(0.);
     div()
         .relative()
         .w_full()
@@ -280,12 +279,9 @@ fn scrolling_row(id: ElementId, image: AnyElement, window: &mut Window, cx: &mut
                 // A vertical wheel keeps scrolling the note around it.
                 .restrict_scroll_to_axis()
                 .track_scroll(&scroll)
-                .when(overflows, |row| row.pb(px(12.)))
                 .child(div().flex_none().mx_auto().child(image)),
         )
-        .when(overflows, |row| {
-            row.child(Scrollbar::horizontal(&scroll).mode(ScrollbarMode::Always))
-        })
+        .child(Scrollbar::horizontal(&scroll))
 }
 
 /// `$…$` in a sentence, or `$$…$$` where the sentence goes on after it.

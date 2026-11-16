@@ -1262,64 +1262,29 @@ impl Desktop {
     pub(super) fn confirm_default_service(
         &mut self,
         version_id: String,
-        window: &mut Window,
+        _: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(version) = self.preferences.version(&version_id) else {
             return;
         };
         let purpose = version.config.protocol.purpose();
-        let defaults = self.preferences.default_refs();
-        let previous = match purpose {
-            ServicePurpose::Speech => defaults.asr.as_deref(),
-            ServicePurpose::Ai => defaults.llm.as_deref(),
+        match self
+            .preferences
+            .set_default_service(purpose, Some(&version_id))
+        {
+            Ok(()) => self.clear_settings_failure(PreferenceGroup::Services),
+            Err(error) => {
+                self.set_settings_failure(
+                    PreferenceGroup::Services,
+                    course2md::tr!("默认服务尚未更改，请重试").into(),
+                );
+                self.settings_ui
+                    .failure_details
+                    .insert(PreferenceGroup::Services, format!("{error:#}"));
+            }
         }
-        .and_then(|id| self.preferences.version(id))
-        .map(|default| {
-            course2md::tr!(
-                "当前默认：{} · v{} · {}",
-                default.config.name,
-                default.number,
-                default.config.model
-            )
-        })
-        .unwrap_or_else(|| course2md::tr!("当前尚未设置默认服务").to_owned());
-        let next = course2md::tr!(
-            "更新为：{} · v{} · {}",
-            version.config.name,
-            version.number,
-            version.config.model
-        );
-        ui::Confirm::new(
-            course2md::tr!("更新默认服务"),
-            course2md::tr!("保留原默认"),
-            course2md::tr!("用于以后生成"),
-        )
-        .text(previous)
-        .text(next)
-        .text(course2md::tr!("仅影响以后生成的笔记"))
-        .ask(
-            cx.listener(move |this, _, _, cx| {
-                match this
-                    .preferences
-                    .set_default_service(purpose, Some(&version_id))
-                {
-                    Ok(()) => this.clear_settings_failure(PreferenceGroup::Services),
-                    Err(error) => {
-                        this.set_settings_failure(
-                            PreferenceGroup::Services,
-                            course2md::tr!("默认服务尚未更改，请重试").into(),
-                        );
-                        this.settings_ui
-                            .failure_details
-                            .insert(PreferenceGroup::Services, format!("{error:#}"));
-                    }
-                }
-                cx.notify();
-            }),
-            window,
-            cx,
-        );
+        cx.notify();
     }
     pub(super) fn confirm_delete_service(
         &mut self,

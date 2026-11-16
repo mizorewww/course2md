@@ -17,8 +17,8 @@ use gpui_kit_material::{
     motion,
     prelude::{
         ButtonIconPosition, ButtonShape, ButtonSize, ButtonTone, ButtonVariant, CardVariant,
-        ConnectedButtonGroup, ITEM_INSET, IconButton, IconButtonVariant, ListDensity, ListItem,
-        ListLeading, MaterialCard, MaterialMenu, MaterialMenuItem, MaterialSideSheet,
+        ConnectedButtonGroup, FilterChip, ITEM_INSET, IconButton, IconButtonVariant, ListDensity,
+        ListItem, ListLeading, MaterialCard, MaterialMenu, MaterialMenuItem, MaterialSideSheet,
         MaterialTooltip, NoticeKind, RADIUS_LARGE, RADIUS_SMALL, SearchField, SearchFieldStyle,
         StatusKind, TEXT_AUX, TEXT_BODY, TILE_GAP, TILE_RADIUS, TileScale, Tint, TypeRole,
         accessible_text, color, disclosure_chevron, list_corners, material_button, media_label,
@@ -276,7 +276,6 @@ impl RenderOnce for CommandsButton {
         let button = ElementId::NamedChild(Arc::new(self.id.clone()), "button".into());
         let tip = ElementId::NamedChild(Arc::new(self.id.clone()), "tip".into());
         let items = ElementId::NamedChild(Arc::new(self.id.clone()), "items".into());
-        let key_toggle = ui::menu_key_toggle(&self.id, window, cx);
         ui::menu(
             self.id,
             MaterialTooltip::plain(tip, self.label.clone()).trigger(
@@ -289,8 +288,7 @@ impl RenderOnce for CommandsButton {
                     button
                         .variant(IconButtonVariant::Tonal)
                         .tone(ButtonTone::Neutral)
-                })
-                .on_click(key_toggle),
+                }),
             ),
             command_menu(items, self.width, self.commands),
             window,
@@ -1516,24 +1514,11 @@ impl Desktop {
                     // worth reading, not only finding under a tooltip.
                     .child(self.sort_menu(cx))
                     .child(
-                        // A toggle among the view controls: neutral like them, a check
-                        // and the secondary container while on.
-                        material_button("library-group-folders", ButtonVariant::Tonal)
-                            .tone(if group_on && can_group {
-                                ButtonTone::Standard
-                            } else {
-                                ButtonTone::Neutral
-                            })
-                            // A tree, not a folder: unlike 文件夹 beside it, it arranges
-                            // the notes rather than going to a place.
-                            .icon(if group_on && can_group {
-                                symbols::check()
-                            } else {
-                                symbols::account_tree()
-                            })
-                            .child(course2md::tr!("按文件夹分组"))
+                        FilterChip::new("library-group-folders", course2md::tr!("按文件夹分组"))
+                            .icon(symbols::account_tree())
+                            .selected(group_on && can_group)
                             .disabled(!can_group)
-                            .on_click(cx.listener(move |this, _, _, cx| {
+                            .on_toggle(cx.listener(move |this, _: &bool, _, cx| {
                                 this.desktop_settings.library_group_folders = !group_on;
                                 this.save_library_presentation(cx);
                             })),
@@ -1793,12 +1778,11 @@ impl Desktop {
                             .w_full()
                             .min_w_0()
                             .gap(rem(2.))
-                            // Room beside the text for the commands.
-                            .pl(rem(4.))
-                            .pr(rem(44.))
+                            .px(rem(4.))
                             .child(
                                 scale
                                     .label(("note-card-title", index), course.title.clone())
+                                    .pr(rem(36.))
                                     // Room for two lines, so a row's cards end together.
                                     .whitespace_normal()
                                     .line_clamp(2)
@@ -1819,21 +1803,28 @@ impl Desktop {
             .relative()
             .min_w_0()
             .gap(rem(4.))
-            .child(with_context_menu(
-                ("note-card-scope", index),
-                command_context_menu(
-                    ("note-card-context", index),
-                    Some(COMMAND_MENU_WIDTH),
-                    commands,
-                ),
-                card,
-            ))
             .child(
                 div()
-                    .absolute()
-                    .bottom(rem(12.))
-                    .right(rem(8.))
-                    .child(self.note_commands_button(course, index, false, cx)),
+                    .relative()
+                    .w_full()
+                    .min_w_0()
+                    .child(with_context_menu(
+                        ("note-card-scope", index),
+                        command_context_menu(
+                            ("note-card-context", index),
+                            Some(COMMAND_MENU_WIDTH),
+                            commands,
+                        ),
+                        card,
+                    ))
+                    .child(
+                        // Placed beside the title row rather than bottom-right over metadata.
+                        div()
+                            .absolute()
+                            .bottom(rem(30.))
+                            .right(rem(6.))
+                            .child(self.note_commands_button(course, index, false, cx)),
+                    ),
             )
             .children(self.course_read_error(course, index, cx))
             .children(
@@ -2072,10 +2063,21 @@ impl Desktop {
         }
         // The design names this section 正在处理 whatever its tasks wait for; each
         // card's own chip says which one needs the person.
+        let total_actionable = self.workspace(cx).map_or(0, |ws| {
+            desktop_tasks::task_view::task_navigation_summary(&ws.state.tasks).0
+        });
+        let more_tasks = (total_actionable > tasks.len() + attention.len()).then(|| {
+            material_button("workbench-all-tasks", ButtonVariant::Text)
+                .icon(symbols::chevron_right())
+                .icon_position(ButtonIconPosition::Trailing)
+                .child(course2md::tr!("查看任务"))
+                .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Task, cx)))
+                .into_any_element()
+        });
         Some(home_section(
             "workbench-active-title",
             course2md::tr!("正在处理"),
-            None,
+            more_tasks,
             list,
         ))
     }
@@ -2400,10 +2402,6 @@ impl Desktop {
     /// Workbench "最近的笔记": recent readable notes, or first use's compact explanation.
     /// Tasks waiting on the person are listed with the other tasks above it.
     pub fn recent_notes_section(&self, cx: &mut Context<Self>) -> Option<Div> {
-        let show_notes = self.desktop_settings.home_recent_notes;
-        if !show_notes {
-            return None;
-        }
         // A note whose task waits on the person is listed with that task, above.
         let attention = self.workbench_attention_tasks(cx);
         let notes: Vec<usize> = self
@@ -2534,7 +2532,6 @@ fn direction_labels(rule: SortRule) -> (&'static str, &'static str) {
 impl RenderOnce for SortMenu {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let id: ElementId = "library-sort".into();
-        let key_toggle = ui::menu_key_toggle(&id, window, cx);
         let Self {
             sort,
             enabled,
@@ -2603,7 +2600,6 @@ impl RenderOnce for SortMenu {
             .child(label)
             .accessibility_label(spoken)
             .disabled(!enabled)
-            .on_click(key_toggle)
             .into_any_element();
         ui::menu(
             id,

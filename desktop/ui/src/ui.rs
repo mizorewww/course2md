@@ -6,13 +6,12 @@
 //! | Item | Why the kit does not cover it |
 //! | --- | --- |
 //! | `field_table`, `Field`, `add_row` | A settings section whose rows mix controls; `ListTrailing` holds no custom element |
-//! | `Resource`, `fact_row` | A kept thing's row with its commands, and one planned fact; product layout on kit parts |
+//! | `Resource` | A kept thing's row with its commands; product layout on kit parts |
 //! | `AsyncStatus`, `async_status` | One check, probe or load narrating itself; the state machine stays in the page |
-//! | `menu`, `keyed_open`, `menu_key_toggle` | `MenuPopup` and `ExposedDropdown` are controlled; these sites keep no other state |
+//! | `menu`, `keyed_open` | `MenuPopup` and `ExposedDropdown` are controlled; these sites keep no other state |
 //! | `choice_items` | Menu items that pick one value |
 //! | `Confirm`, `confirm_host`, `dismiss_confirm`, `modal_open` | `MaterialDialog` is an element in the tree; a question asked from a handler needs one host |
 //! | `status_line` | Text with " · " between parts, breaking only between parts |
-//! | `transfer_status` | A download's title, status line and bar |
 //! | `page_title`, `tip_button` | A page title one step up, an icon button named by its tooltip |
 //!
 //! `task_actions` is not here: the choice of actions is about tasks, not generic, so it
@@ -112,26 +111,6 @@ pub fn menu(
         .on_open_change(set_open)
 }
 
-/// A menu trigger's click handler: a pointer press already reached the popup, a key
-/// did not. `id` is the one given to [`menu`].
-///
-/// ```ignore
-/// IconButton::new("note-more", symbols::more_vert(), label)
-///     .on_click(ui::menu_key_toggle(&"note-menu".into(), window, cx))
-/// ```
-pub fn menu_key_toggle(
-    id: &ElementId,
-    window: &mut Window,
-    cx: &mut App,
-) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
-    let (open, set_open) = keyed_open(id, window, cx);
-    move |event, window, cx| {
-        if event.is_keyboard() {
-            set_open(&!open, window, cx);
-        }
-    }
-}
-
 /// An icon button whose plain tooltip names it with its label.
 pub fn tip_button(
     id: impl Into<ElementId>,
@@ -182,8 +161,6 @@ enum Control {
     Inline(AnyElement),
     /// A wide control under the label: a button group, a text field.
     Below(AnyElement),
-    /// A row that goes somewhere.
-    Link(RowClick),
     /// A row that adds to the list above it: a plus in the rows' icon column.
     Add(RowClick),
     /// A row that shows or hides its detail in place.
@@ -315,14 +292,6 @@ impl Field {
         control: impl IntoElement,
     ) -> Self {
         Self::new(id, label, Control::Below(control.into_any_element()))
-    }
-
-    pub fn link(
-        id: impl Into<SharedString>,
-        label: impl Into<SharedString>,
-        on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    ) -> Self {
-        Self::new(id, label, Control::Link(Box::new(on_click)))
     }
 
     /// A row that adds to the resources above it, its plus in their icon column.
@@ -464,18 +433,6 @@ impl Field {
                         .py(rem(16.))
                         .child(scale.text(text_id, label, hint))
                         .child(control),
-                )
-                .into_any_element(),
-            Control::Link(on_click) => scale
-                .button(ElementId::Name(id), outer)
-                .accessibility_label(label.clone())
-                .disabled(disabled)
-                .on_click(on_click)
-                .child(
-                    scale
-                        .row()
-                        .child(scale.text(text_id, label, hint))
-                        .child(tile_chevron()),
                 )
                 .into_any_element(),
             Control::Add(on_click) => add_row(id, label, hint, disabled, outer, on_click),
@@ -783,11 +740,7 @@ pub fn confirm_host(cx: &App) -> Option<AnyElement> {
             symbols::check()
         })
         .child(confirm.confirm.clone())
-        .when(confirm.danger, |button| {
-            button
-                .bg(color(ColorRole::ERROR))
-                .text_color(color(ColorRole::ON_ERROR))
-        })
+        .when(confirm.danger, |button| button.tone(ButtonTone::Danger))
         .on_click(move |_, window, cx| {
             close_confirm(window, cx);
             on_confirm(&(), window, cx);
@@ -810,37 +763,6 @@ pub fn confirm_host(cx: &App) -> Option<AnyElement> {
             .on_dismiss(close_confirm)
             .into_any_element(),
     )
-}
-
-/// A download or preparation: its title, what is known so far as one status line,
-/// and a bar once the total is known. The kit's progress has no such label block.
-pub fn transfer_status(
-    id: impl Into<ElementId>,
-    title: impl Into<SharedString>,
-    summary: &str,
-    fraction: Option<f32>,
-    window: &mut Window,
-    cx: &mut App,
-) -> Div {
-    let id = id.into();
-    v_flex()
-        .w_full()
-        .min_w_0()
-        .gap(rem(8.))
-        .child(
-            accessible_text(child_id(&id, "title"), title)
-                .text_size(TEXT_BODY)
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(color(ColorRole::ON_SURFACE)),
-        )
-        .child(
-            status_line(child_id(&id, "detail"), summary)
-                .text_size(TEXT_AUX)
-                .text_color(color(ColorRole::ON_SURFACE_VARIANT)),
-        )
-        .when_some(fraction, |view, fraction| {
-            view.child(progress(child_id(&id, "bar"), fraction, window, cx))
-        })
 }
 
 /// Whether a dialog holds the window, Kit's or the kit's: app-wide shortcuts wait.
@@ -944,20 +866,6 @@ impl Resource {
     }
 }
 
-/// An icon, a label and its value: one fact about how a task was planned.
-pub fn fact_row(
-    id: impl Into<SharedString>,
-    icon: Option<SymbolIcon>,
-    label: &'static str,
-    value: String,
-) -> Div {
-    let scale = TileScale::Compact;
-    scale
-        .row()
-        .children(icon.map(|icon| Icon::from(icon).color(color(ColorRole::ON_SURFACE_VARIANT))))
-        .child(scale.text(ElementId::Name(id.into()), label, Some(value.into())))
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -967,8 +875,7 @@ mod tests {
         Context, InteractiveElement, IntoElement, ParentElement, Pixels, Render, Styled,
         TestAppContext, VisualTestContext, Window, div, px,
     };
-    use gpui_kit_material::prelude::{MaterialDialog, MaterialMenu};
-    use std::{cell::Cell, rc::Rc};
+    use gpui_kit_material::prelude::MaterialMenu;
 
     struct Line(Pixels);
 
@@ -1029,41 +936,6 @@ mod tests {
                 ))
                 .children(confirm_host(cx))
         }
-    }
-
-    struct Chooser(Rc<Cell<bool>>);
-
-    impl Render for Chooser {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            let dismissed = self.0.clone();
-            MaterialDialog::new("chooser")
-                .container(gpui_kit_material::color::ColorRole::SURFACE)
-                .headline("Chooser")
-                .content(div().w_full().h(px(200.)))
-                .modal(true)
-                .on_dismiss(move |_, _| dismissed.set(true))
-        }
-    }
-
-    /// A press in the dialog stays there; pressing the scrim itself dismisses.
-    #[gpui::test]
-    fn a_press_in_a_dialog_stays_off_its_scrim(cx: &mut TestAppContext) {
-        cx.update(|cx| {
-            gpui_kit::init(cx);
-            gpui_kit_material::init(cx);
-        });
-        let dismissed = Rc::new(Cell::new(false));
-        let shown = dismissed.clone();
-        let (_, cx) = cx.add_window_view(|_, _| Chooser(shown));
-        cx.update(|window, cx| window.draw(cx).clear(cx));
-        cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
-        let size = cx.update(|window, _| window.viewport_size());
-        let center = gpui::point(size.width / 2., size.height / 2.);
-        cx.simulate_click(center, Default::default());
-        assert!(!dismissed.get(), "a press in the body stays in the dialog");
-        cx.simulate_click(gpui::point(px(2.), px(2.)), Default::default());
-        assert!(dismissed.get(), "a press on the scrim dismisses");
     }
 
     /// Every primitive draws, and a question shows until it is answered.

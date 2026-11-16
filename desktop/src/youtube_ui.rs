@@ -550,14 +550,11 @@ impl AccountsView {
         if let Some(choice) = self.youtube.choice.clone() {
             let menu_id = ElementId::from("youtube-actions");
             let trigger = MaterialTooltip::plain("youtube-actions-tip", course2md::tr!("账号操作"))
-                .trigger(
-                    IconButton::new(
-                        "youtube-actions-button",
-                        symbols::more_vert(),
-                        course2md::tr!("{} 操作", course2md::tr!("YouTube 账号")),
-                    )
-                    .on_click(crate::ui::menu_key_toggle(&menu_id, window, cx)),
-                );
+                .trigger(IconButton::new(
+                    "youtube-actions-button",
+                    symbols::more_vert(),
+                    course2md::tr!("{} 操作", course2md::tr!("YouTube 账号")),
+                ));
             let items = MaterialMenu::new("youtube-action-items")
                 .width(240.)
                 .item(

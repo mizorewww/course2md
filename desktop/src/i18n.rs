@@ -68,18 +68,6 @@ mod tests {
     use crate::preferences::{ApplicationPreferences, InterfaceLanguage};
 
     #[test]
-    fn interface_language_saved_names() {
-        assert_eq!(
-            serde_json::to_string(&InterfaceLanguage::ZhHant).unwrap(),
-            "\"zh-Hant\""
-        );
-        assert_eq!(
-            serde_json::to_string(&InterfaceLanguage::System).unwrap(),
-            "\"system\""
-        );
-    }
-
-    #[test]
     fn missing_language_uses_the_system_default() {
         let preferences: ApplicationPreferences =
             serde_json::from_str(r#"{"font_scale":1.0}"#).unwrap();

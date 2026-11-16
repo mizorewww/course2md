@@ -361,14 +361,22 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let appearance = self.displayed_appearance();
+        let mode_labels = [
+            course2md::tr!("跟随系统"),
+            course2md::tr!("浅色"),
+            course2md::tr!("深色"),
+        ];
+        let modes_fit = crate::settings_ui::segmented_fits(&mode_labels, true, window);
         let modes = ConnectedButtonGroup::new("appearance-mode", course2md::tr!("外观模式"))
             .tone(ButtonTone::Neutral)
             .segmented()
+            .when(modes_fit, |group| group.fit_content())
+            .vertical(!modes_fit)
             .button_size(ButtonSize::Small)
             .options([
-                ("system", course2md::tr!("跟随系统")),
-                ("light", course2md::tr!("浅色")),
-                ("dark", course2md::tr!("深色")),
+                ("system", mode_labels[0]),
+                ("light", mode_labels[1]),
+                ("dark", mode_labels[2]),
             ])
             .icon("system", symbols::computer())
             .icon("light", symbols::light_mode())
@@ -399,10 +407,18 @@ impl Desktop {
         let dark = self.palette_preset(true, appearance.dark, dark_corners, cx);
         let application = self.preferences.application();
         let scales = crate::preferences::FONT_SCALES;
+        let scale_labels: Vec<String> = scales
+            .into_iter()
+            .map(|scale| format!("{}%", (scale * 100.).round() as u32))
+            .collect();
+        let scale_refs: Vec<&str> = scale_labels.iter().map(String::as_str).collect();
+        let scales_fit = crate::settings_ui::segmented_fits(&scale_refs, false, window);
         let font_scale =
             ConnectedButtonGroup::new("app-font-scale", course2md::tr!("界面文字大小"))
                 .tone(ButtonTone::Neutral)
                 .segmented()
+                .when(scales_fit, |group| group.fit_content())
+                .vertical(!scales_fit)
                 .button_size(ButtonSize::Small)
                 .options(scales.into_iter().map(|scale| {
                     let percent = (scale * 100.).round() as u32;
@@ -428,6 +444,24 @@ impl Desktop {
                 .child(dark)
                 .into_any_element()
         });
+        let mode_field = if modes_fit {
+            ui::Field::inline("appearance-mode-row", course2md::tr!("外观模式"), modes)
+        } else {
+            ui::Field::below("appearance-mode-row", course2md::tr!("外观模式"), modes)
+        };
+        let scale_field = if scales_fit {
+            ui::Field::inline(
+                "app-font-scale-row",
+                course2md::tr!("界面文字大小"),
+                font_scale,
+            )
+        } else {
+            ui::Field::below(
+                "app-font-scale-row",
+                course2md::tr!("界面文字大小"),
+                font_scale,
+            )
+        };
         v_flex()
             .w_full()
             .min_w_0()
@@ -435,21 +469,14 @@ impl Desktop {
             .child(self.settings_fields(
                 "appearance-theme",
                 course2md::tr!("主题"),
-                vec![
-                    ui::Field::below("appearance-mode-row", course2md::tr!("外观模式"), modes),
-                    previews,
-                ],
+                vec![mode_field, previews],
             ))
             .child(self.settings_fields(
                 "appearance-motion",
                 course2md::tr!("界面偏好"),
                 vec![
                     self.interface_language_field(cx),
-                    ui::Field::below(
-                        "app-font-scale-row",
-                        course2md::tr!("界面文字大小"),
-                        font_scale,
-                    ),
+                    scale_field,
                     ui::Field::switch(
                         "app-reduce-motion",
                         course2md::tr!("减少动态效果"),
@@ -461,23 +488,6 @@ impl Desktop {
                         }),
                     )
                     .hint(course2md::tr!("关闭过渡动画和进度条的流动效果")),
-                ],
-            ))
-            .child(self.settings_fields(
-                "appearance-home",
-                course2md::tr!("主页"),
-                vec![
-                    ui::Field::switch(
-                        "app-home-recent-notes",
-                        course2md::tr!("显示最近的笔记"),
-                        application.desktop.home_recent_notes,
-                        cx.listener(|this, on: &bool, _, cx| {
-                            let mut next = this.application_edit_base();
-                            next.desktop.home_recent_notes = *on;
-                            this.commit_application(next, cx);
-                        }),
-                    )
-                    .hint(course2md::tr!("关闭后主页不显示已完成的笔记")),
                 ],
             ))
             .into_any_element()

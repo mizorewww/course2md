@@ -363,7 +363,8 @@ impl Desktop {
                     .into_any_element(),
             );
             actions.push(
-                material_button(child("authorize"), ButtonVariant::Filled)
+                material_button(child("authorize"), ButtonVariant::Outlined)
+                    .tone(ButtonTone::Accent)
                     .icon(symbols::open_in_new())
                     .child(course2md::tr!("在浏览器中登录"))
                     .disabled(disabled || busy)

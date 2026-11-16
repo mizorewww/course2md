@@ -265,7 +265,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 仅保存	仅保存	Save only	僅儲存	保存のみ
 仅发送文字 / Send text only	仅发送文字	Send text only	僅傳送文字	テキストのみを送信する
 仅字幕	仅字幕	Subtitles only	僅字幕	字幕のみ
-仅影响以后生成的笔记	仅影响以后生成的笔记	Only affects notes generated later	僅影響以後生成的筆記	今後生成されるノートにのみ影響します
 仅用于没有字幕的视频	仅用于没有字幕的视频	Only for videos without subtitles	僅用於沒有字幕的影片	字幕のない動画のみ
 今天讲编译原理	今天讲编译原理	Today we'll talk about compiler principles	今天講編譯原理	今日はコンパイラの原理について話します
 仍在处理	仍在处理	Still processing	仍在處理	処理中
@@ -353,7 +352,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 保留下载的视频	保留下载的视频	Keep downloaded videos	保留下載的影片	ダウンロードした動画を保存しておく
 保留下载的视频 / Keep the downloaded video	保留下载的视频	Keep the downloaded video	保留下載的影片	ダウンロードした動画を保存しておく
 保留原文件并重置这些设置	保留原文件并重置这些设置	Keep the original file and reset these settings	保留原檔案並重設這些設定	元のファイルを保持してこれらの設定をリセット
-保留原默认	保留原默认	Keep the original default	保留原預設	元のデフォルトのままにする
 保留备份	保留备份	Keep backups	保留備份	バックアップを保持する
 保留并继续	保留并继续	Keep and continue	保留並繼續	保持して続行
 保留文件夹	保留文件夹	Keep folder	保留資料夾	フォルダーを残す
@@ -639,7 +637,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 尚未添加，请先添加一个语音服务	尚未添加，请先添加一个语音服务	Not added yet. Please add a speech service first	尚未新增，請先新增一個語音服務	まだ追加されていません。まず音声サービスを追加してください
 尚未登录 Bilibili。/ No Bilibili login saved.	尚未登录 Bilibili。/ No Bilibili login saved.	No Bilibili login saved.	尚未登入 Bilibili。/ No Bilibili login saved.	Bilibili にまだログインしていません。
 尚未登录 Codex。/ No Codex login saved.	尚未登录 Codex。/ No Codex login saved.	No Codex login saved.	尚未登入 Codex。/ No Codex login saved.	Codex にまだログインしていません。
-尚未设置	尚未设置	Not set yet	尚未設定	まだ設定されていません
 尚未选择文字来源	尚未选择文字来源	No text source selected yet	尚未選擇文字來源	テキストソースがまだ選択されていません
 尚未重新定位：{}	尚未重新定位：{}	Not relocated yet: {}	尚未重新定位：{}	まだ場所を再指定していません: {}
 尚未验证	尚未验证	Not verified yet	尚未驗證	まだ検証されていません
@@ -746,7 +743,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 平台要求登录后读取字幕，请登录对应账号后重试。	平台要求登录后读取字幕，请登录对应账号后重试。	The platform requires logging in to read subtitles. Please log in to the corresponding account and try again.	平台要求登入後讀取字幕，請登入對應帳號後重試。	このプラットフォームでは、字幕を読むためにログインする必要があります。対応するアカウントにログインして、もう一度お試しください。
 应用	应用	Apply	套用	適用
 应用偏好	应用偏好	Application preferences	應用程式偏好設定	アプリケーションの設定
-应用校对规则	应用校对规则	Apply proofreading rules	應用校對規則	校正ルールを適用する
 开启 / enabled	开启	enabled	開啟	有効
 开启后转录文字会发送到所选 AI 服务	开启后转录文字会发送到所选 AI 服务	When turned on, the transcribed text will be sent to the selected AI service	開啟後轉錄文字會傳送到所選 AI 服務	オンにすると、文字起こしされたテキストが選択した AI サービスに送信されます
 开启校对 / Enable transcript polish: course2md llm setup	开启校对：course2md llm setup	Enable transcript polish: course2md llm setup	開啟校對：course2md llm setup	校正をオンにする：course2md llm setup
@@ -764,7 +760,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 当前任务还在处理，请先暂停并等候当前步骤结束	当前任务还在处理，请先暂停并等候当前步骤结束	The current task is still processing. Please pause it and wait for the current step to finish.	目前任務還在處理，請先暫停並等候目前步驟結束	現在のタスクはまだ処理中です。一時停止して、現在のステップが終了するまでお待ちください。
 当前任务还在处理，请先暂停并等候当前步骤结束。	当前任务还在处理，请先暂停并等候当前步骤结束。	The current task is still processing. Please pause it and wait for the current step to finish.	目前任務還在處理，請先暫停並等候目前步驟結束。	現在のタスクはまだ処理中です。一時停止して、現在のステップが終了するまでお待ちください。
 当前任务还在处理，请等候当前操作结束。	当前任务还在处理，请等候当前操作结束。	The current task is still processing. Please wait for the current operation to finish.	目前任務還在處理，請等候目前操作結束。	現在のタスクはまだ処理中です。現在の操作が終了するまでお待ちください。
-当前尚未设置默认服务	当前尚未设置默认服务	No default service is currently set	目前尚未設定預設服務	現在デフォルトのサービスは設定されていません
 当前平台不适用	当前平台不适用	Not applicable to the current platform	目前平台不適用	現在のプラットフォームには適用されません
 当前服务暂不可用：{}	当前服务暂不可用：{}	The current service is temporarily unavailable: {}	目前服務暫不可用：{}	現在のサービスは一時的に利用できません: {}
 当前服务编辑已结束，请重新打开服务后再试	当前服务编辑已结束，请重新打开服务后再试	The current service editing has ended, please reopen the service and try again	目前服務編輯已結束，請重新開啟服務後再試	現在のサービスの編集は終了しました。サービスを再度開いて、もう一度お試しください。
@@ -777,7 +772,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 当前输入记录缺失	当前输入记录缺失	The current input record is missing	目前輸入記錄缺失	現在の入力レコードがありません
 当前还有处理或文件移动在进行，请等候停止后再重建记录。	当前还有处理或文件移动在进行，请等候停止后再重建记录。	There is still processing or file movement in progress, please wait until it stops before rebuilding the record.	目前還有處理或檔案移動在進行，請等候停止後再重建記錄。	まだ処理中またはファイル移動中です。レコードを再構築する前に、処理が停止するまで待ってください。
 当前配置	当前配置	Current configuration	目前設定	現在の構成
-当前默认：{} · v{} · {}	当前默认：{} · v{} · {}	Current default: {} · v{} · {}	目前預設：{} · v{} · {}	現在のデフォルト: {} · v{} · {}
 待修复	待修复	Needs repair	待修復	修正予定
 待确认	待确认	Needs confirmation	待確認	確認待ち
 待确认的请求已变化，请查看最新范围后再选择是否重新发送	待确认的请求已变化，请查看最新范围后再选择是否重新发送	The request to be confirmed has changed. Please check the latest range before choosing whether to resend it.	待確認的請求已變化，請檢視最新範圍後再選擇是否重新傳送	確認待ちのリクエストが変更されました。再送信するかどうかを選択する前に、最新の範囲を確認してください。
@@ -1098,8 +1092,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 更快，占内存较少	更快，占内存较少	Faster, takes up less memory	更快，佔記憶體較少	より高速で、メモリ使用量が少ない
 更换视频	更换视频	Change video	更換影片	動画を変更する
 更改默认位置只影响后续生成的笔记	更改默认位置只影响后续生成的笔记	Changing the default location only affects subsequently generated notes	更改預設位置只影響後續生成的筆記	デフォルトの場所を変更すると、それ以降に生成されるノートにのみ影響します。
-更新为：{} · v{} · {}	更新为：{} · v{} · {}	Updated to: {} · v{} · {}	更新為：{} · v{} · {}	更新先: {} · v{} · {}
-更新默认服务	更新默认服务	Update default services	更新預設服務	デフォルトのサービスを更新する
 替换 {} / Failed to replace {}	替换 {}	Failed to replace {}	替換 {}	{} を置き換えられませんでした
 最近备份也无法读取，原记录已保留	最近备份也无法读取，原记录已保留	The latest backup cannot be read, and the original record has been retained.	最近備份也無法讀取，原記錄已保留	最新のバックアップを読み取ることができず、元のレコードが保持されています。
 最近备份无法读取，原记录已保留	最近备份无法读取，原记录已保留	The latest backup cannot be read, the original record has been retained	最近備份無法讀取，原記錄已保留	最新のバックアップを読み取ることができません。元の記録は保持されています。
@@ -1442,7 +1434,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 生成笔记设置暂时无法读取，原文件与当前输入已保留	生成笔记设置暂时无法读取，原文件与当前输入已保留	Note generation settings can’t be read right now; the original file and the current input are kept	產生筆記設定暫時無法讀取，原檔案與目前輸入已保留	ノート作成の設定を一時的に読み込めません。元のファイルと現在の入力は保持されています。
 生成笔记设置的修改尚未保存，当前输入已保留	生成笔记设置的修改尚未保存，当前输入已保留	Changes to note generation settings have not been saved; the current input is kept	產生筆記設定的修改尚未儲存，目前輸入已保留	ノート作成の設定の変更はまだ保存されていません。現在の入力は保持されています。
 生成配置模板（--force 覆盖已有配置）/ Create a template; --force replaces existing settings	生成配置模板（--force 覆盖已有配置）/ Create a template; --force replaces existing settings	Create a template; --force replaces existing settings	產生設定範本（--force 覆蓋已有設定）	設定テンプレートを生成（--force で既存の設定を上書き）
-用于以后生成	用于以后生成	For later generation	用於以後生成	後で生成するため
 用法：	用法：	Usage:	用法：	使用法:
 用系统包管理器安装 ffmpeg，再运行	用系统包管理器安装 ffmpeg，再运行	Install ffmpeg with the system package manager, then run	用系統套件管理器安裝 ffmpeg，再執行	システムのパッケージマネージャーで ffmpeg をインストールしてから実行
 用途：{}	用途：{}	Purpose: {}	用途：{}	用途: {}
@@ -1951,7 +1942,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 已添加的服务	已添加的服务	Added services	已新增的服務	追加済みのサービス
 {} 操作	{} 操作	{} actions	{} 操作	{} の操作
 支持音频输入的对话模型	支持音频输入的对话模型	A chat model that accepts audio input	支援音訊輸入的對話模型	音声入力に対応した対話モデル
-显示最近的笔记	显示最近的笔记	Show recent notes	顯示最近的筆記	最近のノートを表示
 服务操作	服务操作	Service actions	服務操作	サービスの操作
 测试连接	测试连接	Test connection	測試連線	接続をテスト
 测试通过	测试通过	Test passed	測試通過	テスト合格
@@ -1964,7 +1954,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 设为默认服务…	设为默认服务…	Set as default service…	設為預設服務…	既定のサービスにする…
 退出 ChatGPT 账号	退出 ChatGPT 账号	Sign out of ChatGPT	登出 ChatGPT 帳號	ChatGPT からサインアウト
 默认	默认	Default	預設	既定
-关闭后主页不显示已完成的笔记	关闭后主页不显示已完成的笔记	When off, finished notes are not listed on the home page	關閉後首頁不顯示已完成的筆記	オフにすると、完了したノートはホームに表示されません
 返回「{}」	返回「{}」	Back to {}	返回「{}」	「{}」に戻る
 正在检查本机的 Ollama…	正在检查本机的 Ollama…	Checking for Ollama on this computer…	正在檢查本機的 Ollama…	このコンピューターの Ollama を確認しています…
 未检测到 Ollama，请安装并打开 Ollama	未检测到 Ollama，请安装并打开 Ollama	Ollama was not found. Install and open Ollama.	未偵測到 Ollama，請安裝並開啟 Ollama	Ollama が見つかりません。Ollama をインストールして起動してください
@@ -2077,7 +2066,6 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 没有匹配的设置	没有匹配的设置	No matching settings	沒有符合的設定	一致する設定はありません
 使用中	使用中	In use	使用中	使用中
 未添加时使用本机识别	未添加时使用本机识别	Without one, speech is recognized on this device	未新增時使用本機辨識	未追加の場合はこのデバイスで認識します
-应用 / Application	应用	Application	應用程式	アプリ
 找到 1 篇笔记	找到 1 篇笔记	Found 1 note	找到 1 篇筆記	1 件のノートが見つかりました
 1 篇笔记	1 篇笔记	1 note	1 篇筆記	1 件のノート
 {} 篇笔记	{} 篇笔记	{} notes	{} 篇筆記	{} 件のノート
@@ -2326,3 +2314,4 @@ AI 处理的设置已更改	AI 处理的设置已更改	The AI processing settin
 复制日志	复制日志	Copy log	複製日誌	ログをコピー
 移除任务记录	移除任务记录	Remove task record	移除任務記錄	タスク履歴を削除
 任务记录尚未保存：{}	任务记录尚未保存：{}	Task records have not been saved yet: {}	任務記錄尚未儲存：{}	タスク履歴はまだ保存されていません：{}
+复制全文	复制全文	Copy note	複製全文	ノートをコピー

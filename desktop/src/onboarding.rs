@@ -152,8 +152,6 @@ impl State {
 /// The forward action of a service step.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ServiceAction {
-    Check,
-    Recheck,
     Save,
     Keep,
     RetrySave,
@@ -162,15 +160,10 @@ enum ServiceAction {
 impl ServiceAction {
     fn label(self) -> &'static str {
         match self {
-            Self::Check => course2md::tr!("检查配置"),
-            Self::Recheck => course2md::tr!("重新检查"),
             Self::Save => course2md::tr!("保存并继续"),
             Self::Keep => course2md::tr!("保留并继续"),
             Self::RetrySave => course2md::tr!("重试保存"),
         }
-    }
-    fn sends_sample(self) -> bool {
-        matches!(self, Self::Check | Self::Recheck)
     }
 }
 
@@ -383,23 +376,6 @@ impl Desktop {
         }
     }
 
-    fn setup_service_passed(&self, purpose: ServicePurpose, cx: &App) -> bool {
-        let service = self.onboarding.service(purpose);
-        service.form.typed_key(cx).is_empty()
-            && service
-                .form
-                .current_draft(cx)
-                .configuration()
-                .ok()
-                .is_some_and(|config| {
-                    evidence_covers(
-                        &config,
-                        &self.setup_required_tests(purpose, cx),
-                        &service.evidence,
-                    )
-                })
-    }
-
     /// Adopts a committed draft and validates it; `None` reports why not.
     fn commit_setup_draft(
         &mut self,
@@ -551,9 +527,6 @@ impl Desktop {
         let service = self.onboarding.service(purpose);
         if let Some(version) = service.pending_version.clone() {
             return self.finish_setup_service(purpose, version, window, cx);
-        }
-        if !self.setup_service_passed(purpose, cx) {
-            return self.start_setup_test(purpose, window, cx);
         }
         if service.unchanged(cx) {
             let Some(version) = service.original.clone() else {
@@ -1325,17 +1298,20 @@ impl Desktop {
                     .min_w_0()
                     .flex_wrap()
                     .gap(rem(8.))
-                    .when(self.setup_service_passed(purpose, cx), |row| {
-                        row.child(
-                            material_button(id("recheck"), ButtonVariant::Text)
-                                .icon(symbols::refresh())
-                                .child(course2md::tr!("重新检查"))
-                                .disabled(service.busy())
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.start_setup_test(purpose, window, cx)
-                                })),
-                        )
-                    })
+                    .child(
+                        material_button(id("recheck"), ButtonVariant::Outlined)
+                            .tone(ButtonTone::Accent)
+                            .icon(symbols::refresh())
+                            .child(if service.evidence.is_empty() {
+                                course2md::tr!("检查配置")
+                            } else {
+                                course2md::tr!("重新检查")
+                            })
+                            .disabled(service.busy())
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.start_setup_test(purpose, window, cx)
+                            })),
+                    )
                     .child(
                         material_button(id("details"), ButtonVariant::Text)
                             .icon(if open {
@@ -1419,18 +1395,12 @@ impl Desktop {
 
     fn setup_service_action(&self, purpose: ServicePurpose, cx: &App) -> ServiceAction {
         let service = self.onboarding.service(purpose);
-        if service.running.is_some() {
-            ServiceAction::Save
-        } else if service.pending_version.is_some() {
+        if service.pending_version.is_some() {
             ServiceAction::RetrySave
         } else if service.unchanged(cx) && self.setup_required_tests(purpose, cx).is_empty() {
             ServiceAction::Keep
-        } else if self.setup_service_passed(purpose, cx) {
-            ServiceAction::Save
-        } else if service.evidence.is_empty() {
-            ServiceAction::Check
         } else {
-            ServiceAction::Recheck
+            ServiceAction::Save
         }
     }
 
@@ -1540,16 +1510,6 @@ impl Desktop {
             ButtonVariant::Filled
         };
         footer
-            // The cost notice appears only with the action that sends the sample.
-            .when(
-                service_action.is_some_and(ServiceAction::sends_sample),
-                |footer| {
-                    footer.child(supporting_info(
-                        "setup-test-notice",
-                        service_test::test_notice(),
-                    ))
-                },
-            )
             .child(
                 row()
                     .when(step != Step::Engine && !model_review, |row| {

@@ -129,7 +129,7 @@ struct Desktop {
     work: Entity<Work>,
     /// The task page, whose cards the workbench and the library also show.
     tasks: Entity<task_ui::TasksPage>,
-    theme_frame: views::ThemeFrame,
+    theme_frame_pending: bool,
     library_ui: library_ui::LibraryUi,
     /// The Bilibili and YouTube sign-ins.
     accounts: Entity<account_ui::AccountsView>,
@@ -467,7 +467,7 @@ impl Desktop {
             import: Default::default(),
             work,
             tasks,
-            theme_frame: Default::default(),
+            theme_frame_pending: false,
             library_ui: library_ui::LibraryUi::new(),
             storage_records: None,
             page: Page::New,

@@ -5,7 +5,7 @@ use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit_material::{
     color::{ColorRole, Scheme},
     components::{
-        ButtonTone, ButtonVariant, CaptionLabels, IconButton, MaterialTooltip, NoticeKind,
+        Badge, ButtonTone, ButtonVariant, CaptionLabels, IconButton, MaterialTooltip, NoticeKind,
         Snackbar, SnackbarPosition, TitleBar as AppBar, material_button, notice_banner, spinner,
         title_bar_control,
     },
@@ -89,6 +89,7 @@ fn brand(wordmark: bool) -> Div {
 fn nav_destination(
     id: &'static str,
     selected: bool,
+    attention: bool,
     icon: SymbolIcon,
     label: impl Into<SharedString>,
     shown: Option<SharedString>,
@@ -96,28 +97,31 @@ fn nav_destination(
 ) -> AnyElement {
     let label = label.into();
     let collapsed = shown.as_ref() != Some(&label);
-    let button = title_bar_control(
-        material_button(
-            id,
-            if selected {
-                ButtonVariant::Tonal
+    let button = Badge::small(SharedString::from(format!("{id}-badge")))
+        .visible(attention)
+        .inset(6.)
+        .anchor(title_bar_control(
+            material_button(
+                id,
+                if selected {
+                    ButtonVariant::Tonal
+                } else {
+                    ButtonVariant::Text
+                },
+            )
+            // Neutral at rest, so the current destination's secondary container is the one
+            // tint in the bar.
+            .tone(if selected {
+                ButtonTone::Standard
             } else {
-                ButtonVariant::Text
-            },
-        )
-        // Neutral at rest, so the current destination's secondary container is the one
-        // tint in the bar.
-        .tone(if selected {
-            ButtonTone::Standard
-        } else {
-            ButtonTone::Neutral
-        })
-        .button_size(ButtonSize::Small)
-        .icon(icon)
-        .accessibility_label(label.clone())
-        .children(shown)
-        .on_click(on_click),
-    );
+                ButtonTone::Neutral
+            })
+            .button_size(ButtonSize::Small)
+            .icon(icon)
+            .accessibility_label(label.clone())
+            .children(shown)
+            .on_click(on_click),
+        ));
     if collapsed {
         MaterialTooltip::plain(SharedString::from(format!("{id}-tip")), label)
             .trigger(button)
@@ -234,13 +238,6 @@ fn shell_column_at(width: AbsoluteLength) -> Div {
         .px(px(SHELL_GUTTER))
 }
 
-/// The running theme transition's frames.
-#[derive(Default)]
-pub(crate) struct ThemeFrame {
-    /// One pending next-frame callback advances a running theme transition.
-    pub pending: bool,
-}
-
 impl Desktop {
     /// Keep task results reachable while the user is on another page.
     fn shell_topbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AppBar {
@@ -317,6 +314,7 @@ impl Desktop {
         let library = nav_destination(
             "nav-library",
             matches!(page, Page::Library | Page::Result),
+            false,
             symbols::library_books(),
             course2md::tr!("笔记库"),
             shown(course2md::tr!("笔记库")),
@@ -338,11 +336,8 @@ impl Desktop {
             nav_destination(
                 "nav-tasks",
                 page == Page::Task,
-                if tasks_need_attention {
-                    symbols::warning()
-                } else {
-                    symbols::checklist()
-                },
+                tasks_need_attention,
+                symbols::checklist(),
                 task_label.clone(),
                 shown,
                 cx.listener(|this, _, _, cx| this.navigate(Page::Task, cx)),
@@ -351,11 +346,8 @@ impl Desktop {
         let settings = nav_destination(
             "nav-settings",
             page == Page::Settings,
-            if self.settings_have_problem() {
-                symbols::warning()
-            } else {
-                symbols::settings()
-            },
+            self.settings_have_problem(),
+            symbols::settings(),
             course2md::tr!("设置"),
             shown(course2md::tr!("设置")),
             cx.listener(|this, _, window, cx| this.open_settings(window, cx)),
@@ -550,12 +542,12 @@ impl Desktop {
     pub(crate) fn prepare_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (scheme, scale) = self.theme_target(cx);
         let running = advance_component_theme(scheme, scale, window, cx);
-        if running && !self.theme_frame.pending {
-            self.theme_frame.pending = true;
+        if running && !self.theme_frame_pending {
+            self.theme_frame_pending = true;
             let view = cx.weak_entity();
             window.on_next_frame(move |window, cx| {
                 let _ = view.update(cx, |this, cx| {
-                    this.theme_frame.pending = false;
+                    this.theme_frame_pending = false;
                     this.prepare_theme(window, cx);
                 });
             });

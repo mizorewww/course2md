@@ -626,6 +626,20 @@ impl Desktop {
         self.inspect_source(window, cx);
     }
 
+    fn clear_online_source_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.inputs[&Field::Source].update(cx, |state, cx| {
+            state.set_value("", window, cx);
+            state.focus(window, cx);
+        });
+        self.invalidate_source();
+        self.save_current_draft(cx);
+        let source_input = self.inputs[&Field::Source].clone();
+        window.on_next_frame(move |window, cx| {
+            source_input.update(cx, |state, cx| state.focus(window, cx));
+        });
+        cx.notify();
+    }
+
     pub(crate) fn drop_source_files(
         &mut self,
         files: &[PathBuf],
@@ -1001,7 +1015,8 @@ impl Desktop {
             .is_some_and(|identity| self.notes_for_source(identity, cx).next().is_some())
     }
 
-    /// Candidates that can be checked for a batch: identified, without a note yet.
+    /// Candidates that can be checked for a batch: identified online entries, including
+    /// those that already have a note (replacing them is already explained beside the action).
     fn selectable_candidates<'a>(
         &'a self,
         cx: &'a App,
@@ -1010,9 +1025,7 @@ impl Desktop {
         self.import
             .source_candidates
             .iter()
-            .filter(move |candidate| {
-                batch && candidate.identity.is_some() && !self.candidate_has_note(candidate, cx)
-            })
+            .filter(move |candidate| batch && candidate.identity.is_some())
     }
 
     /// The candidate list. Online lists queue several at once, but only candidates
@@ -1370,9 +1383,7 @@ impl Desktop {
                             .child(course2md::tr!("更换视频"))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 if this.online(cx) {
-                                    // A new link replaces this preview once it is read.
-                                    this.inputs[&Field::Source]
-                                        .update(cx, |input, cx| input.focus(window, cx));
+                                    this.clear_online_source_preview(window, cx);
                                 } else {
                                     this.pick_video(window, cx);
                                 }
@@ -1453,10 +1464,16 @@ impl Desktop {
                         symbols::close(),
                         course2md::tr!("移除预览"),
                         |button| {
-                            button.on_click(cx.listener(|this, _, _, cx| {
-                                this.invalidate_source();
-                                this.save_current_draft(cx);
-                                cx.notify();
+                            button.on_click(cx.listener(|this, _, window, cx| {
+                                if this.online(cx) {
+                                    this.clear_online_source_preview(window, cx);
+                                } else {
+                                    this.inputs[&Field::Source]
+                                        .update(cx, |state, cx| state.set_value("", window, cx));
+                                    this.invalidate_source();
+                                    this.save_current_draft(cx);
+                                    cx.notify();
+                                }
                             }))
                         },
                     )),

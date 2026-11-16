@@ -1187,8 +1187,14 @@ impl TasksPage {
                 ai,
             ));
         }
+        let scale = TileScale::Compact;
         rows.into_iter()
-            .map(|(id, icon, label, value)| ui::fact_row(id, Some(icon), label, value))
+            .map(|(id, icon, label, value)| {
+                scale
+                    .row()
+                    .child(Icon::from(icon).color(color(ColorRole::ON_SURFACE_VARIANT)))
+                    .child(scale.text(ElementId::Name(id.into()), label, Some(value.into())))
+            })
             .collect()
     }
 

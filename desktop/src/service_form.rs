@@ -527,8 +527,9 @@ impl Desktop {
                 .w_full()
                 .label(label)
                 .float_label(true)
+                .placeholder(placeholder)
                 .map(|field| match owner {
-                    FormOwner::Editor => field.placeholder(placeholder).read_only(locked),
+                    FormOwner::Editor => field.read_only(locked),
                     FormOwner::Setup(_) => field.disabled(locked),
                 })
                 .error(error.is_some())

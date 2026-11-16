@@ -310,7 +310,7 @@ impl SettingsTab {
             Self::Generation => course2md::tr!("生成笔记"),
             Self::Services => course2md::tr!("服务与账号"),
             Self::Storage => course2md::tr!("存储"),
-            Self::Application => course2md::tr!("应用 / Application"),
+            Self::Application => course2md::tr!("应用"),
         }
     }
     fn icon(self) -> SymbolIcon {
@@ -353,8 +353,6 @@ impl SettingsTab {
                 course2md::tr!("界面语言"),
                 course2md::tr!("界面文字大小"),
                 course2md::tr!("减少动态效果"),
-                course2md::tr!("主页"),
-                course2md::tr!("显示最近的笔记"),
             ],
             Self::Generation => vec![
                 course2md::tr!("字幕与识别"),
@@ -531,6 +529,7 @@ impl Desktop {
 
     /// Settings returns to where it was opened from, refocusing what opened it.
     pub(crate) fn leave_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.flush_generation_text(cx);
         let (page, focus) = self.settings_origin.take().unwrap_or((Page::New, None));
         if page == Page::New && !self.prepare_workbench_input(window, cx) {
             return;
@@ -553,6 +552,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.flush_generation_text(cx);
         self.settings_tab = tab;
         self.scrolls[Page::Settings as usize].set_offset(point(px(0.), px(0.)));
         // Capture builds can review the lower part of a category.
@@ -1339,20 +1339,34 @@ impl Desktop {
         }
         let input = self.setting_input(field, cx);
         let mut next = self.generation_edit_base();
-        let draft = match field {
+        match field {
             EditField::LocalModel => {
-                let saved = next.options.asr_model.clone().unwrap_or_default();
-                (&mut next.local_model_draft, saved)
+                let model = input.trim();
+                let desired = (!model.is_empty()).then(|| model.to_owned());
+                if next.options.asr_model == desired && next.local_model_draft.is_none() {
+                    return;
+                }
+                next.options.asr_model = desired;
+                next.local_model_draft = None;
             }
             EditField::Languages => {
-                let saved = next.preferred_subtitle_languages.join(", ");
-                (&mut next.subtitle_languages_draft, saved)
+                if valid_subtitle_languages(&input) {
+                    let languages = parse_subtitle_languages(&input);
+                    if next.preferred_subtitle_languages == languages
+                        && next.subtitle_languages_draft.is_none()
+                    {
+                        return;
+                    }
+                    next.preferred_subtitle_languages = languages;
+                    next.subtitle_languages_draft = None;
+                } else {
+                    if next.subtitle_languages_draft.as_deref() == Some(input.as_str()) {
+                        return;
+                    }
+                    next.subtitle_languages_draft = Some(input);
+                }
             }
-        };
-        if draft.0.as_ref().unwrap_or(&draft.1) == &input {
-            return;
         }
-        *draft.0 = Some(input);
         self.stage_generation_text(next, cx);
     }
     fn save_prompt_draft(&mut self, cx: &mut Context<Self>) {
@@ -1360,22 +1374,15 @@ impl Desktop {
             return;
         }
         let text = self.settings_ui.prompt.read(cx).value().to_string();
+        let trimmed = text.trim();
+        let desired = (!trimmed.is_empty() && trimmed != course2md::llm::DEFAULT_PROMPT.trim())
+            .then(|| trimmed.to_owned());
         let mut next = self.generation_edit_base();
-        if next
-            .prompt_draft
-            .as_ref()
-            .or(next.ai.prompt.as_ref())
-            .map(String::as_str)
-            .unwrap_or("")
-            == text
-            // The prefilled standard rule is not an unsaved edit.
-            || (next.ai.prompt.is_none()
-                && next.prompt_draft.is_none()
-                && text.trim() == course2md::llm::DEFAULT_PROMPT.trim())
-        {
+        if next.ai.prompt == desired && next.prompt_draft.is_none() {
             return;
         }
-        next.prompt_draft = Some(text);
+        next.ai.prompt = desired;
+        next.prompt_draft = None;
         self.stage_generation_text(next, cx);
     }
     fn stage_generation_text(&mut self, next: GenerationPreferences, cx: &mut Context<Self>) {
@@ -1403,15 +1410,12 @@ impl Desktop {
         let previous = self
             .ordinary_preferences_submit_issue()
             .map(|issue| issue.message);
-        let had_pending = self.settings_ui.pending_generation.is_some();
         let result = self.preferences.save_generation(next.clone());
         self.settings_ui.pending_generation = pending_after_save(&result, next);
         match result {
             Ok(()) => {
                 self.clear_settings_failure(PreferenceGroup::Generation);
-                if had_pending {
-                    self.refresh_preference_defaults(cx);
-                }
+                self.refresh_preference_defaults(cx);
                 self.clear_resolved_generation_errors(previous);
             }
             Err(error) => {
@@ -1466,30 +1470,6 @@ impl Desktop {
         }));
     }
 
-    fn apply_language_preferences(&mut self, cx: &mut Context<Self>) {
-        let raw = self.setting_input(EditField::Languages, cx);
-        let languages: Vec<String> = raw
-            .split([',', '，', '\n'])
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-            .map(str::to_owned)
-            .collect();
-        if languages
-            .iter()
-            .any(|v| v.len() > 35 || !v.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
-        {
-            self.set_settings_failure(
-                PreferenceGroup::Generation,
-                course2md::tr!("语言代码只能包含字母、数字和连字符，请用逗号分隔各语言").into(),
-            );
-            cx.notify();
-            return;
-        }
-        let mut next = self.generation_edit_base();
-        next.preferred_subtitle_languages = languages;
-        next.subtitle_languages_draft = None;
-        self.commit_generation(next, cx);
-    }
     /// Records why a group's save failed; it shows until the next save succeeds.
     pub(crate) fn set_settings_failure(&mut self, group: PreferenceGroup, message: String) {
         if group == PreferenceGroup::Generation {
@@ -2098,8 +2078,7 @@ impl Desktop {
                         symbols::code(),
                         course2md::tr!("所需程序"),
                     ))
-                    // A list item's own inset would break the group's left edge.
-                    .child(v_flex().mx(rem(-16.)).children(programs))
+                    .child(segmented_list(programs.collect::<Vec<_>>()))
                     .children(repair),
             )
             .children(self.model_hardware_details(cx))
@@ -2291,6 +2270,20 @@ fn search_placeholder() -> &'static str {
     course2md::tr!("搜索设置")
 }
 
+pub(crate) fn parse_subtitle_languages(raw: &str) -> Vec<String> {
+    raw.split([',', '，', '\n'])
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+pub(crate) fn valid_subtitle_languages(raw: &str) -> bool {
+    parse_subtitle_languages(raw)
+        .iter()
+        .all(|v| v.len() <= 35 && v.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+}
+
 /// The command that installs the media programs on this system.
 fn media_install_command() -> &'static str {
     if cfg!(target_os = "macos") {
@@ -2304,14 +2297,6 @@ fn media_install_command() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::pending_after_save;
-
-    #[test]
-    fn a_failed_save_keeps_the_staged_edit_and_a_successful_one_clears_it() {
-        assert_eq!(pending_after_save::<_, ()>(&Ok(()), 7), None);
-        assert_eq!(pending_after_save(&Err("disk full"), 7), Some(7));
-    }
-
     #[test]
     fn settings_leave_the_rail_when_text_leaves_the_content_no_room() {
         use super::SettingsLayout;

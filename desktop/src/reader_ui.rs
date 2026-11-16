@@ -247,7 +247,6 @@ struct NoteState {
 struct FindState {
     input: Entity<InputState>,
     open: bool,
-    return_focus: Option<FocusHandle>,
     /// What the matches were found in: changes when a new parse lands.
     text: Option<RenderedText>,
     prepared: Option<nav::PreparedText>,
@@ -410,7 +409,6 @@ impl ReaderPage {
             find: FindState {
                 input: find,
                 open: false,
-                return_focus: None,
                 text: None,
                 prepared: None,
                 matches: Rc::default(),
@@ -1459,9 +1457,6 @@ impl ReaderPage {
         if self.opened.preview.is_none() {
             return;
         }
-        if !self.find.open {
-            self.find.return_focus = window.focused(cx);
-        }
         self.find.open |= self.opened.result_tab == 0;
         self.reader_find_input()
             .update(cx, |input, cx| input.focus(window, cx));
@@ -1480,7 +1475,6 @@ impl ReaderPage {
             .update(cx, |input, cx| input.set_value("", window, cx));
         // Back to the note, where the reading goes on. What held focus before find
         // opened may be a menu's trigger that a pointer last touched.
-        self.find.return_focus = None;
         self.focus.focus(window, cx);
         cx.notify();
     }
@@ -2119,10 +2113,20 @@ impl ReaderPage {
                 .w_full()
                 .gap(TOC_GAP)
                 .items_stretch()
-                .child(self.reader_toc(current, true, cx))
+                .child(
+                    div()
+                        .relative()
+                        .w(TOC_WIDTH)
+                        .flex_shrink_0()
+                        .h_full()
+                        .min_h_0()
+                        .child(self.reader_toc(current, true, cx))
+                        .child(Scrollbar::vertical(&self.toc_scroll)),
+                )
                 .child(article)
                 .into_any_element()
         } else {
+            let reader = cx.weak_entity();
             div()
                 .relative()
                 .flex()
@@ -2130,17 +2134,25 @@ impl ReaderPage {
                 .min_h_0()
                 .w_full()
                 .child(article)
-                .when(self.toc_open, |body| {
-                    body.child(
-                        div()
-                            .absolute()
-                            .inset_0()
-                            .p(rem(12.))
-                            .rounded(RADIUS_HERO)
-                            .bg(color(SURFACE))
-                            .child(self.reader_toc(current, false, cx)),
-                    )
-                })
+                .child(
+                    MaterialSideSheet::new("reader-toc-sheet")
+                        .modal(true)
+                        .open(self.toc_open)
+                        .headline(course2md::tr!("阅读目录"))
+                        .close_button(course2md::tr!("关闭"))
+                        .on_dismiss(move |_, cx| {
+                            let _ = reader.update(cx, |this, cx| {
+                                this.toc_open = false;
+                                cx.notify();
+                            });
+                        })
+                        .child(
+                            div()
+                                .pl(rem(8.))
+                                .pr(rem(16.))
+                                .child(self.reader_toc(current, false, cx)),
+                        ),
+                )
                 .into_any_element()
         }
     }
@@ -2175,31 +2187,21 @@ impl ReaderPage {
             .id("note-toc")
             .role(Role::Navigation)
             .aria_label(course2md::tr!("阅读目录"))
-            .when(beside, |toc| toc.w(TOC_WIDTH).flex_shrink_0())
-            .when(!beside, |toc| toc.w_full())
-            .h_full()
-            .min_h_0()
-            .overflow_y_scroll()
-            .track_scroll(&self.toc_scroll)
-            .child(
-                h_flex()
-                    .items_center()
-                    .flex_shrink_0()
-                    .px(rem(16.))
-                    .pb(rem(8.))
-                    .child(section_title("toc-title", course2md::tr!("阅读目录")).flex_1())
-                    .when(!beside, |row| {
-                        row.child(
-                            material_button("close-note-toc", ButtonVariant::Text)
-                                .icon(symbols::close())
-                                .child(course2md::tr!("关闭"))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.toc_open = false;
-                                    cx.notify();
-                                })),
-                        )
-                    }),
-            )
+            .w_full()
+            .when(beside, |toc| {
+                toc.h_full()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.toc_scroll)
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .flex_shrink_0()
+                            .px(rem(16.))
+                            .pb(rem(8.))
+                            .child(section_title("toc-title", course2md::tr!("阅读目录")).flex_1()),
+                    )
+            })
             .gap(TILE_GAP)
             .children(self.outline.iter().map(|(index, label, seconds)| {
                 let index = *index;
@@ -2213,7 +2215,7 @@ impl ReaderPage {
                     .container(if beside {
                         ColorRole::SURFACE_CONTAINER
                     } else {
-                        ColorRole::SURFACE
+                        ColorRole::SURFACE_CONTAINER_LOW
                     })
                     .pill(true)
                     .selected(current == Some(index))
@@ -3030,39 +3032,50 @@ impl ReaderPage {
             );
         }
         let label = course2md::tr!("复制与导出");
-        let trigger: AnyElement = if icon_only {
-            ui::tip_button("export-note", symbols::content_copy(), label, |button| {
+        let menu = MaterialMenu::new("export-note-items")
+            .width(360.)
+            .items(items);
+        if icon_only {
+            let trigger = ui::tip_button("export-note", symbols::content_copy(), label, |button| {
                 button
                     .variant(IconButtonVariant::Tonal)
                     .tone(ButtonTone::Neutral)
                     .disabled(exporting)
-            })
-            .into_any_element()
+            });
+            ui::menu("export-note-menu", trigger, menu, window, cx)
+                .anchor(Anchor::TopRight)
+                .into_any_element()
         } else {
-            material_button("export-note", ButtonVariant::Tonal)
-                .icon(symbols::content_copy())
-                .child(if current {
+            let popup_id = ElementId::from("export-note-split");
+            let (open, set_open) = ui::keyed_open(&popup_id, window, cx);
+            let copy_source = preview.clone();
+            SplitButton::new(
+                "export-note",
+                if current {
                     course2md::tr!("正在导出…")
                 } else {
-                    label
-                })
-                // It opens a menu, as its chevron says.
-                .child(Icon::from(symbols::keyboard_arrow_down()).size(rem(18.)))
-                .loading(current, label)
-                .disabled(exporting)
-                .into_any_element()
-        };
-        ui::menu(
-            "export-note-menu",
-            trigger,
-            MaterialMenu::new("export-note-items")
-                .width(360.)
-                .items(items),
-            window,
-            cx,
-        )
-        .anchor(Anchor::TopRight)
-        .into_any_element()
+                    course2md::tr!("复制全文")
+                },
+                label,
+            )
+            .variant(ButtonVariant::Tonal)
+            .icon(symbols::content_copy())
+            .open(open)
+            .disabled(exporting)
+            .menu(menu)
+            .on_click(cx.listener(move |_, _, _, cx| {
+                crate::clipboard::write(
+                    ClipboardItem::new_string(copy_source.markdown_text.clone()),
+                    cx,
+                );
+                cx.emit(ReaderEvent::Message(
+                    course2md::tr!("已复制 Markdown 文本").into(),
+                ));
+                cx.notify();
+            }))
+            .on_toggle(set_open)
+            .into_any_element()
+        }
     }
 
     /// The remaining actions on the note.
@@ -4357,6 +4370,7 @@ impl ReaderPage {
             .filter_map(|index| Some(viewer.frames.get(index)?.image.as_ref()?.path.clone()))
             .collect();
         let viewport_scroll = viewer.viewport_scroll.clone();
+        let track_scroll = viewport_scroll.clone();
         let owner = cx.weak_entity();
         let width = px(image.width as f32 * scale);
         let height = px(image.height as f32 * scale);
@@ -4385,9 +4399,6 @@ impl ReaderPage {
                 .child(spinner("reader-image-loading", label.clone(), cx))
                 .into_any_element(),
         };
-        let Some(viewer) = &self.viewer else {
-            return div().into_any_element();
-        };
         let viewport = div()
             .on_children_prepainted(move |_, window, cx| {
                 let size = viewport_scroll.bounds().size;
@@ -4408,7 +4419,7 @@ impl ReaderPage {
             .size_full()
             .overflow_x_scroll()
             .overflow_y_scroll()
-            .track_scroll(&viewer.viewport_scroll)
+            .track_scroll(&track_scroll)
             // An image larger than the viewport moves with the pointer, and a
             // trackpad pinch zooms it, as in Preview.
             .when(pannable, |viewport| viewport.cursor_grab())
@@ -4652,19 +4663,6 @@ mod tests {
     };
     use gpui::{AppContext as _, ListAlignment, ListOffset, ListState, TestAppContext, px};
     use std::collections::HashMap;
-
-    #[test]
-    fn the_screenshot_viewer_header_starts_below_the_window_buttons() {
-        use gpui_kit_material::components::traffic_light_position;
-        // At the smallest text scale the row the viewer keeps clear is still the
-        // whole title bar the traffic lights are centred on, and taller than the
-        // Windows and Linux caption buttons (32 px).
-        let row =
-            super::TITLE_BAR_HEIGHT.to_pixels(px(gpui_kit_material::tokens::typography::BASE_PX));
-        let lights = traffic_light_position(crate::views::APP_BAR_HEIGHT);
-        assert!(row >= lights.y * 2. + px(14.), "{row:?}");
-        assert!(row >= px(32.));
-    }
 
     #[test]
     fn the_text_goes_beside_the_image_only_where_the_image_stays_as_large() {

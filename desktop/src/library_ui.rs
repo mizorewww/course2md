@@ -1,12 +1,13 @@
 use super::*;
 use crate::{symbols, ui};
 use desktop_store::records::{FolderContext, folders_unavailable};
+use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit_material::{
     color::ColorRole,
     icons::Icon,
     prelude::{
         ButtonVariant, ListDensity, ListItem, ListLeading, MaterialDialog, TextField,
-        TextFieldShape, TileScale, material_button, rem, segmented_list,
+        TextFieldShape, material_button, rem, segmented_list,
     },
 };
 use std::{
@@ -73,6 +74,7 @@ pub(crate) struct LibraryUi {
     /// Tree nodes the person toggled: opened folders, or closed library tops (id 0).
     pub folder_tree_open: HashSet<(PathBuf, u64)>,
     pub folder_tree_scroll: ScrollHandle,
+    pub move_scroll: ScrollHandle,
     /// The virtualized notes: the list, and the identity and focus of what it describes.
     pub list: ListState,
     pub keys: Vec<String>,
@@ -117,6 +119,7 @@ impl LibraryUi {
             places_open: false,
             folder_tree_open: HashSet::new(),
             folder_tree_scroll: ScrollHandle::new(),
+            move_scroll: ScrollHandle::new(),
             list: ListState::new(0, ListAlignment::Top, px(1000.)),
             keys: Vec::new(),
             focus: Vec::new(),
@@ -718,19 +721,16 @@ impl Desktop {
                 .container(ColorRole::SURFACE)
                 .headline(headline)
                 .content(
-                    v_flex()
-                        .px(rem(24.))
-                        .gap(rem(8.))
-                        .child(TileScale::Regular.support("name-field-label", label))
-                        .child(
-                            TextField::new("name-field", &input)
-                                .placeholder(label)
-                                .outlined()
-                                .shape(TextFieldShape::Rounded)
-                                .w_full()
-                                .error(error.is_some())
-                                .when_some(error, |field, error| field.supporting_text(error)),
-                        ),
+                    v_flex().px(rem(24.)).pt(rem(4.)).child(
+                        TextField::new("name-field", &input)
+                            .label(label)
+                            .float_label(true)
+                            .outlined()
+                            .shape(TextFieldShape::Rounded)
+                            .w_full()
+                            .error(error.is_some())
+                            .when_some(error, |field, error| field.supporting_text(error)),
+                    ),
                 )
                 .action(
                     material_button("name-cancel", ButtonVariant::Text)
@@ -811,7 +811,6 @@ impl Desktop {
             let (root, moving) = (dialog.root.clone(), dialog.moving.clone());
             ListItem::new(("move-destination", index), label)
                 .density(ListDensity::Compact)
-                .container(ColorRole::SURFACE_CONTAINER_HIGH)
                 .leading(ListLeading::Icon(if destination.is_some() {
                     Icon::from(symbols::folder())
                 } else {
@@ -831,22 +830,21 @@ impl Desktop {
                     }
                 }))
         });
+        let scroll = &self.library_ui.move_scroll;
         Some(
             MaterialDialog::new("move-dialog")
                 .width(crate::ui::DIALOG_WIDTH_ROOMY)
                 .container(ColorRole::SURFACE)
                 .headline(course2md::tr!("移动到"))
+                .track_body_scroll(scroll)
                 .content(
                     div()
-                        .id("move-destinations")
-                        .max_h(rem(320.))
-                        .overflow_y_scroll()
+                        .relative()
+                        .w_full()
                         // On the title's and the actions' margins.
-                        .child(
-                            div()
-                                .px(rem(24.))
-                                .child(segmented_list(rows.collect::<Vec<_>>())),
-                        ),
+                        .px(rem(24.))
+                        .child(segmented_list(rows.collect::<Vec<_>>()))
+                        .child(Scrollbar::vertical(scroll)),
                 )
                 .action(
                     material_button("move-cancel", ButtonVariant::Text)
