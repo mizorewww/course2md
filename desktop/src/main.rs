@@ -1174,6 +1174,7 @@ impl Desktop {
     fn set_page(&mut self, page: Page, cx: &mut Context<Self>) {
         if self.page == Page::Settings && page != Page::Settings {
             self.flush_font_scale(cx);
+            self.clear_appearance_scroll_pin();
         }
         self.page = page;
         self.reader

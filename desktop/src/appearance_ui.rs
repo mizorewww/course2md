@@ -3,13 +3,13 @@ use crate::preferences::{InterfaceLanguage, PreferenceGroup};
 use crate::{Desktop, symbols, ui};
 use gpui::{prelude::*, *};
 use gpui_base::slider::SliderState;
-use gpui_base::{Placement, Positioner, h_flex, v_flex};
+use gpui_base::{Placement, h_flex, v_flex};
 use gpui_kit_material::{
     color::{Scheme, palette::ALL},
     icons::Icon,
     prelude::*,
     theme::{is_dark, rgba},
-    tokens::shape::OuterCorners,
+    tokens::{elevation, shape::OuterCorners},
 };
 use std::{cell::Cell, rc::Rc};
 
@@ -24,7 +24,8 @@ const PICKER_WIDTH: f32 = 920.;
 
 pub(crate) struct ScaleSlider {
     state: Entity<SliderState>,
-    gesture: Rc<Cell<Option<Bounds<Pixels>>>>,
+    active: Rc<Cell<bool>>,
+    anchor: Rc<Cell<Option<Bounds<Pixels>>>>,
     dragging: Rc<Cell<bool>>,
     _subscription: Subscription,
 }
@@ -38,7 +39,8 @@ impl ScaleSlider {
         let subscription = cx.observe(&state, |_, _, cx| cx.notify());
         Self {
             state,
-            gesture: Rc::new(Cell::new(None)),
+            active: Rc::new(Cell::new(false)),
+            anchor: Rc::new(Cell::new(None)),
             dragging,
             _subscription: subscription,
         }
@@ -48,29 +50,27 @@ impl ScaleSlider {
 impl Render for ScaleSlider {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.clone();
-        let gesture = self.gesture.clone();
+        let active = self.active.clone();
+        let anchor = self.anchor.clone();
         let dragging = self.dragging.clone();
         let view = cx.weak_entity();
-        let preview = self.dragging.get().then(|| self.gesture.get()).flatten();
+        let preview = self.dragging.get() && self.active.get();
         let target = self.state.read(cx).value().end();
         let preview_margin = crate::views::title_bar_height(window) + px(8.);
         let preview_edge = preview_margin + window.client_inset().unwrap_or(px(0.));
         let preview_size = size(
-            px(520.).min(window.viewport_size().width - preview_edge * 2.),
-            px(416.).min(window.viewport_size().height - preview_edge * 2.),
+            px(460.).min(window.viewport_size().width - preview_edge * 2.),
+            px(312.).min(window.viewport_size().height - preview_edge * 2.),
         );
         div()
             .relative()
             .w_full()
             .child(
                 canvas(
-                    |bounds, window, _| {
-                        let room = ui::FOCUS_RING_ROOM.to_pixels(window.rem_size());
-                        window.insert_hitbox(bounds.dilate(room), HitboxBehavior::Normal)
-                    },
+                    |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
                     move |_, hitbox, window, _| {
-                        let pressed = gesture.clone();
-                        let slider = state.clone();
+                        let pressed = active.clone();
+                        let pressed_anchor = anchor.clone();
                         let held = dragging.clone();
                         let pressed_view = view.clone();
                         window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
@@ -78,13 +78,14 @@ impl Render for ScaleSlider {
                                 && event.button == MouseButton::Left
                                 && hitbox.is_hovered(window)
                             {
-                                let bounds = slider.read(cx).bounds();
-                                pressed.set(Some(bounds));
+                                pressed.set(true);
+                                pressed_anchor.set(None);
                                 held.set(true);
                                 let _ = pressed_view.update(cx, |_, cx| cx.notify());
                             }
                         });
-                        let moved = gesture.clone();
+                        let moved = active.clone();
+                        let moved_anchor = anchor.clone();
                         let slider = state.clone();
                         let held = dragging.clone();
                         let moved_view = view.clone();
@@ -92,7 +93,7 @@ impl Render for ScaleSlider {
                             if phase != DispatchPhase::Capture {
                                 return;
                             }
-                            if moved.get().is_none() {
+                            if !moved.get() {
                                 return;
                             }
                             if !held.get() && event.pressed_button == Some(MouseButton::Left) {
@@ -102,20 +103,23 @@ impl Render for ScaleSlider {
                                 return;
                             }
                             if event.pressed_button != Some(MouseButton::Left) {
-                                moved.set(None);
+                                moved.set(false);
+                                moved_anchor.set(None);
                                 held.set(false);
                                 slider.update(cx, |state, cx| state.handle_release(cx));
                                 let _ = moved_view.update(cx, |_, cx| cx.notify());
                             }
                         });
-                        let released = gesture.clone();
+                        let released = active.clone();
+                        let released_anchor = anchor.clone();
                         let slider = state.clone();
                         let held = dragging.clone();
                         window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
                             if phase == DispatchPhase::Capture
                                 && event.button == MouseButton::Left
-                                && released.take().is_some()
+                                && released.replace(false)
                             {
+                                released_anchor.set(None);
                                 held.set(false);
                                 slider.update(cx, |state, cx| state.handle_release(cx));
                                 let _ = view.update(cx, |_, cx| cx.notify());
@@ -132,147 +136,360 @@ impl Render for ScaleSlider {
                     .stops(true)
                     .format(|value| format!("{value:.0}%").into()),
             )
-            .when_some(preview, |control, anchor| {
-                control.child(deferred(
-                    Positioner::side(anchor)
-                        .placement(Placement::Top)
-                        .offset(px(12.))
-                        .margin(preview_margin)
-                        .child(scale_preview_surface(target, preview_size)),
-                ))
+            .when(preview, |control| {
+                control.child(deferred(ScalePreviewOverlay {
+                    slider: self.state.clone(),
+                    anchor: self.anchor.clone(),
+                    margin: preview_margin,
+                    offset: px(12.),
+                    child: scale_preview_surface(target, preview_size).into_any_element(),
+                }))
             })
     }
 }
 
+struct ScalePreviewOverlay {
+    slider: Entity<SliderState>,
+    anchor: Rc<Cell<Option<Bounds<Pixels>>>>,
+    margin: Pixels,
+    offset: Pixels,
+    child: AnyElement,
+}
+
+impl IntoElement for ScalePreviewOverlay {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl Element for ScalePreviewOverlay {
+    type RequestLayoutState = LayoutId;
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, LayoutId) {
+        let child_layout = self.child.request_layout(window, cx);
+        let layout_id = window.request_layout(
+            Style {
+                position: Position::Absolute,
+                display: Display::Flex,
+                ..Style::default()
+            },
+            [child_layout],
+            cx,
+        );
+        (layout_id, child_layout)
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        child_layout: &mut LayoutId,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let popup_size = window.layout_bounds(*child_layout).size;
+        let trigger_bounds = self.anchor.get().unwrap_or_else(|| {
+            let bounds = self.slider.read(cx).bounds();
+            self.anchor.set(Some(bounds));
+            bounds
+        });
+        let margin = preview_frame_insets(
+            window.window_decorations(),
+            window.client_inset().unwrap_or(px(0.)),
+        )
+        .map(|inset| *inset + self.margin);
+        let resolved = resolve_preview_bounds(
+            trigger_bounds,
+            popup_size,
+            window.viewport_size(),
+            margin,
+            self.offset,
+        );
+        let shift = resolved.origin - bounds.origin;
+        let shift = point(shift.x.round(), shift.y.round());
+        window.with_element_offset(shift, |window| self.child.prepaint(window, cx));
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut LayoutId,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.child.paint(window, cx);
+    }
+}
+
+fn preview_frame_insets(decorations: Decorations, client_inset: Pixels) -> Edges<Pixels> {
+    match decorations {
+        Decorations::Server => Edges::default(),
+        Decorations::Client { tiling } => Edges {
+            top: if tiling.top { px(0.) } else { client_inset },
+            right: if tiling.right { px(0.) } else { client_inset },
+            bottom: if tiling.bottom { px(0.) } else { client_inset },
+            left: if tiling.left { px(0.) } else { client_inset },
+        },
+    }
+}
+
+fn resolve_preview_bounds(
+    trigger_bounds: Bounds<Pixels>,
+    popup_size: Size<Pixels>,
+    viewport_size: Size<Pixels>,
+    margin: Edges<Pixels>,
+    offset: Pixels,
+) -> Bounds<Pixels> {
+    let right_limit = (viewport_size.width - margin.right).max(margin.left);
+    let bottom_limit = (viewport_size.height - margin.bottom).max(margin.top);
+    let available_above = (trigger_bounds.top() - margin.top).max(px(0.));
+    let available_below = (bottom_limit - trigger_bounds.bottom()).max(px(0.));
+    let placement = if popup_size.height <= available_above {
+        Placement::Top
+    } else if popup_size.height <= available_below || available_below >= available_above {
+        Placement::Bottom
+    } else {
+        Placement::Top
+    };
+    let origin_x = trigger_bounds.center().x - popup_size.width / 2.;
+    let origin_y = match placement {
+        Placement::Top => trigger_bounds.top() - popup_size.height - offset,
+        _ => trigger_bounds.bottom() + offset,
+    };
+    let mut resolved = Bounds::new(point(origin_x, origin_y), popup_size);
+    if resolved.right() > right_limit {
+        resolved.origin.x -= resolved.right() - right_limit;
+    }
+    if resolved.left() < margin.left {
+        resolved.origin.x = margin.left;
+    }
+    if resolved.bottom() > bottom_limit {
+        resolved.origin.y -= resolved.bottom() - bottom_limit;
+    }
+    if resolved.top() < margin.top {
+        resolved.origin.y = margin.top;
+    }
+    resolved
+}
+
 fn scale_preview_surface(target: f32, panel_size: Size<Pixels>) -> LocalScale {
-    let value_type = TypeRole::TitleLarge.scale();
-    let title_type = TypeRole::TitleMedium.scale();
-    let body_type = TypeRole::BodyLarge.scale();
-    let note_content = v_flex()
+    let header_title_type = TypeRole::TitleSmall.scale();
+    let header_hint_type = TypeRole::BodySmall.scale();
+    let badge_type = TypeRole::TitleMedium.scale();
+    let note_title_type = TypeRole::TitleMedium.scale();
+    let note_meta_type = TypeRole::BodySmall.scale();
+    let note_body_type = TypeRole::BodyMedium.scale();
+    let note = MaterialCard::new("scale-preview-card", CardVariant::Surface)
         .w_full()
-        .min_w_0()
-        .flex_shrink_0()
-        .gap(rem(8.))
+        .rounded(RADIUS_CARD)
+        .p(rem(14.))
         .child(
-            h_flex()
+            v_flex()
                 .w_full()
                 .min_w_0()
-                .flex_shrink_0()
-                .items_center()
-                .gap(rem(12.))
+                .gap(rem(10.))
                 .child(
                     h_flex()
-                        .flex_1()
+                        .w_full()
                         .min_w_0()
                         .items_center()
-                        .gap(rem(8.))
+                        .gap(rem(10.))
+                        .child(tinted_icon(symbols::menu_book(), Tint::Blue, rem(32.)))
                         .child(
-                            Icon::from(symbols::article())
-                                .size(rem(24.))
-                                .color(color(ColorRole::PRIMARY)),
-                        )
-                        .child(
-                            accessible_text("scale-preview-note-title", course2md::tr!("示例笔记"))
+                            v_flex()
+                                .flex_1()
                                 .min_w_0()
-                                .whitespace_normal()
-                                .text_size(title_type.font_size)
-                                .line_height(title_type.line_height)
-                                .font_weight(FontWeight(title_type.font_weight as f32)),
+                                .gap(rem(2.))
+                                .child(
+                                    accessible_text(
+                                        "scale-preview-note-title",
+                                        course2md::tr!("示例笔记"),
+                                    )
+                                    .min_w_0()
+                                    .whitespace_normal()
+                                    .text_size(note_title_type.font_size)
+                                    .line_height(note_title_type.line_height)
+                                    .font_weight(FontWeight(note_title_type.font_weight as f32))
+                                    .text_color(color(ColorRole::ON_SURFACE)),
+                                )
+                                .child(
+                                    accessible_text(
+                                        "scale-preview-note-meta",
+                                        format!(
+                                            "{} · {}",
+                                            course2md::render::fmt_ts(750.),
+                                            course2md::tr!("摘要"),
+                                        ),
+                                    )
+                                    .min_w_0()
+                                    .whitespace_normal()
+                                    .text_size(note_meta_type.font_size)
+                                    .line_height(note_meta_type.line_height)
+                                    .text_color(color(ColorRole::ON_SURFACE_VARIANT)),
+                                ),
                         ),
                 )
                 .child(
-                    TileScale::Compact
-                        .support("scale-preview-note-time", course2md::render::fmt_ts(750.))
-                        .flex_shrink_0(),
+                    div()
+                        .h(px(1.))
+                        .w_full()
+                        .bg(color(ColorRole::OUTLINE_VARIANT)),
+                )
+                .child(
+                    accessible_text(
+                        "scale-preview-note-body",
+                        course2md::tr!("梳理课程重点与关键时间点，方便阅读时快速回顾并核对原文。"),
+                    )
+                    .w_full()
+                    .min_w_0()
+                    .whitespace_normal()
+                    .text_size(note_body_type.font_size)
+                    .line_height(note_body_type.line_height)
+                    .text_color(color(ColorRole::ON_SURFACE)),
+                )
+                .child(
+                    h_flex()
+                        .w_full()
+                        .min_w_0()
+                        .flex_wrap()
+                        .items_center()
+                        .justify_between()
+                        .gap(rem(8.))
+                        .child(outlined_status_chip(
+                            "scale-preview-source",
+                            course2md::tr!("字幕"),
+                        ))
+                        .child(
+                            material_button("scale-preview-button", ButtonVariant::Tonal)
+                                .button_size(ButtonSize::Small)
+                                .preview_state(InteractionPreview::Enabled)
+                                .icon(symbols::menu_book())
+                                .child(course2md::tr!("阅读笔记")),
+                        ),
                 ),
-        )
-        .child(
-            accessible_text(
-                "scale-preview-note-body",
-                course2md::tr!("把重点整理成清晰的笔记。"),
-            )
-            .w_full()
-            .min_w_0()
-            .flex_shrink_0()
-            .whitespace_normal()
-            .text_size(body_type.font_size)
-            .line_height(body_type.line_height)
-            .text_color(color(ColorRole::ON_SURFACE)),
-        );
-    let note = v_flex()
-        .size_full()
-        .min_w_0()
-        .justify_between()
-        .gap(rem(8.))
-        .child(note_content)
-        .child(
-            h_flex().flex_shrink_0().child(
-                material_button("scale-preview-button", ButtonVariant::Tonal)
-                    .button_size(ButtonSize::Small)
-                    .preview_state(InteractionPreview::Enabled)
-                    .icon(symbols::menu_book())
-                    .child(course2md::tr!("阅读笔记")),
-            ),
         );
     LocalScale {
         rem_size: px(gpui_kit_material::tokens::typography::BASE_PX),
         child: MaterialCard::new("scale-preview", CardVariant::Elevated)
             .w(panel_size.width)
             .h(panel_size.height)
-            .rounded(RADIUS_LARGE_INCREASED)
-            .p(rem(16.))
+            .rounded(RADIUS_HERO)
+            .bg(color(ColorRole::SURFACE_CONTAINER_HIGH))
+            .border_1()
+            .border_color(color(ColorRole::OUTLINE_VARIANT))
+            .shadow(elevation::level3())
+            .p(px(16.))
             .child(
                 v_flex()
-                    .w_full()
-                    .h(panel_size.height - px(32.))
-                    .gap(rem(8.))
+                    .size_full()
+                    .min_w_0()
+                    .min_h_0()
+                    .gap(px(12.))
                     .child(
                         h_flex()
                             .w_full()
-                            .h(rem(28.))
                             .flex_shrink_0()
                             .items_center()
-                            .gap(rem(8.))
+                            .gap(rem(10.))
                             .child(
                                 Icon::from(symbols::zoom_in())
                                     .size(rem(20.))
                                     .color(color(ColorRole::ON_SURFACE_VARIANT)),
                             )
                             .child(
-                                section_title("scale-preview-heading", course2md::tr!("缩放预览"))
-                                    .flex_1(),
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .gap(rem(1.))
+                                    .child(
+                                        accessible_text(
+                                            "scale-preview-heading",
+                                            course2md::tr!("缩放预览"),
+                                        )
+                                        .text_size(header_title_type.font_size)
+                                        .line_height(header_title_type.line_height)
+                                        .font_weight(FontWeight(
+                                            header_title_type.font_weight as f32,
+                                        ))
+                                        .text_color(color(ColorRole::ON_SURFACE)),
+                                    )
+                                    .child(
+                                        accessible_text(
+                                            "scale-preview-apply",
+                                            course2md::tr!("松开鼠标后应用"),
+                                        )
+                                        .text_size(header_hint_type.font_size)
+                                        .line_height(header_hint_type.line_height)
+                                        .text_color(color(ColorRole::ON_SURFACE_VARIANT)),
+                                    ),
                             )
                             .child(
-                                accessible_text("scale-preview-value", format!("{target:.0}%"))
-                                    .w(px(64.))
-                                    .text_right()
-                                    .text_size(value_type.font_size)
-                                    .line_height(value_type.line_height)
-                                    .font_weight(FontWeight(value_type.font_weight as f32))
-                                    .text_color(color(ColorRole::PRIMARY)),
+                                div()
+                                    .flex()
+                                    .flex_shrink_0()
+                                    .items_center()
+                                    .justify_center()
+                                    .min_w(rem(60.))
+                                    .px(rem(12.))
+                                    .py(rem(4.))
+                                    .rounded_full()
+                                    .bg(color(ColorRole::SECONDARY_CONTAINER))
+                                    .child(
+                                        accessible_text(
+                                            "scale-preview-value",
+                                            format!("{target:.0}%"),
+                                        )
+                                        .text_size(badge_type.font_size)
+                                        .line_height(badge_type.line_height)
+                                        .font_weight(FontWeight(badge_type.font_weight as f32))
+                                        .text_color(color(ColorRole::ON_SECONDARY_CONTAINER)),
+                                    ),
                             ),
                     )
                     .child(
                         div()
                             .w_full()
-                            .h(panel_size.height - px(96.))
-                            .flex_shrink_0()
-                            .overflow_hidden()
+                            .flex_1()
+                            .min_h_0()
                             .rounded(RADIUS_LARGE)
-                            .bg(color(ColorRole::SURFACE_CONTAINER_LOW))
-                            .p(rem(16.))
-                            .child(LocalScale {
-                                rem_size: px(gpui_kit_material::tokens::typography::BASE_PX
-                                    * target
-                                    / 100.),
-                                child: note.into_any_element(),
-                            }),
-                    )
-                    .child(
-                        TileScale::Regular
-                            .support("scale-preview-apply", course2md::tr!("松开鼠标后应用"))
-                            .h(rem(20.))
-                            .flex_shrink_0(),
+                            .bg(color(ColorRole::SURFACE_CONTAINER))
+                            .border_1()
+                            .border_color(color(ColorRole::OUTLINE_VARIANT))
+                            .p(px(12.))
+                            .child(
+                                div()
+                                    .size_full()
+                                    .overflow_hidden()
+                                    .rounded(RADIUS_CARD)
+                                    .child(LocalScale {
+                                        rem_size: px(
+                                            gpui_kit_material::tokens::typography::BASE_PX * target
+                                                / 100.,
+                                        ),
+                                        child: note.into_any_element(),
+                                    }),
+                            ),
                     ),
             )
             .into_any_element(),
@@ -731,7 +948,15 @@ impl Desktop {
         let light = self.palette_preset(false, appearance.light, light_corners, cx);
         let dark = self.palette_preset(true, appearance.dark, dark_corners, cx);
         let application = self.preferences.application();
-        let percent = (application.font_scale * 100.).round() as u16;
+        let active_percent = (application.font_scale * 100.).round() as u16;
+        let shown_scale = if self.settings_ui.scale_dragging.get() {
+            application.font_scale
+        } else {
+            self.settings_ui
+                .scale_preview
+                .unwrap_or(application.font_scale)
+        };
+        let percent = (shown_scale * 100.).round() as u16;
         let pending_percent = pending_scale_percent(
             application.font_scale,
             self.settings_ui
@@ -760,7 +985,11 @@ impl Desktop {
                             .icon(symbols::restart_alt())
                             .child(course2md::tr!("恢复 100%"))
                             .accessibility_label(course2md::tr!("恢复 100%"))
-                            .disabled(percent == 100 && pending_percent.is_none())
+                            .disabled(
+                                active_percent == 100
+                                    && pending_percent.is_none()
+                                    && self.settings_ui.scale_preview.is_none(),
+                            )
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.preview_font_scale(100., cx);
                                 this.flush_font_scale(cx);
@@ -777,9 +1006,9 @@ impl Desktop {
                 div()
                     .id("app-font-scale-control")
                     .w_full()
-                    .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _, _| {
+                    .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _, cx| {
                         if event.button == MouseButton::Left {
-                            this.begin_font_scale();
+                            this.begin_font_scale(cx);
                         }
                     }))
                     .capture_any_mouse_up(cx.listener(|this, event: &MouseUpEvent, _, cx| {
@@ -809,14 +1038,6 @@ impl Desktop {
             .min_w_0()
             .gap(rem(28.))
             .child(self.settings_fields(
-                "appearance-theme",
-                course2md::tr!("主题"),
-                vec![
-                    ui::Field::below("appearance-mode-row", course2md::tr!("外观模式"), modes),
-                    previews,
-                ],
-            ))
-            .child(self.settings_fields(
                 "appearance-motion",
                 course2md::tr!("界面偏好"),
                 vec![
@@ -837,6 +1058,14 @@ impl Desktop {
                         }),
                     )
                     .hint(course2md::tr!("关闭过渡动画和进度条的流动效果")),
+                ],
+            ))
+            .child(self.settings_fields(
+                "appearance-theme",
+                course2md::tr!("主题"),
+                vec![
+                    ui::Field::below("appearance-mode-row", course2md::tr!("外观模式"), modes),
+                    previews,
                 ],
             ))
             .child(self.settings_fields(
