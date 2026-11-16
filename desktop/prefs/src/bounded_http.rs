@@ -49,6 +49,77 @@ pub(crate) enum BoundedReadError {
     TooLarge,
 }
 
+/// 有界响应。
+pub(crate) struct BoundedResponse {
+    pub status: u16,
+    pub body: Vec<u8>,
+}
+
+/// 统一传输错误分类：尚未发出（NotSent）、网络/超时中断（Network）、响应体超限（TooLarge）。
+pub(crate) enum BoundedTransportError {
+    NotSent,
+    Network,
+    TooLarge(u16),
+}
+
+fn finish_bounded(
+    result: Result<ureq::http::Response<ureq::Body>, ureq::Error>,
+    max: u64,
+) -> Result<BoundedResponse, BoundedTransportError> {
+    let response = match result {
+        Ok(response) => response,
+        Err(
+            ureq::Error::HostNotFound
+            | ureq::Error::ConnectionFailed
+            | ureq::Error::BadUri(_)
+            | ureq::Error::Timeout(ureq::Timeout::Resolve | ureq::Timeout::Connect),
+        ) => return Err(BoundedTransportError::NotSent),
+        Err(ureq::Error::Io(error)) if error.kind() == std::io::ErrorKind::ConnectionRefused => {
+            return Err(BoundedTransportError::NotSent);
+        }
+        Err(_) => return Err(BoundedTransportError::Network),
+    };
+    let status = response.status().as_u16();
+    let body = read_bounded(response, max).map_err(|error| match error {
+        BoundedReadError::TooLarge => BoundedTransportError::TooLarge(status),
+        BoundedReadError::Network => BoundedTransportError::Network,
+    })?;
+    Ok(BoundedResponse { status, body })
+}
+
+pub(crate) fn get_bounded(
+    endpoint: &str,
+    authorization: Option<&Secret>,
+    connect: Duration,
+    read: Duration,
+    total: Duration,
+    max: u64,
+) -> Result<BoundedResponse, BoundedTransportError> {
+    let agent = json_agent(connect, read, None, total);
+    let call = json_call(agent.get(endpoint), authorization);
+    finish_bounded(call.call(), max)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn post_bounded(
+    endpoint: &str,
+    content_type: &str,
+    body: &[u8],
+    authorization: Option<&Secret>,
+    connect: Duration,
+    read: Duration,
+    write: Duration,
+    total: Duration,
+    max: u64,
+) -> Result<BoundedResponse, BoundedTransportError> {
+    let agent = json_agent(connect, read, Some(write), total);
+    let call = json_call(
+        agent.post(endpoint).header("Content-Type", content_type),
+        authorization,
+    );
+    finish_bounded(call.send(body), max)
+}
+
 /// 按 max+1 读取；超过 max 报 TooLarge，IO 失败报 Network。
 pub(crate) fn read_bounded(
     response: ureq::http::Response<ureq::Body>,

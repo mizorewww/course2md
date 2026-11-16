@@ -950,7 +950,7 @@ fn batch_failure_message(
         return None;
     }
     let total = outcome.total?;
-    let unfinished = total.checked_sub(outcome.completed?).filter(|n| *n > 0)?;
+    let unfinished = outcome.unfinished_count().flatten()?;
     let count = if part == NotePart::Proofreading {
         c2m_i18n::tr!(
             "{} 段中 {} 段保留原文",

@@ -22,12 +22,6 @@ pub struct FolderContext {
     pub folders: Vec<(u64, String)>,
 }
 
-/// What a folder context is asked for.
-pub enum FolderPlace<'a> {
-    /// The note folder at this path.
-    Note(&'a Path),
-}
-
 /// Why the folder picker and moves are unavailable.
 pub fn folders_unavailable() -> &'static str {
     c2m_i18n::tr!("文件夹暂不可用，请重新扫描笔记库。")
@@ -138,10 +132,9 @@ impl Records {
         }
     }
 
-    /// Where `place` is filed, as the folder picker and the reader's crumb show it.
-    pub fn folder_context(&self, place: FolderPlace) -> FolderContext {
+    /// Where `path` is filed, as the folder picker and the reader's crumb show it.
+    pub fn folder_context(&self, path: &Path) -> FolderContext {
         let library = &self.library;
-        let FolderPlace::Note(path) = place;
         let storage = library
             .courses
             .iter()

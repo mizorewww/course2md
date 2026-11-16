@@ -154,18 +154,34 @@ impl OfflineVideoRequest {
         {
             return None;
         }
-        let root = self.library_root.canonicalize().ok()?;
-        let work = self.work_dir.canonicalize().ok()?;
-        if work != root.join(".course2md/work").join(&self.task_id)
-            || !self.note_dir.canonicalize().ok()?.starts_with(&root)
-        {
+        let expected_work = self
+            .library_root
+            .join(".course2md/work")
+            .join(&self.task_id);
+        let matches_layout = (self.work_dir == expected_work
+            && self.note_dir.starts_with(&self.library_root))
+            || (|| {
+                let root = self.library_root.canonicalize().ok()?;
+                let work = self.work_dir.canonicalize().ok()?;
+                let note = self.note_dir.canonicalize().ok()?;
+                Some(
+                    work == root.join(".course2md/work").join(&self.task_id)
+                        && note.starts_with(&root),
+                )
+            })()
+            .unwrap_or(false);
+        if !matches_layout {
             return None;
         }
-        let media = work.join("media.mp4").canonicalize().ok()?;
-        let metadata = media.metadata().ok()?;
-        // The system player is started through the shell, which rejects `\\?\` paths.
-        (media.parent() == Some(work.as_path()) && metadata.is_file() && metadata.len() > 0)
-            .then(|| c2m_config::config::simplify_verbatim(media))
+        let media = self.work_dir.join("media.mp4");
+        let metadata = std::fs::symlink_metadata(&media).ok()?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() == 0 {
+            return None;
+        }
+        media
+            .canonicalize()
+            .ok()
+            .map(c2m_config::config::simplify_verbatim)
     }
 }
 

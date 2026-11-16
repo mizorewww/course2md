@@ -154,6 +154,16 @@ pub fn recover_library(root: &Path) -> Vec<artifact::NoteAttention> {
     attention
 }
 
+fn record_attention(scan: &mut LibraryScan, attention: artifact::NoteAttention) {
+    match attention {
+        artifact::NoteAttention::Failed { note, message } => {
+            scan.issues
+                .push(c2m_i18n::tr!("{}：{}", note.display(), message))
+        }
+        attention => scan.attention.push(attention),
+    }
+}
+
 pub fn scan_library(root: &Path) -> Result<LibraryScan> {
     let mut scan = LibraryScan {
         courses: Vec::new(),
@@ -164,16 +174,8 @@ pub fn scan_library(root: &Path) -> Result<LibraryScan> {
     if !root.exists() {
         return Ok(scan);
     }
-    for attention in recover_library(root) {
-        match attention {
-            artifact::NoteAttention::Failed { note, message } => {
-                scan.issues
-                    .push(c2m_i18n::tr!("{}：{}", note.display(), message))
-            }
-            attention => scan.attention.push(attention),
-        }
-    }
-    // Hidden folders are never notes; nor is anything deeper than eight folders.
+    // Single-pass walk: `recover_folder(dir)` completes any interrupted note swap
+    // in `dir` before `WalkDir` reads `dir`'s child entries on the next iteration.
     let mut walk = walkdir::WalkDir::new(root)
         .max_depth(8)
         .into_iter()
@@ -192,6 +194,15 @@ pub fn scan_library(root: &Path) -> Result<LibraryScan> {
             }
         };
         let dir = entry.path();
+        if entry.file_type().is_dir() {
+            for item in artifact::recover_folder(dir) {
+                record_attention(&mut scan, item);
+            }
+        } else if entry.path_is_symlink()
+            && let Some(item) = artifact::note_attention(dir)
+        {
+            record_attention(&mut scan, item);
+        }
         if !entry.file_type().is_dir() || entry.depth() == 0 {
             continue;
         }
@@ -334,12 +345,7 @@ fn processing_issues(manifest: &artifact::Manifest) -> Vec<ProcessingIssue> {
         (ProcessingStage::Summary, &manifest.outcomes.summary),
     ]
     .into_iter()
-    .filter(|(_, outcome)| {
-        matches!(
-            outcome.status,
-            artifact::Status::Failed | artifact::Status::Partial
-        )
-    })
+    .filter(|(_, outcome)| outcome.is_incomplete())
     .map(|(stage, outcome)| ProcessingIssue {
         stage,
         outcome: outcome.clone(),

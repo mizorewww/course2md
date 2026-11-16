@@ -9,7 +9,6 @@ pub mod environment;
 pub mod model_discovery;
 pub mod model_status;
 pub mod preferences;
-pub mod provider_serde;
 pub mod service_binding;
 pub mod service_test;
 pub mod setup;

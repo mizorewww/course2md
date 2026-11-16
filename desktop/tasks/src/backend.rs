@@ -445,18 +445,32 @@ fn reader(
 }
 
 fn line_event(line: &str, json: bool, redactions: &Redactions) -> Event {
-    let line = redactions.line(line);
     if !json {
-        return Event::log(line);
+        return Event::log(redactions.line(line));
     }
-    match serde_json::from_str(&line) {
-        Ok(event) => Event::Engine(event),
-        // A JSON object this build does not recognize is a
-        // protocol drift, not a log line; keep it visible.
-        Err(error) if line.starts_with('{') => {
-            Event::log(c2m_i18n::tr!("无法识别的任务事件（{}）：{}", error, line))
+    match serde_json::from_str::<serde_json::Value>(line) {
+        Ok(mut value) => {
+            if !redactions.0.is_empty() {
+                redactions.value(&mut value);
+            }
+            match serde_json::from_value::<EngineEvent>(value.clone()) {
+                Ok(event) => Event::Engine(event),
+                Err(error) if value.is_object() => {
+                    let text = serde_json::to_string(&value).unwrap_or_default();
+                    Event::log(c2m_i18n::tr!("无法识别的任务事件（{}）：{}", error, text))
+                }
+                Err(_) => Event::log(serde_json::to_string(&value).unwrap_or_default()),
+            }
         }
-        Err(_) => Event::log(line),
+        Err(error) if line.starts_with('{') => {
+            let redacted = redactions.line(line);
+            Event::log(c2m_i18n::tr!(
+                "无法识别的任务事件（{}）：{}",
+                error,
+                redacted
+            ))
+        }
+        Err(_) => Event::log(redactions.line(line)),
     }
 }
 

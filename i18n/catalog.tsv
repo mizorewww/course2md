@@ -459,8 +459,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 内容仍在处理中，请停止后重新定位	内容仍在处理中，请停止后重新定位	The content is still being processed, please stop and then relocate.	內容仍在處理中，請停止後重新定位	内容はまだ処理中です。停止してから場所を指定し直してください。
 内嵌字幕无法读取	内嵌字幕无法读取	Embedded subtitles cannot be read	內嵌字幕無法讀取	埋め込み字幕を読み取れません
 内嵌字幕（轨道 {}）	内嵌字幕（轨道 {}）	Embedded subtitles (track {})	內嵌字幕（軌道 {}）	埋め込み字幕 (トラック {})
-内置图片为蓝色卡片，校对后应将原文的 red 改为 blue	内置图片为蓝色卡片，校对后应将原文的 red 改为 blue	The built-in picture is a blue card. After proofreading, the red in the original text should be changed to blue.	內建圖片為藍色卡片，校對後應將原文的 red 改為 blue	内蔵画像は青いカードです。校正後は原文の red を blue に変更する必要があります。
-内置音频：The blue notebook contains seven pages.；回应未保留其中的关键信息	内置音频：The blue notebook contains seven pages.；回应未保留其中的关键信息	Built-in audio: The blue notebook contains seven pages.; the response did not keep its key information	內建音訊：The blue notebook contains seven pages.；回應未保留其中的關鍵資訊	内蔵音声：The blue notebook contains seven pages.；応答に重要な情報が残っていません
+语音识别测试未返回有效文字	语音识别测试未返回有效文字	Speech recognition test returned no valid text	語音辨識測試未傳回有效文字	音声認識テストから有効なテキストが返されませんでした
 写 checkpoint {} / Failed to write checkpoint {}	写 checkpoint {}	Failed to write checkpoint {}	寫 checkpoint {}	checkpoint {} の書き込みに失敗しました
 写 {} / Failed to write {}	写 {}	Failed to write {}	寫 {}	{} の書き込みに失敗しました
 准备 Apple 识别模型	准备 Apple 识别模型	Prepare Apple speech model	準備 Apple 辨識模型	Apple 音声認識モデルを準備
@@ -1487,7 +1486,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 目标文件缺少目录	目标文件缺少目录	Target file is missing directory	目標檔案缺少目錄	ターゲットファイルのディレクトリがありません
 目标缺少这次移动的识别记录，未修改目标内容	目标缺少这次移动的识别记录，未修改目标内容	The destination is missing the identification record for this move; its contents were not modified.	目標缺少這次移動的識別記錄，未修改目標內容	移動先にこの移動の識別記録がないため、内容は変更されていません。
 跳过设置	跳过设置	Skip setup	略過設定	セットアップをスキップ
-短文讲述光合作用使用阳光并释放氧气，摘要未保留这些关键信息	短文讲述光合作用使用阳光并释放氧气，摘要未保留这些关键信息	The short text says photosynthesis uses sunlight and releases oxygen; the summary did not keep this key information.	短文講述光合作用使用陽光並釋放氧氣，摘要未保留這些關鍵資訊	短い文章では光合成が太陽光を使い酸素を放出すると述べていますが、要約にはこの重要な情報が残っていません
 移动位置已经变化，原数据和副本已保留	移动位置已经变化，原数据和副本已保留	The move location has changed; the original data and the copy were retained.	移動位置已經變化，原資料和副本已保留	移動先が変わりました。元のデータとコピーは保持されています。
 移动笔记库	移动笔记库	Move note library	移動筆記庫	ノートライブラリを移動
 移动笔记库…	移动笔记库…	Move note library…	移動筆記庫…	ノートライブラリを移動…
@@ -1534,7 +1532,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 笔记清单损坏 / Invalid note manifest	笔记清单损坏	Invalid note manifest	筆記清單損壞	ノートマニフェストが破損しています
 笔记目录，或存放多份笔记的上级目录 / A note directory or a folder of notes	笔记目录，或存放多份笔记的上级目录	A note directory or a folder of notes	筆記目錄，或存放多份筆記的上級目錄	ノート ディレクトリ、または複数のノートが保存される親ディレクトリ
 笔记详情	笔记详情	Note details	筆記詳情	ノートの詳細
-第一段应纠正 have / book 的语法；第二段应保留水在零摄氏度结冰的原意	第一段应纠正 have / book 的语法；第二段应保留水在零摄氏度结冰的原意	The first paragraph should correct the grammar of have / book; the second paragraph should retain the original meaning of water freezing at zero degrees Celsius	第一段應糾正 have / book 的語法；第二段應保留水在零攝氏度結冰的原意	最初の段落では、have / book の文法を修正する必要があります。2 番目の段落は、摂氏 0 度で水が凍るという本来の意味を保持する必要があります。
 等待 yt-dlp 结束失败 / Failed waiting for yt-dlp to exit	等待 yt-dlp 结束失败	Failed waiting for yt-dlp to exit	等待 yt-dlp 結束失敗	yt-dlp の終了待ちに失敗しました
 等待准备进度	等待准备进度	Waiting for preparation progress	等待準備進度	準備の進行を待っています
 等待响应	等待响应	Waiting for response	等待回應	応答を待っています

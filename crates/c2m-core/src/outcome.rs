@@ -105,6 +105,18 @@ impl Outcome {
             ..Self::succeeded()
         }
     }
+    pub fn is_incomplete(&self) -> bool {
+        matches!(self.status, Status::Failed | Status::Partial)
+    }
+    /// `None` when not incomplete; `Some(Some(n))` when `total` and `completed`
+    /// give an exact remaining count, or `Some(None)` when incomplete without counts.
+    pub fn unfinished_count(&self) -> Option<Option<usize>> {
+        self.is_incomplete()
+            .then(|| match (self.completed, self.total) {
+                (Some(done), Some(total)) => Some(total.saturating_sub(done)),
+                _ => None,
+            })
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,7 +142,7 @@ impl Outcomes {
         ]
         .into_iter()
         .chain(self.exports.values())
-        .any(|o| matches!(o.status, Status::Failed | Status::Partial))
+        .any(Outcome::is_incomplete)
     }
 }
 

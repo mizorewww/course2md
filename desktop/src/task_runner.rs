@@ -453,7 +453,6 @@ impl Desktop {
                     .and_then(|follow| {
                         follow.submitted(self.import.preview_generation, id.clone())
                     });
-                self.import.source_editor_open = false;
                 self.scrolls[Page::New as usize].set_offset(point(px(0.), px(0.)));
             }
             self.select_task(&id, cx);

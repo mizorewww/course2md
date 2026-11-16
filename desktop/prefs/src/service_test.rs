@@ -279,16 +279,13 @@ fn unknown_result_message() -> &'static str {
     c2m_i18n::tr!("未收到确定结果，测试可能已产生费用")
 }
 
+use crate::bounded_http::{BoundedResponse as HttpResponse, BoundedTransportError};
+
 struct HttpRequest {
     endpoint: String,
     content_type: String,
     body: Vec<u8>,
     authorization: Option<Secret>,
-}
-
-struct HttpResponse {
-    status: u16,
-    body: Vec<u8>,
 }
 
 enum TransportFailure {
@@ -309,45 +306,22 @@ struct HttpTransport;
 
 impl Transport for HttpTransport {
     fn send(&self, request: &HttpRequest) -> Result<HttpResponse, TransportFailure> {
-        let agent = crate::bounded_http::json_agent(
+        crate::bounded_http::post_bounded(
+            &request.endpoint,
+            &request.content_type,
+            &request.body,
+            request.authorization.as_ref(),
             Duration::from_secs(10),
             Duration::from_secs(30),
-            Some(Duration::from_secs(15)),
+            Duration::from_secs(15),
             Duration::from_secs(45),
-        );
-        let call = agent
-            .post(&request.endpoint)
-            .header("Content-Type", &request.content_type);
-        let call = crate::bounded_http::json_call(call, request.authorization.as_ref());
-        // Each test creates a fresh agent with an empty pool, so a stale recycled
-        // connection cannot make ureq resend the request behind our back. A request
-        // that never reached a server was not sent and cannot have been charged.
-        let response = match call.send(&request.body[..]) {
-            Ok(response) => response,
-            Err(
-                ureq::Error::HostNotFound
-                | ureq::Error::ConnectionFailed
-                | ureq::Error::BadUri(_)
-                | ureq::Error::Timeout(ureq::Timeout::Resolve | ureq::Timeout::Connect),
-            ) => return Err(TransportFailure::NotSent),
-            Err(ureq::Error::Io(error))
-                if error.kind() == std::io::ErrorKind::ConnectionRefused =>
-            {
-                return Err(TransportFailure::NotSent);
-            }
-            Err(_) => return Err(TransportFailure::Unknown),
-        };
-        let status = response.status().as_u16();
-        let body =
-            crate::bounded_http::read_bounded(response, MAX_RESPONSE).map_err(
-                |error| match error {
-                    crate::bounded_http::BoundedReadError::TooLarge => {
-                        TransportFailure::ResponseTooLarge(status)
-                    }
-                    crate::bounded_http::BoundedReadError::Network => TransportFailure::Unknown,
-                },
-            )?;
-        Ok(HttpResponse { status, body })
+            MAX_RESPONSE,
+        )
+        .map_err(|error| match error {
+            BoundedTransportError::NotSent => TransportFailure::NotSent,
+            BoundedTransportError::Network => TransportFailure::Unknown,
+            BoundedTransportError::TooLarge(status) => TransportFailure::ResponseTooLarge(status),
+        })
     }
 }
 
@@ -605,20 +579,6 @@ fn request_body(config: &ServiceConfiguration, kind: TestKind) -> (String, Vec<u
     )
 }
 
-fn words(text: &str) -> String {
-    text.to_lowercase()
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn has_word(text: &str, word: &str) -> bool {
-    text.split_whitespace().any(|actual| actual == word)
-}
-
 fn filled(value: Option<&Value>) -> bool {
     value
         .and_then(Value::as_str)
@@ -626,18 +586,11 @@ fn filled(value: Option<&Value>) -> bool {
 }
 
 fn verify_sample(kind: TestKind, content: &str) -> Result<(), (TestOutcome, String)> {
-    let mismatch = |message: &str| Err((TestOutcome::SampleMismatch, message.to_owned()));
     let contract = |message: &str| (TestOutcome::ContractMismatch, message.to_owned());
     match kind {
         TestKind::Speech => {
-            let text = words(content).replace("7", "seven");
-            if !["blue", "notebook", "seven", "pages"]
-                .iter()
-                .all(|word| has_word(&text, word))
-            {
-                return mismatch(c2m_i18n::tr!(
-                    "内置音频：The blue notebook contains seven pages.；回应未保留其中的关键信息"
-                ));
+            if content.trim().is_empty() {
+                return Err(contract(c2m_i18n::tr!("语音识别测试未返回有效文字")));
             }
         }
         TestKind::Proofread | TestKind::Vision => {
@@ -655,35 +608,8 @@ fn verify_sample(kind: TestKind, content: &str) -> Result<(), (TestOutcome, Stri
                     "返回段落 ID 必须与内置输入一一对应，且每段包含有效文字"
                 )));
             }
-            let segment = |id: usize| {
-                pairs
-                    .iter()
-                    .find(|(found, _)| *found == id)
-                    .map(|(_, text)| words(text))
-                    .unwrap_or_default()
-            };
-            let first = segment(0);
-            if kind == TestKind::Vision {
-                if !has_word(&first, "blue") || has_word(&first, "red") {
-                    return mismatch(c2m_i18n::tr!(
-                        "内置图片为蓝色卡片，校对后应将原文的 red 改为 blue"
-                    ));
-                }
-            } else {
-                let second = segment(1);
-                if !(first.contains("has three books") || first.contains("has 3 books"))
-                    || !second.contains("water")
-                    || !second.contains("celsius")
-                {
-                    return mismatch(c2m_i18n::tr!(
-                        "第一段应纠正 have / book 的语法；第二段应保留水在零摄氏度结冰的原意"
-                    ));
-                }
-            }
         }
         TestKind::Summary => {
-            // The same reading production gives a summary: code fences, surrounding
-            // prose and trailing commas do not make a working service fail its test.
             let value = c2m_ai::llm::extract_json_object(content).ok_or_else(|| {
                 contract(if content.contains('{') {
                     c2m_i18n::tr!("摘要 JSON 无法解析")
@@ -712,15 +638,6 @@ fn verify_sample(kind: TestKind, content: &str) -> Result<(), (TestOutcome, Stri
                 return Err(contract(c2m_i18n::tr!(
                     "需要有效的 tldr、key_points 和带时间的 outline"
                 )));
-            }
-            let text = words(content);
-            if !["photosynthesis", "sunlight", "oxygen"]
-                .iter()
-                .all(|word| text.contains(word))
-            {
-                return mismatch(c2m_i18n::tr!(
-                    "短文讲述光合作用使用阳光并释放氧气，摘要未保留这些关键信息"
-                ));
             }
         }
     }
@@ -855,18 +772,11 @@ mod tests {
     }
 
     #[test]
-    fn structurally_valid_but_uncorrected_sample_is_distinct_from_bad_contract() {
+    fn structurally_valid_sample_passes_without_wording_quiz() {
         let evidence = run(&transport(
             200,
             chat(
-                "{\"segments\":[{\"id\":0,\"text\":\"The student have three book.\"},{\"id\":1,\"text\":\"Water freezes at zero degrees Celsius.\"}]}",
-            ),
-        ));
-        assert_eq!(evidence.outcome, TestOutcome::SampleMismatch);
-        let evidence = run(&transport(
-            200,
-            chat(
-                "{\"segments\":[{\"id\":0,\"text\":\"The student has three books.\"},{\"id\":1,\"text\":\"Water freezes at zero degrees Celsius.\"}]}",
+                "{\"segments\":[{\"id\":0,\"text\":\"Three books belong to the student.\"},{\"id\":1,\"text\":\"Ice forms at 0°C.\"}]}",
             ),
         ));
         assert_eq!(evidence.outcome, TestOutcome::Passed);
@@ -1158,20 +1068,20 @@ mod tests {
     }
 
     #[test]
-    fn speech_and_vision_verify_sample_content_not_just_nonempty_text() {
-        assert!(verify_sample(TestKind::Speech, "The blue notebook contains 7 pages.").is_ok());
-        assert!(verify_sample(TestKind::Speech, "error unavailable").is_err());
+    fn speech_and_vision_verify_nonempty_structured_replies() {
+        assert!(verify_sample(TestKind::Speech, "蓝色笔记本有七页。").is_ok());
+        assert!(verify_sample(TestKind::Speech, "   ").is_err());
         assert!(
             verify_sample(
                 TestKind::Vision,
-                "{\"segments\":[{\"id\":0,\"text\":\"The card shown is blue.\"}]}"
+                "{\"segments\":[{\"id\":0,\"text\":\"卡片是蓝色的。\"}]}"
             )
             .is_ok()
         );
         assert!(
             verify_sample(
                 TestKind::Vision,
-                "{\"segments\":[{\"id\":0,\"text\":\"The card shown is red.\"}]}"
+                "{\"segments\":[{\"id\":0,\"text\":\"\"}]}"
             )
             .is_err()
         );

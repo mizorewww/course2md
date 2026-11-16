@@ -684,7 +684,6 @@ impl Desktop {
         if !self.prepare_workbench_input(window, cx) {
             return;
         }
-        self.import.source_editor_open = true;
         self.navigate(Page::New, cx);
         if self.online(cx) {
             self.inputs[&Field::Source].update(cx, |input, cx| input.focus(window, cx));

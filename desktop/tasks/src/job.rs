@@ -265,7 +265,7 @@ pub fn job_exit_status(success: bool, cancelled: bool) -> &'static str {
 mod tests {
     use super::{
         DRAFT_SAVE_DELAY, EVENT_REPAINT_INTERVAL, IDLE_POLL_SLEEP, MIN_POLL_SLEEP, RESULT_SHOWN,
-        Work, earliest_deadline, poll_timeout,
+        Work, poll_timeout,
     };
     use std::time::{Duration, Instant};
 
@@ -309,18 +309,6 @@ mod tests {
         work.closing = true;
         work.end_start("b");
         assert!(!work.claim_start("a"), "nothing starts while closing");
-    }
-
-    #[test]
-    fn absent_deadlines_do_not_hide_other_deadlines() {
-        let now = Instant::now();
-        assert_eq!(earliest_deadline(None, None), None);
-        assert_eq!(earliest_deadline(Some(now), None), Some(now));
-        assert_eq!(earliest_deadline(None, Some(now)), Some(now));
-        assert_eq!(
-            earliest_deadline(Some(now + Duration::from_secs(2)), Some(now)),
-            Some(now)
-        );
     }
 
     /// A deadline already past still sleeps on a real timer, so the loop yields.

@@ -1,19 +1,14 @@
 //! The processing choices a note is generated with: what the workbench edits
 //! for the current input, and what a task's configuration implies.
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ConversionOptions {
-    #[serde(with = "crate::provider_serde")]
     pub provider: Option<c2m_config::config::AsrProvider>,
-    #[serde(with = "text_source_index")]
     pub source_mode: c2m_config::config::TranscriptSource,
     pub llm: bool,
-    #[serde(default)]
     pub summarize: bool,
-    #[serde(default)]
     pub vision: bool,
     /// Bilingual notes: target language code, or None for no translation.
-    #[serde(default)]
     pub translate: Option<String>,
     pub keep_video: bool,
     pub formats: [bool; 3],
@@ -55,13 +50,6 @@ impl ConversionOptions {
         }
     }
 
-    /// These options as a task plan records them: the configuration keeps
-    /// only what takes effect (vision only with proofreading).
-    pub fn as_planned(&self) -> Self {
-        let mut config = c2m_config::settings::ConfigFile::default();
-        self.apply_to(&mut config);
-        Self::from_config(&config)
-    }
     pub fn apply_to(&self, config: &mut c2m_config::settings::ConfigFile) {
         use c2m_config::config::OutputFormat;
         config.defaults.provider = self.provider;
@@ -121,32 +109,4 @@ pub fn provider_label(provider: Option<c2m_config::config::AsrProvider>) -> &'st
 
 pub fn provider_from_id(id: &str) -> Option<c2m_config::config::AsrProvider> {
     c2m_config::config::AsrProvider::from_id(id)
-}
-
-/// The text source choice is stored as its historical index (0 auto,
-/// 1 subtitles, 2 speech recognition).
-mod text_source_index {
-    use c2m_config::config::TranscriptSource;
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S: Serializer>(
-        value: &TranscriptSource,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        serializer.serialize_u64(match value {
-            TranscriptSource::Auto => 0,
-            TranscriptSource::Subtitle => 1,
-            TranscriptSource::Asr => 2,
-        })
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<TranscriptSource, D::Error> {
-        Ok(match u64::deserialize(deserializer)? {
-            1 => TranscriptSource::Subtitle,
-            2 => TranscriptSource::Asr,
-            _ => TranscriptSource::Auto,
-        })
-    }
 }

@@ -11,7 +11,7 @@ use crate::{
     reader_navigation as nav, source, symbols, ui, workspace,
 };
 use desktop_reader_core::reader::*;
-use desktop_store::records::{FolderPlace, Records};
+use desktop_store::records::Records;
 use gpui::{prelude::*, *};
 use gpui_base::{
     TextSelection, h_flex,
@@ -4522,10 +4522,7 @@ impl ReaderPage {
         let library = course2md::tr!("笔记库");
         let crumb = match &self.opened.preview {
             Some(preview) => {
-                let folder = self
-                    .records
-                    .read(cx)
-                    .folder_context(FolderPlace::Note(&preview.course.dir));
+                let folder = self.records.read(cx).folder_context(&preview.course.dir);
                 match folder.load_error {
                     None => format!("{library} · {}", folder.label),
                     Some(_) => library.to_owned(),

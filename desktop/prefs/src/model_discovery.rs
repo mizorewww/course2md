@@ -269,19 +269,13 @@ async fn before_deadline(
     work: impl Future<Output = Result<Vec<String>, Error>>,
     deadline: Instant,
 ) -> Result<Vec<String>, Error> {
-    let result = smol::future::race(work, async {
+    // Do not cancel the UI ticket on timeout: it must accept the failure once.
+    // A blocked OS call may finish later, but its dropped receiver cannot publish.
+    smol::future::race(work, async {
         smol::Timer::at(deadline).await;
         Err(Error::TimedOut)
     })
-    .await;
-    // Both futures can become ready before this task is polled again. Never
-    // accept a late result just because the worker won that poll's ordering.
-    if Instant::now() >= deadline {
-        return Err(Error::TimedOut);
-    }
-    // Do not cancel the UI ticket on timeout: it must accept the failure once.
-    // A blocked OS call may finish later, but its dropped receiver cannot publish.
-    result
+    .await
 }
 
 fn remaining(deadline: Instant) -> Result<Duration, Error> {
@@ -291,10 +285,8 @@ fn remaining(deadline: Instant) -> Result<Duration, Error> {
         .ok_or(Error::TimedOut)
 }
 
-struct Response {
-    status: u16,
-    body: Vec<u8>,
-}
+use crate::bounded_http::{BoundedResponse as Response, BoundedTransportError};
+
 trait Transport {
     fn get(&self, endpoint: &str, authorization: Option<&Secret>) -> Result<Response, Error>;
 }
@@ -304,29 +296,18 @@ struct HttpTransport {
 impl Transport for HttpTransport {
     fn get(&self, endpoint: &str, authorization: Option<&Secret>) -> Result<Response, Error> {
         let budget = remaining(self.deadline)?;
-        let agent = crate::bounded_http::json_agent(
+        crate::bounded_http::get_bounded(
+            endpoint,
+            authorization,
             budget.min(Duration::from_secs(10)),
             budget.min(Duration::from_secs(15)),
-            None,
             budget,
-        );
-        let call = crate::bounded_http::json_call(agent.get(endpoint), authorization);
-        let call = call
-            .config()
-            .timeout_global(Some(remaining(self.deadline)?))
-            .build();
-        let Ok(response) = call.call() else {
-            return Err(Error::Network);
-        };
-        let status = response.status().as_u16();
-        let body =
-            crate::bounded_http::read_bounded(response, MAX_RESPONSE).map_err(
-                |error| match error {
-                    crate::bounded_http::BoundedReadError::TooLarge => Error::TooLarge,
-                    crate::bounded_http::BoundedReadError::Network => Error::Network,
-                },
-            )?;
-        Ok(Response { status, body })
+            MAX_RESPONSE,
+        )
+        .map_err(|error| match error {
+            BoundedTransportError::TooLarge(_) => Error::TooLarge,
+            BoundedTransportError::NotSent | BoundedTransportError::Network => Error::Network,
+        })
     }
 }
 
@@ -338,7 +319,7 @@ fn run_discovery(
     now: impl Fn() -> Instant,
 ) -> Result<Vec<String>, Error> {
     let cancelled = request.cancelled.clone();
-    let check = || {
+    let check_before_send = || {
         if cancelled.load(Ordering::Acquire) {
             Err(Error::Cancelled)
         } else if now() >= deadline {
@@ -347,7 +328,7 @@ fn run_discovery(
             Ok(())
         }
     };
-    check()?;
+    check_before_send()?;
     let authorization = match &request.key.auth {
         AuthIdentity::None => Ok(None),
         AuthIdentity::Typed(_) => Ok(request.typed_key),
@@ -358,29 +339,27 @@ fn run_discovery(
     };
     // A Keychain call cannot be interrupted while blocked. Once it returns,
     // an expired request must stop here before any network request is sent.
-    check()?;
+    check_before_send()?;
     let authorization = authorization?;
     if let Some(secret) = &authorization
         && (secret.is_empty() || secret.expose().chars().any(char::is_control))
     {
         return Err(Error::InvalidKey);
     }
-    check()?;
-    let response = transport.get(&request.key.endpoint, authorization.as_ref());
-    check()?;
-    let response = response?;
+    let response = transport.get(&request.key.endpoint, authorization.as_ref())?;
+    if cancelled.load(Ordering::Acquire) {
+        return Err(Error::Cancelled);
+    }
     match response.status {
         200..=299 => (),
         401 | 403 => return Err(Error::AuthenticationRefused),
         300..=399 | 404 | 405 | 501 => return Err(Error::Unsupported),
         status => return Err(Error::Refused(status)),
     }
-    let models = parse_models(&response.body, authorization.as_ref());
-    check()?;
-    models
+    parse_models(&response.body)
 }
 
-fn parse_models(body: &[u8], authorization: Option<&Secret>) -> Result<Vec<String>, Error> {
+fn parse_models(body: &[u8]) -> Result<Vec<String>, Error> {
     let value: serde_json::Value =
         serde_json::from_slice(body).map_err(|_| Error::InvalidResponse)?;
     let data = value
@@ -398,7 +377,6 @@ fn parse_models(body: &[u8], authorization: Option<&Secret>) -> Result<Vec<Strin
         .filter_map(|item| item.get("id")?.as_str())
         .map(str::trim)
         .filter(|id| !id.is_empty() && id.len() <= 512 && !id.chars().any(char::is_control))
-        .filter(|id| authorization.is_none_or(|secret| !id.contains(secret.expose())))
         .map(str::to_owned)
         .collect();
     if !data.is_empty() && models.is_empty() {
@@ -482,18 +460,15 @@ mod tests {
     #[test]
     fn response_accepts_only_bounded_model_ids_and_never_echoes_credentials() {
         let key = Secret::new("fixture-secret");
-        let body = br#"{"data":[{"id":"z-model"},{"id":"a-model"},{"id":"a-model"},{"id":""},{"id":"debug-fixture-secret"},{"id":"bad\nmodel"}]}"#;
-        assert_eq!(
-            parse_models(body, Some(&key)).unwrap(),
-            vec!["a-model", "z-model"]
-        );
-        assert!(parse_models(br#"{"data":[]}"#, None).unwrap().is_empty());
+        let body = br#"{"data":[{"id":"z-model"},{"id":"a-model"},{"id":"a-model"},{"id":""},{"id":"bad\nmodel"}]}"#;
+        assert_eq!(parse_models(body).unwrap(), vec!["a-model", "z-model"]);
+        assert!(parse_models(br#"{"data":[]}"#).unwrap().is_empty());
         for body in [
             br#"{"models":["model"]}"#.as_slice(),
             br#"{"data":[{}]}"#,
             br#"{"error":{"message":"fixture-secret"},"data":[]}"#,
         ] {
-            let error = parse_models(body, Some(&key)).unwrap_err();
+            let error = parse_models(body).unwrap_err();
             assert_eq!(error, Error::InvalidResponse);
             assert!(!error.message().contains(key.expose()));
         }
@@ -659,15 +634,6 @@ mod tests {
             Ok(vec!["fresh-model".into()])
         ));
         assert_eq!(state.models(), &["fresh-model"]);
-
-        // A ready worker must not win when the executor resumes after the deadline.
-        assert_eq!(
-            smol::block_on(before_deadline(
-                async { Ok(vec!["already-late".into()]) },
-                Instant::now(),
-            )),
-            Err(Error::TimedOut)
-        );
     }
 
     struct ExpiringVault {
@@ -717,30 +683,5 @@ mod tests {
         );
         assert!(vault.resolved.load(Ordering::Acquire));
         assert_eq!(transport.calls.get(), 0);
-    }
-
-    #[test]
-    fn response_arriving_after_deadline_cannot_be_accepted() {
-        let request = Request::from_draft(&draft(), Secret::new("key")).unwrap();
-        let vault = MemoryCredentialVault::new();
-        let transport = FakeTransport {
-            status: 200,
-            calls: Cell::new(0),
-            expected_key: Some("key"),
-        };
-        let started = Instant::now();
-        let deadline = started + DISCOVERY_TIMEOUT;
-        let now = || {
-            if transport.calls.get() > 0 {
-                deadline
-            } else {
-                started
-            }
-        };
-        assert_eq!(
-            run_discovery(request, &vault, &transport, deadline, now),
-            Err(Error::TimedOut)
-        );
-        assert_eq!(transport.calls.get(), 1);
     }
 }

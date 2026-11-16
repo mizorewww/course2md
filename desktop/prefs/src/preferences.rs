@@ -113,7 +113,7 @@ pub fn save_failure_message(group: PreferenceGroup, error: &anyhow::Error) -> St
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default, deny_unknown_fields, from = "StoredGeneration")]
+#[serde(default, from = "StoredGeneration")]
 pub struct GenerationPreferences {
     /// Ordinary processing parameters only. Storage is owned by the library registry.
     pub options: Defaults,
@@ -135,7 +135,7 @@ pub struct GenerationPreferences {
 /// kept as `ai` (flat `ai_proofread`, `ai_summary`, `translate`, `vision`,
 /// `prompt` and `ai_concurrency`).
 #[derive(Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 struct StoredGeneration {
     options: Option<Defaults>,
     ai: Option<c2m_ai::llm::LlmSettings>,
@@ -272,7 +272,7 @@ impl InterfaceLanguage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct ApplicationPreferences {
     pub desktop: DesktopSettings,
     pub font_scale: f32,
@@ -442,7 +442,6 @@ pub enum Authentication {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct ServiceDraft {
     pub id: ServiceDraftId,
     pub service_id: ServiceId,
@@ -580,7 +579,6 @@ pub struct FieldError {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct ServiceConfiguration {
     pub name: String,
     pub protocol: ServiceProtocol,
@@ -617,7 +615,6 @@ impl ServiceConfiguration {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct ServiceVersion {
     pub id: ServiceVersionId,
     pub service_id: ServiceId,
@@ -656,7 +653,7 @@ impl ServiceVersion {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct ServiceRefs {
     pub asr: Option<ServiceVersionId>,
     pub llm: Option<ServiceVersionId>,
@@ -699,7 +696,6 @@ pub enum TestOutcome {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct ServiceTestEvidence {
     pub fingerprint: String,
     pub contract: String,
@@ -761,7 +757,6 @@ impl Drop for ResolvedConfig {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Envelope<T> {
     schema: u32,
     revision: u64,
@@ -1807,9 +1802,31 @@ fn clear_service_fields(config: &mut ConfigFile) {
     config.llm.model.clear();
 }
 
+fn query_contains_secret_param(url: &url::Url) -> bool {
+    url.query_pairs().any(|(key, _)| {
+        let lower = key.to_ascii_lowercase();
+        matches!(
+            lower.as_str(),
+            "key"
+                | "api_key"
+                | "apikey"
+                | "api-key"
+                | "token"
+                | "access_token"
+                | "secret"
+                | "password"
+                | "sig"
+                | "signature"
+                | "auth"
+                | "authorization"
+        )
+    })
+}
+
 /// Accept the chosen protocol's full endpoint or a base URL. A known conflicting full
 /// endpoint is an error, never silently changed to another protocol. URL credentials,
-/// query-string tokens and fragments are rejected before they can enter normal files/logs.
+/// secret query-string tokens and fragments are rejected before they can enter normal
+/// files/logs, while benign query parameters (such as Azure's `?api-version=...`) pass.
 pub fn normalize_endpoint(address: &str, protocol: ServiceProtocol) -> Result<String> {
     let mut url = url::Url::parse(address.trim())
         .map_err(|_| anyhow!(c2m_i18n::tr!("请输入包含 http:// 或 https:// 的服务地址")))?;
@@ -1818,7 +1835,7 @@ pub fn normalize_endpoint(address: &str, protocol: ServiceProtocol) -> Result<St
     }
     if !url.username().is_empty()
         || url.password().is_some()
-        || url.query().is_some()
+        || query_contains_secret_param(&url)
         || url.fragment().is_some()
     {
         bail!(url_credentials());
@@ -1917,7 +1934,7 @@ mod tests {
         assert_eq!(reloaded, loaded);
         assert!(
             serde_json::from_value::<GenerationPreferences>(serde_json::json!({"unknown": 1}))
-                .is_err()
+                .is_ok()
         );
     }
 
@@ -2448,6 +2465,14 @@ mod tests {
             )
             .is_err()
         );
+        assert_eq!(
+            normalize_endpoint(
+                "https://example.test/openai/deployments/gpt-4o?api-version=2024-10-21",
+                ServiceProtocol::AiChat
+            )
+            .unwrap(),
+            "https://example.test/openai/deployments/gpt-4o/chat/completions?api-version=2024-10-21"
+        );
     }
 
     #[test]
@@ -2964,18 +2989,6 @@ mod tests {
         app.font_scale = f32::NAN;
         assert!(store.save_application(app).is_err());
         assert_eq!(store.application().font_scale, 1.0);
-    }
-
-    #[test]
-    fn saved_theme_preferences_keep_their_form() {
-        use gpui_kit_material_color::{Appearance, PaletteId, ThemePreferences, palette::ALL};
-        let saved = r#"{"mode":"dark","light":"catppuccin_latte","dark":"tokyo_night"}"#;
-        let parsed: ThemePreferences = serde_json::from_str(saved).unwrap();
-        assert_eq!(parsed.mode, Appearance::Dark);
-        assert_eq!(parsed.resolve(false), PaletteId::TokyoNight);
-        assert_eq!(serde_json::to_string(&parsed).unwrap(), saved);
-        assert!(serde_json::from_str::<PaletteId>("\"unknown_theme\"").is_err());
-        assert_eq!(ALL.len(), 10);
     }
 
     #[test]

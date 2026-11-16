@@ -1,6 +1,6 @@
 use super::*;
 use crate::{symbols, ui};
-use desktop_store::records::{FolderContext, FolderPlace, folders_unavailable};
+use desktop_store::records::{FolderContext, folders_unavailable};
 use gpui_kit_material::{
     color::ColorRole,
     icons::Icon,
@@ -988,8 +988,6 @@ impl Desktop {
     }
 
     pub(crate) fn folder_context(&self, course: PathBuf, cx: &App) -> FolderContext {
-        self.records
-            .read(cx)
-            .folder_context(FolderPlace::Note(&course))
+        self.records.read(cx).folder_context(&course)
     }
 }

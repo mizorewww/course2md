@@ -2093,7 +2093,6 @@ impl Desktop {
         }
         self.invalidate_source();
         self.restore_draft(window, cx);
-        self.import.source_editor_open = true;
         true
     }
 

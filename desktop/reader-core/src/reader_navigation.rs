@@ -61,15 +61,16 @@ pub fn seek_url(target: &SourceTarget, seconds: f64) -> Option<String> {
 /// takes it and opens the file itself, in a player that can start at a time.
 const LOCAL_SEEK: &str = "course2md-local-seek:";
 
-/// Where 从此处观看 at `seconds` leads: the platform's seek URL for a web source, the
+/// Where 从此处观看 at `seconds` leads: the platform's seek URL for a web source (or
+/// the web source URL itself when the platform has no seek parameter), or the
 /// reader's own address for a local file.
 pub fn watch_url(target: &SourceTarget, seconds: f64) -> Option<String> {
+    if !seconds.is_finite() || seconds < 0. {
+        return None;
+    }
     match target {
-        SourceTarget::Web(_) => seek_url(target, seconds),
-        SourceTarget::Local(_) if seconds.is_finite() && seconds >= 0. => {
-            Some(format!("{LOCAL_SEEK}{}", seconds.floor() as u64))
-        }
-        SourceTarget::Local(_) => None,
+        SourceTarget::Web(raw) => seek_url(target, seconds).or_else(|| Some(raw.clone())),
+        SourceTarget::Local(_) => Some(format!("{LOCAL_SEEK}{}", seconds.floor() as u64)),
     }
 }
 
@@ -257,7 +258,9 @@ pub(crate) fn content_outline(
             named.insert(index, (title.clone(), displayed_time));
         }
     }
-    if named.len() < 2 {
+    if named.is_empty()
+        || (named.len() == 1 && named.values().all(|(_, seconds)| seconds.is_none()))
+    {
         return Vec::new();
     }
     named
@@ -310,9 +313,14 @@ mod tests {
         let url = watch_url(&local, 90.7).unwrap();
         assert_eq!(local_seek_seconds(&url), Some(90.));
         assert!(watch_url(&local, f64::NAN).is_none());
-        // A web source keeps the platform's own seek address.
+        // A web source keeps the platform's own seek address, or opens the page directly.
         let web = SourceTarget::Web("https://www.youtube.com/watch?v=x".into());
         assert_eq!(watch_url(&web, 12.), seek_url(&web, 12.));
+        let generic = SourceTarget::Web("https://video.example/watch".into());
+        assert_eq!(
+            watch_url(&generic, 12.).as_deref(),
+            Some("https://video.example/watch")
+        );
         assert_eq!(
             local_seek_seconds("https://www.youtube.com/watch?v=x&t=12"),
             None

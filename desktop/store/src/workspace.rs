@@ -193,8 +193,13 @@ impl Source {
 }
 
 pub(crate) fn relocate_path(path: &mut PathBuf, old: &Path, new: &Path) {
-    if path.is_absolute()
-        && let Ok(relative) = path.strip_prefix(old)
+    if !path.is_absolute() {
+        return;
+    }
+    if let Ok(relative) = path.strip_prefix(old) {
+        *path = new.join(relative);
+    } else if let (Ok(canon_path), Ok(canon_old)) = (path.canonicalize(), old.canonicalize())
+        && let Ok(relative) = canon_path.strip_prefix(canon_old)
     {
         *path = new.join(relative);
     }
@@ -1777,10 +1782,7 @@ fn pause_recovered_control(task: &TaskRecord) -> Result<()> {
 }
 
 fn failed_outcome(outcome: &c2m_artifact::artifact::Outcome) -> bool {
-    matches!(
-        outcome.status,
-        c2m_artifact::artifact::Status::Failed | c2m_artifact::artifact::Status::Partial
-    )
+    outcome.is_incomplete()
 }
 
 fn component_outcome(

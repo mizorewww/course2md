@@ -61,18 +61,6 @@ pub fn conversion_ai_option_enabled(
     }
 }
 
-pub fn apply_conversion_ai_option(
-    options: &mut ConversionOptions,
-    option: ConversionAiOption,
-    enabled: bool,
-) {
-    match option {
-        ConversionAiOption::Proofread => options.llm = enabled,
-        ConversionAiOption::Vision => options.vision = enabled,
-        ConversionAiOption::Summary => options.summarize = enabled,
-    }
-}
-
 pub fn text_source_choices() -> [(TranscriptSource, &'static str); 3] {
     [
         (TranscriptSource::Auto, c2m_i18n::tr!("自动")),
@@ -467,7 +455,6 @@ pub struct PlanKey {
 /// being read, its candidates and subtitles, and a start intent on its way.
 #[derive(Default)]
 pub struct ImportSession {
-    pub completed_source: Option<String>,
     pub source_preview: Option<source::Source>,
     pub source_candidates: Vec<source::SourceCandidate>,
     pub source_collection_title: Option<String>,
@@ -493,8 +480,6 @@ pub struct ImportSession {
     pub source_validation: Option<String>,
     pub show_preview_details: bool,
     pub subtitle_issue_open: bool,
-    pub source_editor_open: bool,
-    pub validation_attempt: usize,
     /// The derived preview plan; an error carries whether it is only waiting on background
     /// checks (`plan::PlanPending`).
     pub preview_plan_cache: Option<(PlanKey, PreviewPlan)>,
@@ -531,7 +516,6 @@ impl ImportSession {
         }
         self.preview_generation = self.preview_generation.wrapping_add(1);
         self.source_preview = None;
-        self.source_editor_open = false;
         self.source_candidates.clear();
         self.source_candidate_covers.clear();
         self.source_collection_title = None;
@@ -549,7 +533,6 @@ impl ImportSession {
     /// instead of a Start that hangs on 取消转换. Any other refusal stays with its
     /// message, to be retried or cancelled.
     pub fn refuse_start(&mut self, message: String, missing_text_source: bool) {
-        self.validation_attempt = self.validation_attempt.wrapping_add(1);
         if missing_text_source {
             self.cancel_start();
         } else {
@@ -853,7 +836,6 @@ mod tests {
         assert_eq!(session.pending_conversion, None);
         assert_eq!(session.following_conversion, None);
         assert_eq!(session.source_validation, None);
-        assert_eq!(session.validation_attempt, 2);
     }
 
     /// A new Start or 取消转换 leaves no earlier refusal (and its 重试转换) standing.
