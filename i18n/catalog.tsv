@@ -741,7 +741,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 平台暂时限制了字幕读取，请稍后重试，或选择其他文字来源。	平台暂时限制了字幕读取，请稍后重试，或选择其他文字来源。	The platform has temporarily restricted subtitle reading. Please try again later or choose another text source.	平台暫時限制了字幕讀取，請稍後重試，或選擇其他文字來源。	プラットフォームは一時的に字幕の読み取りを制限しています。後でもう一度試すか、別のテキスト ソースを選択してください。
 平台暂时限制读取，请稍后重试	平台暂时限制读取，请稍后重试	The platform is temporarily limiting access. Try again later.	平台暫時限制讀取，請稍後重試	プラットフォームが一時的に読み取りを制限しています。後で再試行してください
 平台要求登录后读取字幕，请登录对应账号后重试。	平台要求登录后读取字幕，请登录对应账号后重试。	The platform requires logging in to read subtitles. Please log in to the corresponding account and try again.	平台要求登入後讀取字幕，請登入對應帳號後重試。	このプラットフォームでは、字幕を読むためにログインする必要があります。対応するアカウントにログインして、もう一度お試しください。
-应用	应用	Apply	套用	適用
 应用偏好	应用偏好	Application preferences	應用程式偏好設定	アプリケーションの設定
 开启 / enabled	开启	enabled	開啟	有効
 开启后转录文字会发送到所选 AI 服务	开启后转录文字会发送到所选 AI 服务	When turned on, the transcribed text will be sent to the selected AI service	開啟後轉錄文字會傳送到所選 AI 服務	オンにすると、文字起こしされたテキストが選択した AI サービスに送信されます
@@ -927,7 +926,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 放到 GPU 上运行的层数（0–999，默认全部）；核显不稳定时调低 / Layers run on the GPU (0–999, all by default); lower on unstable integrated GPUs	放到 GPU 上运行的层数（0–999，默认全部）；核显不稳定时调低	Layers run on the GPU (0–999, all by default); lower on unstable integrated GPUs	放到 GPU 上執行的層數（0–999，預設全部）；內顯不穩定時調低	GPU で実行するレイヤー数（0–999、デフォルトはすべて）。内蔵 GPU が不安定な場合は下げてください
 放大	放大	Zoom in	放大	ズームイン
 放大 · +	放大 · +	Zoom in · +	放大 · +	拡大 · +
-放大{}	放大{}	Enlarge {}	放大{}	{} を拡大
 放弃移动，保留副本	放弃移动，保留副本	Cancel move, keep copy	放棄移動，保留副本	移動を中止し、コピーを残す
 整理好的笔记会出现在这里	整理好的笔记会出现在这里	Organized notes will appear here	整理好的筆記會出現在這裡	整理されたノートがここに表示されます
 整理选中的 {} 个视频	整理选中的 {} 个视频	Organize {} selected videos	整理選中的 {} 個影片	選択した {} 本の動画を整理
@@ -1448,7 +1446,7 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 界面语言	界面语言	Interface language	介面語言	表示言語
 界面语言：auto、en、zh-Hans、zh-Hant、ja / Interface language: auto, en, zh-Hans, zh-Hant, ja	界面语言：auto、en、zh-Hans、zh-Hant、ja / Interface language: auto, en, zh-Hans, zh-Hant, ja	Interface language: auto, en, zh-Hans, zh-Hant, ja	介面語言：auto、en、zh-Hans、zh-Hant、ja	表示言語：auto、en、zh-Hans、zh-Hant、ja
 登录 Bilibili	登录 Bilibili	Sign in to Bilibili	登入 Bilibili	Bilibili にログイン
-登录后可读取账号有权访问的视频与字幕	登录后可读取账号有权访问的视频与字幕	Sign in to read the videos and subtitles your account can access.	登入後可讀取帳號有權存取的影片與字幕	ログイン後、アカウントがアクセスできる動画と字幕を読むことができます。
+登录后可读取账号有权访问的视频与字幕	登录后可读取账号有权访问的视频与字幕	Sign in to read the videos and subtitles your account can access	登入後可讀取帳號有權存取的影片與字幕	ログイン後、アカウントがアクセスできる動画と字幕を読むことができます。
 登录响应未包含完整凭据，请重新扫码 / Login response did not include complete credentials; scan the QR code again	登录响应未包含完整凭据，请重新扫码	Login response did not include complete credentials; scan the QR code again	登入回應未包含完整憑證，請重新掃描 QR 碼	ログイン応答に完全な認証情報が含まれていません。QR コードをもう一度スキャンしてください。
 登录响应缺少凭据，请重新运行 course2md --login bilibili / Login response is missing credentials; run course2md --login bilibili again	登录响应缺少凭据，请重新运行 course2md --login bilibili	Login response is missing credentials; run course2md --login bilibili again	登入回應缺少憑證，請重新執行 course2md --login bilibili	ログイン応答に資格情報がありません。course2md --login bilibili を再実行してください。
 登录回调地址无效 / Invalid login callback URL	登录回调地址无效	Invalid login callback URL	登入回呼網址無效	ログインコールバックURLが無効です
@@ -1951,7 +1949,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 笔记库操作	笔记库操作	Library actions	筆記庫操作	ノートライブラリの操作
 编辑…	编辑…	Edit…	編輯…	編集…
 设为默认保存位置	设为默认保存位置	Set as default location	設為預設儲存位置	既定の保存先にする
-设为默认服务…	设为默认服务…	Set as default service…	設為預設服務…	既定のサービスにする…
 退出 ChatGPT 账号	退出 ChatGPT 账号	Sign out of ChatGPT	登出 ChatGPT 帳號	ChatGPT からサインアウト
 默认	默认	Default	預設	既定
 返回「{}」	返回「{}」	Back to {}	返回「{}」	「{}」に戻る
@@ -2315,3 +2312,11 @@ AI 处理的设置已更改	AI 处理的设置已更改	The AI processing settin
 移除任务记录	移除任务记录	Remove task record	移除任務記錄	タスク履歴を削除
 任务记录尚未保存：{}	任务记录尚未保存：{}	Task records have not been saved yet: {}	任務記錄尚未儲存：{}	タスク履歴はまだ保存されていません：{}
 复制全文	复制全文	Copy note	複製全文	ノートをコピー
+保留现有笔记	保留现有笔记	Keep existing notes	保留現有筆記	既存のノートを残す
+关于应用	关于应用	Application	關於應用程式	アプリ情報
+当前位置	当前位置	Current	目前位置	現在の場所
+放大 {}	放大 {}	Enlarge {}	放大 {}	{} を拡大
+检测到多个视频链接，可勾选批量转换	检测到多个视频链接，可勾选批量转换	Multiple video links found; select videos to convert in a batch	偵測到多個影片連結，可勾選批次轉換	複数の動画リンクが見つかりました。選択して一括変換できます
+覆盖已有笔记	覆盖已有笔记	Replace existing notes	覆蓋已有筆記	既存のノートを上書き
+覆盖并生成	覆盖并生成	Replace and convert	覆蓋並產生	上書きして変換
+选中的视频中有 {} 个已有笔记，继续转换将覆盖原有笔记。	选中的视频中有 {} 个已有笔记，继续转换将覆盖原有笔记。	{} of the selected videos already have notes; continuing will replace them.	選取的影片中有 {} 個已有筆記，繼續轉換將覆蓋原有筆記。	選択した動画のうち {} 件には既にノートがあり、続行すると上書きされます。

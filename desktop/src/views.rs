@@ -6,8 +6,8 @@ use gpui_kit_material::{
     color::{ColorRole, Scheme},
     components::{
         Badge, ButtonTone, ButtonVariant, CaptionLabels, IconButton, MaterialTooltip, NoticeKind,
-        Snackbar, SnackbarPosition, TitleBar as AppBar, material_button, notice_banner, spinner,
-        title_bar_control,
+        Snackbar, SnackbarDuration, SnackbarPosition, TitleBar as AppBar, material_button,
+        notice_banner, spinner, title_bar_control,
     },
     icons::SymbolIcon,
     motion,
@@ -274,13 +274,16 @@ impl Desktop {
         }
         // The brand leads the bar and returns to the workbench, as on the M3
         // canvas; destinations follow on the trailing edge with icon and label.
+        let has_any_tasks = self
+            .workspace(cx)
+            .is_some_and(|workspace| !workspace.state.tasks.is_empty());
         let task_label = if task_count > 0 {
             course2md::tr!("任务 · {}", task_count)
         } else {
             course2md::tr!("任务").to_owned()
         };
         let task_count_text = (task_count > 0).then(|| task_count.to_string());
-        let show_tasks = task_count > 0 || tasks_need_attention || page == Page::Task;
+        let show_tasks = has_any_tasks || tasks_need_attention || page == Page::Task;
         // Destinations keep their labels; once the bar, measured with the
         // current text, cannot hold them, every destination becomes its icon
         // (the label as its tooltip), and then the wordmark goes.
@@ -495,6 +498,7 @@ impl Desktop {
             SharedString::from(format!("app-message-{message}")),
             message,
         )
+        .duration(SnackbarDuration::Short)
         .position(SnackbarPosition::default())
         .close(course2md::tr!("关闭提示"), move |_, window, cx| {
             close(window, cx)

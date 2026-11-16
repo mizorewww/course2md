@@ -310,7 +310,7 @@ impl SettingsTab {
             Self::Generation => course2md::tr!("生成笔记"),
             Self::Services => course2md::tr!("服务与账号"),
             Self::Storage => course2md::tr!("存储"),
-            Self::Application => course2md::tr!("应用"),
+            Self::Application => course2md::tr!("关于应用"),
         }
     }
     fn icon(self) -> SymbolIcon {
@@ -1251,7 +1251,7 @@ impl Desktop {
                 if is_default {
                     course2md::tr!("已是默认服务")
                 } else {
-                    course2md::tr!("设为默认服务…")
+                    course2md::tr!("设为默认服务")
                 },
                 symbols::check_circle(),
                 &desktop,

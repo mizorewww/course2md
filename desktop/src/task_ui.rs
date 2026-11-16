@@ -1083,8 +1083,8 @@ impl TasksPage {
     /// Where a task saves, as its supporting line.
     fn task_destination(&self, task: &TaskRecord, cx: &App) -> String {
         match self.task_library(task, cx) {
-            // Only a note that exists is saved; until then it is where it will go.
-            Some(location) if task.artifact.is_some() => {
+            // Only a note that exists (or was superseded after saving) is saved; until then it is where it will go.
+            Some(location) if task.artifact.is_some() || task.replaced_by.is_some() => {
                 course2md::tr!("保存在「{}」", location.label())
             }
             Some(location) => course2md::tr!("将保存到「{}」", location.label()),

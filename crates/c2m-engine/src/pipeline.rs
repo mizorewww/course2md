@@ -134,6 +134,7 @@ pub async fn run(cfg: &PipelineConfig, models: ModelDownload<'_>) -> Result<()> 
         title: Some(meta.title.clone())
             .filter(|title| !title.trim().is_empty())
             .unwrap_or_else(|| source_id.clone()),
+        title_from_probe: false,
         source_id,
         // Left out of the task's identity, as the former one left them out: a site may
         // report another uploader or duration on the next probe, and the task must still
@@ -501,6 +502,9 @@ impl Task<'_> {
             progress::start(Stage::Fetch);
             let video = fetch::probe_video(&request.source, &self.job.control).await?;
             progress::done(Stage::Fetch);
+            if request.title_from_probe && !video.meta.title.trim().is_empty() {
+                meta.title = video.meta.title.clone();
+            }
             if meta.uploader.trim().is_empty() {
                 meta.uploader = video.meta.uploader.clone();
             }
@@ -509,6 +513,20 @@ impl Task<'_> {
             }
             SubtitleInput::Discover(Some(Box::new(video)))
         } else {
+            if request.title_from_probe
+                && !self.is_local
+                && let Ok(video) = fetch::probe_video(&request.source, &self.job.control).await
+            {
+                if !video.meta.title.trim().is_empty() {
+                    meta.title = video.meta.title;
+                }
+                if meta.uploader.trim().is_empty() {
+                    meta.uploader = video.meta.uploader;
+                }
+                if !meta.duration.is_finite() || meta.duration <= 0. {
+                    meta.duration = video.meta.duration;
+                }
+            }
             SubtitleInput::Selected(subtitle)
         };
         let credentials = Credentials::Task {

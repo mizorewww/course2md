@@ -28,6 +28,7 @@ fn request(source: &str, source_id: &str, config: ConfigFile) -> execution::Requ
         source: source.into(),
         source_id: source_id.into(),
         title: "Lecture".into(),
+        title_from_probe: false,
         author: "Teacher".into(),
         duration: 61.5,
         subtitle: None,

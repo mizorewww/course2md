@@ -153,6 +153,10 @@ pub struct Request {
     pub source: String,
     pub source_id: String,
     pub title: String,
+    /// When true, `title` is only a queue placeholder for an unprobed batch URL and
+    /// is replaced by the extractor's real video title when the job probes the source.
+    #[serde(default)]
+    pub title_from_probe: bool,
     #[serde(default)]
     pub author: String,
     #[serde(default)]
@@ -909,6 +913,7 @@ mod tests {
             source: "https://example.invalid/video".into(),
             source_id: "example:video".into(),
             title: "Lecture".into(),
+            title_from_probe: false,
             author: String::new(),
             duration: 1.,
             subtitle: None,
@@ -992,6 +997,7 @@ mod tests {
                 source: "video.mp4".into(),
                 source_id: "local:sha256:0".into(),
                 title: "Lecture".into(),
+                title_from_probe: false,
                 author: String::new(),
                 duration: 0.,
                 subtitle: None,

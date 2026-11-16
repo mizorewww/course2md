@@ -402,6 +402,7 @@ pub fn execution_request(
             source,
             source_id: task.plan.source_id.clone(),
             title: task.plan.title.clone(),
+            title_from_probe: task.plan.source.online && task.plan.source.title.trim().is_empty(),
             author: task.plan.source.author.clone(),
             duration: task.plan.source.duration,
             subtitle,
@@ -603,6 +604,10 @@ pub fn record_finish(
         .map(|(done, _)| done.out_dir.clone());
     if let (Some(done), Some(manifest)) = (done, manifest) {
         task.artifact = Some(done.out_dir.clone());
+        if task.plan.source.title.trim().is_empty() && !manifest.title.trim().is_empty() {
+            task.plan.title = manifest.title.clone();
+            task.plan.source.title = manifest.title.clone();
+        }
         let partial = done.partial.unwrap_or(manifest.partial);
         task.state = if task.has_uncertain() {
             TaskState::Uncertain

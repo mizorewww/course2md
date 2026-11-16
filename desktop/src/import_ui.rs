@@ -1134,8 +1134,27 @@ impl Desktop {
                                 })
                                 // The component check decides whether these can run at all.
                                 .disabled(selected_count == 0 || self.environment.is_none())
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.enqueue_selected_candidates(cx)
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    if noted_selected > 0 {
+                                        ui::Confirm::new(
+                                            course2md::tr!("覆盖已有笔记"),
+                                            course2md::tr!("保留现有笔记"),
+                                            course2md::tr!("覆盖并生成"),
+                                        )
+                                        .text(course2md::tr!(
+                                            "选中的视频中有 {} 个已有笔记，继续转换将覆盖原有笔记。",
+                                            noted_selected
+                                        ))
+                                        .ask(
+                                            cx.listener(|this, _, _, cx| {
+                                                this.enqueue_selected_candidates(cx)
+                                            }),
+                                            window,
+                                            cx,
+                                        );
+                                    } else {
+                                        this.enqueue_selected_candidates(cx);
+                                    }
                                 })),
                         ),
                 )
@@ -1553,11 +1572,14 @@ impl Desktop {
                 SubtitleEvidence::Failed { .. } => course2md::tr!("字幕还没读取完成").into(),
             }
         };
-        let trigger = AssistChip::new("text-source", value.clone()).icon(if speech {
-            symbols::mic()
-        } else {
-            symbols::subtitles()
-        });
+        let trigger = FilterChip::new("text-source", value.clone())
+            .icon(if speech {
+                symbols::mic()
+            } else {
+                symbols::subtitles()
+            })
+            .trailing_icon(symbols::arrow_drop_down())
+            .on_toggle(|_, _, _| {});
         // Settings' 文字来源 decides between subtitles and speech recognition. Set to
         // speech recognition, the chip says so and offers no subtitles to choose.
         let chip = if mode == TranscriptSource::Asr {

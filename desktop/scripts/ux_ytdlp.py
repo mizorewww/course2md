@@ -38,7 +38,7 @@ if "--write-subs" in args and ("TIMEOUT" in case or "LOGIN" in case) and case no
     print("ERROR: Sign in to read these subtitles" if "LOGIN" in case else "ERROR: timed out while reading subtitle metadata", file=sys.stderr)
     sys.exit(1)
 if "COLLECTION" in case and part is None:
-    print(json.dumps({"_type": "playlist", "id": case, "title": "验收合辑：两节课程", "extractor": "BiliBili", "entries": [{"_type": "url", "url": source + "?p=" + str(i), "ie_key": "BiliBili"} for i in [1, 2]] + [None]}, ensure_ascii=False))
+    print(json.dumps({"_type": "playlist", "id": case, "title": "验收合辑：两节课程", "extractor": "BiliBili", "entries": [{"_type": "url", "id": f"BV1UXCOL0{i}AB", "title": f"验收合辑 · 第 {i} 节", "url": f"https://www.bilibili.com/video/BV1UXCOL0{i}AB", "ie_key": "BiliBili"} for i in [1, 2]] + [None]}, ensure_ascii=False))
     sys.exit(0)
 
 def cues(text):

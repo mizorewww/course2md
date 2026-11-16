@@ -524,9 +524,41 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let owner = FormOwner::Setup(purpose);
         let service = self.onboarding.service(purpose);
+        if service.running.is_some() || service.form.vault_busy {
+            return;
+        }
         if let Some(version) = service.pending_version.clone() {
             return self.finish_setup_service(purpose, version, window, cx);
+        }
+        let key = service.form.typed_key(cx);
+        if !key.trim().is_empty() {
+            let draft = service.form.current_draft(cx);
+            self.store_form_secret(
+                owner,
+                draft,
+                Secret::new(key),
+                |this, draft, reference| {
+                    this.preferences
+                        .commit_service_draft(draft, Some(reference))
+                },
+                move |this, committed, window, cx| {
+                    if committed.is_ok() {
+                        this.onboarding.service(purpose).form.clear_key(window, cx);
+                    }
+                    if this
+                        .commit_setup_draft(purpose, committed, window, cx)
+                        .is_some()
+                    {
+                        this.continue_setup_service(purpose, window, cx);
+                    }
+                    cx.notify();
+                },
+                cx,
+            );
+            cx.notify();
+            return;
         }
         if service.unchanged(cx) {
             let Some(version) = service.original.clone() else {
@@ -1268,7 +1300,20 @@ impl Desktop {
             );
         }
         if service.evidence.is_empty() {
-            return None;
+            return Some(
+                view.child(
+                    h_flex().child(
+                        material_button(id("recheck"), ButtonVariant::Outlined)
+                            .tone(ButtonTone::Accent)
+                            .icon(symbols::refresh())
+                            .child(course2md::tr!("检查配置"))
+                            .disabled(service.busy())
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.start_setup_test(purpose, window, cx)
+                            })),
+                    ),
+                ),
+            );
         }
         let results =
             service

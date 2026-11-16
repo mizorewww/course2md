@@ -221,7 +221,7 @@ impl Desktop {
         if self.online(cx) {
             let links = source::video_links(&input);
             if links.len() > 1 {
-                self.import.source_candidates = links
+                let candidates: Vec<_> = links
                     .into_iter()
                     .map(|input| {
                         let mut candidate = source::SourceCandidate {
@@ -232,11 +232,26 @@ impl Desktop {
                             thumbnail: None,
                         };
                         candidate.identity = course2md::fetch::candidate_identity(&candidate);
+                        if let Some(existing) = candidate
+                            .identity
+                            .as_deref()
+                            .and_then(|id| self.notes_for_source(id, cx).next())
+                        {
+                            candidate.title = existing.title.clone();
+                        }
                         candidate
                     })
                     .collect();
-                self.import.source_collection_title =
-                    Some(course2md::tr!("分享内容中有多个链接，请选择一个视频").into());
+                let batchable = candidates.iter().any(|c| c.identity.is_some());
+                self.import.source_candidates = candidates;
+                self.import.source_collection_title = Some(
+                    if batchable {
+                        course2md::tr!("检测到多个视频链接，可勾选批量转换")
+                    } else {
+                        course2md::tr!("分享内容中有多个链接，请选择一个视频")
+                    }
+                    .into(),
+                );
                 self.save_current_draft(cx);
                 cx.notify();
                 return;
@@ -809,15 +824,19 @@ impl Desktop {
         let rows = std::iter::once((None, top)).chain(folders).enumerate();
         let rows = rows.map(|(index, (destination, label))| {
             let (root, moving) = (dialog.root.clone(), dialog.moving.clone());
+            let is_current = destination == current;
             ListItem::new(("move-destination", index), label)
                 .density(ListDensity::Compact)
+                .container(ColorRole::SURFACE_CONTAINER)
                 .leading(ListLeading::Icon(if destination.is_some() {
                     Icon::from(symbols::folder())
                 } else {
                     Icon::from(top_icon)
                 }))
-                .selected(destination == current)
-                .disabled(destination == current)
+                .when(is_current, |item| {
+                    item.trailing_text(course2md::tr!("当前位置"))
+                })
+                .disabled(is_current)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.close_move_dialog(cx);
                     match &moving {

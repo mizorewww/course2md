@@ -528,9 +528,19 @@ impl PlanInputs<'_> {
             .context(c2m_i18n::tr!("还无法确认这个视频的身份，请单独打开后转换"))?;
         let environment = self.ensure_plan_environment(true)?;
         let library = self.plan_library(workspace, PlanValidation::Submission)?;
+        let probed_title = {
+            let trimmed = candidate.title.trim();
+            (!trimmed.is_empty() && trimmed != candidate.input.trim()).then(|| trimmed.to_owned())
+        };
+        let existing_title = self.library.courses.iter().find_map(|course| {
+            let manifest = course.manifest.as_ref()?;
+            (manifest.source_id == identity && !course.title.trim().is_empty())
+                .then(|| course.title.clone())
+        });
+        let display_title = probed_title.clone().or(existing_title).unwrap_or(title);
         let source = source::Source {
             input: candidate.input.clone(),
-            title: title.clone(),
+            title: probed_title.unwrap_or_default(),
             duration: candidate
                 .duration
                 .filter(|value| value.is_finite() && *value > 0.)
@@ -548,7 +558,7 @@ impl PlanInputs<'_> {
             operation: Default::default(),
             source_id: source.identity.clone(),
             source,
-            title,
+            title: display_title,
             library_id: library.id.clone(),
             folder: None,
             subtitle: None,

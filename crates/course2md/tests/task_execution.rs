@@ -37,6 +37,7 @@ fn request(root: &Path, source: &Path) -> Request {
             course2md::execution::file_digest(source).unwrap()
         ),
         title: "我确认的笔记名称".into(),
+        title_from_probe: false,
         author: String::new(),
         duration: 1.,
         subtitle: None,

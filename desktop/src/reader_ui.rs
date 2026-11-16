@@ -2277,7 +2277,7 @@ impl ReaderPage {
         let label = frame.map_or(course2md::tr!("截图").to_owned(), |frame| {
             frame_label(&self.frames[frame])
         });
-        let enlarge = course2md::tr!("放大{}", label);
+        let enlarge = course2md::tr!("放大 {}", label);
         // The frame's time at one corner and the action that enlarges it at the other.
         let copyable = !matches!(loaded, Loaded::Failed);
         let slot = screenshot_slot(("note-figure-slot", block), Some(loaded)).when_some(
@@ -3509,7 +3509,7 @@ impl ReaderPage {
             CardVariant::Surface,
         )
         .rounded(TILE_RADIUS)
-        .accessibility_label(course2md::tr!("放大{}", frame_label(frame)))
+        .accessibility_label(course2md::tr!("放大 {}", frame_label(frame)))
         .w_full()
         .h_full()
         .min_w_0()

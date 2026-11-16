@@ -735,6 +735,7 @@ fn summarize_note(
         source,
         source_id: base.source_id.clone(),
         title: base.title.clone(),
+        title_from_probe: false,
         author: document.meta.uploader.clone(),
         duration: document.meta.duration.max(0.),
         subtitle: None,

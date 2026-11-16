@@ -142,12 +142,17 @@ impl OfflineVideoRequest {
 
     /// Fallback for a note whose completed task record was cleared from history while
     /// keeping its retained `media.mp4` under `<library>/.course2md/work/<task_id>/`.
+    /// Returns `None` when no retained `media.mp4` exists so ordinary online notes
+    /// never false-report a missing offline video.
     pub fn for_library_note(course: &Course, library: &workspace::LibraryLocation) -> Option<Self> {
         let manifest = course.manifest.as_ref()?;
         if manifest.source_id.starts_with("local:") || !course.dir.starts_with(&library.root) {
             return None;
         }
         let work_dir = library.root.join(".course2md/work").join(&manifest.task_id);
+        if !work_dir.join("media.mp4").is_file() {
+            return None;
+        }
         Some(Self {
             library_root: library.root.clone(),
             task_id: manifest.task_id.clone(),
@@ -1061,6 +1066,7 @@ mod tests {
         assert!(OfflineVideoRequest::for_note(&first, &changed, &library).is_none());
         std::fs::remove_file(media).unwrap();
         assert_eq!(request.inspect(), OfflineVideo::Missing);
+        assert!(OfflineVideoRequest::for_library_note(&first, &library).is_none());
     }
 
     #[test]
