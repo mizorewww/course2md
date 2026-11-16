@@ -1536,11 +1536,13 @@ impl Desktop {
                 SubtitleEvidence::Failed { .. } => course2md::tr!("字幕还没读取完成").into(),
             }
         };
-        let trigger = AssistChip::new("text-source", value.clone()).icon(if speech {
-            symbols::mic()
-        } else {
-            symbols::subtitles()
-        });
+        let trigger = AssistChip::new("text-source", value.clone())
+            .icon(if speech {
+                symbols::mic()
+            } else {
+                symbols::subtitles()
+            })
+            .on_click(ui::menu_key_toggle(&"text-source-menu".into(), window, cx));
         // Settings' 文字来源 decides between subtitles and speech recognition. Set to
         // speech recognition, the chip says so and offers no subtitles to choose.
         let chip = if mode == TranscriptSource::Asr {

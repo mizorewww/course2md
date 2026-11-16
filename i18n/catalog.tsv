@@ -248,6 +248,8 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 二维码响应缺少 key / QR code response is missing key	二维码响应缺少 key	QR code response is missing key	QR 碼回應缺少 key	QR コードの応答に key がありません
 二维码响应缺少 url / QR code response is missing url	二维码响应缺少 url	QR code response is missing url	QR 碼回應缺少 url	QR コードの応答に url がありません
 二维码已过期	二维码已过期	QR code has expired	QR 碼已過期	QRコードの有効期限が切れています
+二维码已就绪。请使用 Bilibili App 扫码，或选择密码或短信登录。	二维码已就绪。请使用 Bilibili App 扫码，或选择密码或短信登录。	The QR code is ready. Scan it with the Bilibili app, or choose password or SMS login.	QR 碼已就緒。請使用 Bilibili App 掃碼，或選擇密碼或簡訊登入。	QR コードの準備ができました。Bilibili アプリでスキャンするか、パスワードまたは SMS ログインを選択してください。
+二维码已过期，请刷新二维码或选择其他登录方式。	二维码已过期，请刷新二维码或选择其他登录方式。	The QR code has expired. Refresh it or choose another login method.	QR 碼已過期，請重新整理 QR 碼或選擇其他登入方式。	QR コードの有効期限が切れました。更新するか、別のログイン方法を選択してください。
 二维码已过期，请重新运行 course2md --login bilibili / QR code expired; run course2md --login bilibili again	二维码已过期，请重新运行 course2md --login bilibili	QR code expired; run course2md --login bilibili again	QR 碼已過期，請重新執行 course2md --login bilibili	QR コードの有効期限が切れています。course2md --login bilibili を再実行してください。
 二维码约 {} 秒后过期	二维码约 {} 秒后过期	QR code expires in approximately {} seconds	QR 碼約 {} 秒後過期	QR コードの有効期限は約 {} 秒後に切れます
 二维码约 1 秒后过期	二维码约 1 秒后过期	QR code expires in approximately 1 second	QR 碼約 1 秒後過期	QR コードの有効期限は約 1 秒後に切れます
@@ -1472,6 +1474,7 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 登录失败，请回终端重试。/ Login failed; return to the terminal and retry.	登录失败，请回终端重试。/ Login failed; return to the terminal and retry.	Login failed; return to the terminal and retry.	登入失敗，請回到終端機重試。	ログインに失敗しました。ターミナルに戻って再試行してください。
 登录已失效	登录已失效	Login expired	登入已失效	ログインの有効期限切れ
 登录未完成	登录未完成	Login not completed	登入未完成	ログインが完了していません
+登录未完成：{}	登录未完成：{}	Login did not complete: {}	登入未完成：{}	ログインが完了していません：{}
 登录请求失败，请检查网络后重新获取二维码	登录请求失败，请检查网络后重新获取二维码	Login request failed. Check the network and get a new QR code.	登入請求失敗，請檢查網路後重新取得 QR 碼	ログイン要求に失敗しました。ネットワークを確認して QR コードを再度取得してください。
 登录跳转地址无效 / Invalid login redirect URL	登录跳转地址无效	Invalid login redirect URL	登入重新導向網址無效	ログインリダイレクトURLが無効です
 登录跳转缺少地址 / Login redirect is missing an address	登录跳转缺少地址	Login redirect is missing an address	登入重新導向缺少網址	ログインリダイレクトにURLがありません
@@ -1683,6 +1686,7 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 诶	诶	Hey	誒	ねえ
 请为浅色和深色外观分别选择对应的主题	请为浅色和深色外观分别选择对应的主题	Choose separate themes for the light and dark appearances	請為淺色和深色外觀分別選擇對應的主題	明るい外観と暗い外観に別々のテーマを選択してください
 请使用 Bilibili App 扫码	请使用 Bilibili App 扫码	Scan the QR code with the Bilibili app	請使用 Bilibili App 掃描 QR 碼	Bilibili アプリで QR コードをスキャンしてください
+无法扫码时，可在上方选择密码或短信登录。这两种方式可能需要在浏览器中完成人机验证。	无法扫码时，可在上方选择密码或短信登录。这两种方式可能需要在浏览器中完成人机验证。	If you cannot scan the code, choose password or SMS login above. These methods may require a human check in your browser.	無法掃碼時，可在上方選擇密碼或簡訊登入。這兩種方式可能需要在瀏覽器中完成人机驗證。	スキャンできない場合は、上部でパスワードまたは SMS ログインを選択してください。ブラウザでの人間認証が必要になる場合があります。
 请先填写 API Key，再获取模型	请先填写 API Key，再获取模型	Enter the API key first, then fetch models	請先填寫 API 金鑰，再取得模型	先に API キーを入力してから、モデルを取得してください
 请先填写有效的服务地址和模型 ID，尚未发送请求	请先填写有效的服务地址和模型 ID，尚未发送请求	Enter a valid service URL and model ID first. The request has not been sent yet.	請先填寫有效的服務網址和模型 ID，尚未傳送請求	先に有効なサービスURLとモデル ID を入力してください。リクエストはまだ送信されていません
 请先填写有效的服务地址，再获取模型	请先填写有效的服务地址，再获取模型	Enter a valid service URL before fetching models	請先填寫有效的服務網址，再取得模型	モデルを取得する前に、有効なサービスURLを入力してください

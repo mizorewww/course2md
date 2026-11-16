@@ -41,6 +41,9 @@ pub(crate) struct AccountsView {
     pub(crate) account: AccountUi,
     /// The password and SMS login fields, made when the login dialog first opens.
     pub(crate) login_inputs: Option<crate::login_ui::LoginInputs>,
+    login_body_focus: FocusHandle,
+    login_close_focus: FocusHandle,
+    login_retry_focus: FocusHandle,
     pub(crate) youtube: desktop_accounts::youtube::YoutubeUi,
     /// The YouTube dialog's scrolling body, and the step it last showed: a new
     /// step starts at the top.
@@ -57,6 +60,9 @@ impl AccountsView {
         let mut this = Self {
             account: AccountUi::default(),
             login_inputs: None,
+            login_body_focus: cx.focus_handle(),
+            login_close_focus: cx.focus_handle(),
+            login_retry_focus: cx.focus_handle(),
             youtube: Default::default(),
             youtube_scroll: ScrollHandle::new(),
             youtube_scroll_step: Default::default(),
@@ -482,6 +488,25 @@ impl AccountsView {
             return div().into_any_element();
         };
         let success = matches!(state, QrDialogState::Success(_));
+        if open && success && self.login_body_focus.contains_focused(window, cx) {
+            let this = cx.weak_entity();
+            let handle = self.window;
+            let generation = self.account.generation;
+            let focused_before = window.focused(cx);
+            cx.defer(move |cx| {
+                let _ = cx.update_window(handle, |_, window, cx| {
+                    let _ = this.update(cx, |this, cx| {
+                        let focused_now = window.focused(cx);
+                        if this.account.current(generation)
+                            && matches!(this.account.dialog, Some(QrDialogState::Success(_)))
+                            && (focused_now.is_none() || focused_now == focused_before)
+                        {
+                            this.login_close_focus.focus(window, cx);
+                        }
+                    });
+                });
+            });
+        }
         let qr = self.account.method == LoginMethod::Qr || success;
         let retry = qr && matches!(state, QrDialogState::Expired | QrDialogState::Error(_));
         let retry_source = success && source_ready;
@@ -502,6 +527,7 @@ impl AccountsView {
                 ButtonVariant::Text
             },
         )
+        .track_focus(&self.login_close_focus)
         .when(success, |button| button.icon(symbols::check_circle()))
         .child(if retry_source {
             course2md::tr!("重新预览")
@@ -517,6 +543,17 @@ impl AccountsView {
             .width(DIALOG_LOGIN_WIDTH)
             .content(
                 v_flex()
+                    .id("bilibili-login-content")
+                    .role(Role::Group)
+                    .aria_label(course2md::tr!("登录 Bilibili"))
+                    .when(qr && !success, |content| {
+                        content.aria_description(course2md::tr!(
+                            "无法扫码时，可在上方选择密码或短信登录。这两种方式可能需要在浏览器中完成人机验证。"
+                        ))
+                    })
+                    .track_focus(&self.login_body_focus)
+                    .tab_index(0)
+                    .tab_stop(false)
                     .w_full()
                     .min_w_0()
                     .gap(rem(20.))
@@ -538,12 +575,19 @@ impl AccountsView {
             .when(retry, |dialog| {
                 dialog.action(
                     material_button("account-qr-retry", ButtonVariant::Filled)
+                        .track_focus(&self.login_retry_focus)
                         .icon(symbols::refresh())
                         .child(course2md::tr!("刷新二维码"))
-                        .on_click(cx.listener(|this, _, _, cx| this.start_account_qr(cx))),
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            if this.login_retry_focus.is_focused(window) {
+                                this.login_close_focus.focus(window, cx);
+                            }
+                            this.start_account_qr(cx);
+                        })),
                 )
             })
             .dismiss_on_scrim(false)
+            .dismiss_on_escape(true)
             .modal(open)
             .on_dismiss({
                 let this = cx.weak_entity();
@@ -592,6 +636,7 @@ impl AccountsView {
             ),
         };
         let confirming = matches!(state, QrDialogState::Confirming(_));
+        let announcement = state.accessibility_message();
         let (status, tone) = match state {
             QrDialogState::Success(_) => (
                 Some(symbols::check_circle()),
@@ -610,16 +655,35 @@ impl AccountsView {
             .justify_center()
             .rounded(RADIUS_LARGE)
             .bg(color(tone.1));
-        let visual = if let Some(modules) = self.account.modules.clone() {
+        let visual = if let Some(modules) = self.account.modules.clone().filter(|_| {
+            matches!(
+                state,
+                QrDialogState::Waiting(_) | QrDialogState::Confirming(_)
+            )
+        }) {
             // A real QR code keeps its high-contrast white scanning surface.
             visual
+                .id("bilibili-login-qr")
+                .role(Role::Image)
+                .aria_label(message.clone())
+                .aria_description(course2md::tr!(
+                    "无法扫码时，可在上方选择密码或短信登录。这两种方式可能需要在浏览器中完成人机验证。"
+                ))
                 .rounded(px(0.))
                 .bg(gpui::rgb(0xffffff))
                 .child(qr_canvas(modules))
+                .into_any_element()
         } else if let Some(icon) = status {
-            visual.child(Icon::from(icon).size(rem(32.)).color(color(tone.0)))
+            visual
+                .child(Icon::from(icon).size(rem(32.)).color(color(tone.0)))
+                .into_any_element()
         } else {
-            visual.child(spinner("qr-code-generating", message.clone(), cx))
+            visual
+                .id("bilibili-login-decoration")
+                .role(Role::Group)
+                .a11y_synthetic_children(|builder| builder.parent_node().set_hidden())
+                .child(spinner("qr-code-generating", message.clone(), cx))
+                .into_any_element()
         };
         v_flex()
             .w_full()
@@ -640,10 +704,31 @@ impl AccountsView {
                             .gap(rem(8.))
                             .items_center()
                             .when(confirming, |row| {
-                                row.child(spinner("qr-awaiting-confirmation", message.clone(), cx))
+                                row.child(
+                                    div()
+                                        .id("bilibili-confirmation-decoration")
+                                        .role(Role::Group)
+                                        .a11y_synthetic_children(|builder| {
+                                            builder.parent_node().set_hidden();
+                                        })
+                                        .child(spinner(
+                                            "qr-awaiting-confirmation",
+                                            message.clone(),
+                                            cx,
+                                        )),
+                                )
                             })
                             .child(
-                                accessible_text("bilibili-login-step", message.clone())
+                                status_text("bilibili-login-step", message.clone())
+                                    .aria_label(announcement.clone())
+                                    .aria_value(announcement)
+                                    .when(matches!(state, QrDialogState::Error(_)), |text| {
+                                        text.role(Role::Alert).a11y_synthetic_children(|builder| {
+                                            builder
+                                                .parent_node()
+                                                .set_live(accesskit::Live::Assertive);
+                                        })
+                                    })
                                     .min_w_0()
                                     .whitespace_normal()
                                     .when(!beside, |text| text.text_center())

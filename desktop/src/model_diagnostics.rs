@@ -509,7 +509,7 @@ impl Desktop {
         let chip = h_flex()
             .gap(ICON_GAP)
             .items_center()
-            .child(status_chip(kind).child(reading))
+            .child(status_chip(kind).child(accessible_text(id("reading"), reading)))
             .when(preparing || checking, |row| {
                 row.child(spinner(id("spinner"), reading, cx))
             });

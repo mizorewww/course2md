@@ -728,6 +728,7 @@ impl TasksPage {
                     },
                 )
                 .trailing(ListTrailing::Icon(disclosure_chevron(opened)))
+                .aria_expanded(opened)
                 .segment([false, false, true, true])
                 .on_click(move |_, _, cx| {
                     toggle.update(cx, |open, cx| {
@@ -752,6 +753,7 @@ impl TasksPage {
                 .leading(ListLeading::Icon(symbols::check_circle().into()))
                 .trailing_text(count.to_string())
                 .trailing(ListTrailing::Icon(disclosure_chevron(open)))
+                .aria_expanded(open)
                 .segment([true; 4])
                 // Folding also closes a finished task that was opened
                 // from elsewhere, or the fold could not close.
@@ -821,23 +823,21 @@ impl TasksPage {
     ) -> AnyElement {
         let id = &task.id;
         let label = course2md::tr!("更多操作");
+        let menu_id: ElementId = SharedString::from(format!("task-more-menu-{id}")).into();
         let items = self.task_menu(task, cx)(window, cx);
         let trigger =
             MaterialTooltip::plain(SharedString::from(format!("task-more-tip-{id}")), label)
-                .trigger(IconButton::new(
-                    SharedString::from(format!("task-more-{id}")),
-                    symbols::more_vert(),
-                    label,
-                ));
-        ui::menu(
-            SharedString::from(format!("task-more-menu-{id}")),
-            trigger,
-            items,
-            window,
-            cx,
-        )
-        .anchor(Anchor::TopRight)
-        .into_any_element()
+                .trigger(
+                    IconButton::new(
+                        SharedString::from(format!("task-more-{id}")),
+                        symbols::more_vert(),
+                        label,
+                    )
+                    .on_click(ui::menu_key_toggle(&menu_id, window, cx)),
+                );
+        ui::menu(menu_id, trigger, items, window, cx)
+            .anchor(Anchor::TopRight)
+            .into_any_element()
     }
 
     /// Expand a row's details, or fold the expanded one.
@@ -1023,7 +1023,10 @@ impl TasksPage {
             } else {
                 task_status_kind(task.state)
             })
-            .child(task_status_label(task))
+            .child(accessible_text(
+                SharedString::from(format!("task-status-{}", task.id)),
+                task_status_label(task),
+            ))
         });
         let context_menu = self.task_menu(task, cx);
         // The running card's progress and actions stay in its text column; a task that
@@ -1142,6 +1145,7 @@ impl TasksPage {
         let row = scale
             .button(SharedString::from(format!("select-{id}")), corners)
             .accessibility_label(task.plan.title.clone())
+            .aria_expanded(self.task_list.expanded.as_deref() == Some(id.as_str()))
             .on_click(cx.listener({
                 let id = id.clone();
                 move |this, _, _, cx| this.toggle_task_row(&id, cx)

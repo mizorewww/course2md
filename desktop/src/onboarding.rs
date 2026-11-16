@@ -1031,11 +1031,12 @@ impl Desktop {
             .tinted_icon(engine_icon(Some(*engine)).into(), Tint::Blue, icon_size)
             // An obstacle stated with its repair below the engines is not said
             // again on each row it dims.
-            .status(
-                issue
-                    .filter(|issue| !issues.contains(issue))
-                    .map(|issue| status_chip(StatusKind::Warning).child(issue.short())),
-            )
+            .status(issue.filter(|issue| !issues.contains(issue)).map(|issue| {
+                status_chip(StatusKind::Warning).child(accessible_text(
+                    ("setup-engine-status", index),
+                    issue.short(),
+                ))
+            }))
             .enabled(issue.is_none());
             if !detected {
                 tile = tile.description(course2md::tr!("正在检测"));

@@ -223,6 +223,22 @@ pub enum QrDialogState {
     Success(AccountProfile),
 }
 
+impl QrDialogState {
+    pub fn accessibility_message(&self) -> String {
+        match self {
+            Self::Generating => c2m_i18n::tr!("正在获取二维码").into(),
+            Self::Waiting(_) => {
+                c2m_i18n::tr!("二维码已就绪。请使用 Bilibili App 扫码，或选择密码或短信登录。")
+                    .into()
+            }
+            Self::Confirming(_) => c2m_i18n::tr!("已扫码，请在手机上确认登录").into(),
+            Self::Expired => c2m_i18n::tr!("二维码已过期，请刷新二维码或选择其他登录方式。").into(),
+            Self::Error(error) => c2m_i18n::tr!("登录未完成：{}", error),
+            Self::Success(_) => c2m_i18n::tr!("已登录 Bilibili").into(),
+        }
+    }
+}
+
 pub enum QrPollResult {
     Waiting,
     Confirming,
