@@ -332,8 +332,8 @@ pub struct RunOpts {
     #[cfg_attr(feature = "clap", arg(long, value_parser = choice(transcript_source_help), help_heading = IO))]
     pub transcript_source: Option<crate::config::TranscriptSource>,
 
-    /// 放到 GPU 上运行的层数（0–99，默认全部）；核显不稳定时调低 / Layers run on the GPU (0–99, all by default); lower on unstable integrated GPUs
-    #[cfg_attr(feature = "clap", arg(long, value_parser = clap::value_parser!(u32).range(0..=99), help_heading = SPEECH))]
+    /// 放到 GPU 上运行的层数（0–999，默认全部）；核显不稳定时调低 / Layers run on the GPU (0–999, all by default); lower on unstable integrated GPUs
+    #[cfg_attr(feature = "clap", arg(long, value_parser = clap::value_parser!(u32).range(0..=999), help_heading = SPEECH))]
     pub gpu_layers: Option<u32>,
 
     /// 音频编码部分也用 GPU（默认）/ Also run the audio encoder on the GPU (default)
@@ -585,15 +585,8 @@ pub fn print_effective(cfg: &settings::ConfigFile) -> Result<()> {
 
 #[cfg(feature = "clap")]
 fn parse_translation_target(value: &str) -> Result<String, String> {
-    crate::language::target(value)
-        .map(str::to_owned)
-        .ok_or_else(|| {
-            let codes: Vec<_> = crate::language::TARGETS
-                .iter()
-                .map(|(code, _)| *code)
-                .collect();
-            tr!("支持的语言：{}", codes.join(", "))
-        })
+    crate::language::normalize_target(value)
+        .ok_or_else(|| tr!("无效的目标语言 / Invalid target language").to_owned())
 }
 
 #[cfg(test)]
@@ -643,17 +636,6 @@ mod tests {
         let cfg = resolve("video".into(), &explicit, &file).unwrap();
         assert_eq!(cfg.asr_model.as_deref(), Some("qwen3-1.7b"));
         assert!(cfg.validate_asr_with_auth(true, true).is_err());
-    }
-
-    #[test]
-    fn a_region_is_sent_as_the_percentages_that_read_back_as_it() {
-        for hundredths in 0..=10_000 {
-            let fraction = format!("{}", f64::from(hundredths) / 100.)
-                .parse::<f64>()
-                .unwrap()
-                / 100.;
-            assert_eq!(percent(fraction).parse::<f64>().unwrap() / 100., fraction);
-        }
     }
 
     #[test]

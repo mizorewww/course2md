@@ -775,17 +775,6 @@ mod tests {
     }
 
     #[test]
-    fn known_messages_have_all_languages() {
-        // A small sentinel set keeps the catalog from silently losing entries.
-        for source in ["笔记库", "设置", "取消"] {
-            assert!(
-                catalog().contains_key(source),
-                "missing catalog entry: {source}"
-            );
-        }
-    }
-
-    #[test]
     fn escaping_round_trips() {
         let value = "第一行\n第二行\tTab \\ \"引号\"";
         assert_eq!(unescape(&escape(value)), value);

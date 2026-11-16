@@ -910,7 +910,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 提取音频	提取音频	Extract audio	提取音訊	音声を抽出する
 提取音频 / Extracting audio	提取音频	Extracting audio	提取音訊	音声を抽出中
 提示关闭状态未能保存：{}	提示关闭状态未能保存：{}	Could not save that the tip was dismissed: {}	提示關閉狀態未能儲存：{}	ヒントを閉じた状態を保存できませんでした: {}
-提示：运行 course2md llm setup 可开启 AI 校对与摘要 / Tip: run course2md llm setup to enable AI proofreading and summaries	提示：运行 course2md llm setup 可开启 AI 校对与摘要	Tip: run course2md llm setup to enable AI proofreading and summaries	提示：執行 course2md llm setup 可開啟 AI 校對與摘要	ヒント: course2md llm setup を実行すると AI 校正と要約を有効にできます
 搜索截图对应文字	搜索截图对应文字	Search screenshot text	搜尋截圖文字	スクリーンショットの文字を検索
 搜索笔记	搜索笔记	Search notes	搜尋筆記	ノートを検索する
 搜索笔记标题	搜索笔记标题	Search note titles	搜尋筆記標題	ノート名を検索
@@ -932,7 +931,7 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 收起详情	收起详情	Collapse details	收起詳情	詳細を折りたたむ
 改用云端 API / Use cloud API	改用云端 API	Use cloud API	改用雲端 API	クラウドAPIに切り替える
 改用浏览器授权登录（ChatGPT 账号）？/ Authorize with a ChatGPT account in the browser instead?	改用浏览器授权登录（ChatGPT 账号）？/ Authorize with a ChatGPT account in the browser instead?	Authorize with a ChatGPT account in the browser instead?	改用瀏覽器授權登入（ChatGPT 帳號）？/ Authorize with a ChatGPT account in the browser instead?	代わりにブラウザで ChatGPT アカウントを使って認可しますか？
-放到 GPU 上运行的层数（0–99，默认全部）；核显不稳定时调低 / Layers run on the GPU (0–99, all by default); lower on unstable integrated GPUs	放到 GPU 上运行的层数（0–99，默认全部）；核显不稳定时调低	Layers run on the GPU (0–99, all by default); lower on unstable integrated GPUs	放到 GPU 上執行的層數（0–99，預設全部）；內顯不穩定時調低	GPU で実行するレイヤー数（0–99、デフォルトはすべて）。内蔵 GPU が不安定な場合は下げてください
+放到 GPU 上运行的层数（0–999，默认全部）；核显不稳定时调低 / Layers run on the GPU (0–999, all by default); lower on unstable integrated GPUs	放到 GPU 上运行的层数（0–999，默认全部）；核显不稳定时调低	Layers run on the GPU (0–999, all by default); lower on unstable integrated GPUs	放到 GPU 上執行的層數（0–999，預設全部）；內顯不穩定時調低	GPU で実行するレイヤー数（0–999、デフォルトはすべて）。内蔵 GPU が不安定な場合は下げてください
 放大	放大	Zoom in	放大	ズームイン
 放大 · +	放大 · +	Zoom in · +	放大 · +	拡大 · +
 放大{}	放大{}	Enlarge {}	放大{}	{} を拡大
@@ -2017,7 +2016,7 @@ ChatGPT 账号	ChatGPT 账号	ChatGPT account	ChatGPT 帳號	ChatGPT アカウ�
 这份笔记还有未完成的任务，请在任务结束或取消后再删除	这份笔记还有未完成的任务，请在任务结束或取消后再删除	This note has an unfinished task; delete it after the task finishes or is cancelled	這份筆記還有未完成的任務，請在任務結束或取消後再刪除	このノートには未完了のタスクがあります。タスクが終了するかキャンセルしてから削除してください
 双语笔记：把文字翻译为该语言（zh-Hans、zh-Hant、en、ja、ko、fr、de、es） / Bilingual notes: translate the text into this language (zh-Hans, zh-Hant, en, ja, ko, fr, de, es)	双语笔记：把文字翻译为该语言（zh-Hans、zh-Hant、en、ja、ko、fr、de、es）	Bilingual notes: translate the text into this language (zh-Hans, zh-Hant, en, ja, ko, fr, de, es)	雙語筆記：把文字翻譯為該語言（zh-Hans、zh-Hant、en、ja、ko、fr、de、es）	バイリンガルノート：テキストをこの言語に翻訳します（zh-Hans、zh-Hant、en、ja、ko、fr、de、es）
 本次不翻译 / Do not translate this run	本次不翻译	Do not translate this run	本次不翻譯	今回は翻訳しない
-支持的语言：{}	支持的语言：{}	Supported languages: {}	支援的語言：{}	対応言語: {}
+无效的目标语言 / Invalid target language	无效的目标语言	Invalid target language	無效的目標語言	無効な翻訳先言語
 翻译 {}–{} 的文字 / Translate transcript {}–{}	翻译 {}–{} 的文字	Translate transcript {}–{}	翻譯 {}–{} 的文字	{}–{} のテキストを翻訳
 服务返回的翻译结构无效 / Invalid translation structure	服务返回的翻译结构无效	Invalid translation structure	服務傳回的翻譯結構無效	サービスから返された翻訳の構造が無効です
 翻译结果与原文段落不对应 / Translated segments do not match the input	翻译结果与原文段落不对应	Translated segments do not match the input	翻譯結果與原文段落不對應	翻訳結果が元の段落と一致しません

@@ -15,9 +15,8 @@ except ImportError as e:
 model_arg = sys.argv[1]
 port = int(sys.argv[2])  # Rust 侧永远显式传参（free_port 动态分配）
 device = sys.argv[3]
-kind = sys.argv[4]
 # 会话令牌：本机任意进程不应能中断转写或占用推理（127.0.0.1 不等于可信）
-token = sys.argv[5]
+token = sys.argv[4]
 
 model_path = model_arg
 if not os.path.isdir(model_path):
@@ -50,30 +49,17 @@ sys.stderr.write("[NPU] 正在将模型加载/编译至 " + device + "（首次�
 sys.stderr.flush()
 t0 = time.time()
 
-if kind != "whisper":
-    # 非 Whisper 仓库只能交给 ASRPipeline；不可用或加载失败直接报错，不回退到 Whisper
-    # （静默换模型会让转写来源不可追溯）
-    if not hasattr(ov_genai, "ASRPipeline"):
-        sys.stderr.write("错误 / Error: 此 openvino-genai 版本只能加载 Whisper 模型 / this openvino-genai only loads Whisper models: " + model_arg + "\n")
-        sys.exit(1)
-    try:
-        pipe = ov_genai.ASRPipeline(model_path, device)
-        gen_cfg = ov_genai.ASRGenerationConfig()
-    except Exception as e_asr:
-        sys.stderr.write("错误 / Error: 模型加载失败 / model load failed " + model_arg + ": " + str(e_asr) + "\n（Intel NPU 支持 OpenVINO 导出的 Whisper 模型，可指定 --asr-model whisper / Intel NPU runs OpenVINO Whisper exports; pass --asr-model whisper）\n")
-        sys.exit(1)
+try:
+    pipe = ov_genai.WhisperPipeline(model_path, device)
+except Exception as e_whisper:
+    sys.stderr.write("错误 / Error: 模型加载失败 / model load failed " + model_arg + ": " + str(e_whisper) + "\n")
+    sys.exit(1)
+gen_cfg_path = os.path.join(model_path, "generation_config.json")
+if os.path.isfile(gen_cfg_path):
+    gen_cfg = ov_genai.WhisperGenerationConfig(gen_cfg_path)
 else:
-    try:
-        pipe = ov_genai.WhisperPipeline(model_path, device)
-    except Exception as e_whisper:
-        sys.stderr.write("错误 / Error: 模型加载失败 / model load failed " + model_arg + ": " + str(e_whisper) + "\n")
-        sys.exit(1)
-    gen_cfg_path = os.path.join(model_path, "generation_config.json")
-    if os.path.isfile(gen_cfg_path):
-        gen_cfg = ov_genai.WhisperGenerationConfig(gen_cfg_path)
-    else:
-        gen_cfg = ov_genai.WhisperGenerationConfig()
-    # 语言由模型自动检测，不强制中文（硬编码 <|zh|> 会把英文课转成中文幻觉输出）
+    gen_cfg = ov_genai.WhisperGenerationConfig()
+# 语言由模型自动检测，不强制中文（硬编码 <|zh|> 会把英文课转成中文幻觉输出）
 
 sys.stderr.write("[NPU] 模型在 " + device + " 就绪（耗时 " + f"{time.time()-t0:.2f}" + "s）\n")
 sys.stderr.flush()

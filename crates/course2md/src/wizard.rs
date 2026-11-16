@@ -23,13 +23,20 @@ pub struct ExitWizard;
 
 /// 调用方已排除 --json/--quiet（stdout 必须保持纯输出，不能混进交互提示）。
 pub fn maybe_run(
+    source: &str,
     opts: &crate::cli::RunOpts,
     file: &crate::settings::ConfigFile,
 ) -> Result<crate::settings::ConfigFile> {
-    if matches!(
-        opts.transcript_source.or(file.defaults.transcript_source),
-        Some(crate::config::TranscriptSource::Subtitle)
-    ) || !is_first_run(opts.provider.is_none(), file)
+    let transcript_source = opts
+        .transcript_source
+        .or(file.defaults.transcript_source)
+        .unwrap_or_default();
+    let local = std::path::Path::new(source);
+    let can_try_subtitles_first = transcript_source == crate::config::TranscriptSource::Auto
+        && (!local.is_file() || !crate::subtitle::sidecar_tracks(local).is_empty());
+    if transcript_source == crate::config::TranscriptSource::Subtitle
+        || can_try_subtitles_first
+        || !is_first_run(opts.provider.is_none(), file)
     {
         return Ok(file.clone());
     }

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 /// `[defaults]`：命令行参数的默认值。全部可选，未设置的项回落内置默认。
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Defaults {
     pub out: Option<PathBuf>,
     pub similarity: Option<f64>,
@@ -68,7 +68,7 @@ pub enum AsrApiMode {
 
 /// 云端 STT（provider = "api"，OpenAI 兼容端点，如 OpenRouter）。
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct AsrApi {
     pub base_url: String,
     pub api_key: String,
@@ -100,7 +100,7 @@ impl Default for AsrApi {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct DesktopSettings {
     pub library_cards: bool,
     pub library_group_folders: bool,
@@ -109,11 +109,6 @@ pub struct DesktopSettings {
     pub reduce_motion: bool,
     /// The home page lists recent notes below the input.
     pub home_recent_notes: bool,
-    /// Older versions kept whether the home page showed its per-video processing
-    /// options; those options are now Settings alone, so a saved value is read and
-    /// dropped.
-    #[serde(rename = "home_options", skip_serializing)]
-    pub retired_home_options: serde::de::IgnoredAny,
 }
 
 /// New libraries open as a card grid; a saved choice is kept as written.
@@ -126,13 +121,12 @@ impl Default for DesktopSettings {
             system_titlebar: false,
             reduce_motion: false,
             home_recent_notes: true,
-            retired_home_options: serde::de::IgnoredAny,
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct ConfigFile {
     pub desktop: DesktopSettings,
     pub defaults: Defaults,

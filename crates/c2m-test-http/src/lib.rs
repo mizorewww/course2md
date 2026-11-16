@@ -42,10 +42,10 @@ pub fn serve_on(
 /// Serves an unbounded sequence of connections on `127.0.0.1:0`, reading each
 /// complete HTTP/1.1 request on its own thread and passing `(request, &mut stream)`
 /// to `handler`. Returning without writing drops the socket after receiving the request.
-pub fn serve_stream(handler: impl Fn(Request, &mut TcpStream) + Send + Sync + 'static) -> String {
+pub fn serve_stream(handler: impl FnMut(Request, &mut TcpStream) + Send + 'static) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
-    let handler = std::sync::Arc::new(handler);
+    let handler = std::sync::Arc::new(std::sync::Mutex::new(handler));
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { return };
@@ -53,8 +53,10 @@ pub fn serve_stream(handler: impl Fn(Request, &mut TcpStream) + Send + Sync + 's
             std::thread::spawn(move || {
                 let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
                 let req = read_request(&mut stream);
-                if !req.head.is_empty() {
-                    handler(req, &mut stream);
+                if !req.head.is_empty()
+                    && let Ok(mut guard) = handler.lock()
+                {
+                    guard(req, &mut stream);
                 }
             });
         }

@@ -533,8 +533,8 @@ impl PipelineConfig {
             self.max_height
         );
         anyhow::ensure!(
-            self.gpu_layers <= 99,
-            "GPU 层数必须在 0 到 99 之间（当前 {0}）/ GPU layers must be between 0 and 99 (got {0})",
+            self.gpu_layers <= 999,
+            "GPU 层数必须在 0 到 999 之间（当前 {0}）/ GPU layers must be between 0 and 999 (got {0})",
             self.gpu_layers
         );
 
@@ -1041,12 +1041,12 @@ mod tests {
     #[test]
     fn validate_rejects_gpu_layers_out_of_range() {
         let mut c = valid_cfg();
-        c.gpu_layers = 100;
+        c.gpu_layers = 1000;
         assert!(c.validate().is_err());
-        c.gpu_layers = 0;
-        c.validate().unwrap();
-        c.gpu_layers = 99;
-        c.validate().unwrap();
+        for valid in [0, 128, 999] {
+            c.gpu_layers = valid;
+            c.validate().unwrap();
+        }
     }
 
     #[test]

@@ -495,7 +495,7 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
             // Only fails fast before the wizard: `pipeline::run` validates in full, and
             // then runs the conversion as a task, as `run-task` does.
             initial.validate()?;
-            if initial.llm.enabled {
+            if initial.llm.uses_service() {
                 llm::validate(&initial.llm)?;
             }
             if !std::path::Path::new(&source).is_file() {
@@ -506,7 +506,7 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
             let file = if cli.opts.json || cli.opts.quiet {
                 file
             } else {
-                wizard::maybe_run(&cli.opts, &file)?
+                wizard::maybe_run(&source, &cli.opts, &file)?
             };
             let mut cfg = course2md::options::resolve(source, &cli.opts, &file)?;
             // coreml 首次使用时先确定模型（可能交互询问），模型缓存准备与转写才会是同一个模型
@@ -844,7 +844,7 @@ fn normalize_source(source: &str) -> anyhow::Result<String> {
         );
         return Ok(source.to_owned());
     }
-    if config::known_video_site(source).is_some() {
+    if config::known_video_site(source).is_some() || looks_like_schemeless_url(source) {
         return Ok(format!("https://{source}"));
     }
     Err(course2md::error::invalid_input(anyhow::anyhow!(
@@ -852,6 +852,24 @@ fn normalize_source(source: &str) -> anyhow::Result<String> {
         tr!("找不到视频文件或无法识别链接：{}", source),
         tr!("请检查路径；含空格的路径需加引号")
     )))
+}
+
+fn looks_like_schemeless_url(source: &str) -> bool {
+    if source.starts_with(['.', '/', '~', '\\']) || source.contains([' ', '\\']) {
+        return false;
+    }
+    let Some((host, path)) = source.split_once('/') else {
+        return false;
+    };
+    !path.is_empty()
+        && host.split('.').count() >= 2
+        && host.split('.').all(|label| {
+            !label.is_empty()
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b':'))
+        })
+        && url::Url::parse(&format!("https://{source}")).is_ok()
 }
 
 #[cfg(test)]

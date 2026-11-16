@@ -343,6 +343,14 @@ impl Request {
 
     /// Identity includes effective parameters and selected content, excluding secret values.
     pub fn binding(&self, cfg: &PipelineConfig) -> Result<serde_json::Value> {
+        self.binding_with_local_digest(cfg, None)
+    }
+
+    pub fn binding_with_local_digest(
+        &self,
+        cfg: &PipelineConfig,
+        verified_local_digest: Option<&str>,
+    ) -> Result<serde_json::Value> {
         // Storage moves are resolved locations, not a change in the processing plan.
         let mut config = cfg.redacted_for_identity(Path::new(""));
         config["out_root"] = serde_json::Value::String(String::new());
@@ -364,7 +372,10 @@ impl Request {
             || matches!(&self.operation, Operation::Reprocess { components, .. }
                 if components.contains(&Component::Screenshots));
         let local_digest = if needs_source && Path::new(&self.source).is_file() {
-            Some(file_digest(Path::new(&self.source))?)
+            match verified_local_digest {
+                Some(digest) => Some(digest.to_owned()),
+                None => Some(file_digest(Path::new(&self.source))?),
+            }
         } else {
             None
         };

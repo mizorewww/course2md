@@ -220,9 +220,16 @@ pub(crate) async fn run_task(
             artifact::NoteChanged
         );
     }
+    let preverified_local_digest = match &caller {
+        Caller::Cli(cli) if cli.probed.is_none() => Some(cli.meta.id.clone()),
+        _ => None,
+    };
     let binding = {
         let (request, cfg) = (request.clone(), cfg.clone());
-        blocking(move || request.binding(&cfg)).await?
+        blocking(move || {
+            request.binding_with_local_digest(&cfg, preverified_local_digest.as_deref())
+        })
+        .await?
     };
     let (parent, former) = match &caller {
         Caller::Task(parent) => (Some(*parent), None),
@@ -616,11 +623,6 @@ impl Task<'_> {
                 },
                 target.course_dir.display()
             );
-            if !cfg.llm.enabled && !cfg.llm.disable_hint {
-                eprintln_tr!(
-                    "提示：运行 course2md llm setup 可开启 AI 校对与摘要 / Tip: run course2md llm setup to enable AI proofreading and summaries"
-                );
-            }
         }
         Ok(())
     }
@@ -1406,7 +1408,7 @@ impl Task<'_> {
     async fn translate_step(
         &self,
         mut sections: Vec<timeline::Section>,
-        language: &'static str,
+        language: &str,
         outcomes: &mut Outcomes,
     ) -> Result<Vec<timeline::Section>> {
         let mut sample = String::new();
@@ -1427,9 +1429,13 @@ impl Task<'_> {
             return Ok(sections);
         }
         progress::start(Stage::Translate);
-        let (llm, control) = (self.cfg.llm.clone(), self.job.control.clone());
+        let (llm, control, language) = (
+            self.cfg.llm.clone(),
+            self.job.control.clone(),
+            language.to_owned(),
+        );
         let (sections, report) = blocking(move || {
-            crate::llm::translate_sections_report(&mut sections, &llm, language, &control)
+            crate::llm::translate_sections_report(&mut sections, &llm, &language, &control)
                 .map(|report| (sections, report))
         })
         .await?;

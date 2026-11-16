@@ -544,6 +544,8 @@ impl CloudSpeech {
                 };
                 crate::runtime::receive(request.send(body))
             };
+            let key_ref = self.key.as_str();
+            let secrets: &[&str] = if key_ref.is_empty() { &[] } else { &[key_ref] };
             self.control.request(
                 &crate::dispatch::RequestSpec {
                     service: "asr",
@@ -553,7 +555,7 @@ impl CloudSpeech {
                     identity,
                     former: &[],
                     resend: crate::dispatch::Resend::AskUser,
-                    secrets: &[],
+                    secrets,
                 },
                 send,
                 |value| {
@@ -1747,7 +1749,7 @@ mod cloud_tests {
         for (status, reason, possible) in [(400, "Bad Request", true), (404, "Not Found", false)] {
             let dir = tempfile::tempdir().unwrap();
             let wav = lavfi_wav(dir.path(), "aevalsrc=sin(440*2*PI*t):d=2:s=16000");
-            let body = r#"{"error":{"code":"InvalidParameter","message":"secret-bearing detail"}}"#;
+            let body = r#"{"error":{"code":"InvalidParameter","message":"audio duration exceeds limit (sk-loopback-only)"}}"#;
             let refusal = format!(
                 "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()
@@ -1764,7 +1766,11 @@ mod cloud_tests {
             assert!(message.contains("qwen3-asr-flash"), "{message}");
             assert!(message.contains("/compatible-mode/v1"), "{message}");
             assert_eq!(message.contains("可能原因之一"), possible, "{message}");
-            assert!(!message.contains("secret-bearing"), "{message}");
+            assert!(
+                message.contains("audio duration exceeds limit"),
+                "{message}"
+            );
+            assert!(!message.contains("sk-loopback-only"), "{message}");
             assert_eq!(
                 error
                     .downcast_ref::<crate::dispatch::Failure>()

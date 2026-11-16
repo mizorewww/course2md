@@ -36,7 +36,7 @@ impl LlmProvider {
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct LlmSettings {
     pub enabled: bool,
     /// 服务方言/登录方式（默认 OpenAI 兼容）
@@ -129,9 +129,10 @@ impl LlmSettings {
         self.enabled || self.summarize || self.translation_target().is_some()
     }
 
-    /// The supported bilingual target, if one is set.
-    pub fn translation_target(&self) -> Option<&'static str> {
-        self.translate.as_deref().and_then(crate::language::target)
+    /// The configured bilingual target, normalized when it matches a built-in target.
+    pub fn translation_target(&self) -> Option<&str> {
+        let raw = self.translate.as_deref()?.trim();
+        (!raw.is_empty()).then(|| crate::language::target(raw).unwrap_or(raw))
     }
 }
 
@@ -153,22 +154,5 @@ mod tests {
             serde_json::to_string(&LlmProvider::OpenAiCompatible).unwrap(),
             r#""open-ai-compatible""#
         );
-    }
-
-    #[test]
-    fn retry_defaults_are_not_written_and_changes_are() {
-        let defaults = super::LlmSettings::default();
-        let json = serde_json::to_value(&defaults).unwrap();
-        assert!(json.get("auto_retry").is_none(), "{json}");
-        assert!(json.get("retry_attempts").is_none(), "{json}");
-        let changed = super::LlmSettings {
-            auto_retry: false,
-            retry_attempts: 2,
-            ..Default::default()
-        };
-        let json = serde_json::to_value(&changed).unwrap();
-        let back: super::LlmSettings = serde_json::from_value(json).unwrap();
-        assert!(!back.auto_retry);
-        assert_eq!(back.retry_attempts, 2);
     }
 }

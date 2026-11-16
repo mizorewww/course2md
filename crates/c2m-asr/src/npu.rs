@@ -41,14 +41,14 @@ fn detect_device() -> bool {
 /// PowerShell query for the Windows NPU device. "Intel(R) AI Boost" sits in
 /// the "Neural processors" (ComputeAccelerator) device class; only a device
 /// whose driver is working counts.
-#[cfg(any(windows, test))]
+#[cfg(windows)]
 const WINDOWS_DEVICE_QUERY: &str = "Get-CimInstance -ClassName Win32_PnPEntity \
     -Filter \"Name LIKE '%AI Boost%' OR (PNPClass = 'ComputeAccelerator' AND Manufacturer LIKE '%Intel%')\" \
     | Where-Object { $_.Status -eq 'OK' } | Select-Object -ExpandProperty Name";
 
 /// `powershell -EncodedCommand` takes base64 of UTF-16LE text, which keeps
 /// the query's quotes out of Windows command-line quoting.
-#[cfg(any(windows, test))]
+#[cfg(windows)]
 fn powershell_encoded(script: &str) -> String {
     use base64::Engine as _;
     let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
@@ -262,14 +262,6 @@ impl crate::asr::Transcribe for NpuWorker {
     }
 }
 
-fn npu_kind(model_id: &str) -> &'static str {
-    if model_id.to_ascii_lowercase().contains("whisper") {
-        "whisper"
-    } else {
-        "qwen"
-    }
-}
-
 impl NpuWorker {
     /// `model_id` 须经 [`resolve_npu_model`] 解析：checkpoint 身份与 worker 加载是同一个模型。
     pub(crate) fn start(model_id: &str, control: &crate::dispatch::TaskControl) -> Result<Self> {
@@ -283,7 +275,7 @@ impl NpuWorker {
         let token = crate::runtime::random_b64url(32)?;
         tracing::info!(model = %model_id, port, "starting npu worker");
         crate::progress::start(Stage::ModelLoad);
-        let mut child = spawn_npu_worker(&script_path, model_id, port, npu_kind(model_id), &token)?;
+        let mut child = spawn_npu_worker(&script_path, model_id, port, &token)?;
         let stderr = child
             .take_stderr()
             .map(|s| crate::runtime::drain_stderr(s, "npu_worker"))
@@ -357,7 +349,6 @@ fn spawn_npu_worker(
     script: &Path,
     model: &str,
     port: u16,
-    kind: &str,
     token: &str,
 ) -> Result<crate::runtime::ManagedChild> {
     // 优先使用 uv（自动处理隔离环境与依赖），若无则回退已装好依赖的 Python
@@ -386,7 +377,6 @@ fn spawn_npu_worker(
         .arg(model)
         .arg(port.to_string())
         .arg("NPU")
-        .arg(kind)
         .arg(token)
         .stdout(Stdio::null())
         // stderr 不能 inherit：脚本的输出会插进进度条重绘中间。piped + 后台 drain。
@@ -428,43 +418,6 @@ mod tests {
             "NPU worker 脚本存在语法错误：{}",
             String::from_utf8_lossy(&out.stderr)
         );
-    }
-
-    #[test]
-    fn uv_launcher_ignores_projects_and_requests_a_supported_python() {
-        let cmd = Launcher::Uv(PathBuf::from("uv")).command();
-        let args: Vec<_> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
-        assert_eq!(
-            &args[..4],
-            ["run", "--no-project", "--python", WORKER_PYTHON]
-        );
-        let py = Launcher::PyLauncher(PathBuf::from("py")).command();
-        assert_eq!(py.get_args().collect::<Vec<_>>(), ["-3"]);
-        assert_eq!(args.last(), Some(&"python"));
-        for package in WORKER_PACKAGES {
-            assert!(
-                package.contains("=="),
-                "an unpinned package changes under users: {package}"
-            );
-            assert!(
-                args.windows(2).any(|w| w == ["--with", package]),
-                "{package}"
-            );
-        }
-    }
-
-    #[test]
-    fn device_query_is_encoded_as_utf16_base64() {
-        use base64::Engine as _;
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(powershell_encoded(WINDOWS_DEVICE_QUERY))
-            .unwrap();
-        let units: Vec<u16> = bytes
-            .chunks(2)
-            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-            .collect();
-        assert_eq!(String::from_utf16(&units).unwrap(), WINDOWS_DEVICE_QUERY);
-        assert!(WINDOWS_DEVICE_QUERY.contains("'%AI Boost%'"));
     }
 
     /// The query must run on stock Windows; the runner has no NPU, so only

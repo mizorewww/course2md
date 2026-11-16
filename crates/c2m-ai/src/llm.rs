@@ -2436,7 +2436,7 @@ mod tests {
 
     /// [`scripted_service`] whose `answer` sees the request body instead of its number.
     fn scripted_service_with_body(
-        answer: impl Fn(&serde_json::Value, &[String]) -> String + Send + Sync + 'static,
+        answer: impl Fn(&serde_json::Value, &[String]) -> String + Send + 'static,
     ) -> (String, Bodies) {
         use std::io::Write as _;
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
