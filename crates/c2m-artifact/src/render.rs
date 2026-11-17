@@ -403,7 +403,12 @@ mod tests {
         let english = page(&"the lecture explains how compilers work and why ".repeat(4));
         assert!(english.contains("<html lang=\"en\">"), "{english}");
         let chinese = page(&"今天我们来讲一讲编译器是如何工作的以及它为什么重要".repeat(4));
-        assert!(chinese.contains("<html lang=\"zh\">"), "{chinese}");
+        assert!(chinese.contains("<html lang=\"zh-Hans\">"), "{chinese}");
+        let traditional = page(&"今天我們來講一講編譯器是如何工作的以及它為什麼重要".repeat(4));
+        assert!(
+            traditional.contains("<html lang=\"zh-Hant\">"),
+            "{traditional}"
+        );
         // The caption is translated like its Markdown counterpart, not fixed text.
         let caption = tr!("视频 {} 的截图", fmt_ts(0.0));
         assert!(
