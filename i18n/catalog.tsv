@@ -1443,6 +1443,12 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 画面间隔	画面间隔	Frame interval	畫面間隔	フレーム間隔
 界面偏好	界面偏好	Interface preferences	介面偏好	表示設定
 界面文字大小	界面文字大小	Text size	介面文字大小	文字サイズ
+界面缩放	界面缩放	UI scale	介面縮放	UI の拡大率
+缩放预览	缩放预览	Scale preview	縮放預覽	拡大率のプレビュー
+示例笔记	示例笔记	Sample note	範例筆記	サンプルノート
+梳理课程核心要点与关键时间点，方便在回顾时快速定位重点章节，并结合原文字幕核对细节。	梳理课程核心要点与关键时间点，方便在回顾时快速定位重点章节，并结合原文字幕核对细节。	Organize key points and timestamps so you can locate chapters and check details against the transcript while reading.	梳理課程核心要點與關鍵時間點，方便在回顧時快速定位重點章節，並結合原文字幕核對細節。	講義の要点とタイムスタンプを整理し、読み返しながら重要な章を見つけて原文字幕と照合できます。
+重要推导与示例画面都会关联对应时间点，方便回顾笔记时随时跳转并核对上下文。	重要推导与示例画面都会关联对应时间点，方便回顾笔记时随时跳转并核对上下文。	Important steps and slides stay linked to timestamps so you can jump back to the video context anytime.	重要推導與範例畫面都會關聯對應時間點，方便回顧筆記時隨時跳轉並核對上下文。	重要な解説やスライドはタイムスタンプと連動しており、復習時にいつでも映像の文脈へ戻って確認できます。
+松开鼠标后应用	松开鼠标后应用	Release to apply	放開滑鼠後套用	マウスを離すと適用されます
 界面语言	界面语言	Interface language	介面語言	表示言語
 界面语言：auto、en、zh-Hans、zh-Hant、ja / Interface language: auto, en, zh-Hans, zh-Hant, ja	界面语言：auto、en、zh-Hans、zh-Hant、ja / Interface language: auto, en, zh-Hans, zh-Hant, ja	Interface language: auto, en, zh-Hans, zh-Hant, ja	介面語言：auto、en、zh-Hans、zh-Hant、ja	表示言語：auto、en、zh-Hans、zh-Hant、ja
 登录 Bilibili	登录 Bilibili	Sign in to Bilibili	登入 Bilibili	Bilibili にログイン
@@ -1685,7 +1691,7 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 请输入服务提供的模型 ID	请输入服务提供的模型 ID	Please enter the model ID provided by the service	請輸入服務提供的模型 ID	サービスから提供されたモデルIDを入力してください
 请输入笔记名称	请输入笔记名称	Please enter a note name	請輸入筆記名稱	ノート名を入力してください
 请输入语音服务提供的模型 ID / Speech model ID is required	请输入语音服务提供的模型 ID	Speech model ID is required	請輸入語音服務提供的模型 ID	音声サービスから提供されたモデルIDを入力してください
-请选择 100%、125%、150% 或 200% 的文字大小	请选择 100%、125%、150% 或 200% 的文字大小	Please select 100%, 125%, 150% or 200% text size	請選擇 100%、125%、150% 或 200% 的文字大小	100%、125%、150%、または 200% のテキスト サイズを選択してください
+请选择 75% 到 200% 的界面缩放，步长为 5%	请选择 75% 到 200% 的界面缩放，步长为 5%	Select a UI scale from 75% to 200% in steps of 5%.	請選擇 75% 到 200% 的介面縮放，步長為 5%	UI の拡大率を 75% から 200% の範囲で 5% 刻みで選択してください。
 请选择 SRT 或 VTT 字幕文件	请选择 SRT 或 VTT 字幕文件	Please select SRT or VTT subtitle file	請選擇 SRT 或 VTT 字幕檔案	SRT または VTT 字幕ファイルを選択してください
 请选择可读取的视频文件	请选择可读取的视频文件	Please select a readable video file	請選擇可讀取的影片檔案	読み取り可能な動画ファイルを選択してください
 请选择字幕	请选择字幕	Please select subtitles	請選擇字幕	字幕を選択してください
@@ -2320,3 +2326,5 @@ AI 处理的设置已更改	AI 处理的设置已更改	The AI processing settin
 覆盖已有笔记	覆盖已有笔记	Replace existing notes	覆蓋已有筆記	既存のノートを上書き
 覆盖并生成	覆盖并生成	Replace and convert	覆蓋並產生	上書きして変換
 选中的视频中有 {} 个已有笔记，继续转换将覆盖原有笔记。	选中的视频中有 {} 个已有笔记，继续转换将覆盖原有笔记。	{} of the selected videos already have notes; continuing will replace them.	選取的影片中有 {} 個已有筆記，繼續轉換將覆蓋原有筆記。	選択した動画のうち {} 件には既にノートがあり、続行すると上書きされます。
+恢复 100%	恢复 100%	Reset to 100%	恢復 100%	100% に戻す
+尚未保存的界面缩放：{}%	尚未保存的界面缩放：{}%	Unsaved UI scale: {}%	尚未儲存的介面縮放：{}%	未保存の UI の拡大率：{}%

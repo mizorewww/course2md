@@ -267,8 +267,22 @@ struct GalleryState {
     list: ListState,
     items: Rc<Vec<GalleryItem>>,
     columns: usize,
+    rem_size: Pixels,
     extensions: MarkdownExtensions,
     line_width: Arc<AtomicU32>,
+}
+
+fn remeasure_gallery_for_rem(
+    list: &ListState,
+    measured_rem_size: &mut Pixels,
+    rem_size: Pixels,
+) -> bool {
+    if *measured_rem_size == rem_size {
+        return false;
+    }
+    list.remeasure();
+    *measured_rem_size = rem_size;
+    true
 }
 
 /// Returning to a saved reading position once its view has what it needs, and recording
@@ -423,6 +437,7 @@ impl ReaderPage {
                 list: gallery_list,
                 items: Rc::new(vec![GalleryItem::Header]),
                 columns: 1,
+                rem_size: window.rem_size(),
                 extensions: note_text::extensions(gallery_line.clone()),
                 line_width: gallery_line,
             },
@@ -703,9 +718,13 @@ const GALLERY_GAP: Rems = rem(12.);
 const GALLERY_MIN_COLUMN: Rems = rem(260.);
 /// A window with less height than this for the page shows no view tabs.
 const SHORT_MAX_HEIGHT: Rems = rem(336.);
-pub(crate) const TITLE_BAR_HEIGHT: Rems = rem(56.);
 /// The widest the search field grows.
 const SEARCH_MAX_WIDTH: Rems = rem(560.);
+
+/// The shared app bar height at this rem size, with native button clearance.
+pub(crate) fn title_bar_height_for_rem(rem_size: Pixels) -> Pixels {
+    (rem(40.).to_pixels(rem_size) + px(16.)).max(crate::views::APP_BAR_HEIGHT)
+}
 
 impl ReaderMetrics {
     /// The width the page gives its views: all of it beside the contents, else the
@@ -737,7 +756,7 @@ impl ReaderMetrics {
         } else {
             rem(48.)
         };
-        let available = window.bounds().size.height - TITLE_BAR_HEIGHT.to_pixels(rem_size);
+        let available = window.bounds().size.height - crate::views::title_bar_height(window);
         Self {
             content_width,
             toc_beside,
@@ -3301,6 +3320,7 @@ impl ReaderPage {
         if columns != self.gallery.columns {
             self.set_gallery_items(columns);
         }
+        remeasure_gallery_for_rem(&self.gallery.list, &mut self.gallery.rem_size, rem_size);
         // Cards draw a thumbnail decoded at their own device width.
         let card_width = (width - gap * (columns as f32 - 1.)) / columns as f32;
         self.gallery
@@ -3842,7 +3862,7 @@ impl ReaderPage {
     /// caption buttons (drawn above every dialog) stay. The viewer's surface still
     /// fills the row behind them.
     fn viewer_safe_top(window: &Window) -> Pixels {
-        TITLE_BAR_HEIGHT.to_pixels(window.rem_size())
+        crate::views::title_bar_height(window)
     }
     /// The height the viewer has below the title bar's row.
     fn viewer_height(window: &Window) -> Pixels {
@@ -4665,6 +4685,26 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
+    fn the_screenshot_viewer_header_starts_below_the_window_buttons() {
+        use gpui_kit_material::components::traffic_light_position;
+        let lights = traffic_light_position(crate::views::APP_BAR_HEIGHT);
+        for scale in [0.75, 1., 2.] {
+            let rem_size = px(gpui_kit_material::tokens::typography::BASE_PX * scale);
+            let row = super::title_bar_height_for_rem(rem_size);
+            assert!(row >= lights.y * 2. + px(14.), "{scale}: {row:?}");
+            assert!(row >= px(32.), "{scale}: {row:?}");
+        }
+    }
+
+    #[test]
+    fn the_reader_title_bar_height_keeps_native_clearance_at_each_scale() {
+        for (scale, height) in [(0.75, 56.), (1., 56.), (2., 96.)] {
+            let rem_size = px(gpui_kit_material::tokens::typography::BASE_PX * scale);
+            assert_eq!(super::title_bar_height_for_rem(rem_size), px(height));
+        }
+    }
+
+    #[test]
     fn the_text_goes_beside_the_image_only_where_the_image_stays_as_large() {
         use super::text_beside;
         // The column and its gap, and the gap below, at 100% text.
@@ -4714,6 +4754,51 @@ mod tests {
         let narrow = gallery_items(matches.len(), 2);
         assert_eq!(gallery_row_of(&narrow, &matches, 3), Some(2));
         assert_eq!(gallery_row_of(&narrow, &matches, 99), None);
+    }
+
+    #[test]
+    fn a_gallery_scale_change_remeasures_rows_and_keeps_the_same_screenshot() {
+        let matches: Vec<usize> = (0..7).collect();
+        let items = gallery_items(matches.len(), 3);
+        let list = ListState::new(items.len(), ListAlignment::Top, px(1000.));
+        let base_rem = px(gpui_kit_material::tokens::typography::BASE_PX);
+        let mut measured_rem_size = base_rem;
+        list.scroll_to(ListOffset {
+            item_ix: 2,
+            offset_in_item: px(50.),
+        });
+        for scale in [0.75, 1., 2.] {
+            let rem_size = base_rem * scale;
+            assert!(super::remeasure_gallery_for_rem(
+                &list,
+                &mut measured_rem_size,
+                rem_size,
+            ));
+            assert_eq!(measured_rem_size, rem_size);
+            assert_eq!(list.item_count(), items.len());
+            assert_eq!(gallery_top_frame(&items, &matches, &list), Some(3));
+            assert_eq!(list.logical_scroll_top().offset_in_item, px(50.));
+        }
+    }
+
+    #[test]
+    fn an_unchanged_gallery_scale_keeps_its_measurements() {
+        let list = ListState::new(4, ListAlignment::Top, px(1000.));
+        let rem_size = px(gpui_kit_material::tokens::typography::BASE_PX);
+        let mut measured_rem_size = rem_size;
+        list.scroll_to(ListOffset {
+            item_ix: 2,
+            offset_in_item: px(50.),
+        });
+        assert!(!super::remeasure_gallery_for_rem(
+            &list,
+            &mut measured_rem_size,
+            rem_size,
+        ));
+        assert_eq!(measured_rem_size, rem_size);
+        assert_eq!(list.item_count(), 4);
+        assert_eq!(list.logical_scroll_top().item_ix, 2);
+        assert_eq!(list.logical_scroll_top().offset_in_item, px(50.));
     }
 
     fn section(index: usize) -> PreviewBlock {

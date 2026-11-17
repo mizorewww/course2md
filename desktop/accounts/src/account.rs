@@ -277,7 +277,13 @@ mod tests {
         assert_eq!(code, 260.);
 
         for (width, height) in [(400., 300.), (812., 268.), (560., 800.)] {
-            for scale in desktop_prefs::preferences::FONT_SCALES {
+            for percent in (desktop_prefs::preferences::FONT_SCALE_MIN_PERCENT
+                ..=desktop_prefs::preferences::FONT_SCALE_MAX_PERCENT)
+                .step_by(usize::from(
+                    desktop_prefs::preferences::FONT_SCALE_STEP_PERCENT,
+                ))
+            {
+                let scale = f32::from(percent) / 100.;
                 let (code, _) = qr_layout(width, height, 14. * scale);
                 assert!(code > 0. && code <= width && code <= height);
             }

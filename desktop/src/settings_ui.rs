@@ -22,6 +22,7 @@ use crate::{
 use anyhow::{Result, anyhow};
 use course2md::execution::Component;
 use gpui::{prelude::*, *};
+use gpui_base::slider::{SliderEvent, SliderState};
 use gpui_base::{h_flex, v_flex};
 use gpui_kit::component::{
     input::{InputEvent, InputState, TextareaState},
@@ -39,6 +40,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 use std::time::Duration;
+use std::{cell::Cell, rc::Rc};
 
 actions!(
     course2md_settings,
@@ -120,6 +122,13 @@ pub(crate) struct State {
     generation_block_messages: BTreeSet<String>,
     pub(crate) pending_generation: Option<GenerationPreferences>,
     pub(crate) pending_application: Option<ApplicationPreferences>,
+    pub(crate) font_scale: Entity<SliderState>,
+    pub(crate) scale_slider: Entity<crate::appearance_ui::ScaleSlider>,
+    pub(crate) scale_preview: Option<f32>,
+    pub(crate) scale_dragging: Rc<Cell<bool>>,
+    scale_scroll_pin: bool,
+    scale_scroll_target: Option<f32>,
+    scale_save: Option<Task<()>>,
     /// Typed text not yet written to disk; flushed after a pause, on blur and on exit.
     unsaved_text: Option<GenerationPreferences>,
     text_flush: Option<Task<()>>,
@@ -127,7 +136,7 @@ pub(crate) struct State {
 }
 
 impl State {
-    pub fn new(window: &mut Window, cx: &mut Context<Desktop>) -> Self {
+    pub fn new(scale: f32, window: &mut Window, cx: &mut Context<Desktop>) -> Self {
         cx.bind_keys([
             KeyBinding::new("right", NextSettingsTab, Some("SettingsTabs")),
             KeyBinding::new("down", NextSettingsTab, Some("SettingsTabs")),
@@ -166,6 +175,28 @@ impl State {
             InputEvent::Blur => this.flush_generation_text(cx),
             _ => {}
         }));
+        let font_scale = cx.new(|_| {
+            SliderState::new()
+                .min(f32::from(preferences::FONT_SCALE_MIN_PERCENT))
+                .max(f32::from(preferences::FONT_SCALE_MAX_PERCENT))
+                .step(f32::from(preferences::FONT_SCALE_STEP_PERCENT))
+                .default_value((scale * 100.).round())
+        });
+        let scale_dragging = Rc::new(Cell::new(false));
+        let scale_slider = cx.new(|cx| {
+            crate::appearance_ui::ScaleSlider::new(font_scale.clone(), scale_dragging.clone(), cx)
+        });
+        subscriptions.push(cx.subscribe_in(
+            &font_scale,
+            window,
+            |this, _, event, _, cx| match event {
+                SliderEvent::Change(value) => this.preview_font_scale(value.end(), cx),
+                SliderEvent::Release(_) => {
+                    this.settings_ui.scale_dragging.set(false);
+                    this.flush_font_scale(cx);
+                }
+            },
+        ));
         Self {
             model_diagnostics: Default::default(),
             navigation_focus: cx.focus_handle(),
@@ -189,6 +220,13 @@ impl State {
             generation_block_messages: Default::default(),
             pending_generation: None,
             pending_application: None,
+            font_scale,
+            scale_slider,
+            scale_preview: None,
+            scale_dragging,
+            scale_scroll_pin: false,
+            scale_scroll_target: None,
+            scale_save: None,
             unsaved_text: None,
             text_flush: None,
             _subscriptions: subscriptions,
@@ -274,7 +312,7 @@ fn settings_row_width(window: &Window) -> f32 {
         SettingsLayout::Rail => shell - settings_rail_width(window) - SETTINGS_RAIL_GAP,
         SettingsLayout::Single => shell.min(760.),
     };
-    pane - 12. - 2. * 20.
+    pane - 24. / unit - 2. * 20.
 }
 
 /// Whether a small segmented group of `labels` fits one settings row.
@@ -351,6 +389,7 @@ impl SettingsTab {
                 course2md::tr!("深色主题"),
                 course2md::tr!("界面偏好"),
                 course2md::tr!("界面语言"),
+                course2md::tr!("界面缩放"),
                 course2md::tr!("界面文字大小"),
                 course2md::tr!("减少动态效果"),
             ],
@@ -453,11 +492,144 @@ impl Desktop {
             .clone()
     }
     pub(crate) fn application_edit_base(&self) -> ApplicationPreferences {
-        self.settings_ui
+        let mut next = self
+            .settings_ui
             .pending_application
             .as_ref()
             .unwrap_or_else(|| self.preferences.application())
-            .clone()
+            .clone();
+        if let Some(scale) = self
+            .settings_ui
+            .scale_preview
+            .filter(|_| !self.settings_ui.scale_dragging.get())
+        {
+            next.font_scale = scale;
+        }
+        next
+    }
+
+    fn pin_appearance_scroll_top(&mut self, target: Option<f32>) {
+        self.settings_ui.scale_scroll_pin = true;
+        self.settings_ui.scale_scroll_target = target;
+        self.scrolls[Page::Settings as usize].set_offset(point(px(0.), px(0.)));
+    }
+
+    pub(crate) fn clear_appearance_scroll_pin(&mut self) {
+        self.settings_ui.scale_scroll_pin = false;
+        self.settings_ui.scale_scroll_target = None;
+    }
+
+    fn appearance_scroll_guard(&self, child: impl IntoElement, cx: &Context<Self>) -> AnyElement {
+        let active =
+            self.settings_tab == SettingsTab::Appearance && self.settings_ui.scale_scroll_pin;
+        let view = cx.weak_entity();
+        prepaint_bounds(child, move |_, window, cx| {
+            if !active {
+                return;
+            }
+            let view = view.clone();
+            window.defer(cx, move |window, cx| {
+                let _ = view.update(cx, |this, _| {
+                    if this.settings_tab != SettingsTab::Appearance
+                        || !this.settings_ui.scale_scroll_pin
+                    {
+                        return;
+                    }
+                    let scroll = &this.scrolls[Page::Settings as usize];
+                    if scroll.offset() != Point::default() {
+                        scroll.set_offset(point(px(0.), px(0.)));
+                        window.refresh();
+                    }
+                    if let Some(target) = this.settings_ui.scale_scroll_target {
+                        let expected = gpui_kit_material::tokens::typography::BASE_PX * target;
+                        if (f32::from(window.rem_size()) - expected).abs() < 0.01 {
+                            this.clear_appearance_scroll_pin();
+                        }
+                    }
+                });
+            });
+        })
+        .into_any_element()
+    }
+
+    fn settings_content_scroll(
+        &self,
+        child: impl IntoElement,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let scroll = &self.scrolls[Page::Settings as usize];
+        div()
+            .id("settings-content-scroll")
+            .min_w_0()
+            .min_h_0()
+            .overflow_y_scroll()
+            .track_scroll(scroll)
+            .on_scroll(cx.listener(|this, _, _, cx| {
+                if this.settings_tab == SettingsTab::Appearance && this.settings_ui.scale_scroll_pin
+                {
+                    this.scrolls[Page::Settings as usize].set_offset(point(px(0.), px(0.)));
+                    cx.notify();
+                }
+            }))
+            .child(self.appearance_scroll_guard(child, cx))
+    }
+
+    pub(crate) fn begin_font_scale(&mut self, cx: &mut Context<Self>) {
+        self.settings_ui.scale_save = None;
+        self.settings_ui.scale_dragging.set(true);
+        self.pin_appearance_scroll_top(None);
+        cx.notify();
+    }
+
+    pub(crate) fn preview_font_scale(&mut self, percent: f32, cx: &mut Context<Self>) {
+        let scale = percent / 100.;
+        if !preferences::is_supported_font_scale(scale) {
+            return;
+        }
+        self.settings_ui.scale_preview = Some(scale);
+        self.settings_ui.scale_save = None;
+        if !self.settings_ui.scale_dragging.get() {
+            self.settings_ui.scale_save = Some(cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(TEXT_SAVE_DELAY_MS))
+                    .await;
+                let _ = this.update(cx, |this, cx| this.flush_font_scale(cx));
+            }));
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn flush_font_scale(&mut self, cx: &mut Context<Self>) {
+        self.settings_ui.scale_save = None;
+        if self.settings_ui.scale_dragging.replace(false) {
+            self.settings_ui.scale_preview = None;
+            if self.settings_ui.scale_scroll_pin {
+                self.pin_appearance_scroll_top(Some(self.preferences.application().font_scale));
+                cx.notify();
+            }
+            return;
+        }
+        let next = self.application_edit_base();
+        let committed = if self.settings_ui.scale_preview.take().is_some()
+            && (next != *self.preferences.application()
+                || self.settings_ui.pending_application.is_some())
+        {
+            self.commit_application(next, cx);
+            true
+        } else {
+            false
+        };
+        if self.settings_ui.scale_scroll_pin {
+            self.pin_appearance_scroll_top(Some(self.preferences.application().font_scale));
+            if !committed {
+                cx.notify();
+            }
+        }
+    }
+
+    pub(crate) fn release_font_scale(&mut self, cx: &mut Context<Self>) {
+        self.settings_ui.scale_dragging.set(false);
+        self.flush_font_scale(cx);
     }
     fn setting_input(&self, field: EditField, cx: &App) -> String {
         match field {
@@ -553,6 +725,8 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         self.flush_generation_text(cx);
+        self.flush_font_scale(cx);
+        self.clear_appearance_scroll_pin();
         self.settings_tab = tab;
         self.scrolls[Page::Settings as usize].set_offset(point(px(0.), px(0.)));
         // Capture builds can review the lower part of a category.
@@ -892,45 +1066,41 @@ impl Desktop {
                     ))
                 })
         });
+        if self.settings_tab == SettingsTab::Appearance && self.settings_ui.scale_scroll_pin {
+            self.scrolls[Page::Settings as usize].set_offset(point(px(0.), px(0.)));
+        }
         let scroll = &self.scrolls[Page::Settings as usize];
         let notices: Vec<_> = self.settings_notices(cx).into_iter().collect();
         if single {
             return self.settings_single_column(heading, notices, content, cx);
         }
         let navigation = self.settings_navigation(compact, cx);
-        let panel = v_flex()
-            .relative()
-            .id("settings-panel")
-            .flex_1()
-            .max_w(rem(760.))
-            .min_w_0()
-            .min_h_0()
-            .h_full()
-            .gap(rem(16.))
-            .when(!notices.is_empty(), |panel| {
-                panel.child(
-                    v_flex()
-                        .w_full()
-                        .min_w_0()
-                        .flex_shrink_0()
-                        .pr(rem(12.))
-                        .gap(rem(8.))
-                        .children(notices),
-                )
-            })
-            .child(
-                div()
-                    .id("settings-content-scroll")
-                    .flex_1()
-                    .min_w_0()
-                    .min_h_0()
-                    .w_full()
-                    .overflow_y_scroll()
-                    .track_scroll(scroll)
-                    .child(
+        let panel =
+            v_flex()
+                .relative()
+                .id("settings-panel")
+                .flex_1()
+                .max_w(rem(760.))
+                .min_w_0()
+                .min_h_0()
+                .h_full()
+                .gap(rem(16.))
+                .when(!notices.is_empty(), |panel| {
+                    panel.child(
+                        v_flex()
+                            .w_full()
+                            .min_w_0()
+                            .flex_shrink_0()
+                            .pr(px(24.))
+                            .gap(rem(8.))
+                            .children(notices),
+                    )
+                })
+                .child(
+                    self.settings_content_scroll(
                         // A category arrives as one unit; the navigation stays a landmark.
                         // The right inset is the scrollbar's gutter, so it never covers a tile.
-                        div().w_full().min_w_0().pr(rem(12.)).pb(rem(64.)).child(
+                        div().w_full().min_w_0().pr(px(24.)).pb(rem(64.)).child(
                             motion::page_enter(
                                 ("settings-category", self.settings_tab.index()),
                                 v_flex()
@@ -941,9 +1111,12 @@ impl Desktop {
                                     .child(content),
                             ),
                         ),
-                    ),
-            )
-            .child(Scrollbar::vertical(scroll));
+                        cx,
+                    )
+                    .flex_1()
+                    .w_full(),
+                )
+                .child(Scrollbar::vertical(scroll));
         h_flex()
             .size_full()
             .max_w(rem(1120.))
@@ -986,40 +1159,35 @@ impl Desktop {
             .size_full()
             .min_h_0()
             .child(
-                div()
-                    .id("settings-content-scroll")
-                    .size_full()
-                    .min_w_0()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(scroll)
-                    .child(
-                        v_flex()
-                            .w_full()
-                            .min_w_0()
-                            .max_w(rem(760.))
-                            .mx_auto()
-                            .pt(rem(8.))
-                            .pr(rem(12.))
-                            .pb(rem(64.))
-                            .gap(rem(16.))
-                            .child(self.settings_header(cx))
-                            .child(self.settings_search(cx))
-                            .when(has_tabs, |column| {
-                                column.child(self.settings_category_menu(cx))
-                            })
-                            .children(notices)
-                            .child(motion::page_enter(
-                                ("settings-category", self.settings_tab.index()),
-                                v_flex()
-                                    .w_full()
-                                    .min_w_0()
-                                    .pt(rem(12.))
-                                    .gap(rem(28.))
-                                    .children(heading)
-                                    .child(content),
-                            )),
-                    ),
+                self.settings_content_scroll(
+                    v_flex()
+                        .w_full()
+                        .min_w_0()
+                        .max_w(rem(760.))
+                        .mx_auto()
+                        .pt(rem(8.))
+                        .pr(px(24.))
+                        .pb(rem(64.))
+                        .gap(rem(16.))
+                        .child(self.settings_header(cx))
+                        .child(self.settings_search(cx))
+                        .when(has_tabs, |column| {
+                            column.child(self.settings_category_menu(cx))
+                        })
+                        .children(notices)
+                        .child(motion::page_enter(
+                            ("settings-category", self.settings_tab.index()),
+                            v_flex()
+                                .w_full()
+                                .min_w_0()
+                                .pt(rem(12.))
+                                .gap(rem(28.))
+                                .children(heading)
+                                .child(content),
+                        )),
+                    cx,
+                )
+                .size_full(),
             )
             .child(Scrollbar::vertical(scroll))
             .into_any_element()
@@ -1721,12 +1889,23 @@ impl Desktop {
         next: ApplicationPreferences,
         cx: &mut Context<Self>,
     ) -> bool {
+        let previous_scale = self.preferences.application().font_scale;
+        self.settings_ui.scale_preview = None;
+        self.settings_ui.scale_save = None;
+        self.settings_ui.scale_dragging.set(false);
         let saved = match self.preferences.save_application(next.clone()) {
             Ok(()) => {
                 self.settings_ui.pending_application = None;
                 self.desktop_settings = self.preferences.application().desktop.clone();
                 cx.set_reduce_motion(self.desktop_settings.reduce_motion);
                 self.clear_settings_failure(PreferenceGroup::Application);
+                if self.page == Page::Settings
+                    && self.settings_tab == SettingsTab::Appearance
+                    && (self.preferences.application().font_scale - previous_scale).abs()
+                        > f32::EPSILON
+                {
+                    self.pin_appearance_scroll_top(Some(self.preferences.application().font_scale));
+                }
                 true
             }
             Err(error) => {
@@ -2234,6 +2413,7 @@ impl Desktop {
     /// Ordinary preferences save immediately. Service form edits become active
     /// only through Save and do not create a separate quit-time save workflow.
     pub fn flush_settings_for_exit(&mut self, cx: &mut Context<Self>) -> bool {
+        self.flush_font_scale(cx);
         if let Some(cancel) = self
             .settings_ui
             .editor

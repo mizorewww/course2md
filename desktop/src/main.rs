@@ -431,7 +431,7 @@ impl Desktop {
         if let Some(workspace) = &workspace {
             workspace.set_wake_sender(work.read(cx).waker());
         }
-        let settings_ui = settings_ui::State::new(window, cx);
+        let settings_ui = settings_ui::State::new(preferences.application().font_scale, window, cx);
         let onboarding = onboarding::State::new(window, cx);
         let records = cx.new(|_| {
             desktop_store::records::Records::new(
@@ -1171,6 +1171,10 @@ impl Desktop {
 
     /// Shows `page`; the reader records reading positions only while it shows.
     fn set_page(&mut self, page: Page, cx: &mut Context<Self>) {
+        if self.page == Page::Settings && page != Page::Settings {
+            self.flush_font_scale(cx);
+            self.clear_appearance_scroll_pin();
+        }
         self.page = page;
         self.reader
             .change(cx, |reader, _| reader.visible = page == Page::Result);

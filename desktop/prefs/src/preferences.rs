@@ -238,8 +238,26 @@ impl GenerationPreferences {
     }
 }
 
-/// 界面文字大小档位：应用、下拉选项、持久化校验共用同一白名单
-pub const FONT_SCALES: [f32; 4] = [1.0, 1.25, 1.5, 2.0];
+/// The minimum interface scale, as a percentage.
+pub const FONT_SCALE_MIN_PERCENT: u16 = 75;
+/// The maximum interface scale, as a percentage.
+pub const FONT_SCALE_MAX_PERCENT: u16 = 200;
+/// The interval between supported interface scale percentages.
+pub const FONT_SCALE_STEP_PERCENT: u16 = 5;
+
+/// Accepts finite scales in the inclusive range at the supported percentage steps.
+/// Allows rounding errors from conversion to `f32`.
+pub fn is_supported_font_scale(scale: f32) -> bool {
+    let min = f32::from(FONT_SCALE_MIN_PERCENT);
+    let max = f32::from(FONT_SCALE_MAX_PERCENT);
+    if !scale.is_finite() || !(min / 100.0..=max / 100.0).contains(&scale) {
+        return false;
+    }
+    let percent = scale * 100.0;
+    let step = f32::from(FONT_SCALE_STEP_PERCENT);
+    let nearest = min + ((percent - min) / step).round() * step;
+    (percent - nearest).abs() <= 2.0 * f32::EPSILON * percent
+}
 
 /// The interface language, including the default that follows the operating system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -804,8 +822,8 @@ impl Validate for ApplicationPreferences {
         if !self.appearance.valid() {
             bail!(c2m_i18n::tr!("请为浅色和深色外观分别选择对应的主题"));
         }
-        if !crate::preferences::FONT_SCALES.contains(&self.font_scale) {
-            bail!(c2m_i18n::tr!("请选择 100%、125%、150% 或 200% 的文字大小"));
+        if !is_supported_font_scale(self.font_scale) {
+            bail!(c2m_i18n::tr!("请选择 75% 到 200% 的界面缩放，步长为 5%"));
         }
         Ok(())
     }
@@ -2983,12 +3001,68 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_text_scale_is_not_published_or_restored_as_active() {
-        let (_directory, mut store) = isolated();
-        let mut app = store.application().clone();
-        app.font_scale = f32::NAN;
-        assert!(store.save_application(app).is_err());
-        assert_eq!(store.application().font_scale, 1.0);
+    fn font_scale_validation_and_persistence_preserve_active_value() {
+        for percent in (75_u16..=200).step_by(5) {
+            for scale in [f32::from(percent) / 100.0, f32::from(percent) * 0.01] {
+                assert!(is_supported_font_scale(scale), "{percent}%: {scale}");
+            }
+        }
+        for scale in [
+            f32::NAN,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            -1.0,
+            0.0,
+            0.70,
+            0.75_f32.next_down(),
+            2.0_f32.next_up(),
+            2.05,
+            0.76,
+            1.01,
+            1.025,
+            1.25001,
+            1.999,
+        ] {
+            assert!(!is_supported_font_scale(scale), "{scale}");
+        }
+
+        let (directory, mut store) = isolated();
+        let mut active = store.application().clone();
+        active.font_scale = 0.95;
+        store.save_application(active.clone()).unwrap();
+        assert_eq!(open(directory.path(), store.vault()).application(), &active);
+
+        let revision = store.revision(PreferenceGroup::Application);
+        let mut invalid = active.clone();
+        invalid.font_scale = 1.025;
+        let error = store.save_application(invalid).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            c2m_i18n::tr!("请选择 75% 到 200% 的界面缩放，步长为 5%")
+        );
+        assert_eq!(store.application(), &active);
+        assert_eq!(store.revision(PreferenceGroup::Application), revision);
+    }
+
+    #[test]
+    fn failed_font_scale_save_preserves_active_value() {
+        let (directory, mut store) = isolated();
+        let mut active = store.application().clone();
+        active.font_scale = 0.95;
+        store.save_application(active.clone()).unwrap();
+        let revision = store.revision(PreferenceGroup::Application);
+        let path = directory.path().join("application.json");
+        let preserved = directory.path().join("application-preserved.json");
+        let saved = std::fs::read(&path).unwrap();
+        std::fs::rename(&path, &preserved).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        let mut edit = active.clone();
+        edit.font_scale = 2.0;
+        assert!(store.save_application(edit.clone()).is_err());
+        assert_eq!(store.application(), &active);
+        assert_eq!(store.revision(PreferenceGroup::Application), revision);
+        assert_eq!(store.application_intent(), Some(&edit));
+        assert_eq!(std::fs::read(&preserved).unwrap(), saved);
     }
 
     #[test]

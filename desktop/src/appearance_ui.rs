@@ -2,13 +2,15 @@
 use crate::preferences::{InterfaceLanguage, PreferenceGroup};
 use crate::{Desktop, symbols, ui};
 use gpui::{prelude::*, *};
-use gpui_base::{h_flex, v_flex};
+use gpui_base::slider::SliderState;
+use gpui_base::{Placement, h_flex, v_flex};
 use gpui_kit_material::{
     color::{Scheme, palette::ALL},
     prelude::*,
     theme::{is_dark, rgba},
-    tokens::shape::OuterCorners,
+    tokens::{elevation, shape::OuterCorners},
 };
+use std::{cell::Cell, rc::Rc};
 
 /// Between palette cards, and the narrowest a card gets, in design px.
 const CARD_GAP: f32 = 16.;
@@ -19,9 +21,522 @@ const CARD_MIN_WIDTH: f32 = 150.;
 /// The picker's widest, in dp: four previews across with their names on one line.
 const PICKER_WIDTH: f32 = 920.;
 
+pub(crate) struct ScaleSlider {
+    state: Entity<SliderState>,
+    active: Rc<Cell<bool>>,
+    anchor: Rc<Cell<Option<Bounds<Pixels>>>>,
+    dragging: Rc<Cell<bool>>,
+    _subscription: Subscription,
+}
+
+impl ScaleSlider {
+    pub(crate) fn new(
+        state: Entity<SliderState>,
+        dragging: Rc<Cell<bool>>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let subscription = cx.observe(&state, |_, _, cx| cx.notify());
+        Self {
+            state,
+            active: Rc::new(Cell::new(false)),
+            anchor: Rc::new(Cell::new(None)),
+            dragging,
+            _subscription: subscription,
+        }
+    }
+}
+
+impl Render for ScaleSlider {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let state = self.state.clone();
+        let active = self.active.clone();
+        let anchor = self.anchor.clone();
+        let dragging = self.dragging.clone();
+        let view = cx.weak_entity();
+        let preview = self.dragging.get() && self.active.get();
+        let target = self.state.read(cx).value().end();
+        let preview_margin = crate::views::title_bar_height(window) + px(8.);
+        let preview_edge = preview_margin + window.client_inset().unwrap_or(px(0.));
+        let preview_size = size(
+            px(440.).min(window.viewport_size().width - preview_edge * 2.),
+            px(300.).min(window.viewport_size().height - preview_edge * 2.),
+        );
+        div()
+            .relative()
+            .w_full()
+            .child(
+                canvas(
+                    |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
+                    move |_, hitbox, window, _| {
+                        let pressed = active.clone();
+                        let pressed_anchor = anchor.clone();
+                        let held = dragging.clone();
+                        let pressed_view = view.clone();
+                        window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+                            if phase == DispatchPhase::Capture
+                                && event.button == MouseButton::Left
+                                && hitbox.is_hovered(window)
+                            {
+                                pressed.set(true);
+                                pressed_anchor.set(None);
+                                held.set(true);
+                                let _ = pressed_view.update(cx, |_, cx| cx.notify());
+                            }
+                        });
+                        let moved = active.clone();
+                        let moved_anchor = anchor.clone();
+                        let slider = state.clone();
+                        let held = dragging.clone();
+                        let moved_view = view.clone();
+                        window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+                            if phase != DispatchPhase::Capture {
+                                return;
+                            }
+                            if !moved.get() {
+                                return;
+                            }
+                            if !held.get() && event.pressed_button == Some(MouseButton::Left) {
+                                cx.stop_active_drag(window);
+                                slider.update(cx, |state, cx| state.handle_release(cx));
+                                cx.stop_propagation();
+                                return;
+                            }
+                            if event.pressed_button != Some(MouseButton::Left) {
+                                moved.set(false);
+                                moved_anchor.set(None);
+                                held.set(false);
+                                slider.update(cx, |state, cx| state.handle_release(cx));
+                                let _ = moved_view.update(cx, |_, cx| cx.notify());
+                            }
+                        });
+                        let released = active.clone();
+                        let released_anchor = anchor.clone();
+                        let slider = state.clone();
+                        let held = dragging.clone();
+                        window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                            if phase == DispatchPhase::Capture
+                                && event.button == MouseButton::Left
+                                && released.replace(false)
+                            {
+                                released_anchor.set(None);
+                                held.set(false);
+                                slider.update(cx, |state, cx| state.handle_release(cx));
+                                let _ = view.update(cx, |_, cx| cx.notify());
+                            }
+                        });
+                    },
+                )
+                .absolute()
+                .size_full(),
+            )
+            .child(
+                MaterialSlider::new(&self.state, course2md::tr!("界面缩放"))
+                    .id("app-font-scale")
+                    .stops(true)
+                    .value_indicator(false)
+                    .format(|value| format!("{value:.0}%").into()),
+            )
+            .when(preview, |control| {
+                control.child(deferred(ScalePreviewOverlay {
+                    slider: self.state.clone(),
+                    anchor: self.anchor.clone(),
+                    margin: preview_margin,
+                    offset: px(12.),
+                    child: scale_preview_surface(target, preview_size).into_any_element(),
+                }))
+            })
+    }
+}
+
+struct ScalePreviewOverlay {
+    slider: Entity<SliderState>,
+    anchor: Rc<Cell<Option<Bounds<Pixels>>>>,
+    margin: Pixels,
+    offset: Pixels,
+    child: AnyElement,
+}
+
+impl IntoElement for ScalePreviewOverlay {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl Element for ScalePreviewOverlay {
+    type RequestLayoutState = LayoutId;
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, LayoutId) {
+        let child_layout = self.child.request_layout(window, cx);
+        let layout_id = window.request_layout(
+            Style {
+                position: Position::Absolute,
+                display: Display::Flex,
+                ..Style::default()
+            },
+            [child_layout],
+            cx,
+        );
+        (layout_id, child_layout)
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        child_layout: &mut LayoutId,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let popup_size = window.layout_bounds(*child_layout).size;
+        let trigger_bounds = self.anchor.get().unwrap_or_else(|| {
+            let bounds = self.slider.read(cx).bounds();
+            self.anchor.set(Some(bounds));
+            bounds
+        });
+        let margin = preview_frame_insets(
+            window.window_decorations(),
+            window.client_inset().unwrap_or(px(0.)),
+        )
+        .map(|inset| *inset + self.margin);
+        let resolved = resolve_preview_bounds(
+            trigger_bounds,
+            popup_size,
+            window.viewport_size(),
+            margin,
+            self.offset,
+        );
+        let shift = resolved.origin - bounds.origin;
+        let shift = point(shift.x.round(), shift.y.round());
+        window.with_element_offset(shift, |window| self.child.prepaint(window, cx));
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut LayoutId,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.child.paint(window, cx);
+    }
+}
+
+fn preview_frame_insets(decorations: Decorations, client_inset: Pixels) -> Edges<Pixels> {
+    match decorations {
+        Decorations::Server => Edges::default(),
+        Decorations::Client { tiling } => Edges {
+            top: if tiling.top { px(0.) } else { client_inset },
+            right: if tiling.right { px(0.) } else { client_inset },
+            bottom: if tiling.bottom { px(0.) } else { client_inset },
+            left: if tiling.left { px(0.) } else { client_inset },
+        },
+    }
+}
+
+fn resolve_preview_bounds(
+    trigger_bounds: Bounds<Pixels>,
+    popup_size: Size<Pixels>,
+    viewport_size: Size<Pixels>,
+    margin: Edges<Pixels>,
+    offset: Pixels,
+) -> Bounds<Pixels> {
+    let right_limit = (viewport_size.width - margin.right).max(margin.left);
+    let bottom_limit = (viewport_size.height - margin.bottom).max(margin.top);
+    let available_above = (trigger_bounds.top() - margin.top).max(px(0.));
+    let available_below = (bottom_limit - trigger_bounds.bottom()).max(px(0.));
+    let placement = if popup_size.height <= available_above {
+        Placement::Top
+    } else if popup_size.height <= available_below || available_below >= available_above {
+        Placement::Bottom
+    } else {
+        Placement::Top
+    };
+    let origin_x = trigger_bounds.center().x - popup_size.width / 2.;
+    let origin_y = match placement {
+        Placement::Top => trigger_bounds.top() - popup_size.height - offset,
+        _ => trigger_bounds.bottom() + offset,
+    };
+    let mut resolved = Bounds::new(point(origin_x, origin_y), popup_size);
+    if resolved.right() > right_limit {
+        resolved.origin.x -= resolved.right() - right_limit;
+    }
+    if resolved.left() < margin.left {
+        resolved.origin.x = margin.left;
+    }
+    if resolved.bottom() > bottom_limit {
+        resolved.origin.y -= resolved.bottom() - bottom_limit;
+    }
+    if resolved.top() < margin.top {
+        resolved.origin.y = margin.top;
+    }
+    resolved
+}
+
+fn scale_preview_surface(target: f32, panel_size: Size<Pixels>) -> LocalScale {
+    let header_title_type = TypeRole::TitleSmall.scale();
+    let header_hint_type = TypeRole::BodySmall.scale();
+    let badge_type = TypeRole::TitleLarge.scale();
+    let note_title_type = TypeRole::TitleMedium.scale();
+    let note_meta_type = TypeRole::BodySmall.scale();
+    let note_body_type = TypeRole::BodyMedium.scale();
+    let note = v_flex()
+        .w_full()
+        .min_w_0()
+        .p(rem(14.))
+        .gap(rem(10.))
+        .child(
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .items_center()
+                .gap(rem(10.))
+                .child(tinted_icon(symbols::menu_book(), Tint::Blue, rem(28.)))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap(rem(1.))
+                        .child(
+                            accessible_text(
+                                "scale-preview-note-title",
+                                course2md::tr!("示例笔记"),
+                            )
+                            .min_w_0()
+                            .whitespace_normal()
+                            .text_size(note_title_type.font_size)
+                            .line_height(note_title_type.line_height)
+                            .font_weight(FontWeight(note_title_type.font_weight as f32))
+                            .text_color(color(ColorRole::ON_SURFACE)),
+                        )
+                        .child(
+                            accessible_text(
+                                "scale-preview-note-meta",
+                                format!(
+                                    "{} · {}",
+                                    course2md::render::fmt_ts(750.),
+                                    course2md::tr!("摘要"),
+                                ),
+                            )
+                            .min_w_0()
+                            .whitespace_normal()
+                            .text_size(note_meta_type.font_size)
+                            .line_height(note_meta_type.line_height)
+                            .text_color(color(ColorRole::ON_SURFACE_VARIANT)),
+                        ),
+                )
+                .child(outlined_status_chip(
+                    "scale-preview-source",
+                    course2md::tr!("字幕"),
+                )),
+        )
+        .child(
+            div()
+                .h(px(1.))
+                .w_full()
+                .flex_shrink_0()
+                .bg(color(ColorRole::OUTLINE_VARIANT)),
+        )
+        .child(
+            accessible_text(
+                "scale-preview-note-body",
+                course2md::tr!(
+                    "梳理课程核心要点与关键时间点，方便在回顾时快速定位重点章节，并结合原文字幕核对细节。"
+                ),
+            )
+            .w_full()
+            .min_w_0()
+            .whitespace_normal()
+            .text_size(note_body_type.font_size)
+            .line_height(note_body_type.line_height)
+            .text_color(color(ColorRole::ON_SURFACE)),
+        )
+        .child(
+            accessible_text(
+                "scale-preview-note-support",
+                course2md::tr!(
+                    "重要推导与示例画面都会关联对应时间点，方便回顾笔记时随时跳转并核对上下文。"
+                ),
+            )
+            .w_full()
+            .min_w_0()
+            .whitespace_normal()
+            .text_size(note_body_type.font_size)
+            .line_height(note_body_type.line_height)
+            .text_color(color(ColorRole::ON_SURFACE_VARIANT)),
+        );
+    LocalScale {
+        rem_size: px(gpui_kit_material::tokens::typography::BASE_PX),
+        child:
+            v_flex()
+                .id("scale-preview")
+                .w(panel_size.width)
+                .h(panel_size.height)
+                .overflow_hidden()
+                .rounded(RADIUS_HERO)
+                .bg(color(ColorRole::SURFACE_CONTAINER_HIGH))
+                .border_1()
+                .border_color(color(ColorRole::OUTLINE_VARIANT))
+                .shadow(elevation::level3())
+                .p(px(12.))
+                .gap(px(10.))
+                .child(
+                    h_flex()
+                        .w_full()
+                        .flex_shrink_0()
+                        .px(px(8.))
+                        .pt(px(2.))
+                        .items_center()
+                        .justify_between()
+                        .gap(px(12.))
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap(rem(1.))
+                                .child(
+                                    accessible_text(
+                                        "scale-preview-heading",
+                                        course2md::tr!("缩放预览"),
+                                    )
+                                    .text_size(header_title_type.font_size)
+                                    .line_height(header_title_type.line_height)
+                                    .font_weight(FontWeight(header_title_type.font_weight as f32))
+                                    .text_color(color(ColorRole::ON_SURFACE)),
+                                )
+                                .child(
+                                    accessible_text(
+                                        "scale-preview-apply",
+                                        course2md::tr!("松开鼠标后应用"),
+                                    )
+                                    .text_size(header_hint_type.font_size)
+                                    .line_height(header_hint_type.line_height)
+                                    .text_color(color(ColorRole::ON_SURFACE_VARIANT)),
+                                ),
+                        )
+                        .child(
+                            accessible_text("scale-preview-value", format!("{target:.0}%"))
+                                .flex_shrink_0()
+                                .text_size(badge_type.font_size)
+                                .line_height(badge_type.line_height)
+                                .font_weight(FontWeight(badge_type.font_weight as f32))
+                                .text_color(color(ColorRole::PRIMARY)),
+                        ),
+                )
+                .child(
+                    CardSurface::new(CardVariant::Outlined)
+                        .rounded(RADIUS_LARGE)
+                        .w_full()
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_hidden()
+                        .child(LocalScale {
+                            rem_size: px(
+                                gpui_kit_material::tokens::typography::BASE_PX * target / 100.
+                            ),
+                            child: note.into_any_element(),
+                        }),
+                )
+                .into_any_element(),
+    }
+}
+
+struct LocalScale {
+    rem_size: Pixels,
+    child: AnyElement,
+}
+
+impl IntoElement for LocalScale {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl Element for LocalScale {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        let layout = window.with_rem_size(Some(self.rem_size), |window| {
+            self.child.request_layout(window, cx)
+        });
+        (layout, ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        window.with_rem_size(Some(self.rem_size), |window| {
+            self.child.prepaint(window, cx)
+        });
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        window.with_rem_size(Some(self.rem_size), |window| self.child.paint(window, cx));
+    }
+}
+
 fn palette_columns(width: f32, rem_size: f32) -> u16 {
     let unit = rem_size / 14.;
     (((width + CARD_GAP * unit) / ((CARD_MIN_WIDTH + CARD_GAP) * unit)).floor() as u16).clamp(1, 4)
+}
+
+fn pending_scale_percent(active_scale: f32, pending_scale: Option<f32>) -> Option<u16> {
+    let active = (active_scale * 100.).round() as u16;
+    pending_scale
+        .map(|scale| (scale * 100.).round() as u16)
+        .filter(|percent| *percent != active)
 }
 
 /// A miniature window in the palette's own colors, not application chrome: window
@@ -406,33 +921,105 @@ impl Desktop {
         let light = self.palette_preset(false, appearance.light, light_corners, cx);
         let dark = self.palette_preset(true, appearance.dark, dark_corners, cx);
         let application = self.preferences.application();
-        let scales = crate::preferences::FONT_SCALES;
-        let scale_labels: Vec<String> = scales
-            .into_iter()
-            .map(|scale| format!("{}%", (scale * 100.).round() as u32))
-            .collect();
-        let scale_refs: Vec<&str> = scale_labels.iter().map(String::as_str).collect();
-        let scales_fit = crate::settings_ui::segmented_fits(&scale_refs, false, window);
-        let font_scale =
-            ConnectedButtonGroup::new("app-font-scale", course2md::tr!("界面文字大小"))
-                .tone(ButtonTone::Neutral)
-                .segmented()
-                .when(scales_fit, |group| group.fit_content())
-                .vertical(!scales_fit)
-                .button_size(ButtonSize::Small)
-                .options(scales.into_iter().map(|scale| {
-                    let percent = (scale * 100.).round() as u32;
-                    (percent.to_string(), format!("{percent}%"))
-                }))
-                .selected(((application.font_scale * 100.).round() as u32).to_string())
-                .on_change(cx.listener(|this, selected: &SharedString, _, cx| {
-                    let Ok(percent) = selected.parse::<f32>() else {
-                        return;
-                    };
-                    let mut next = this.application_edit_base();
-                    next.font_scale = percent / 100.;
-                    this.commit_application(next, cx);
-                }));
+        let active_percent = (application.font_scale * 100.).round() as u16;
+        let shown_scale = if self.settings_ui.scale_dragging.get() {
+            application.font_scale
+        } else {
+            self.settings_ui
+                .scale_preview
+                .unwrap_or(application.font_scale)
+        };
+        let percent = (shown_scale * 100.).round() as u16;
+        let pending_percent = pending_scale_percent(
+            application.font_scale,
+            self.settings_ui
+                .pending_application
+                .as_ref()
+                .map(|pending| pending.font_scale),
+        );
+        let font_scale = v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(rem(12.))
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .flex_wrap()
+                    .items_center()
+                    .justify_between()
+                    .gap(rem(12.))
+                    .child(
+                        TileScale::Regular
+                            .label("app-font-scale-row-label", course2md::tr!("界面缩放"))
+                            .flex_1()
+                            .min_w_0()
+                            .whitespace_normal(),
+                    )
+                    .child(
+                        material_button("app-font-scale-reset", ButtonVariant::Text)
+                            .tone(ButtonTone::Neutral)
+                            .icon(symbols::restart_alt())
+                            .child(course2md::tr!("恢复 100%"))
+                            .accessibility_label(course2md::tr!("恢复 100%"))
+                            .disabled(
+                                active_percent == 100
+                                    && pending_percent.is_none()
+                                    && self.settings_ui.scale_preview.is_none(),
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.preview_font_scale(100., cx);
+                                this.flush_font_scale(cx);
+                            })),
+                    ),
+            )
+            .when_some(pending_percent, |field, pending| {
+                field.child(supporting_info(
+                    "app-font-scale-unsaved",
+                    course2md::tr!("尚未保存的界面缩放：{}%", pending),
+                ))
+            })
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .items_center()
+                    .gap(rem(16.))
+                    .child(div().min_w(rem(56.)).flex_shrink_0().child(
+                        TileScale::Regular.label("app-font-scale-value", format!("{percent}%")),
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .px(ui::FOCUS_RING_ROOM)
+                            .py(rem(4.))
+                            .child(
+                                div()
+                                    .id("app-font-scale-control")
+                                    .w_full()
+                                    .capture_any_mouse_down(cx.listener(
+                                        |this, event: &MouseDownEvent, _, cx| {
+                                            if event.button == MouseButton::Left {
+                                                this.begin_font_scale(cx);
+                                            }
+                                        },
+                                    ))
+                                    .capture_any_mouse_up(cx.listener(
+                                        |this, event: &MouseUpEvent, _, cx| {
+                                            if event.button == MouseButton::Left {
+                                                this.release_font_scale(cx);
+                                            }
+                                        },
+                                    ))
+                                    .on_mouse_up_out(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _, _, cx| this.release_font_scale(cx)),
+                                    )
+                                    .child(self.settings_ui.scale_slider.clone()),
+                            ),
+                    ),
+            );
         let previews = ui::Field::tile("palette-previews", move |_| {
             div()
                 .grid()
@@ -449,34 +1036,16 @@ impl Desktop {
         } else {
             ui::Field::below("appearance-mode-row", course2md::tr!("外观模式"), modes)
         };
-        let scale_field = if scales_fit {
-            ui::Field::inline(
-                "app-font-scale-row",
-                course2md::tr!("界面文字大小"),
-                font_scale,
-            )
-        } else {
-            ui::Field::below(
-                "app-font-scale-row",
-                course2md::tr!("界面文字大小"),
-                font_scale,
-            )
-        };
         v_flex()
             .w_full()
             .min_w_0()
             .gap(rem(28.))
             .child(self.settings_fields(
-                "appearance-theme",
-                course2md::tr!("主题"),
-                vec![mode_field, previews],
-            ))
-            .child(self.settings_fields(
                 "appearance-motion",
                 course2md::tr!("界面偏好"),
                 vec![
                     self.interface_language_field(cx),
-                    scale_field,
+                    ui::Field::content("app-font-scale-row", font_scale),
                     ui::Field::switch(
                         "app-reduce-motion",
                         course2md::tr!("减少动态效果"),
@@ -490,13 +1059,27 @@ impl Desktop {
                     .hint(course2md::tr!("关闭过渡动画和进度条的流动效果")),
                 ],
             ))
+            .child(self.settings_fields(
+                "appearance-theme",
+                course2md::tr!("主题"),
+                vec![mode_field, previews],
+            ))
             .into_any_element()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::palette_columns;
+    use super::{palette_columns, pending_scale_percent};
+
+    #[test]
+    fn pending_scale_is_shown_only_when_its_percentage_differs_from_active() {
+        assert_eq!(pending_scale_percent(0.75, None), None);
+        assert_eq!(pending_scale_percent(0.75, Some(0.75)), None);
+        assert_eq!(pending_scale_percent(0.75, Some(1.0)), Some(100));
+        assert_eq!(pending_scale_percent(1.0, Some(0.75)), Some(75));
+        assert_eq!(pending_scale_percent(0.95, Some(0.95000005)), None);
+    }
 
     #[test]
     fn larger_text_and_narrower_panes_reduce_the_palette_columns() {
