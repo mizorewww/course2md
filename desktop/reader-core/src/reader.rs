@@ -108,7 +108,7 @@ pub enum OfflineVideo {
 #[derive(Clone)]
 pub struct OfflineVideoRequest {
     pub library_root: PathBuf,
-    pub task_id: String,
+    pub work_key: String,
     pub work_dir: PathBuf,
     pub note_dir: PathBuf,
 }
@@ -120,45 +120,53 @@ impl OfflineVideoRequest {
         library: &workspace::LibraryLocation,
     ) -> Option<Self> {
         let manifest = course.manifest.as_ref()?;
-        if !task.plan.source.online
-            || !task
-                .ran_with
-                .as_ref()
-                .is_some_and(|ran_with| ran_with.options().keep_video)
-            || task.id != manifest.task_id
-            || task.plan.source_id != manifest.source_id
-            || task.artifact.as_ref() != Some(&course.dir)
-            || task.plan.library_id != library.id
+        if !task.source.online
+            || !task.kept_video
+            || task.course_id != manifest.course_id
+            || task.source_id != manifest.source_id
+            || task.note_dir.as_ref() != Some(&course.dir)
+            || task.library_id != library.id
         {
             return None;
         }
+        let work_dir = task.effective_work_dir().to_path_buf();
+        let work_key = work_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| *name == task.course_id || *name == task.id || *name == manifest.task_id)
+            .unwrap_or(&task.course_id)
+            .to_owned();
         Some(Self {
             library_root: library.root.clone(),
-            task_id: task.id.clone(),
-            work_dir: task.work_dir.clone(),
+            work_key,
+            work_dir,
             note_dir: course.dir.clone(),
         })
     }
 
-    /// Fallback for a note whose completed task record was cleared from history while
-    /// keeping its retained `media.mp4` under `<library>/.course2md/work/<task_id>/`.
-    /// Returns `None` when no retained `media.mp4` exists so ordinary online notes
-    /// never false-report a missing offline video.
+    /// Fallback for a note whose completed task record was cleared while keeping its
+    /// retained `media.mp4` under `<library>/.course2md/work/<course_id>/` (or legacy
+    /// `<manifest.task_id>/`).
     pub fn for_library_note(course: &Course, library: &workspace::LibraryLocation) -> Option<Self> {
         let manifest = course.manifest.as_ref()?;
         if manifest.source_id.starts_with("local:") || !course.dir.starts_with(&library.root) {
             return None;
         }
-        let work_dir = library.root.join(".course2md/work").join(&manifest.task_id);
-        if !work_dir.join("media.mp4").is_file() {
-            return None;
+        for key in [&manifest.course_id, &manifest.task_id] {
+            if key.is_empty() {
+                continue;
+            }
+            let work_dir = library.root.join(".course2md/work").join(key);
+            if work_dir.join("media.mp4").is_file() {
+                return Some(Self {
+                    library_root: library.root.clone(),
+                    work_key: key.clone(),
+                    work_dir,
+                    note_dir: course.dir.clone(),
+                });
+            }
         }
-        Some(Self {
-            library_root: library.root.clone(),
-            task_id: manifest.task_id.clone(),
-            work_dir,
-            note_dir: course.dir.clone(),
-        })
+        None
     }
 
     /// Called only by reader workers, including the final check before opening.
@@ -169,7 +177,7 @@ impl OfflineVideoRequest {
     }
 
     pub(crate) fn checked_path(&self) -> Option<PathBuf> {
-        let mut components = std::path::Path::new(&self.task_id).components();
+        let mut components = std::path::Path::new(&self.work_key).components();
         if !matches!(components.next(), Some(std::path::Component::Normal(_)))
             || components.next().is_some()
         {
@@ -178,7 +186,7 @@ impl OfflineVideoRequest {
         let expected_work = self
             .library_root
             .join(".course2md/work")
-            .join(&self.task_id);
+            .join(&self.work_key);
         let matches_layout = (self.work_dir == expected_work
             && self.note_dir.starts_with(&self.library_root))
             || (|| {
@@ -186,7 +194,7 @@ impl OfflineVideoRequest {
                 let work = self.work_dir.canonicalize().ok()?;
                 let note = self.note_dir.canonicalize().ok()?;
                 Some(
-                    work == root.join(".course2md/work").join(&self.task_id)
+                    work == root.join(".course2md/work").join(&self.work_key)
                         && note.starts_with(&root),
                 )
             })()
@@ -781,52 +789,37 @@ mod tests {
         };
         let task = workspace::TaskRecord {
             id: manifest.task_id.clone(),
-            plan: workspace::TaskPlan {
-                operation: Default::default(),
-                source: desktop_store::workspace::Source {
-                    input: "https://www.bilibili.com/video/BVfixture?p=2".into(),
-                    identity: manifest.source_id.clone(),
-                    online: true,
-                    ..Default::default()
-                },
-                source_id: manifest.source_id.clone(),
-                title: course.title.clone(),
-                library_id: library.id.clone(),
-                folder: None,
-                subtitle: None,
-                repair: None,
-            },
-            state: workspace::TaskState::Complete,
-            intent: workspace::Intent::Run,
-            created: 0,
-            updated: 0,
-            parent: None,
-            handled_by: None,
-            held: false,
-            work_dir: root.join(".course2md/work").join(&manifest.task_id),
-            events: desktop_store::activity::JobEvents {
-                error: None,
+            library_id: library.id.clone(),
+            course_id: manifest.course_id.clone(),
+            source_id: manifest.source_id.clone(),
+            source: desktop_store::workspace::Source {
+                input: "https://www.bilibili.com/video/BVfixture?p=2".into(),
+                identity: manifest.source_id.clone(),
+                online: true,
                 ..Default::default()
             },
-            artifact: Some(course.dir.clone()),
+            title: course.title.clone(),
+            title_from_probe: false,
+            author: String::new(),
+            duration: 0.,
+            subtitle: None,
+            subtitle_events: None,
+            target_folder: None,
+            note_dir: Some(course.dir.clone()),
+            work_dir: root.join(".course2md/work").join(&manifest.course_id),
+            legacy_work_dir: None,
+            status: workspace::TaskStatus::Completed,
+            run_mode: workspace::RunMode::Resume,
+            stages: Default::default(),
+            error: None,
+            logs: Vec::new(),
             unread: false,
-            resend: Vec::new(),
-            replaced_by: None,
-            rework: None,
-            rework_accepted: None,
-            ai_answered_by: Vec::new(),
-            // Its run kept the downloaded video.
-            ran_with: Some(workspace::RunSettings::new(
-                &c2m_config::settings::ConfigFile {
-                    defaults: c2m_config::settings::Defaults {
-                        keep_video: Some(true),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-                None,
-                None,
-            )),
+            created: 0,
+            updated: 0,
+            outcomes: None,
+            kept_video: true,
+            kept_edits: Vec::new(),
+            events: Default::default(),
         };
         (task, library)
     }
@@ -1041,28 +1034,14 @@ mod tests {
         );
         let cleared_fallback = OfflineVideoRequest::for_library_note(&first, &library).unwrap();
         assert_eq!(cleared_fallback.inspect(), request.inspect());
-        // Another task replaced the note: its video is not this note's.
-        let second = fixture_note(root.path(), 2, &[20.]);
-        assert_eq!(second.dir, first.dir);
-        assert!(OfflineVideoRequest::for_note(&second, &task, &library).is_none());
         let mut changed = task.clone();
-        changed.artifact = Some(root.path().join("another-note"));
+        changed.note_dir = Some(root.path().join("another-note"));
         assert!(OfflineVideoRequest::for_note(&first, &changed, &library).is_none());
         changed = task.clone();
-        changed.plan.source_id = "another-video".into();
+        changed.source_id = "another-video".into();
         assert!(OfflineVideoRequest::for_note(&first, &changed, &library).is_none());
         changed = task.clone();
-        changed
-            .ran_with
-            .as_mut()
-            .unwrap()
-            .config
-            .defaults
-            .keep_video = Some(false);
-        assert!(OfflineVideoRequest::for_note(&first, &changed, &library).is_none());
-        // A task with no record of its run (never ran) has no offline video either.
-        changed = task.clone();
-        changed.ran_with = None;
+        changed.kept_video = false;
         assert!(OfflineVideoRequest::for_note(&first, &changed, &library).is_none());
         std::fs::remove_file(media).unwrap();
         assert_eq!(request.inspect(), OfflineVideo::Missing);

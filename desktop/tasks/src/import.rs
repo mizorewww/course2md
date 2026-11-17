@@ -1,13 +1,13 @@
-//! The workbench's decisions: which task owns the input, when a start intent goes
-//! through, and what follows a conversion to its note.
+//! Workbench preview state, input validation, subtitle selection rules, and single-issue
+//! obstacle reporting.
 use crate::source;
 use c2m_config::config::TranscriptSource;
 use c2m_source::subtitle::{SubtitleEvidence, SubtitleReadError};
 use desktop_prefs::conversion::ConversionOptions;
-use desktop_store::{page::Page, workspace};
+use desktop_store::workspace;
 use std::{
     collections::{BTreeSet, HashMap},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -34,7 +34,6 @@ pub fn source_metadata(source: &source::Source) -> String {
         .join(" · ")
 }
 
-/// One AI processing switch, as a task's details name what its run used.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConversionAiOption {
     Proofread,
@@ -120,9 +119,6 @@ pub fn automatic_subtitle_fallback(
     true
 }
 
-/// The track to read for a video previewed without one chosen: its first, when
-/// Settings' 文字来源 (`mode`) uses subtitles and nothing is read or chosen yet (a
-/// preview taken under speech recognition read none).
 pub fn default_track_to_read(
     source: &source::Source,
     mode: TranscriptSource,
@@ -135,11 +131,6 @@ pub fn default_track_to_read(
     .flatten()
 }
 
-/// Settings' 文字来源 asks for subtitles only, and this video has none it can use:
-/// none chosen and none to read, or its read failed (`read_failed` is the
-/// workbench's own failed read). Nothing the app does on its own changes that, so 开始转换
-/// waits for the person to attach a subtitle file, read again or change the setting.
-/// A read in flight is not this: the caller checks it.
 pub fn subtitles_required_but_missing(
     source: &source::Source,
     source_mode: TranscriptSource,
@@ -160,287 +151,112 @@ pub fn subtitle_needs_confirmation(source: &source::Source, source_mode: Transcr
             || source.subtitle_read_error.is_some())
 }
 
-/// Follow only this input's submitted recovery chain. A matching URL or the
-/// selected queue item alone cannot establish that a task belongs to this form.
-pub fn submitted_input_task<'a>(
+/// Returns the single existing task in the default library for the workbench's current
+/// previewed course, if any.
+pub fn current_course_task<'a>(
     draft: &workspace::Draft,
-    tasks: &'a [workspace::TaskRecord],
-    input: &str,
+    state: &'a workspace::State,
 ) -> Option<&'a workspace::TaskRecord> {
-    if draft.input != input || input.trim().is_empty() {
+    let source = draft.source.as_ref()?;
+    if source.identity.trim().is_empty() || source.online != draft.online {
         return None;
     }
-    let find = |id: &str| {
-        let mut matches = tasks.iter().filter(|task| task.id == id);
-        let task = matches.next()?;
-        matches.next().is_none().then_some(task)
-    };
-    let mut task = find(draft.submitted_task.as_deref()?)?;
-    let source_id = &task.plan.source_id;
-    let online = task.plan.source.online;
-    if source_id.is_empty()
-        || task.plan.source.input != input
-        || online != draft.online
-        || draft
-            .source
-            .as_ref()
-            .is_some_and(|source| source.identity != *source_id || source.online != online)
-    {
-        return None;
-    }
-    let mut visited = std::collections::BTreeSet::new();
-    loop {
-        if !visited.insert(task.id.as_str())
-            || task.plan.source_id != *source_id
-            || task.plan.source.identity != *source_id
-            || task.plan.source.online != online
-        {
-            return None;
-        }
-        let Some(next) = task.handled_by.as_deref() else {
-            return Some(task);
-        };
-        let next = find(next)?;
-        if next.parent.as_deref() != Some(task.id.as_str()) {
-            return None;
-        }
-        task = next;
-    }
-}
-
-/// The submitted task still owns this input until it finishes.
-pub fn locked_input_task<'a>(
-    draft: &workspace::Draft,
-    tasks: &'a [workspace::TaskRecord],
-    input: &str,
-) -> Option<&'a workspace::TaskRecord> {
-    submitted_input_task(draft, tasks, input).filter(|task| !task.state.finished())
-}
-
-pub(crate) fn completed_input_task<'a>(
-    draft: &workspace::Draft,
-    tasks: &'a [workspace::TaskRecord],
-    input: &str,
-) -> Option<&'a workspace::TaskRecord> {
-    submitted_input_task(draft, tasks, input).filter(|task| {
-        matches!(
-            task.state,
-            workspace::TaskState::Complete | workspace::TaskState::Partial
-        ) && task.artifact.is_some()
-    })
-}
-
-/// A saved result is history when entering the workbench. A running or paused
-/// recovery, an uncertain request, and any changes after submission stay in place.
-pub fn retired_input_task<'a>(
-    draft: &workspace::Draft,
-    tasks: &'a [workspace::TaskRecord],
-    input: &str,
-) -> Option<&'a workspace::TaskRecord> {
-    let task = submitted_input_task(draft, tasks, input)?;
-    if !task.state.finished()
-        || task.has_uncertain()
-        || (task.state != workspace::TaskState::Cancelled && task.artifact.is_none())
-    {
-        return None;
-    }
-    let submitted = tasks
-        .iter()
-        .find(|task| Some(task.id.as_str()) == draft.submitted_task.as_deref())?;
-    (draft.subtitle == submitted.plan.subtitle).then_some(task)
-}
-
-/// The task the current input was reopened from on Home, while it still waits: a
-/// conversion of the input would take its place, which the card says, and the
-/// person may continue that task instead.
-pub fn waiting_retried_task<'a>(
-    draft: &workspace::Draft,
-    tasks: &'a [workspace::TaskRecord],
-) -> Option<&'a workspace::TaskRecord> {
-    let id = draft.retry_of.as_deref()?;
-    tasks
-        .iter()
-        .find(|task| task.id == id)
-        .filter(|task| !task.state.finished() && task.handled_by.is_none() && !task.held)
-}
-
-/// A live navigation intent is separate from the saved task. Leaving its
-/// originating input or note ends following without cancelling the work.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ConversionFollow {
-    Preparing(u64),
-    Task {
-        id: String,
-        source_revision: u64,
-    },
-    /// A repair started from the reader, which reopens its note once the repair
-    /// has replaced it, while the reader still shows the note as it was.
-    ReaderTask {
-        id: String,
-        note: PathBuf,
-        reader_revision: u64,
-    },
-}
-
-impl ConversionFollow {
-    /// Opening a viewer owns the note as it is until the person closes it. Do not
-    /// restore this intent afterwards, even if an in-flight read is still pending.
-    pub fn interrupt_for_reader_viewer(follow: &mut Option<Self>) {
-        if matches!(follow, Some(Self::ReaderTask { .. })) {
-            *follow = None;
-        }
-    }
-
-    pub fn submitted(self, revision: u64, id: String) -> Option<Self> {
-        matches!(self, Self::Preparing(current) if current == revision).then_some(Self::Task {
-            id,
-            source_revision: revision,
-        })
-    }
-
-    pub fn follows(&self, id: &str, revision: u64) -> bool {
-        matches!(self, Self::Task { id: followed, source_revision }
-            if followed == id && *source_revision == revision)
-    }
-
-    pub fn reader_reprocess(
-        task: &workspace::TaskRecord,
-        note: &std::path::Path,
-        revision: u64,
-    ) -> Option<Self> {
-        let c2m_engine::execution::Operation::Reprocess {
-            note_dir,
-            components,
-            ..
-        } = &task.plan.operation
-        else {
-            return None;
-        };
-        (note_dir == note && !components.is_empty() && !task.exports_only()).then(|| {
-            Self::ReaderTask {
-                id: task.id.clone(),
-                note: note_dir.clone(),
-                reader_revision: revision,
-            }
-        })
-    }
-
-    /// Check both before starting an automatic read and after its asynchronous
-    /// load. The latter also retains the caller's existing read-generation guard.
-    pub fn context_is_current(
-        &self,
-        page: Page,
-        source_revision: u64,
-        reader_revision: u64,
-        note: Option<&std::path::Path>,
-    ) -> bool {
-        match self {
-            Self::Preparing(_) => false,
-            Self::Task {
-                source_revision: expected,
-                ..
-            } => page == Page::New && *expected == source_revision,
-            Self::ReaderTask {
-                note: followed,
-                reader_revision: expected,
-                ..
-            } => {
-                page == Page::Result
-                    && *expected == reader_revision
-                    && note == Some(followed.as_path())
-            }
-        }
-    }
-
-    /// The followed repair finished with the note replaced, and the reader still
-    /// shows the note `opened_task` wrote before it: the note is read again.
-    pub fn completed_reader_task(
-        &self,
-        task: &workspace::TaskRecord,
-        page: Page,
-        reader_revision: u64,
-        note: Option<&std::path::Path>,
-        opened_task: Option<&str>,
-    ) -> bool {
-        let Self::ReaderTask {
-            id, note: followed, ..
-        } = self
-        else {
-            return false;
-        };
-        task.id == *id
-            && self.context_is_current(page, 0, reader_revision, note)
-            && Self::reader_reprocess(task, followed, reader_revision).as_ref() == Some(self)
-            && matches!(
-                task.state,
-                workspace::TaskState::Complete | workspace::TaskState::Partial
-            )
-            && task.artifact.as_ref() == Some(followed)
-            && opened_task.is_some_and(|opened| opened != task.id)
-    }
-
-    pub fn completed_task<'a>(
-        &self,
-        on_workbench: bool,
-        revision: u64,
-        draft: &workspace::Draft,
-        tasks: &'a [workspace::TaskRecord],
-        input: &str,
-    ) -> Option<&'a workspace::TaskRecord> {
-        let task = completed_input_task(draft, tasks, input)?;
-        (on_workbench && self.follows(&task.id, revision)).then_some(task)
-    }
+    state.task_for_source(&state.default_library, &source.identity)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ConversionGate {
-    Wait,
-    Stop,
-    Submit,
+pub enum WorkbenchIssueKind {
+    Input,
+    Preview,
+    Subtitle,
+    Plan,
 }
 
-/// Normal asynchronous stages retain the first Start intent. Only an abandoned
-/// source or an unresolved material choice ends this automatic continuation.
-/// What a pending Start depends on.
-#[derive(Clone, Copy)]
-pub struct GateInputs {
-    pub requested_revision: Option<u64>,
-    pub current_revision: u64,
-    pub reading: bool,
-    pub has_source: bool,
-    pub needs_text_choice: bool,
-    /// Settings require subtitles and this video has none to use: no check that
-    /// finishes later supplies one (`subtitles_required_but_missing`).
-    pub missing_text_source: bool,
-    pub environment_ready: bool,
-    pub library_ready: bool,
-    pub existing_note: bool,
+/// Single clean obstacle/validation error shown on the workbench.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkbenchIssue {
+    pub kind: WorkbenchIssueKind,
+    pub message: String,
+    pub needs_settings: bool,
 }
 
-pub fn conversion_gate(gate: GateInputs) -> ConversionGate {
-    if gate.requested_revision != Some(gate.current_revision) {
-        ConversionGate::Stop
-    } else if gate.reading {
-        ConversionGate::Wait
-    } else if !gate.has_source || gate.missing_text_source {
-        ConversionGate::Stop
-    } else if gate.needs_text_choice || !gate.environment_ready || !gate.library_ready {
-        ConversionGate::Wait
-    } else if gate.existing_note {
-        ConversionGate::Stop
-    } else {
-        ConversionGate::Submit
+impl WorkbenchIssue {
+    pub fn input(message: impl Into<String>) -> Self {
+        Self {
+            kind: WorkbenchIssueKind::Input,
+            message: message.into(),
+            needs_settings: false,
+        }
+    }
+
+    pub fn preview(message: impl Into<String>, needs_settings: bool) -> Self {
+        Self {
+            kind: WorkbenchIssueKind::Preview,
+            message: message.into(),
+            needs_settings,
+        }
+    }
+
+    pub fn subtitle(message: impl Into<String>) -> Self {
+        Self {
+            kind: WorkbenchIssueKind::Subtitle,
+            message: message.into(),
+            needs_settings: false,
+        }
+    }
+
+    pub fn plan(message: impl Into<String>, needs_settings: bool) -> Self {
+        Self {
+            kind: WorkbenchIssueKind::Plan,
+            message: message.into(),
+            needs_settings,
+        }
+    }
+
+    pub fn from_error(kind: WorkbenchIssueKind, error: &anyhow::Error) -> Self {
+        let message = format!("{error:#}");
+        let needs_settings = crate::run::message_indicates_settings(&message);
+        Self {
+            kind,
+            message,
+            needs_settings,
+        }
     }
 }
 
-/// Everything a derived preview plan reads: any change derives it again.
+/// Validates a URL or local file path entered on the workbench before probing.
+pub fn validate_workbench_input(online: bool, input: &str) -> Result<(), WorkbenchIssue> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(WorkbenchIssue::input(if online {
+            c2m_i18n::tr!("先粘贴视频链接")
+        } else {
+            c2m_i18n::tr!("先选择一个视频")
+        }));
+    }
+    if online {
+        if !source::video_links(trimmed).is_empty() {
+            return Ok(());
+        }
+        source::validate_url(trimmed)
+            .map(drop)
+            .map_err(|error| WorkbenchIssue::input(error.to_string()))
+    } else {
+        if Path::new(trimmed).is_file() {
+            Ok(())
+        } else {
+            Err(WorkbenchIssue::input(c2m_i18n::tr!(
+                "原视频已移动或无法读取，请重新选择视频"
+            )))
+        }
+    }
+}
+
+/// Cache key for deriving a preview plan on Home.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct PlanKey {
     pub workspace: u64,
-    /// The generation preferences' revision.
     pub preferences: u64,
-    /// The services record's revision and whether it can be read: a service added,
-    /// changed or deleted changes which one the plan uses.
     pub services: u64,
     pub services_blocked: bool,
     pub source: u64,
@@ -451,50 +267,52 @@ pub struct PlanKey {
     pub library_loading: bool,
 }
 
-/// What the workbench knows about the current input while no task owns it: the source
-/// being read, its candidates and subtitles, and a start intent on its way.
+/// A derived preview plan, or `(issue, is_pending_background_check)`.
+pub type PreviewPlan = Result<workspace::TaskPlan, (WorkbenchIssue, bool)>;
+
+/// Ephemeral workbench preview state for the current input.
 #[derive(Default)]
 pub struct ImportSession {
     pub source_preview: Option<source::Source>,
     pub source_candidates: Vec<source::SourceCandidate>,
     pub source_collection_title: Option<String>,
-    /// The real collection name from the probe (the batch note title prefix); placeholder
-    /// hints are not names, see source_collection_title.
     pub source_collection_name: Option<String>,
-    /// Inputs of the candidates checked in an online list; cleared when the candidates change.
     pub selected_candidates: BTreeSet<String>,
-    /// Local cache of candidate row previews (candidate.input → cached file), downloaded
-    /// once per URL in the background.
     pub source_candidate_covers: HashMap<String, PathBuf>,
     pub source_covers_cancel: Option<Arc<AtomicBool>>,
     pub subtitle_loading: bool,
     pub subtitle_cancel: Option<Arc<AtomicBool>>,
-    pub subtitle_error: Option<String>,
     pub subtitle_generation: u64,
     pub preview_cancel: Option<Arc<AtomicBool>>,
     pub preview_generation: u64,
-    pub pending_conversion: Option<u64>,
-    pub following_conversion: Option<ConversionFollow>,
     pub preview_workers: usize,
-    pub preview_error: Option<String>,
-    pub source_validation: Option<String>,
+    pub issue: Option<WorkbenchIssue>,
     pub show_preview_details: bool,
     pub subtitle_issue_open: bool,
-    /// The derived preview plan; an error carries whether it is only waiting on background
-    /// checks (`plan::PlanPending`).
     pub preview_plan_cache: Option<(PlanKey, PreviewPlan)>,
 }
 
-/// A derived preview plan, or its message and whether it is only waiting.
-pub(crate) type PreviewPlan = Result<workspace::TaskPlan, (String, bool)>;
-
 impl ImportSession {
-    /// A source or its subtitles are being read.
     pub fn reading(&self) -> bool {
         self.preview_cancel.is_some() || self.subtitle_loading
     }
 
-    /// Stops the background preview and subtitle readers.
+    pub fn subtitle_failed(&self) -> bool {
+        self.issue
+            .as_ref()
+            .is_some_and(|issue| issue.kind == WorkbenchIssueKind::Subtitle)
+    }
+
+    pub fn set_issue(&mut self, issue: WorkbenchIssue) {
+        self.issue = Some(issue);
+    }
+
+    pub fn clear_issue_of(&mut self, kind: WorkbenchIssueKind) {
+        if self.issue.as_ref().is_some_and(|issue| issue.kind == kind) {
+            self.issue = None;
+        }
+    }
+
     pub fn cancel_background_reads(&self) {
         if let Some(cancel) = &self.preview_cancel {
             cancel.store(true, Ordering::Relaxed);
@@ -504,9 +322,7 @@ impl ImportSession {
         }
     }
 
-    /// Forgets the source: running reads stop, their late results no longer count.
     pub fn invalidate_source(&mut self) {
-        self.pending_conversion = None;
         self.stop_subtitle_read();
         for cancel in [self.preview_cancel.take(), self.source_covers_cancel.take()]
             .into_iter()
@@ -521,72 +337,37 @@ impl ImportSession {
         self.source_collection_title = None;
         self.source_collection_name = None;
         self.selected_candidates.clear();
-        self.subtitle_error = None;
-        self.preview_error = None;
-        self.source_validation = None;
+        self.issue = None;
         self.show_preview_details = false;
         self.subtitle_issue_open = false;
+        self.preview_plan_cache = None;
     }
 
-    /// The plan refused a Start. A missing text source ends the intent: the card
-    /// states the obstacle with its repairs, and 开始转换 waits until it is resolved,
-    /// instead of a Start that hangs on 取消转换. Any other refusal stays with its
-    /// message, to be retried or cancelled.
-    pub fn refuse_start(&mut self, message: String, missing_text_source: bool) {
-        if missing_text_source {
-            self.cancel_start();
-        } else {
-            self.source_validation = Some(message);
-        }
-    }
-
-    /// 开始转换 for the current preview: a fresh intent, followed when `follow`
-    /// (started from Home), with no earlier refusal standing beside it.
-    pub fn begin_start(&mut self, follow: bool) {
-        self.pending_conversion = Some(self.preview_generation);
-        self.following_conversion =
-            follow.then_some(ConversionFollow::Preparing(self.preview_generation));
-        self.source_validation = None;
-    }
-
-    /// The start intent ends without a task (取消转换, or an obstacle only the
-    /// person can resolve): nothing is followed, and its refusal goes with it.
-    pub fn cancel_start(&mut self) {
-        self.pending_conversion = None;
-        self.following_conversion = None;
-        self.source_validation = None;
-    }
-
-    /// Stops a subtitle read; its late result no longer counts. Returns the new generation.
     pub fn stop_subtitle_read(&mut self) -> u64 {
         if let Some(cancel) = self.subtitle_cancel.take() {
             cancel.store(true, Ordering::Relaxed);
         }
         self.subtitle_generation = self.subtitle_generation.wrapping_add(1);
         self.subtitle_loading = false;
+        self.clear_issue_of(WorkbenchIssueKind::Subtitle);
         self.subtitle_generation
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
     #[test]
-    fn forgetting_a_source_stops_its_reads_and_outdates_their_results() {
-        use super::ImportSession;
-        use std::sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
-        };
-        let (preview, subtitles) = (
-            Arc::new(AtomicBool::new(false)),
-            Arc::new(AtomicBool::new(false)),
-        );
+    fn forgetting_a_source_stops_its_reads_and_clears_the_single_issue() {
+        let preview = Arc::new(AtomicBool::new(false));
+        let subtitles = Arc::new(AtomicBool::new(false));
         let mut session = ImportSession {
             preview_cancel: Some(preview.clone()),
             subtitle_cancel: Some(subtitles.clone()),
             subtitle_loading: true,
-            pending_conversion: Some(0),
-            source_validation: Some("先粘贴视频链接".into()),
+            issue: Some(WorkbenchIssue::input("先粘贴视频链接")),
             ..Default::default()
         };
         assert!(session.reading());
@@ -595,38 +376,55 @@ mod tests {
         assert!(preview.load(Ordering::Relaxed) && subtitles.load(Ordering::Relaxed));
         assert_eq!(session.preview_generation, 1);
         assert_eq!(session.subtitle_generation, 1);
-        assert_eq!(session.pending_conversion, None);
-        assert_eq!(session.source_validation, None);
-        assert_eq!(session.stop_subtitle_read(), 2);
-    }
-
-    use super::{
-        ConversionFollow, ConversionGate, GateInputs, PlanKey, automatic_subtitle_fallback,
-        completed_input_task, conversion_gate, locked_input_task, submitted_input_task,
-        subtitle_needs_confirmation, subtitles_required_but_missing, uses_speech,
-    };
-    use crate::source;
-    use c2m_config::config::TranscriptSource;
-    use c2m_source::subtitle::{CachedSubtitle, SubtitleEvidence, SubtitleReadError};
-    use desktop_store::workspace;
-
-    /// A pending Start for revision 7 with every prerequisite met.
-    fn ready() -> GateInputs {
-        GateInputs {
-            requested_revision: Some(7),
-            current_revision: 7,
-            reading: false,
-            has_source: true,
-            needs_text_choice: false,
-            missing_text_source: false,
-            environment_ready: true,
-            library_ready: true,
-            existing_note: false,
-        }
+        assert!(session.issue.is_none());
     }
 
     #[test]
-    fn a_preview_plan_is_derived_again_once_what_it_waited_for_has_finished() {
+    fn input_validation_checks_online_links_and_local_files() {
+        assert_eq!(
+            validate_workbench_input(true, "  ").unwrap_err().kind,
+            WorkbenchIssueKind::Input
+        );
+        assert!(validate_workbench_input(true, "https://www.bilibili.com/video/BV1xx").is_ok());
+        assert!(validate_workbench_input(true, "not a url").is_err());
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("video.mp4");
+        assert!(validate_workbench_input(false, &file.display().to_string()).is_err());
+        std::fs::write(&file, "bytes").unwrap();
+        assert!(validate_workbench_input(false, &file.display().to_string()).is_ok());
+    }
+
+    #[test]
+    fn current_course_task_matches_default_library_by_course_identity() {
+        let mut state = workspace::State::initial(PathBuf::from("/library"));
+        let lib = state.default_library.clone();
+        let src = source::Source {
+            input: "https://example.test/v1".into(),
+            identity: "online:v1".into(),
+            title: "课程 1".into(),
+            online: true,
+            ..Default::default()
+        };
+        let task_id = state
+            .enqueue(workspace::NewTask::from_source(
+                &lib,
+                src.clone(),
+                "课程 1",
+                workspace::RunMode::Resume,
+            ))
+            .unwrap();
+        let draft = state.draft_mut().unwrap();
+        draft.input = src.input.clone();
+        draft.source = Some(src);
+        assert_eq!(
+            current_course_task(state.draft().unwrap(), &state).map(|t| t.id.as_str()),
+            Some(task_id.as_str())
+        );
+    }
+
+    #[test]
+    fn plan_key_detects_completed_prerequisite_updates() {
         let waiting = PlanKey {
             workspace: 3,
             preferences: 2,
@@ -640,1096 +438,19 @@ mod tests {
             library_loading: true,
         };
         assert!(waiting == PlanKey { ..waiting });
-        for finished in [
-            PlanKey {
-                environment_ready: true,
-                ..waiting
-            },
-            PlanKey {
-                library_loading: false,
-                ..waiting
-            },
-            PlanKey {
-                reading: false,
-                ..waiting
-            },
-            // A default service saved after the plan said none was set.
-            PlanKey {
-                services: 6,
-                ..waiting
-            },
-            PlanKey {
-                services_blocked: true,
-                ..waiting
-            },
-        ] {
-            assert!(waiting != finished);
-        }
-    }
-
-    #[test]
-    fn preview_completion_without_confirmation_never_submits() {
-        for reading in [true, false] {
-            for environment_ready in [true, false] {
-                for library_ready in [true, false] {
-                    let gate = GateInputs {
-                        requested_revision: None,
-                        reading,
-                        environment_ready,
-                        library_ready,
-                        ..ready()
-                    };
-                    assert_eq!(conversion_gate(gate), ConversionGate::Stop);
+        assert!(
+            waiting
+                != PlanKey {
+                    environment_ready: true,
+                    ..waiting
                 }
-            }
-        }
-    }
-
-    #[test]
-    fn confirmed_start_waits_for_remaining_prerequisites() {
-        // The same Start revision survives each independently completing prerequisite.
-        for (reading, has_source, needs_text_choice, environment_ready) in [
-            (true, false, false, false),
-            (true, true, true, true),
-            (false, true, false, false),
-            (false, true, true, true),
-        ] {
-            let gate = GateInputs {
-                reading,
-                has_source,
-                needs_text_choice,
-                environment_ready,
-                ..ready()
-            };
-            assert_eq!(conversion_gate(gate), ConversionGate::Wait);
-        }
-        assert_eq!(conversion_gate(ready()), ConversionGate::Submit);
-        // Source replacement and duplicate content require a fresh intent/choice.
-        let replaced = GateInputs {
-            current_revision: 8,
-            reading: true,
-            has_source: false,
-            ..ready()
-        };
-        assert_eq!(conversion_gate(replaced), ConversionGate::Stop);
-        assert_eq!(
-            conversion_gate(GateInputs {
-                existing_note: true,
-                ..ready()
-            }),
-            ConversionGate::Stop
-        );
-        assert_eq!(
-            conversion_gate(GateInputs {
-                has_source: false,
-                ..ready()
-            }),
-            ConversionGate::Stop
-        );
-    }
-
-    /// Subtitles only, and the video has none: no check that finishes later brings
-    /// one, so a Start does not wait on it (it stopped behind 取消转换 before).
-    #[test]
-    fn a_start_without_a_text_source_stops_instead_of_waiting() {
-        let missing = GateInputs {
-            needs_text_choice: true,
-            missing_text_source: true,
-            ..ready()
-        };
-        assert_eq!(conversion_gate(missing), ConversionGate::Stop);
-        // A read in flight may still find one.
-        assert_eq!(
-            conversion_gate(GateInputs {
-                reading: true,
-                ..missing
-            }),
-            ConversionGate::Wait
-        );
-    }
-
-    #[test]
-    fn subtitles_only_without_subtitles_has_no_text_source() {
-        let track = c2m_source::subtitle::file_track("lesson.srt".into(), None);
-        let none = source::Source {
-            subtitles: SubtitleEvidence::NoneFound,
-            ..Default::default()
-        };
-        let missing = |source: &source::Source, mode, failed| {
-            subtitles_required_but_missing(source, mode, failed)
-        };
-        // Only subtitles only: automatic recognizes speech, speech needs none.
-        assert!(missing(&none, TranscriptSource::Subtitle, false));
-        assert!(!missing(&none, TranscriptSource::Auto, false));
-        assert!(!missing(&none, TranscriptSource::Asr, false));
-        for subtitles in [
-            SubtitleEvidence::Unchecked,
-            SubtitleEvidence::Unsupported {
-                message: "不支持".into(),
-            },
-            SubtitleEvidence::Failed {
-                message: "请求失败".into(),
-            },
-        ] {
-            let source = source::Source {
-                subtitles,
-                ..Default::default()
-            };
-            assert!(missing(&source, TranscriptSource::Subtitle, false));
-        }
-        // Tracks to read: the card asks which, as before.
-        let found = source::Source {
-            subtitles: SubtitleEvidence::Found {
-                tracks: vec![track.clone()],
-                warning: None,
-            },
-            ..Default::default()
-        };
-        assert!(!missing(&found, TranscriptSource::Subtitle, false));
-        // A read on its way may still bring one.
-        let reading = source::Source {
-            subtitle_request: Some(track.clone()),
-            ..none.clone()
-        };
-        assert!(!missing(&reading, TranscriptSource::Subtitle, false));
-        // A failed read leaves none until the person acts.
-        let failed = source::Source {
-            subtitle_read_error: Some(SubtitleReadError::Failed {
-                message: "字幕文件无法读取".into(),
-            }),
-            ..reading
-        };
-        assert!(missing(&failed, TranscriptSource::Subtitle, false));
-        assert!(missing(&found, TranscriptSource::Subtitle, true));
-        // An attached subtitle file is a text source.
-        let attached = source::Source {
-            subtitles: SubtitleEvidence::Found {
-                tracks: vec![track.clone()],
-                warning: None,
-            },
-            selected_subtitle: Some(CachedSubtitle {
-                source_identity: String::new(),
-                track_id: track.id.clone(),
-                label: "lesson.srt".into(),
-                path: "lesson.srt".into(),
-                events: Vec::new(),
-            }),
-            ..Default::default()
-        };
-        assert!(!missing(&attached, TranscriptSource::Subtitle, false));
-    }
-
-    /// A Start the plan refuses for a missing text source returns the card to its
-    /// obstacle; any other refusal keeps its message to retry or cancel.
-    #[test]
-    fn a_refused_start_without_a_text_source_does_not_stay_pending() {
-        use super::ImportSession;
-        let mut session = ImportSession {
-            pending_conversion: Some(3),
-            following_conversion: Some(ConversionFollow::Preparing(3)),
-            ..Default::default()
-        };
-        session.refuse_start("保存位置不可用".into(), false);
-        assert_eq!(session.pending_conversion, Some(3));
-        assert_eq!(session.source_validation.as_deref(), Some("保存位置不可用"));
-        session.refuse_start("字幕还未确认".into(), true);
-        assert_eq!(session.pending_conversion, None);
-        assert_eq!(session.following_conversion, None);
-        assert_eq!(session.source_validation, None);
-    }
-
-    /// A new Start or 取消转换 leaves no earlier refusal (and its 重试转换) standing.
-    #[test]
-    fn a_new_or_cancelled_start_drops_the_previous_refusal() {
-        use super::ImportSession;
-        let mut session = ImportSession {
-            preview_generation: 4,
-            ..Default::default()
-        };
-        session.begin_start(true);
-        session.refuse_start("保存位置不可用".into(), false);
-        session.cancel_start();
-        assert_eq!(session.pending_conversion, None);
-        assert_eq!(session.following_conversion, None);
-        assert_eq!(session.source_validation, None);
-        session.source_validation = Some("保存位置不可用".into());
-        session.begin_start(true);
-        assert_eq!(session.pending_conversion, Some(4));
-        assert_eq!(
-            session.following_conversion,
-            Some(ConversionFollow::Preparing(4))
-        );
-        assert_eq!(session.source_validation, None);
-        session.begin_start(false);
-        assert_eq!(session.following_conversion, None);
-    }
-
-    #[test]
-    fn first_start_waits_for_library_scan_before_existing_note_decision() {
-        // A restored source and the environment can be ready before the async
-        // library scan replaces its initially empty (or stale) note list.
-        for existing_note in [false, true] {
-            let gate = GateInputs {
-                library_ready: false,
-                existing_note,
-                ..ready()
-            };
-            assert_eq!(conversion_gate(gate), ConversionGate::Wait);
-        }
-        // The original Start is still pending when the scan reports a result.
-        assert_eq!(
-            conversion_gate(GateInputs {
-                existing_note: true,
-                ..ready()
-            }),
-            ConversionGate::Stop
-        );
-        assert_eq!(conversion_gate(ready()), ConversionGate::Submit);
-        let replaced = GateInputs {
-            current_revision: 8,
-            library_ready: false,
-            ..ready()
-        };
-        assert_eq!(conversion_gate(replaced), ConversionGate::Stop);
-    }
-
-    #[test]
-    fn an_explicit_regenerate_follows_the_new_task_instead_of_the_previous_result() {
-        let (mut draft, mut tasks) = submitted_recovery_chain();
-        tasks[0].state = workspace::TaskState::Complete;
-        tasks[0].artifact = Some("note".into());
-        tasks[0].handled_by = None;
-        tasks[0].events.error = None;
-        tasks[1].id = "new-version".into();
-        tasks[1].parent = None;
-        tasks[1].plan.operation = Default::default();
-        draft.submitted_task = Some(tasks[1].id.clone());
-        let following = ConversionFollow::Preparing(7)
-            .submitted(7, tasks[1].id.clone())
-            .unwrap();
-        // The note as it was remains readable but is not the explicit new intent.
-        assert!(
-            following
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .is_none()
-        );
-        tasks[1].state = workspace::TaskState::Complete;
-        tasks[1].artifact = Some("note".into());
-        assert_eq!(
-            following
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .unwrap()
-                .id,
-            "new-version",
-        );
-    }
-
-    #[test]
-    fn completion_opens_only_the_result_still_followed_in_the_current_input() {
-        let (draft, mut tasks) = submitted_recovery_chain();
-        let followed = ConversionFollow::Preparing(7)
-            .submitted(7, "recovery".into())
-            .unwrap();
-        assert!(
-            ConversionFollow::Preparing(7)
-                .submitted(8, "recovery".into())
-                .is_none()
         );
         assert!(
-            followed
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .is_none()
-        );
-        tasks[1].state = workspace::TaskState::Complete;
-        assert!(
-            followed
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .is_none()
-        );
-        tasks[1].artifact = Some("note".into());
-        assert_eq!(
-            followed
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .unwrap()
-                .id,
-            "recovery"
-        );
-        assert!(
-            followed
-                .completed_task(false, 7, &draft, &tasks, &draft.input)
-                .is_none()
-        );
-        assert!(
-            followed
-                .completed_task(true, 8, &draft, &tasks, &draft.input)
-                .is_none()
-        );
-        assert!(
-            followed
-                .completed_task(true, 7, &draft, &tasks, "new video")
-                .is_none()
-        );
-        let other = ConversionFollow::Task {
-            id: "original".into(),
-            source_revision: 7,
-        };
-        assert!(
-            other
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .is_none()
-        );
-        tasks[1].state = workspace::TaskState::Partial;
-        assert!(
-            followed
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .is_some()
-        );
-    }
-
-    #[test]
-    fn reader_repair_reopens_the_note_only_while_it_still_shows_the_note_before_it() {
-        let (_, mut tasks) = submitted_recovery_chain();
-        let note = std::path::Path::new("note");
-        let before = Some("original");
-        let follow = ConversionFollow::reader_reprocess(&tasks[1], note, 12).unwrap();
-        // Submitting a recovery is not enough: it must publish a readable result.
-        assert!(!follow.completed_reader_task(
-            &tasks[1],
-            super::Page::Result,
-            12,
-            Some(note),
-            before
-        ));
-        tasks[1].artifact = Some(note.into());
-        for state in [
-            workspace::TaskState::Complete,
-            workspace::TaskState::Partial,
-        ] {
-            tasks[1].state = state;
-            assert!(follow.completed_reader_task(
-                &tasks[1],
-                super::Page::Result,
-                12,
-                Some(note),
-                before
-            ));
-        }
-        // The reader already shows what the repair wrote, or shows no manifest.
-        for opened in [Some("recovery"), None] {
-            assert!(!follow.completed_reader_task(
-                &tasks[1],
-                super::Page::Result,
-                12,
-                Some(note),
-                opened
-            ));
-        }
-        for page in [
-            super::Page::New,
-            super::Page::Library,
-            super::Page::Task,
-            super::Page::Settings,
-        ] {
-            assert!(!follow.completed_reader_task(&tasks[1], page, 12, Some(note), before));
-        }
-        // Leaving and returning to the same note has a new read generation.
-        assert!(!follow.completed_reader_task(
-            &tasks[1],
-            super::Page::Result,
-            13,
-            Some(note),
-            before
-        ));
-        assert!(!follow.completed_reader_task(
-            &tasks[1],
-            super::Page::Result,
-            12,
-            Some(std::path::Path::new("another-note")),
-            before,
-        ));
-        assert!(!follow.completed_reader_task(&tasks[1], super::Page::Result, 12, None, before));
-        let mut unrelated = tasks[1].clone();
-        unrelated.id = "another-repair".into();
-        assert!(!follow.completed_reader_task(
-            &unrelated,
-            super::Page::Result,
-            12,
-            Some(note),
-            before
-        ));
-        for state in [
-            workspace::TaskState::Running,
-            workspace::TaskState::Paused,
-            workspace::TaskState::Uncertain,
-        ] {
-            tasks[1].state = state;
-            assert!(!follow.completed_reader_task(
-                &tasks[1],
-                super::Page::Result,
-                12,
-                Some(note),
-                before
-            ));
-        }
-    }
-
-    #[test]
-    fn reader_repair_guard_excludes_exports_and_rechecks_the_note_when_loading_finishes() {
-        let (_, mut tasks) = submitted_recovery_chain();
-        let note = std::path::Path::new("note");
-        let before = Some("original");
-        let follow = ConversionFollow::reader_reprocess(&tasks[1], note, 12).unwrap();
-        assert!(follow.context_is_current(super::Page::Result, 99, 12, Some(note)));
-        assert!(!follow.context_is_current(super::Page::Result, 99, 13, Some(note)));
-        assert!(!follow.context_is_current(super::Page::Library, 99, 12, Some(note)));
-        assert!(!follow.context_is_current(
-            super::Page::Result,
-            99,
-            12,
-            Some(std::path::Path::new("other")),
-        ));
-
-        let c2m_engine::execution::Operation::Reprocess { components, .. } =
-            &mut tasks[1].plan.operation
-        else {
-            unreachable!();
-        };
-        *components = vec![c2m_engine::execution::Component::Exports];
-        tasks[1].state = workspace::TaskState::Complete;
-        tasks[1].artifact = Some(note.to_owned());
-        assert!(ConversionFollow::reader_reprocess(&tasks[1], note, 12).is_none());
-        // An export-only task never turns into navigation.
-        assert!(!follow.completed_reader_task(
-            &tasks[1],
-            super::Page::Result,
-            12,
-            Some(note),
-            before
-        ));
-        tasks[1].plan.operation = Default::default();
-        assert!(ConversionFollow::reader_reprocess(&tasks[1], note, 12).is_none());
-    }
-
-    #[test]
-    fn opening_a_reader_viewer_ends_repair_following_even_if_it_closes_before_the_read_finishes() {
-        let (_, mut tasks) = submitted_recovery_chain();
-        let note = std::path::Path::new("note");
-        let before = Some("original");
-        let captured = ConversionFollow::reader_reprocess(&tasks[1], note, 12).unwrap();
-        tasks[1].state = workspace::TaskState::Complete;
-        tasks[1].artifact = Some(note.into());
-        for read_started in [false, true] {
-            let mut active = Some(captured.clone());
-            if read_started {
-                assert!(active.as_ref().unwrap().completed_reader_task(
-                    &tasks[1],
-                    super::Page::Result,
-                    12,
-                    Some(note),
-                    before,
-                ));
-            }
-            ConversionFollow::interrupt_for_reader_viewer(&mut active);
-            assert!(active.is_none());
-            // Closing the viewer only restores its underlying note. The old
-            // asynchronous callback still has a ticket, but no longer owns intent.
-            assert_ne!(active.as_ref(), Some(&captured));
-            assert!(
-                !active
-                    .as_ref()
-                    .is_some_and(|follow| follow.completed_reader_task(
-                        &tasks[1],
-                        super::Page::Result,
-                        12,
-                        Some(note),
-                        before,
-                    ))
-            );
-        }
-        // A viewer must not cancel a distinct workbench conversion.
-        let mut input = Some(ConversionFollow::Task {
-            id: "conversion".into(),
-            source_revision: 7,
-        });
-        let expected = input.clone();
-        ConversionFollow::interrupt_for_reader_viewer(&mut input);
-        assert_eq!(input, expected);
-    }
-
-    #[test]
-    fn a_submitted_input_locks_its_options_until_the_next_video_replaces_it() {
-        let root = tempfile::tempdir().unwrap();
-        let mut workspace = workspace::Workspace::open_at_inline(
-            root.path().join("workspace.json"),
-            root.path().join("library"),
-        )
-        .unwrap();
-        let state = &mut workspace.state;
-        let source = source::Source {
-            input: "https://www.bilibili.com/video/BVfixture".into(),
-            identity: "video-fixture".into(),
-            online: true,
-            ..Default::default()
-        };
-        let plan = workspace::TaskPlan {
-            operation: Default::default(),
-            source: source.clone(),
-            source_id: source.identity.clone(),
-            title: "已提交的标题".into(),
-            library_id: state.default_library.clone(),
-            folder: None,
-            subtitle: None,
-            repair: None,
-        };
-        // Before submission the options belong to the form.
-        let draft = state.draft_mut().unwrap();
-        draft.change_source(source.input.clone());
-        draft.source = Some(source.clone());
-        assert!(locked_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_none());
-        let (id, _) = state.enqueue(plan.clone(), None).unwrap();
-        state.draft_mut().unwrap().submitted_task = Some(id.clone());
-        // Leaving for the task list and coming back home keeps an in-flight
-        // input: its card shows the task.
-        for in_flight in [
-            workspace::TaskState::Queued,
-            workspace::TaskState::Running,
-            workspace::TaskState::Pausing,
-            workspace::TaskState::Paused,
-            workspace::TaskState::NeedsAttention,
-            workspace::TaskState::Uncertain,
-        ] {
-            state.task_mut(&id).unwrap().state = in_flight;
-            let draft = state.draft().unwrap();
-            assert!(super::retired_input_task(draft, &state.tasks, &source.input).is_none());
-            assert_eq!(
-                locked_input_task(draft, &state.tasks, &source.input)
-                    .unwrap()
-                    .id,
-                id
-            );
-        }
-        for finished in [
-            workspace::TaskState::Complete,
-            workspace::TaskState::Partial,
-            workspace::TaskState::Cancelled,
-        ] {
-            state.task_mut(&id).unwrap().state = finished;
-            assert!(
-                locked_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_none()
-            );
-        }
-        // Clearing the link starts the next input; the submitted task keeps its plan.
-        state.task_mut(&id).unwrap().state = workspace::TaskState::Running;
-        assert!(state.prepare_next_import(""));
-        let next = state.draft().unwrap();
-        assert!(next.submitted_task.is_none());
-        assert!(locked_input_task(next, &state.tasks, "").is_none());
-        let task = state.task(&id).unwrap();
-        assert_eq!(task.state, workspace::TaskState::Running);
-        assert!(task.plan == plan);
-    }
-
-    #[test]
-    fn completion_belongs_to_the_submitted_input_and_requires_a_readable_result() {
-        let root = tempfile::tempdir().unwrap();
-        let mut workspace = workspace::Workspace::open_at_inline(
-            root.path().join("workspace.json"),
-            root.path().join("library"),
-        )
-        .unwrap();
-        let state = &mut workspace.state;
-        let source = source::Source {
-            input: "https://www.bilibili.com/video/BVfixture".into(),
-            identity: "video-fixture".into(),
-            online: true,
-            ..Default::default()
-        };
-        let plan = workspace::TaskPlan {
-            operation: Default::default(),
-            source: source.clone(),
-            source_id: source.identity.clone(),
-            title: "已提交的标题".into(),
-            library_id: state.default_library.clone(),
-            folder: None,
-            subtitle: None,
-            repair: None,
-        };
-        let (id, _) = state.enqueue(plan.clone(), None).unwrap();
-        let draft = state.draft_mut().unwrap();
-        draft.change_source(source.input.clone());
-        draft.submitted_task = Some(id.clone());
-        assert!(
-            completed_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_none()
-        );
-        state.task_mut(&id).unwrap().state = workspace::TaskState::Complete;
-        assert!(
-            completed_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_none()
-        );
-        state.task_mut(&id).unwrap().artifact = Some(root.path().join("published-version"));
-        assert_eq!(
-            completed_input_task(state.draft().unwrap(), &state.tasks, &source.input)
-                .unwrap()
-                .id,
-            id,
-        );
-        // The text can change before its observer replaces the submitted draft.
-        // That next input must remain visible even during this intermediate state.
-        for next in ["", "https://www.bilibili.com/video/BVnext"] {
-            assert!(completed_input_task(state.draft().unwrap(), &state.tasks, next).is_none());
-        }
-        state.task_mut(&id).unwrap().state = workspace::TaskState::Partial;
-        assert!(
-            completed_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_some()
-        );
-        state.task_mut(&id).unwrap().state = workspace::TaskState::Complete;
-        state.prepare_next_import("https://www.bilibili.com/video/BVnext");
-        assert!(
-            completed_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_none()
-        );
-        assert!(state.task(&id).unwrap().plan == plan);
-    }
-
-    fn submitted_recovery_chain() -> (workspace::Draft, Vec<workspace::TaskRecord>) {
-        let source = source::Source {
-            input: "https://www.bilibili.com/video/BVfixture".into(),
-            identity: "video-fixture".into(),
-            online: true,
-            ..Default::default()
-        };
-        let mut draft = workspace::Draft::new(true);
-        draft.change_source(source.input.clone());
-        draft.source = Some(source.clone());
-        draft.submitted_task = Some("original".into());
-        let mut original = workspace::TaskRecord {
-            id: "original".into(),
-            plan: workspace::TaskPlan {
-                operation: Default::default(),
-                source_id: source.identity.clone(),
-                source,
-                title: "已提交的课程".into(),
-                library_id: "library".into(),
-                folder: None,
-                subtitle: None,
-                repair: None,
-            },
-            state: workspace::TaskState::Uncertain,
-            intent: workspace::Intent::Pause,
-            created: 0,
-            updated: 0,
-            parent: None,
-            handled_by: None,
-            held: false,
-            work_dir: "work/original".into(),
-            events: desktop_store::activity::JobEvents {
-                error: Some("原摘要请求结果未确认".into()),
-                ..Default::default()
-            },
-            artifact: Some("note".into()),
-            unread: false,
-            resend: Vec::new(),
-            replaced_by: None,
-            rework: None,
-            rework_accepted: None,
-            ai_answered_by: Vec::new(),
-            ran_with: None,
-        };
-        let mut recovery = original.clone();
-        recovery.id = "recovery".into();
-        recovery.parent = Some(original.id.clone());
-        recovery.state = workspace::TaskState::Queued;
-        recovery.intent = workspace::Intent::Run;
-        recovery.events.error = None;
-        recovery.artifact = None;
-        recovery.work_dir = "work/recovery".into();
-        recovery.plan.operation = c2m_engine::execution::Operation::Reprocess {
-            note_dir: "note".into(),
-            base_task_id: original.id.clone(),
-            components: vec![c2m_engine::execution::Component::Summary],
-            prior_work_dir: Some(original.work_dir.clone()),
-        };
-        original.handled_by = Some(recovery.id.clone());
-        (draft, vec![original, recovery])
-    }
-
-    /// Previewed under speech recognition, a video's subtitles were not read; with
-    /// Settings back on subtitles its first track is, and until then nothing starts.
-    #[test]
-    fn a_track_is_read_when_settings_turn_back_to_subtitles() {
-        use c2m_source::subtitle::{SubtitleKind, SubtitleOrigin, SubtitleTrack};
-        let track = SubtitleTrack {
-            id: "video:embedded:2".into(),
-            language: Some("zh".into()),
-            name: None,
-            kind: SubtitleKind::Unknown,
-            translated: false,
-            origin: SubtitleOrigin::Embedded {
-                stream_index: 2,
-                codec: "mov_text".into(),
-            },
-            source_order: 0,
-        };
-        let source = source::Source {
-            subtitles: SubtitleEvidence::Found {
-                tracks: vec![track.clone()],
-                warning: None,
-            },
-            ..Default::default()
-        };
-        assert_eq!(
-            super::default_track_to_read(&source, TranscriptSource::Asr),
-            None
-        );
-        assert_eq!(
-            super::default_track_to_read(&source, TranscriptSource::Auto),
-            Some(track.clone())
-        );
-        let mut reading = source.clone();
-        reading.subtitle_request = Some(track);
-        assert_eq!(
-            super::default_track_to_read(&reading, TranscriptSource::Auto),
-            None
-        );
-    }
-
-    #[test]
-    fn a_video_reopened_from_a_waiting_task_names_it_until_it_is_replaced() {
-        let (mut draft, mut tasks) = submitted_recovery_chain();
-        draft.retry_of = Some(tasks[1].id.clone());
-        tasks[1].handled_by = None;
-        tasks[1].state = workspace::TaskState::Paused;
-        assert_eq!(
-            super::waiting_retried_task(&draft, &tasks).unwrap().id,
-            tasks[1].id
-        );
-        // Finished, or already followed by another attempt: nothing to take the place of.
-        tasks[1].state = workspace::TaskState::Complete;
-        assert!(super::waiting_retried_task(&draft, &tasks).is_none());
-        tasks[1].state = workspace::TaskState::NeedsAttention;
-        tasks[1].handled_by = Some("later".into());
-        assert!(super::waiting_retried_task(&draft, &tasks).is_none());
-        draft.retry_of = None;
-        assert!(super::waiting_retried_task(&draft, &tasks).is_none());
-    }
-
-    #[test]
-    fn workbench_entry_retires_only_unchanged_terminal_inputs() {
-        let (mut draft, mut tasks) = submitted_recovery_chain();
-        for state in [
-            workspace::TaskState::Complete,
-            workspace::TaskState::Partial,
-            workspace::TaskState::Cancelled,
-        ] {
-            tasks[1].state = state;
-            tasks[1].artifact = Some("note".into());
-            assert_eq!(
-                super::retired_input_task(&draft, &tasks, &draft.input)
-                    .unwrap()
-                    .id,
-                "recovery"
-            );
-        }
-        for state in [
-            workspace::TaskState::Queued,
-            workspace::TaskState::Running,
-            workspace::TaskState::Pausing,
-            workspace::TaskState::Paused,
-            workspace::TaskState::NeedsAttention,
-            workspace::TaskState::Uncertain,
-        ] {
-            tasks[1].state = state;
-            assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
-        }
-        tasks[1].state = workspace::TaskState::Partial;
-        let unchanged = draft.clone();
-        // A subtitle file attached since is a change to keep.
-        draft.subtitle = Some("other.srt".into());
-        assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
-        draft = unchanged;
-        assert!(super::retired_input_task(&draft, &tasks, "新视频").is_none());
-        tasks[1].events.blocked.push(workspace::BlockedRequest {
-            reason: c2m_protocol::progress::BlockReason::Uncertain,
-            request_id: Some("pending-summary".into()),
-            purpose: Some("summary".into()),
-            description: "摘要".into(),
-            kind: Some(c2m_artifact::artifact::FailureKind::Uncertain),
-            message: "结果未知".into(),
-        });
-        assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
-        tasks[1].events.blocked.clear();
-        tasks[1].artifact = None;
-        assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
-    }
-
-    #[test]
-    fn workbench_follows_the_same_recovery_for_queued_running_and_completed_results() {
-        let (draft, mut tasks) = submitted_recovery_chain();
-        let original = tasks[0].clone();
-        for state in [workspace::TaskState::Queued, workspace::TaskState::Running] {
-            tasks[1].state = state;
-            assert_eq!(
-                submitted_input_task(&draft, &tasks, &draft.input)
-                    .unwrap()
-                    .id,
-                "recovery"
-            );
-            assert!(completed_input_task(&draft, &tasks, &draft.input).is_none());
-        }
-        tasks[1].state = workspace::TaskState::Complete;
-        assert!(completed_input_task(&draft, &tasks, &draft.input).is_none());
-        tasks[1].artifact = Some("note".into());
-        assert_eq!(
-            completed_input_task(&draft, &tasks, &draft.input)
-                .unwrap()
-                .id,
-            "recovery"
-        );
-
-        let mut final_attempt = tasks[1].clone();
-        final_attempt.id = "final-attempt".into();
-        final_attempt.parent = Some("recovery".into());
-        final_attempt.state = workspace::TaskState::Running;
-        final_attempt.artifact = None;
-        tasks[1].state = workspace::TaskState::Uncertain;
-        tasks[1].handled_by = Some(final_attempt.id.clone());
-        tasks.push(final_attempt);
-        assert_eq!(
-            submitted_input_task(&draft, &tasks, &draft.input)
-                .unwrap()
-                .id,
-            "final-attempt"
-        );
-        assert!(completed_input_task(&draft, &tasks, &draft.input).is_none());
-        tasks[2].state = workspace::TaskState::Complete;
-        tasks[2].artifact = Some("note".into());
-        assert_eq!(
-            completed_input_task(&draft, &tasks, &draft.input)
-                .unwrap()
-                .id,
-            "final-attempt"
-        );
-        // A cancelled recovery still belongs to this input for inline feedback,
-        // but must not fall back to an older readable result or follow new input.
-        tasks[2].state = workspace::TaskState::Cancelled;
-        tasks[2].artifact = None;
-        assert_eq!(
-            submitted_input_task(&draft, &tasks, &draft.input)
-                .unwrap()
-                .id,
-            "final-attempt"
-        );
-        assert!(completed_input_task(&draft, &tasks, &draft.input).is_none());
-        assert!(submitted_input_task(&draft, &tasks, "another-video").is_none());
-        assert!(tasks[0] == original);
-        assert_eq!(draft.submitted_task.as_deref(), Some("original"));
-    }
-
-    #[test]
-    fn recovery_lookup_rejects_broken_cycles_or_unrelated_task_links() {
-        for case in [
-            "missing",
-            "self-cycle",
-            "cycle",
-            "wrong-parent",
-            "other-source",
-            "inconsistent-source",
-            "other-kind",
-            "duplicate-id",
-            "unrelated-submission",
-        ] {
-            let (mut draft, mut tasks) = submitted_recovery_chain();
-            match case {
-                "missing" => tasks[0].handled_by = Some("missing".into()),
-                "self-cycle" => {
-                    tasks[0].handled_by = Some("original".into());
-                    tasks[0].parent = Some("original".into());
+            waiting
+                != PlanKey {
+                    services: 6,
+                    ..waiting
                 }
-                "cycle" => {
-                    tasks[1].handled_by = Some("original".into());
-                    tasks[0].parent = Some("recovery".into());
-                }
-                "wrong-parent" => tasks[1].parent = Some("unrelated".into()),
-                "other-source" => {
-                    tasks[1].plan.source_id = "other-video".into();
-                    tasks[1].plan.source.identity = "other-video".into();
-                }
-                "inconsistent-source" => tasks[1].plan.source.identity = "other-video".into(),
-                "other-kind" => tasks[1].plan.source.online = false,
-                "duplicate-id" => tasks.push(tasks[1].clone()),
-                "unrelated-submission" => {
-                    tasks[1].plan.source_id = "other-video".into();
-                    tasks[1].plan.source.identity = "other-video".into();
-                    draft.submitted_task = Some("recovery".into());
-                }
-                _ => unreachable!(),
-            }
-            assert!(
-                submitted_input_task(&draft, &tasks, &draft.input).is_none(),
-                "{case}"
-            );
-            assert!(
-                completed_input_task(&draft, &tasks, &draft.input).is_none(),
-                "{case}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_recovered_result_cannot_replace_new_or_changed_input() {
-        let (mut draft, mut tasks) = submitted_recovery_chain();
-        tasks[1].state = workspace::TaskState::Complete;
-        tasks[1].artifact = Some("note".into());
-        for input in ["", "https://www.bilibili.com/video/BVnext"] {
-            assert!(submitted_input_task(&draft, &tasks, input).is_none());
-            assert!(completed_input_task(&draft, &tasks, input).is_none());
-        }
-        draft.source.as_mut().unwrap().identity = "newly-inspected-content".into();
-        assert!(submitted_input_task(&draft, &tasks, &draft.input).is_none());
-        draft.source = None;
-        draft.input = "https://www.bilibili.com/video/BVnext".into();
-        assert!(submitted_input_task(&draft, &tasks, &draft.input).is_none());
-    }
-
-    #[test]
-    fn automatic_mode_uses_speech_after_login_or_download_failure() {
-        let track = c2m_source::subtitle::file_track("lesson.srt".into(), None);
-        for metadata_failed in [true, false] {
-            let mut source = source::Source {
-                subtitles: if metadata_failed {
-                    SubtitleEvidence::Failed {
-                        message: "WARNING: subtitles require login".into(),
-                    }
-                } else {
-                    SubtitleEvidence::Found {
-                        tracks: vec![track.clone()],
-                        warning: None,
-                    }
-                },
-                subtitle_request: (!metadata_failed).then(|| track.clone()),
-                subtitle_read_error: (!metadata_failed).then(|| SubtitleReadError::Failed {
-                    message: "字幕文件没有下载成功".into(),
-                }),
-                ..Default::default()
-            };
-            assert!(automatic_subtitle_fallback(
-                &mut source,
-                TranscriptSource::Auto,
-                None
-            ));
-            assert!(uses_speech(&source, TranscriptSource::Auto));
-            assert!(!subtitle_needs_confirmation(
-                &source,
-                TranscriptSource::Auto
-            ));
-            assert!(source.subtitle_request.is_none());
-            assert!(source.subtitle_read_error.is_none());
-        }
-    }
-
-    #[test]
-    fn explicit_subtitle_and_cancelled_reads_never_fall_back_to_speech() {
-        let mut source = source::Source {
-            subtitles: SubtitleEvidence::Failed {
-                message: "字幕需要登录".into(),
-            },
-            subtitle_read_error: Some(SubtitleReadError::Failed {
-                message: "字幕需要登录".into(),
-            }),
-            ..Default::default()
-        };
-        let original = source.clone();
-        assert!(!automatic_subtitle_fallback(
-            &mut source,
-            TranscriptSource::Subtitle,
-            None
-        ));
-        assert_eq!(source, original);
-        assert!(subtitle_needs_confirmation(
-            &source,
-            TranscriptSource::Subtitle
-        ));
-
-        source.subtitle_read_error = Some(SubtitleReadError::Cancelled);
-        let cancelled = source.clone();
-        assert!(!automatic_subtitle_fallback(
-            &mut source,
-            TranscriptSource::Auto,
-            None
-        ));
-        assert_eq!(source, cancelled);
-        assert!(!uses_speech(&source, TranscriptSource::Auto));
-    }
-
-    #[test]
-    fn pending_or_failed_subtitles_remain_required_even_with_cached_text() {
-        let track = c2m_source::subtitle::file_track("lesson.srt".into(), None);
-        let mut source = source::Source {
-            identity: "lesson".into(),
-            subtitles: SubtitleEvidence::Found {
-                tracks: vec![track.clone()],
-                warning: None,
-            },
-            ..Default::default()
-        };
-        assert!(subtitle_needs_confirmation(&source, TranscriptSource::Auto));
-        source.selected_subtitle = Some(CachedSubtitle {
-            source_identity: source.identity.clone(),
-            track_id: track.id.clone(),
-            label: "已读取字幕".into(),
-            path: "lesson.srt".into(),
-            events: Vec::new(),
-        });
-        assert!(!subtitle_needs_confirmation(
-            &source,
-            TranscriptSource::Auto
-        ));
-
-        source.subtitle_request = Some(track);
-        assert!(subtitle_needs_confirmation(&source, TranscriptSource::Auto));
-        source.subtitle_request = None;
-        source.subtitle_read_error = Some(SubtitleReadError::Failed {
-            message: "无法读取新字幕，原正文仍保留".into(),
-        });
-        assert!(subtitle_needs_confirmation(&source, TranscriptSource::Auto));
-
-        // Cancelling the replacement or choosing the cached text restores the
-        // confirmed source without opening unrelated generation preferences.
-        source.subtitle_read_error = None;
-        assert!(!subtitle_needs_confirmation(
-            &source,
-            TranscriptSource::Subtitle
-        ));
-        source.selected_subtitle = None;
-        assert!(subtitle_needs_confirmation(
-            &source,
-            TranscriptSource::Subtitle
-        ));
-        assert!(!subtitle_needs_confirmation(&source, TranscriptSource::Asr));
-    }
-
-    #[test]
-    fn caption_intent_and_unconfirmed_reads_never_imply_speech_recognition() {
-        let mut source = source::Source {
-            subtitles: SubtitleEvidence::NoneFound,
-            ..Default::default()
-        };
-        assert!(uses_speech(&source, TranscriptSource::Auto));
-        assert!(!uses_speech(&source, TranscriptSource::Subtitle));
-        source.subtitle_request = Some(c2m_source::subtitle::file_track("lesson.srt".into(), None));
-        assert!(!uses_speech(&source, TranscriptSource::Auto));
-        assert!(!uses_speech(&source, TranscriptSource::Subtitle));
-        source.subtitle_request = None;
-        source.subtitle_read_error = Some(SubtitleReadError::Failed {
-            message: "字幕文件无法读取".into(),
-        });
-        assert!(!uses_speech(&source, TranscriptSource::Auto));
-        assert!(uses_speech(&source, TranscriptSource::Asr));
-        source.subtitle_read_error = None;
-        source.subtitles = SubtitleEvidence::Unchecked;
-        assert!(!uses_speech(&source, TranscriptSource::Auto));
-        source.subtitles = SubtitleEvidence::Failed {
-            message: "请求失败".into(),
-        };
-        assert!(uses_speech(&source, TranscriptSource::Auto));
-        assert!(!uses_speech(&source, TranscriptSource::Subtitle));
+        );
     }
 }

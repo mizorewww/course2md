@@ -48,12 +48,9 @@ impl Records {
         self.workspace.as_ref()?.state.task(id)
     }
 
-    /// The library a task's plan saves to; the record may name a removed library.
+    /// The library a task saves to; the record may name a removed library.
     pub fn task_library(&self, task: &TaskRecord) -> Option<&LibraryLocation> {
-        self.workspace
-            .as_ref()?
-            .state
-            .library(&task.plan.library_id)
+        self.workspace.as_ref()?.state.library(&task.library_id)
     }
 
     /// The registered library with this id.

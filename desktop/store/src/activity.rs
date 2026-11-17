@@ -61,18 +61,11 @@ pub struct BlockedRequest {
     pub message: String,
 }
 
-impl BlockedRequest {
-    pub fn is_uncertain(&self) -> bool {
-        self.reason == BlockReason::Uncertain
-    }
-}
-
 /// Log lines a job keeps in memory.
-const LOG_LINES: usize = 200;
+pub const LOG_LINES: usize = 200;
 
-/// Everything a job's events say. Only `error` is part of a saved task record, because
-/// the app raises errors of its own: the rest comes back from `events.jsonl`.
-#[derive(Clone, Default, Serialize, Deserialize)]
+/// Everything a job's events say.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct JobEvents {
     #[serde(skip)]
     pub stages: BTreeMap<Stage, Activity>,
@@ -81,37 +74,24 @@ pub struct JobEvents {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(skip)]
+    pub error_code: Option<c2m_protocol::progress::ErrorCode>,
+    #[serde(skip)]
     pub blocked: Vec<BlockedRequest>,
     #[serde(skip)]
     pub outcomes: Option<c2m_artifact::artifact::Outcomes>,
     /// Files of the note this task replaced that were hand-edited and kept beside
-    /// the new note under another name, relative to the note. Read back from the
-    /// task's saved result.
+    /// the new note under another name, relative to the note.
     #[serde(skip)]
     pub kept_edits: Vec<std::path::PathBuf>,
     /// The last error was a speech model that must be prepared first.
     #[serde(skip)]
     pub model_required: bool,
-    /// The last error refused a result and kept the note: the error's message and
-    /// the parts it names, so it is shown in the reader's language. Used only
-    /// while `error` is still that message.
-    #[serde(skip)]
-    pub note_kept: Option<(String, Vec<c2m_core::outcome::KeptPart>)>,
-    /// The last error stopped at the note's folder of copies: its replacement was
-    /// interrupted and not finishable, or copies kept there reached the limit
-    /// (`true`). The error's message and the folder to look at; used only while
-    /// `error` is still that message.
-    #[serde(skip)]
-    pub recovery_blocked: Option<(String, std::path::PathBuf, bool)>,
     /// The result of the run in progress, until the job exits.
     #[serde(skip)]
     pub done: Option<Done>,
     /// The saved events have been read back; a disconnected library's have not.
     #[serde(skip)]
     pub loaded: bool,
-    /// The purposes the task's receipts hold any attempt for, read with them.
-    #[serde(skip)]
-    pub attempted: std::collections::BTreeSet<String>,
 }
 
 /// A record's identity is what it saves: the rest is derived.
@@ -122,33 +102,6 @@ impl PartialEq for JobEvents {
 }
 
 impl JobEvents {
-    /// The folder to look at when the task's last error found its note's
-    /// replacement interrupted and not finishable.
-    pub fn blocked_folder(&self) -> Option<&std::path::Path> {
-        self.recovery_blocked
-            .as_ref()
-            .filter(|(message, ..)| self.error.as_deref() == Some(message.as_str()))
-            .map(|(_, path, _)| path.as_path())
-    }
-
-    /// The folder [`Self::blocked_folder`] names holds copies that reached the limit.
-    pub fn blocked_by_copies(&self) -> bool {
-        self.blocked_folder().is_some()
-            && self
-                .recovery_blocked
-                .as_ref()
-                .is_some_and(|(.., copies)| *copies)
-    }
-
-    /// The parts the task's last error names when it refused a result and kept
-    /// the note; `None` once another error has taken its place.
-    pub fn kept_parts(&self) -> Option<&[c2m_core::outcome::KeptPart]> {
-        self.note_kept
-            .as_ref()
-            .filter(|(message, _)| self.error.as_deref() == Some(message.as_str()))
-            .map(|(_, parts)| parts.as_slice())
-    }
-
     /// Applies one event. Returns whether it changes what a person sees right away;
     /// logs and steady progress can wait for the next repaint.
     pub fn apply(&mut self, event: &Event) -> bool {
@@ -225,33 +178,10 @@ impl JobEvents {
                 self.stage(stage).workers = *workers;
                 false
             }
-            Event::Error {
-                message,
-                code,
-                parts,
-                path,
-            } => {
-                use c2m_protocol::progress::ErrorCode;
-                self.recovery_blocked = path
-                    .as_ref()
-                    .filter(|_| {
-                        matches!(
-                            code,
-                            ErrorCode::NoteRecoveryBlocked | ErrorCode::NoteCopiesKept
-                        )
-                    })
-                    .map(|path| {
-                        (
-                            message.clone(),
-                            path.clone(),
-                            *code == ErrorCode::NoteCopiesKept,
-                        )
-                    });
+            Event::Error { message, code } => {
                 self.error = Some(message.clone());
+                self.error_code = Some(*code);
                 self.model_required = *code == c2m_protocol::progress::ErrorCode::ModelRequired;
-                self.note_kept = (*code == c2m_protocol::progress::ErrorCode::NoteKept
-                    && !parts.is_empty())
-                .then(|| (message.clone(), parts.clone()));
                 true
             }
             Event::Blocked {
@@ -300,6 +230,9 @@ impl JobEvents {
     pub fn begin_run(&mut self) {
         self.done = None;
         self.error = None;
+        self.error_code = None;
+        self.model_required = false;
+        self.blocked.clear();
     }
 
     /// Applies a saved stream. A line this build cannot read is skipped: this is a view

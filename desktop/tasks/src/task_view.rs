@@ -1,47 +1,34 @@
-//! What a task is doing and what can be done about it, as words and decisions. The task
-//! page draws this.
-use c2m_config::config::TranscriptSource;
+//! Task presentation logic: the 4 task groups, 5-state badges, actionable failure
+//! reasons, in-place actions, and stage progress rows.
+use crate::job::Work;
 use c2m_engine::execution::Component;
 use c2m_protocol::progress::Stage;
 use desktop_store::{
     activity,
-    workspace::{self, Intent, TaskRecord, TaskState},
+    workspace::{self, StagePhase, TaskRecord, TaskStatus},
 };
 
-/// Request purpose of a remote speech recognition call.
-pub(crate) const TRANSCRIPTION_PURPOSE: &str = "transcription";
-
-/// A settled task that waits for the person.
+/// A non-running task waiting for user attention or action.
 pub fn needs_person(task: &TaskRecord) -> bool {
-    task.replaced_by.is_none()
-        && matches!(
-            task.state,
-            TaskState::NeedsAttention
-                | TaskState::Uncertain
-                | TaskState::Paused
-                | TaskState::Partial
-        )
+    matches!(task.status, TaskStatus::Failed | TaskStatus::Paused)
 }
 
-/// Page order: the work in progress, what waits on the person, what follows,
-/// then the record.
+/// A paused task that can resume directly in place.
+pub fn resumable(task: &TaskRecord) -> bool {
+    task.status == TaskStatus::Paused
+}
+
+/// Task groups on the Tasks page (zero `History` group).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TaskGroup {
     Running,
     Attention,
     Queued,
     Finished,
-    History,
 }
 
 impl TaskGroup {
-    pub const ORDER: [Self; 5] = [
-        Self::Running,
-        Self::Attention,
-        Self::Queued,
-        Self::Finished,
-        Self::History,
-    ];
+    pub const ORDER: [Self; 4] = [Self::Running, Self::Attention, Self::Queued, Self::Finished];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -49,49 +36,31 @@ impl TaskGroup {
             Self::Attention => c2m_i18n::tr!("需要处理"),
             Self::Queued => c2m_i18n::tr!("排队中"),
             Self::Finished => c2m_i18n::tr!("已结束"),
-            Self::History => c2m_i18n::tr!("此前处理记录"),
         }
     }
 
-    /// Finished work and earlier records, which fold behind one tile.
     pub fn settled(self) -> bool {
-        matches!(self, Self::Finished | Self::History)
+        self == Self::Finished
     }
 }
 
 pub fn task_group(task: &TaskRecord) -> TaskGroup {
-    if task.handled_by.is_some() || task.replaced_by.is_some() {
-        TaskGroup::History
-    } else if task.held {
-        TaskGroup::Running
-    } else {
-        match task.state {
-            // A task the person paused keeps its place in the queue.
-            TaskState::Paused if !task.has_uncertain() => TaskGroup::Queued,
-            TaskState::Paused
-            | TaskState::NeedsAttention
-            | TaskState::Uncertain
-            | TaskState::Partial => TaskGroup::Attention,
-            TaskState::Running | TaskState::Pausing => TaskGroup::Running,
-            TaskState::Queued => TaskGroup::Queued,
-            TaskState::Complete | TaskState::Cancelled => TaskGroup::Finished,
-        }
+    match task.status {
+        TaskStatus::Running => TaskGroup::Running,
+        TaskStatus::Failed => TaskGroup::Attention,
+        TaskStatus::Queued | TaskStatus::Paused => TaskGroup::Queued,
+        TaskStatus::Completed => TaskGroup::Finished,
     }
 }
 
-/// The task page header's chips. Each task counts once, in the group it is shown
-/// in: a task held by a worker from an earlier session is still `Queued` in its
-/// record, but it is being processed, not waiting.
+/// Summary counters for the Tasks page header.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TaskCounts {
     pub running: usize,
     pub attention: usize,
     pub queued: usize,
     pub resumable: usize,
-    /// Work still meant to run that this session can pause: not a held task, whose
-    /// worker it does not command.
     pub pausable: usize,
-    /// Settled task records that "清空已完成" removes without touching notes.
     pub clearable: usize,
 }
 
@@ -99,37 +68,35 @@ pub fn task_counts(tasks: &[TaskRecord]) -> TaskCounts {
     tasks
         .iter()
         .fold(TaskCounts::default(), |mut counts, task| {
-            let group = task_group(task);
-            counts.running += usize::from(group == TaskGroup::Running);
-            counts.attention += usize::from(group == TaskGroup::Attention);
-            counts.queued +=
-                usize::from(group == TaskGroup::Queued && task.state == TaskState::Queued);
-            counts.resumable += usize::from(resumable(task));
-            counts.pausable += usize::from(
-                matches!(task.state, TaskState::Running | TaskState::Queued)
-                    && task.intent == Intent::Run
-                    && task.handled_by.is_none()
-                    && !task.held,
-            );
-            counts.clearable += usize::from(workspace::can_clear_completed_task_in(tasks, task));
+            match task.status {
+                TaskStatus::Running => {
+                    counts.running += 1;
+                    counts.pausable += 1;
+                }
+                TaskStatus::Failed => {
+                    counts.attention += 1;
+                }
+                TaskStatus::Queued => {
+                    counts.queued += 1;
+                    counts.pausable += 1;
+                }
+                TaskStatus::Paused => {
+                    counts.resumable += 1;
+                }
+                TaskStatus::Completed => {
+                    counts.clearable += 1;
+                }
+            }
             counts
         })
 }
 
-/// What the app bar shows for the task page, in one pass over the tasks: how
-/// many still need doing, and whether one needs the person.
+/// App bar badge summary: `(unfinished_count, has_failed_attention)`.
 pub fn task_navigation_summary(tasks: &[TaskRecord]) -> (usize, bool) {
     tasks.iter().fold((0, false), |(count, attention), task| {
-        let actionable = matches!(
-            task_group(task),
-            TaskGroup::Running | TaskGroup::Attention | TaskGroup::Queued
-        );
-        let needs_person = task.handled_by.is_none()
-            && matches!(
-                task.state,
-                TaskState::NeedsAttention | TaskState::Uncertain | TaskState::Partial
-            );
-        (count + usize::from(actionable), attention || needs_person)
+        let unfinished = task.status != TaskStatus::Completed;
+        let failed = task.status == TaskStatus::Failed;
+        (count + usize::from(unfinished), attention || failed)
     })
 }
 
@@ -150,18 +117,12 @@ impl WorkerWait {
     }
 }
 
-/// A closed stage is not a completed task: later stages may not have started.
-/// Only the final render event or worker result identifies the finishing phase;
-/// the task itself is still completed by the existing Exit/manifest path.
-/// Pause and cancel are already shown by the status badge and the busy stop
-/// button, so a stopping worker reports no separate waiting line.
 pub fn worker_wait_state<'a>(
     active: bool,
     result_received: bool,
-    intent: Intent,
     stages: impl IntoIterator<Item = (&'a Stage, bool)>,
 ) -> Option<WorkerWait> {
-    if !active || intent != Intent::Run {
+    if !active {
         return None;
     }
     let mut has_stage = false;
@@ -186,22 +147,37 @@ pub fn worker_wait_state<'a>(
 pub enum StageStatus {
     Running,
     Complete,
-    Pausing,
-    Stopping,
     Paused,
     Waiting,
     Failed,
-    Uncertain,
-    Cancelled,
 }
 
-/// A stage's measurement: in full for the task details, or `compact` for a
-/// one-line card status, which leaves out supplementary context.
-///
-/// AI steps count the batches answered, with the time the rest will take; older
-/// engines counted batches sent, including requests still in flight, which
-/// measure nothing. Only the worker's stage result can move these stages into
-/// completed history.
+impl StageStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Running => c2m_i18n::tr!("处理中"),
+            Self::Complete => c2m_i18n::tr!("已完成"),
+            Self::Paused => c2m_i18n::tr!("已暂停"),
+            Self::Waiting => c2m_i18n::tr!("等待继续"),
+            Self::Failed => c2m_i18n::tr!("未完成"),
+        }
+    }
+
+    pub fn running(self) -> bool {
+        self == Self::Running
+    }
+}
+
+/// One step of a task, as rendered in a card or stage list.
+pub struct TaskStage {
+    pub id: String,
+    pub title: String,
+    pub status: StageStatus,
+    pub detail: String,
+    pub compact_detail: String,
+    pub fraction: Option<f32>,
+}
+
 pub(crate) fn stage_progress(
     name: &Stage,
     done: bool,
@@ -216,9 +192,6 @@ pub(crate) fn stage_progress(
         {
             return (detail, live.fraction());
         }
-        // Without a measured count, their clock and the tokens sent and returned
-        // show them moving, and the tokens stay as the record once the task no
-        // longer runs (a saved record has no clock).
         return (
             live.map(|live| live.live_counter())
                 .or_else(|| stored.tokens_label())
@@ -243,16 +216,11 @@ pub(crate) fn stage_progress(
     } else {
         String::new()
     };
-    // A finished measured stage keeps a full bar, so the stages read as a
-    // growing stack rather than one bar replacing another.
     let fraction = if done {
         (total > 0).then_some(1.)
     } else {
         live.and_then(|stage| stage.fraction())
     };
-    // Unmeasured running work shows its clock instead of a bar. Without a
-    // total, the stage's own metrics end in an elapsed note; the live counter
-    // carries that clock once, with any returned tokens.
     let detail = match live.filter(|_| !done && fraction.is_none()) {
         Some(live) => {
             let mut metrics = live.transfer_metrics(name, true);
@@ -275,15 +243,7 @@ pub(crate) fn stage_progress(
     (detail, fraction)
 }
 
-/// Proofreading and summary are the AI components; remote request purposes
-/// use the same names.
-pub fn ai_component(name: &str) -> Option<Component> {
-    Component::parse(name).filter(|part| part.is_ai())
-}
-
-/// A proofreading stage can close after failed requests. Published component
-/// outcomes distinguish an ended attempt from a successfully completed step.
-pub(crate) fn ai_stage_outcome(
+fn ai_stage_outcome(
     name: &Stage,
     outcomes: Option<&c2m_artifact::artifact::Outcomes>,
 ) -> Option<StageStatus> {
@@ -295,563 +255,171 @@ pub(crate) fn ai_stage_outcome(
     };
     match outcome.status {
         c2m_artifact::artifact::Status::Succeeded => Some(StageStatus::Complete),
-        _ if unfinished(outcome) => Some(StageStatus::Failed),
+        _ if outcome.is_incomplete() => Some(StageStatus::Failed),
         _ => None,
     }
 }
 
-/// User-initiated stops are normal states shown by the status badge, and a
-/// partial result names each unfinished component beside its retry action.
-/// Keep worker diagnostics in raw logs, and retain only a short, actionable
-/// localized failure summary in the task.
-/// The hint older engines attached to failures no account could fix (V1).
-const LEGACY_LOGIN_HINT: &str = "提示：请在设置的账号中重新登录 B 站后重试。 / Hint: sign in to Bilibili again in Settings and retry.";
-
-/// Saved task messages whose wording a later version replaced, by their old Simplified
-/// Chinese or English text, and the catalog row that says it now.
-const RENAMED_MESSAGES: &[(&str, &str)] = &[
-    (
-        "找不到任务使用的服务版本，请选择服务后建立新尝试",
-        "任务使用的服务已从设置中删除",
-    ),
-    (
-        "The service version used by the task cannot be found. Please select the service and create a new attempt.",
-        "任务使用的服务已从设置中删除",
-    ),
-    (
-        "找不到任務使用的服務版本，請選擇服務後建立新嘗試",
-        "任务使用的服务已从设置中删除",
-    ),
-    (
-        "タスクで使用されているサービスのバージョンが見つかりません。サービスを選択し、新しい試行を作成してください。",
-        "任务使用的服务已从设置中删除",
-    ),
-    // The message said the button's words again; it now states only the obstacle.
-    (
-        "任务使用的服务已不在设置中，请调整后重试并选择服务",
-        "任务使用的服务已从设置中删除",
-    ),
-    (
-        "The service this task used is no longer in settings. Adjust and try again with a service selected.",
-        "任务使用的服务已从设置中删除",
-    ),
-    (
-        "任務使用的服務已不在設定中，請調整後重試並選擇服務",
-        "任务使用的服务已从设置中删除",
-    ),
-    (
-        "このタスクで使っていたサービスは設定にありません。調整して再試行し、サービスを選択してください",
-        "任务使用的服务已从设置中删除",
-    ),
-];
-
-fn renamed_message(text: &str) -> &str {
-    RENAMED_MESSAGES
-        .iter()
-        .find(|(old, _)| *old == text)
-        .map_or(text, |(_, now)| now)
+/// Derives stage rows from live `Work` + `task.events` when available, falling back
+/// cleanly to durable `task.stages`.
+pub fn task_stage_rows(task: &TaskRecord, work: &Work) -> Vec<TaskStage> {
+    let active = work.is_running(&task.id) && task.status == TaskStatus::Running;
+    task_stage_rows_active(task, active)
 }
 
-/// A task's failure in the interface language. A refused result names its parts
-/// from the error's structure, not from the engine's Simplified Chinese words.
-fn task_error_summary(task: &TaskRecord) -> Option<String> {
-    task_error_summary_in(task, c2m_i18n::i18n::lang())
-}
-
-fn task_error_summary_in(task: &TaskRecord, lang: c2m_i18n::i18n::Lang) -> Option<String> {
-    // What to do, with the full paths: never cut short.
-    if let Some(folder) = task.events.blocked_folder() {
-        let message = if task.events.blocked_by_copies() {
-            c2m_core::outcome::copies_kept_message(folder, lang)
-        } else {
-            c2m_core::outcome::recovery_blocked_message(folder, lang)
-        };
-        return failure_summary_in(task.state, task.events.error.as_deref(), lang).map(|_| message);
-    }
-    match task.events.kept_parts() {
-        Some(parts) => failure_summary_in(task.state, task.events.error.as_deref(), lang)
-            .map(|_| c2m_core::outcome::note_kept_message(parts, lang)),
-        None => failure_summary_in(task.state, task.events.error.as_deref(), lang),
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn task_failure_summary(state: TaskState, error: Option<&str>) -> Option<String> {
-    failure_summary_in(state, error, c2m_i18n::i18n::lang())
-}
-
-fn failure_summary_in(
-    state: TaskState,
-    error: Option<&str>,
-    lang: c2m_i18n::i18n::Lang,
-) -> Option<String> {
-    if matches!(
-        state,
-        TaskState::Paused | TaskState::Cancelled | TaskState::Partial
-    ) {
-        return None;
-    }
-    error.map(|error| {
-        let summary = error
-            .lines()
-            .map(str::trim)
-            .find(|line| {
-                !line.is_empty()
-                    && !line.starts_with("ERROR:")
-                    && !line.starts_with("WARNING:")
-                    && !line.starts_with("Traceback")
-                    && !line.starts_with("panic")
+pub fn task_stage_rows_active(task: &TaskRecord, active: bool) -> Vec<TaskStage> {
+    if !task.events.stages.is_empty() {
+        return task
+            .events
+            .stages
+            .iter()
+            .map(|(name, stored)| {
+                let live = active
+                    .then_some(stored)
+                    .filter(|stage| !stage.elapsed().is_zero());
+                let done = stored.done;
+                let outcomes = if active {
+                    task.events
+                        .done
+                        .as_ref()
+                        .and_then(|done| done.outcomes.as_ref())
+                } else {
+                    task.outcomes.as_ref().or(task.events.outcomes.as_ref())
+                };
+                let status = if let Some(outcome) = ai_stage_outcome(name, outcomes) {
+                    outcome
+                } else if done {
+                    StageStatus::Complete
+                } else if active {
+                    StageStatus::Running
+                } else {
+                    match task.status {
+                        TaskStatus::Paused => StageStatus::Paused,
+                        TaskStatus::Queued => StageStatus::Waiting,
+                        TaskStatus::Running => StageStatus::Running,
+                        TaskStatus::Failed => StageStatus::Failed,
+                        TaskStatus::Completed => StageStatus::Complete,
+                    }
+                };
+                let (detail, fraction) = stage_progress(name, done, live, stored, false);
+                let (compact_detail, _) = stage_progress(name, done, live, stored, true);
+                TaskStage {
+                    id: format!("task-stage-{}-{name}", task.id),
+                    title: activity::title(name),
+                    status,
+                    detail,
+                    compact_detail,
+                    fraction,
+                }
             })
-            .unwrap_or_default();
-        // Older engines put a Bilibili login hint before any failure that was not
-        // yt-dlp's own answer, such as yt-dlp missing; it never fit, so it goes.
-        let summary = summary
-            .strip_prefix(LEGACY_LOGIN_HINT)
-            .map_or(summary, |rest| rest.trim_start_matches([':', ' ']));
-        // A message an older version saved under wording since replaced.
-        let summary = renamed_message(summary);
-        // A model the engine names by its id reads by its display name, and the
-        // message leaves the action to the button beside it.
-        if let Some(model) = summary
-            .strip_prefix("识别模型 ")
-            .and_then(|rest| rest.strip_suffix(" 尚未下载，请先下载并准备模型，再继续"))
-        {
-            return c2m_i18n::i18n::t_for("识别模型「{}」还没有下载", lang).replacen(
-                "{}",
-                c2m_config::config::model_label(model),
-                1,
-            );
-        }
-        // The worker writes for machine consumers in Simplified Chinese, and the
-        // desktop saves its own in the language it showed then; the person reads
-        // either in the interface language.
-        let summary = c2m_i18n::i18n::engine_message_for(summary, lang);
-        let summary = summary.as_str();
-        // A long cause (a tool's own error line) is cut, not replaced: the start
-        // of the real reason helps more than a generic one.
-        if summary.is_empty() {
-            c2m_i18n::i18n::t_for("转换未完成", lang).into()
-        } else if summary.chars().count() <= 140 {
-            summary.into()
-        } else {
-            format!("{}…", summary.chars().take(139).collect::<String>())
-        }
-    })
-}
-
-pub fn task_attention_summary(task: &TaskRecord) -> String {
-    if task.has_uncertain() {
-        return task_status_label(task);
-    }
-    if let Some(reason) = task_service_repair_reason(task) {
-        return reason.into();
-    }
-    task_error_summary(task).unwrap_or_else(|| task_status_label(task))
-}
-
-/// Only concrete configuration rejections change recovery from Retry to Repair.
-/// Rate limiting, timeouts and unknown outcomes keep their own recovery.
-pub(crate) fn service_repair_reason(
-    kind: c2m_artifact::artifact::FailureKind,
-) -> Option<&'static str> {
-    match kind {
-        c2m_artifact::artifact::FailureKind::Authentication => {
-            Some(c2m_i18n::tr!("AI 服务拒绝了 API Key，请检查密钥或权限"))
-        }
-        c2m_artifact::artifact::FailureKind::Model => {
-            Some(c2m_i18n::tr!("AI 服务地址或模型名称有误"))
-        }
-        c2m_artifact::artifact::FailureKind::Parameters => {
-            Some(c2m_i18n::tr!("AI 服务不支持当前的模型设置"))
-        }
-        _ => None,
-    }
-}
-
-pub(crate) fn task_service_repair_reason(task: &TaskRecord) -> Option<&'static str> {
-    if task.handled_by.is_some() || task.has_uncertain() {
-        return None;
-    }
-    let outcomes = task.events.outcomes.as_ref()?;
-    let components = [
-        &outcomes.proofreading,
-        &outcomes.translation,
-        &outcomes.summary,
-    ]
-    .into_iter()
-    .filter(|outcome| unfinished(outcome));
-    let blocked = task
-        .events
-        .blocked
-        .iter()
-        .filter_map(|request| ai_component(request.purpose.as_deref()?).and(request.kind));
-    components
-        .filter_map(|outcome| outcome.kind)
-        .chain(blocked)
-        .find_map(service_repair_reason)
-}
-
-pub fn task_requires_service_repair(task: &TaskRecord) -> bool {
-    task_service_repair_reason(task).is_some()
-}
-
-/// Component key → retry button label; the one source shared by task cards, the library and the reader.
-pub fn retry_component_label(component: &str) -> &'static str {
-    match Component::parse(component) {
-        Some(Component::Screenshots) => c2m_i18n::tr!("重新生成截图"),
-        Some(Component::Proofreading) => c2m_i18n::tr!("重试 AI 校对"),
-        Some(Component::Translation) => c2m_i18n::tr!("重试 AI 翻译"),
-        Some(Component::Summary) => c2m_i18n::tr!("重新生成摘要"),
-        Some(Component::Exports) => c2m_i18n::tr!("重新导出"),
-        None => c2m_i18n::tr!("补全未完成部分"),
-    }
-}
-
-/// [`retry_component_label`] for `task`'s note. Proofreading and translation go in
-/// batches; when only some of them failed, retrying sends just those, which the
-/// label says, so nobody expects the whole text to be redone.
-pub fn task_retry_label(task: &TaskRecord, component: &str) -> &'static str {
-    let partial = task_note_failures(task).iter().any(|(key, _, outcome)| {
-        key == component && outcome.status == c2m_artifact::artifact::Status::Partial
-    });
-    match Component::parse(component) {
-        Some(Component::Proofreading) if partial => c2m_i18n::tr!("重试未完成的校对部分"),
-        Some(Component::Translation) if partial => c2m_i18n::tr!("重试未完成的翻译部分"),
-        _ => retry_component_label(component),
-    }
-}
-
-/// [`retry_components_label`] for `task`'s note, naming a partly finished part as
-/// [`task_retry_label`] does.
-pub fn task_retry_components_label(
-    task: Option<&TaskRecord>,
-    components: &[String],
-) -> &'static str {
-    match (task, components) {
-        (Some(task), [component]) => task_retry_label(task, component),
-        _ => retry_components_label(components),
-    }
-}
-
-/// Retry button label: one component is named; several read as 「补全未完成部分」.
-pub fn retry_components_label(components: &[String]) -> &'static str {
-    if components.len() == 1 {
-        retry_component_label(&components[0])
-    } else {
-        c2m_i18n::tr!("补全未完成部分")
-    }
-}
-
-/// Which controls a task's commands are drawn into.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum TaskSurface {
-    /// Every command, on right-click and behind ⋯.
-    Menu,
-    /// The buttons of a card on the task page.
-    Card,
-    /// The buttons of the card standing in for the video on the workbench.
-    Home,
-}
-
-/// One thing a person can do to a task. [`task_actions`] says which apply;
-/// every button and menu item is drawn from it.
-#[derive(Clone, Debug, PartialEq)]
-pub enum TaskAction {
-    Read,
-    OpenNoteFolder,
-    /// The folder a stopped replacement of the task's note left, to sort out by hand.
-    OpenRecoveryFolder,
-    OpenExports,
-    OpenSource,
-    CopyLink,
-    Details,
-    Log,
-    Followup(String),
-    /// A move within the queue; `to` is `None` where it would change nothing.
-    Move {
-        label: &'static str,
-        up: bool,
-        to: Option<usize>,
-    },
-    Pause,
-    Resume,
-    /// Download the speech model the task stopped for, which the person agrees to here.
-    PrepareModel,
-    Repair,
-    Retry(String),
-    Reassociate(String),
-    Resend,
-    Adjust,
-    Cancel,
-    Remove,
-    ViewTask,
-}
-
-/// What a person came to the task for: where a card puts its one filled button.
-pub fn lead_action<'a>(
-    actions: &'a [TaskAction],
-    task: &TaskRecord,
-    surface: TaskSurface,
-) -> Option<&'a TaskAction> {
-    let recovery = || {
-        actions.iter().find(|action| {
-            matches!(
-                action,
-                TaskAction::PrepareModel
-                    | TaskAction::Repair
-                    | TaskAction::Resume
-                    | TaskAction::Retry(_)
-            )
-        })
-    };
-    let home = surface == TaskSurface::Home;
-    let read = (home && task.state == TaskState::Partial)
-        .then(|| actions.iter().find(|action| **action == TaskAction::Read))
-        .flatten();
-    // A task that cannot continue as it is goes on as a new attempt.
-    let adjust = || {
-        (task.state == TaskState::NeedsAttention && !task.has_uncertain())
-            .then(|| actions.iter().find(|action| **action == TaskAction::Adjust))
-            .flatten()
-    };
-    read.or_else(recovery).or_else(adjust)
-}
-
-/// A task still working: its card shows the step it is on.
-pub fn runs_in_card(task: &TaskRecord) -> bool {
-    !task.state.finished() && task.state != TaskState::Uncertain && !task.has_uncertain()
-}
-
-/// Why a task needs the person: each unfinished part of a partial note, or its one reason.
-pub fn task_reasons(task: &TaskRecord) -> Vec<String> {
-    let failures = task_note_failures(task);
-    if task.state != TaskState::Partial || failures.is_empty() {
-        return task_service_repair_reason(task)
-            .map(str::to_owned)
-            .or_else(|| task_error_summary(task).filter(|_| !task.has_uncertain()))
-            .into_iter()
             .collect();
     }
-    let repair = task_requires_service_repair(task);
-    let unconfirmed = |component: &str| {
-        task.events.blocked.iter().any(|request| {
-            request.is_uncertain()
-                && request
-                    .purpose
-                    .as_deref()
-                    .and_then(ai_component)
-                    .is_some_and(|part| part.as_str() == component)
-        })
-    };
-    task_service_repair_reason(task)
-        .map(str::to_owned)
-        .into_iter()
-        .chain(
-            failures
-                .iter()
-                .filter(|(component, ..)| !repair || ai_component(component).is_none())
-                .filter(|(component, ..)| !unconfirmed(component))
-                .map(|(_, part, outcome)| activity::outcome_failure_message(*part, outcome)),
-        )
-        .collect()
-}
 
-/// The unfinished parts of a saved note; a task with no note has none.
-pub fn task_note_failures(
-    task: &TaskRecord,
-) -> Vec<(String, activity::NotePart, c2m_artifact::artifact::Outcome)> {
-    if task.artifact.is_some() {
-        task_component_failures(task)
-    } else {
-        Vec::new()
-    }
-}
-
-/// The speech model `task` runs with now: the one Settings name, or `fallback`'s
-/// default model where they name no engine.
-pub fn task_model_request(
-    preferences: &desktop_prefs::preferences::Store,
-    task: &TaskRecord,
-    fallback: c2m_config::config::AsrProvider,
-) -> desktop_prefs::model_status::Request {
-    let config = crate::run::current_config(preferences, &task.plan, fallback);
-    let defaults = &config.defaults;
-    desktop_prefs::model_status::Request::new(
-        defaults.provider.unwrap_or(fallback),
-        defaults.asr_model.as_deref(),
-        &c2m_core::paths::model_dir_from(defaults.model_dir.as_deref()),
-    )
-}
-
-/// The tasks that stopped only because a speech model was not there and continue
-/// once `request`'s, the one they run with now, is ready. A task the person paused,
-/// cancelled or continued in the meantime has left that state.
-pub fn tasks_awaiting_model(
-    preferences: &desktop_prefs::preferences::Store,
-    tasks: &[TaskRecord],
-    request: &desktop_prefs::model_status::Request,
-    fallback: c2m_config::config::AsrProvider,
-) -> Vec<String> {
-    tasks
+    task.stages
         .iter()
-        .filter(|task| {
-            task.state == TaskState::NeedsAttention
-                && task.events.model_required
-                && task.handled_by.is_none()
-                && !task.held
-                && !task.has_uncertain()
-                && task_model_request(preferences, task, fallback) == *request
+        .map(|(key, stage)| {
+            let status = match stage.phase {
+                StagePhase::Completed => StageStatus::Complete,
+                StagePhase::Running if active => StageStatus::Running,
+                StagePhase::Running if task.status == TaskStatus::Paused => StageStatus::Paused,
+                StagePhase::Running => StageStatus::Failed,
+                StagePhase::Failed => StageStatus::Failed,
+                StagePhase::Pending => match task.status {
+                    TaskStatus::Paused => StageStatus::Paused,
+                    _ => StageStatus::Waiting,
+                },
+            };
+            let detail = stage.detail.clone().unwrap_or_default();
+            TaskStage {
+                id: format!("task-stage-{}-{key:?}", task.id),
+                title: key.label().into(),
+                status,
+                compact_detail: detail.clone(),
+                detail,
+                fraction: (status == StageStatus::Complete).then_some(1.),
+            }
         })
-        .map(|task| task.id.clone())
         .collect()
-}
-
-/// A paused task that can continue as it is.
-pub fn resumable(task: &TaskRecord) -> bool {
-    task.state == TaskState::Paused && task.handled_by.is_none() && !task.has_uncertain()
-}
-
-/// What reopening a task's video on Home is for: regenerating its note, or another
-/// attempt with the current settings.
-pub fn adjust_label(task: &TaskRecord) -> &'static str {
-    if task.artifact.is_some() {
-        c2m_i18n::tr!("在主页重新生成")
-    } else if task.state == TaskState::Paused {
-        c2m_i18n::tr!("在主页重新打开")
-    } else {
-        c2m_i18n::tr!("在主页重试")
-    }
-}
-
-/// What a finished task's note kept of the one it replaced: the files the person
-/// had edited, saved beside it under another name.
-pub fn task_kept_edits(task: &TaskRecord) -> Option<String> {
-    task.artifact
-        .as_ref()
-        .and_then(|_| crate::run::kept_edits_notice(&task.events.kept_edits))
-}
-
-/// The worker's log, failure and blocked-request text, when there is any.
-pub fn task_log_text(task: &TaskRecord) -> Option<String> {
-    let text = task
-        .events
-        .logs
-        .iter()
-        .chain(task.events.error.iter())
-        .chain(task.events.blocked.iter().map(|request| &request.message))
-        .cloned()
-        .collect::<Vec<_>>()
-        .join("\n");
-    (!text.trim().is_empty()).then_some(text)
-}
-
-/// The AI services a task's text goes to: while it works, the one its run uses; once
-/// it has finished, those whose answers its results are (an answer replayed from an
-/// earlier service keeps that service), never one that produced none of them.
-pub fn ai_producers(task: &TaskRecord) -> Vec<&str> {
-    if task.state.finished() || task.state == TaskState::Uncertain {
-        return task.ai_answered_by.iter().map(String::as_str).collect();
-    }
-    task.ran_with
-        .as_ref()
-        .filter(|ran_with| ran_with.config.llm.uses_service())
-        .and_then(|ran_with| ran_with.ai_service.as_deref())
-        .into_iter()
-        .collect()
-}
-
-/// Where the text of a task's latest run came from; `None` before it ran.
-pub fn task_text_source(task: &TaskRecord) -> Option<&'static str> {
-    let options = task.ran_with.as_ref()?.options();
-    Some(
-        if options.source_mode == TranscriptSource::Subtitle
-            || (options.source_mode != TranscriptSource::Asr
-                && task.plan.source.selected_subtitle.is_some())
-        {
-            c2m_i18n::tr!("视频字幕")
-        } else if options.uses_cloud_provider() {
-            c2m_i18n::tr!("语音识别服务")
-        } else {
-            c2m_i18n::tr!("本机识别")
-        },
-    )
 }
 
 pub fn task_status_label(task: &TaskRecord) -> String {
-    if task.handled_by.is_some() {
-        return c2m_i18n::tr!("已有后续处理任务").into();
+    if task.status == TaskStatus::Failed && task.note_dir.is_some() {
+        c2m_i18n::tr!("部分未完成").into()
+    } else {
+        task.status.label().into()
     }
-    if task.replaced_by.is_some() {
-        return c2m_i18n::tr!("笔记已被之后的任务更新").into();
+}
+
+const LEGACY_LOGIN_HINT: &str = "提示：请在设置的账号中重新登录 B 站后重试。 / Hint: sign in to Bilibili again in Settings and retry.";
+
+pub fn format_failure_summary(raw: &str, lang: c2m_i18n::i18n::Lang) -> String {
+    let summary = raw
+        .lines()
+        .map(str::trim)
+        .find(|line| {
+            !line.is_empty()
+                && !line.starts_with("ERROR:")
+                && !line.starts_with("WARNING:")
+                && !line.starts_with("Traceback")
+                && !line.starts_with("panic")
+        })
+        .unwrap_or_default();
+    let summary = summary
+        .strip_prefix(LEGACY_LOGIN_HINT)
+        .map_or(summary, |rest| rest.trim_start_matches([':', ' ']));
+    if let Some(model) = summary
+        .strip_prefix("识别模型 ")
+        .and_then(|rest| rest.strip_suffix(" 尚未下载，请先下载并准备模型，再继续"))
+    {
+        return c2m_i18n::i18n::t_for("识别模型「{}」还没有下载", lang).replacen(
+            "{}",
+            c2m_config::config::model_label(model),
+            1,
+        );
     }
-    // What the folder holds is not known until the earlier worker lets go.
-    if task.held {
-        return TaskState::Pausing.label().into();
+    let summary = c2m_i18n::i18n::engine_message_for(summary, lang);
+    let summary = summary.as_str();
+    if summary.is_empty() {
+        c2m_i18n::i18n::t_for("转换未完成", lang).into()
+    } else if summary.chars().count() <= 140 {
+        summary.into()
+    } else {
+        format!("{}…", summary.chars().take(139).collect::<String>())
     }
-    if task.has_uncertain() {
-        let purpose: std::collections::BTreeSet<_> = task
-            .events
-            .blocked
-            .iter()
-            .filter(|request| request.is_uncertain())
-            .filter_map(|request| request.purpose.as_deref())
-            .collect();
-        // The 阅读笔记 action shows whether the note is readable.
-        let all = |component: Component| {
-            !purpose.is_empty()
-                && purpose
-                    .iter()
-                    .all(|purpose| ai_component(purpose) == Some(component))
-        };
-        return if all(Component::Proofreading) {
-            c2m_i18n::tr!("AI 校对结果未确认")
-        } else if all(Component::Translation) {
-            c2m_i18n::tr!("AI 翻译结果未确认")
-        } else if all(Component::Summary) {
-            c2m_i18n::tr!("摘要结果未确认")
-        } else if purpose.contains(TRANSCRIPTION_PURPOSE) {
-            c2m_i18n::tr!("语音识别结果未确认")
-        } else {
-            c2m_i18n::tr!("部分处理结果未确认")
+}
+
+pub fn task_error_summary(task: &TaskRecord) -> Option<String> {
+    if task.status != TaskStatus::Failed {
+        return None;
+    }
+    let lang = c2m_i18n::i18n::lang();
+    if let Some(err) = &task.error {
+        if let Some((_, model)) = &err.missing_model {
+            return Some(
+                c2m_i18n::i18n::t_for("识别模型「{}」还没有下载", lang).replacen(
+                    "{}",
+                    c2m_config::config::model_label(model),
+                    1,
+                ),
+            );
         }
-        .into();
+        return Some(format_failure_summary(&err.message, lang));
     }
-    if task.exports_only() && task.state == TaskState::Complete {
-        c2m_i18n::tr!("文件已导出").into()
-    } else {
-        task.status_label().into()
-    }
+    task.events
+        .error
+        .as_deref()
+        .map(|raw| format_failure_summary(raw, lang))
 }
 
-pub fn request_scope(request: &workspace::BlockedRequest) -> String {
-    if !request.description.trim().is_empty() {
-        c2m_i18n::i18n::engine_message(&request.description)
-    } else {
-        let purpose = request.purpose.as_deref().unwrap_or_default();
-        let name = match ai_component(purpose) {
-            Some(Component::Proofreading) => c2m_i18n::tr!("AI 校对"),
-            Some(Component::Translation) => c2m_i18n::tr!("AI 翻译"),
-            Some(Component::Summary) => c2m_i18n::tr!("生成摘要"),
-            _ if purpose == TRANSCRIPTION_PURPOSE => c2m_i18n::tr!("语音识别"),
-            _ => c2m_i18n::tr!("外部处理"),
-        };
-        c2m_i18n::tr!("{}（具体内容未记录）", name)
-    }
+pub fn task_attention_summary(task: &TaskRecord) -> String {
+    task_error_summary(task).unwrap_or_else(|| task_status_label(task))
 }
 
-/// A component that failed, or finished only in part.
-fn unfinished(outcome: &c2m_artifact::artifact::Outcome) -> bool {
-    matches!(
-        outcome.status,
-        c2m_artifact::artifact::Status::Failed | c2m_artifact::artifact::Status::Partial
-    )
-}
-
-/// Unfinished parts of a published note: (component, label, outcome).
+/// Unfinished parts of a published note: `(component_key, NotePart, Outcome)`.
 pub fn task_component_failures(
     task: &TaskRecord,
 ) -> Vec<(String, activity::NotePart, c2m_artifact::artifact::Outcome)> {
-    let Some(outcomes) = &task.events.outcomes else {
+    let Some(outcomes) = task.outcomes.as_ref().or(task.events.outcomes.as_ref()) else {
         return Vec::new();
     };
     use activity::NotePart;
@@ -874,13 +442,13 @@ pub fn task_component_failures(
         (Component::Summary, NotePart::Summary, &outcomes.summary),
     ]
     .into_iter()
-    .filter(|(.., outcome)| unfinished(outcome))
+    .filter(|(.., outcome)| outcome.is_incomplete())
     .map(|(component, part, outcome)| (component.as_str().into(), part, outcome.clone()))
     .collect();
     let exports: Vec<_> = outcomes
         .exports
         .values()
-        .filter(|o| unfinished(o))
+        .filter(|o| o.is_incomplete())
         .collect();
     if !exports.is_empty() {
         let messages: Vec<_> = exports.iter().filter_map(|o| o.message.clone()).collect();
@@ -893,17 +461,110 @@ pub fn task_component_failures(
     results
 }
 
+pub fn task_note_failures(
+    task: &TaskRecord,
+) -> Vec<(String, activity::NotePart, c2m_artifact::artifact::Outcome)> {
+    if task.note_dir.is_some() {
+        task_component_failures(task)
+    } else {
+        Vec::new()
+    }
+}
+
+/// Actionable failure lines shown on an attention card.
+pub fn task_reasons(task: &TaskRecord) -> Vec<String> {
+    if task.status != TaskStatus::Failed {
+        return Vec::new();
+    }
+    let failures = task_note_failures(task);
+    if !failures.is_empty() {
+        return failures
+            .iter()
+            .map(|(_, part, outcome)| activity::outcome_failure_message(*part, outcome))
+            .collect();
+    }
+    task_error_summary(task).into_iter().collect()
+}
+
+/// Component key -> retry button label.
+pub fn retry_component_label(component: &str) -> &'static str {
+    match Component::parse(component) {
+        Some(Component::Screenshots) => c2m_i18n::tr!("重新生成截图"),
+        Some(Component::Proofreading) => c2m_i18n::tr!("重试 AI 校对"),
+        Some(Component::Translation) => c2m_i18n::tr!("重试 AI 翻译"),
+        Some(Component::Summary) => c2m_i18n::tr!("重新生成摘要"),
+        Some(Component::Exports) => c2m_i18n::tr!("重新导出"),
+        None => c2m_i18n::tr!("补全未完成部分"),
+    }
+}
+
+pub fn retry_components_label(components: &[String]) -> &'static str {
+    if components.len() == 1 {
+        retry_component_label(&components[0])
+    } else {
+        c2m_i18n::tr!("补全未完成部分")
+    }
+}
+
+/// Button label for `TaskAction::Retry` on `task`.
+pub fn task_retry_action_label(task: &TaskRecord) -> &'static str {
+    let failures = task_note_failures(task);
+    match failures.as_slice() {
+        [(key, _, outcome)] if outcome.status == c2m_artifact::artifact::Status::Partial => {
+            match Component::parse(key) {
+                Some(Component::Proofreading) => c2m_i18n::tr!("重试未完成的校对部分"),
+                Some(Component::Translation) => c2m_i18n::tr!("重试未完成的翻译部分"),
+                _ => retry_component_label(key),
+            }
+        }
+        [(key, _, _)] => retry_component_label(key),
+        [_, _, ..] => c2m_i18n::tr!("补全未完成部分"),
+        [] => c2m_i18n::tr!("重试"),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TaskSurface {
+    Menu,
+    Card,
+    Home,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum TaskAction {
+    Pause,
+    Resume,
+    Retry,
+    Regenerate,
+    PrepareModel,
+    OpenSettings,
+    OpenNote,
+    Cancel,
+    Remove,
+    OpenNoteFolder,
+    OpenExports,
+    OpenSource,
+    CopyLink,
+    Details,
+    Log,
+    Move {
+        label: &'static str,
+        up: bool,
+        to: Option<usize>,
+    },
+    Reassociate(String),
+    ViewTask,
+}
+
 impl TaskAction {
-    /// Its menu section.
     pub fn group(&self) -> u8 {
         match self {
-            Self::Read
+            Self::OpenNote
             | Self::OpenNoteFolder
-            | Self::OpenRecoveryFolder
             | Self::OpenExports
             | Self::OpenSource
             | Self::CopyLink => 0,
-            Self::Details | Self::Log | Self::Followup(_) | Self::ViewTask => 1,
+            Self::Details | Self::Log | Self::ViewTask => 1,
             Self::Move { .. } => 2,
             Self::Cancel | Self::Remove => 4,
             _ => 3,
@@ -911,122 +572,77 @@ impl TaskAction {
     }
 }
 
-impl StageStatus {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Running => c2m_i18n::tr!("处理中"),
-            Self::Complete => c2m_i18n::tr!("已完成"),
-            Self::Pausing => c2m_i18n::tr!("暂停中"),
-            Self::Stopping => c2m_i18n::tr!("停止中"),
-            Self::Paused => c2m_i18n::tr!("已暂停"),
-            Self::Waiting => c2m_i18n::tr!("等待继续"),
-            Self::Failed => c2m_i18n::tr!("未完成"),
-            Self::Uncertain => c2m_i18n::tr!("待确认"),
-            Self::Cancelled => c2m_i18n::tr!("已取消"),
-        }
-    }
-
-    pub fn running(self) -> bool {
-        matches!(self, Self::Running | Self::Pausing | Self::Stopping)
-    }
-}
-
-/// One step of a task, as a row or a chip says it.
-pub struct TaskStage {
-    pub id: String,
-    pub title: String,
-    pub status: StageStatus,
-    pub detail: String,
-    /// The measurement as one line for a compact card.
-    pub compact_detail: String,
-    pub fraction: Option<f32>,
-}
-
-/// What a task's actions depend on beyond its own record.
 pub struct TaskFacts<'a> {
-    /// It holds the running job.
     pub active: bool,
-    /// Its details are open.
     pub expanded: bool,
     pub library: Option<&'a workspace::LibraryLocation>,
     pub needs_reassociation: bool,
-    /// The waiting tasks, in order.
     pub queue: Vec<&'a str>,
 }
 
-/// What can be done to `task` right now, in the order `surface` draws it.
+pub fn lead_action<'a>(
+    actions: &'a [TaskAction],
+    task: &TaskRecord,
+    surface: TaskSurface,
+) -> Option<&'a TaskAction> {
+    if surface == TaskSurface::Home
+        && task.note_dir.is_some()
+        && let Some(open) = actions.iter().find(|a| **a == TaskAction::OpenNote)
+    {
+        return Some(open);
+    }
+    actions.iter().find(|action| {
+        matches!(
+            action,
+            TaskAction::PrepareModel
+                | TaskAction::Resume
+                | TaskAction::Retry
+                | TaskAction::OpenNote
+        )
+    })
+}
+
+pub fn runs_in_card(task: &TaskRecord) -> bool {
+    matches!(task.status, TaskStatus::Running | TaskStatus::Queued)
+}
+
 pub fn task_actions(
     task: &TaskRecord,
     surface: TaskSurface,
     facts: &TaskFacts<'_>,
 ) -> Vec<TaskAction> {
-    task_actions_for(task, surface, facts, false)
-}
-
-/// [`task_actions`] for a task that `services_missing` (see `run::services_missing`):
-/// a service it needs is no longer saved or was deleted, so continuing it could only
-/// stop again. It offers no Resume; adjusting it, a new attempt, is the way on.
-pub fn task_actions_for(
-    task: &TaskRecord,
-    surface: TaskSurface,
-    facts: &TaskFacts<'_>,
-    services_missing: bool,
-) -> Vec<TaskAction> {
     use TaskAction::*;
-    let active = facts.active;
-    let uncertain = task.has_uncertain() && !task.held;
-    let running = matches!(task.state, TaskState::Running | TaskState::Pausing) || task.held;
-    let queued = task.state == TaskState::Queued;
-    let has_note = task.artifact.is_some();
+    let has_note = task.note_dir.is_some();
     let has_log = task_log_text(task).is_some();
+    let missing_model = task
+        .error
+        .as_ref()
+        .is_some_and(|err| err.missing_model.is_some());
+    let needs_settings = task.error.as_ref().is_some_and(|err| err.needs_settings);
+
     let mut recovery = Vec::new();
-    if let Some(next) = &task.handled_by {
-        recovery.push(Followup(next.clone()));
-    } else if task.replaced_by.is_some() {
-        // Its note is another task's now: nothing here can be redone.
-    } else {
-        let repair = task_requires_service_repair(task);
-        if repair && has_note {
-            recovery.push(Repair);
+    match task.status {
+        TaskStatus::Paused => recovery.push(Resume),
+        TaskStatus::Failed => {
+            if missing_model {
+                recovery.push(PrepareModel);
+            }
+            if let Some(library) = facts.library.filter(|_| facts.needs_reassociation) {
+                recovery.push(Reassociate(library.id.clone()));
+            }
+            recovery.push(Retry);
+            if needs_settings {
+                recovery.push(OpenSettings);
+            }
         }
-        // Continuing stops again until the person sorts out the note's folder.
-        if task.events.blocked_folder().is_some() {
-            recovery.push(OpenRecoveryFolder);
-        }
-        // Continuing would only stop again until the model is there.
-        if task.state == TaskState::NeedsAttention && task.events.model_required && !uncertain {
-            recovery.push(PrepareModel);
-        }
-        // A task stopped for its speech model goes on when the model is prepared, which
-        // resumes it; continuing before then could only stop again.
-        let model_missing = task.state == TaskState::NeedsAttention && task.events.model_required;
-        if matches!(task.state, TaskState::Paused | TaskState::NeedsAttention)
-            && !uncertain
-            && !services_missing
-            && !model_missing
-        {
-            recovery.push(Resume);
-        }
-        if !uncertain {
-            recovery.extend(
-                task_note_failures(task)
-                    .into_iter()
-                    .filter(|(component, ..)| !repair || ai_component(component).is_none())
-                    .map(|(component, ..)| Retry(component)),
-            );
-        }
-        if let Some(library) = facts.library.filter(|_| facts.needs_reassociation) {
-            recovery.push(Reassociate(library.id.clone()));
-        }
-        if !running && !queued {
-            recovery.push(Adjust);
-        }
+        _ => {}
     }
+
     let mut actions = Vec::new();
     match surface {
         TaskSurface::Menu => {
             if has_note {
-                actions.extend([Read, OpenNoteFolder]);
+                actions.extend([OpenNote, OpenNoteFolder]);
             }
             if facts
                 .library
@@ -1034,73 +650,91 @@ pub fn task_actions_for(
             {
                 actions.push(OpenExports);
             }
-            if task.plan.source.online {
+            if task.source.online {
                 actions.extend([OpenSource, CopyLink]);
             }
-            if !running {
+            if task.status != TaskStatus::Running {
                 actions.push(Details);
             }
             if has_log {
                 actions.push(Log);
             }
-            if task.handled_by.is_some() {
-                actions.extend(recovery);
-                return actions;
-            }
             actions.extend(task_moves(task, &facts.queue));
-            if (running && task.intent != Intent::Cancel) || (queued && !active) {
+            if matches!(task.status, TaskStatus::Running | TaskStatus::Queued) {
                 actions.push(Pause);
             }
             actions.extend(recovery);
-            // A published note's requests are resent by redoing the part they were
-            // made for; when no unfinished part explains them, the card says why.
-            if uncertain
-                && !active
-                && task.replaced_by.is_none()
-                && (!has_note || task.uncertain_components().is_ok())
-            {
-                actions.push(Resend);
+            if task.status != TaskStatus::Running && task.status != TaskStatus::Queued && has_note {
+                actions.push(Regenerate);
             }
-            if !task.state.finished() {
+            if matches!(
+                task.status,
+                TaskStatus::Running | TaskStatus::Queued | TaskStatus::Paused
+            ) {
                 actions.push(Cancel);
-            } else if workspace::can_remove_task_record(task) && !active {
+            } else if !facts.active {
                 actions.push(Remove);
             }
         }
-        TaskSurface::Card if running || (queued && active) => {
-            if has_log {
-                actions.push(Log);
-            }
-            actions.push(Cancel);
-            if task.intent != Intent::Cancel {
+        TaskSurface::Card => match task.status {
+            TaskStatus::Running => {
+                if has_log {
+                    actions.push(Log);
+                }
                 actions.push(Pause);
-            }
-        }
-        // A queued task has produced nothing to keep, so it offers only cancel.
-        TaskSurface::Card if queued => actions.push(Cancel),
-        TaskSurface::Card => {
-            actions.extend(recovery);
-            if has_note {
-                actions.push(Read);
-            }
-            actions.push(Details);
-            if has_log && facts.expanded {
-                actions.push(Log);
-            }
-        }
-        TaskSurface::Home => {
-            if running || queued {
                 actions.push(Cancel);
-            } else {
-                if has_note {
-                    actions.push(Read);
-                }
-                // The rest stays behind ⋯: this card is one step of the workbench. A
-                // task whose service is gone keeps 在主页重试, its only way on.
-                if recovery.len() > 1 && !services_missing {
-                    recovery.retain(|action| *action != Adjust);
-                }
+            }
+            TaskStatus::Queued => {
+                actions.push(Pause);
+                actions.push(Cancel);
+            }
+            TaskStatus::Paused => {
                 actions.extend(recovery);
+                actions.push(Cancel);
+                if has_note {
+                    actions.push(OpenNote);
+                }
+                actions.push(Details);
+                if has_log && facts.expanded {
+                    actions.push(Log);
+                }
+            }
+            TaskStatus::Failed | TaskStatus::Completed => {
+                actions.extend(recovery);
+                if has_note {
+                    actions.push(OpenNote);
+                }
+                actions.push(Details);
+                if has_log && facts.expanded {
+                    actions.push(Log);
+                }
+            }
+        },
+        TaskSurface::Home => {
+            match task.status {
+                TaskStatus::Running | TaskStatus::Queued => {
+                    actions.push(Pause);
+                    actions.push(Cancel);
+                }
+                TaskStatus::Paused => {
+                    if has_note {
+                        actions.push(OpenNote);
+                    }
+                    actions.push(Resume);
+                    actions.push(Cancel);
+                }
+                TaskStatus::Failed => {
+                    if has_note {
+                        actions.push(OpenNote);
+                    }
+                    actions.extend(recovery);
+                }
+                TaskStatus::Completed => {
+                    if has_note {
+                        actions.push(OpenNote);
+                    }
+                    actions.push(Regenerate);
+                }
             }
             actions.push(ViewTask);
         }
@@ -1108,7 +742,6 @@ pub fn task_actions_for(
     actions
 }
 
-/// Moves within the queue, for those who don't drag.
 fn task_moves(task: &TaskRecord, queue: &[&str]) -> Vec<TaskAction> {
     let Some(position) = queue.iter().position(|queued| *queued == task.id) else {
         return Vec::new();
@@ -1132,319 +765,142 @@ fn task_moves(task: &TaskRecord, queue: &[&str]) -> Vec<TaskAction> {
     ]
 }
 
-/// Live and retained stages use the same labels, status column and icon slot.
-pub fn task_stage_rows(task: &TaskRecord, active: bool) -> Vec<TaskStage> {
-    // `Stage` orders by pipeline position, so the map is already sorted.
-    task.events
-        .stages
+pub fn task_kept_edits(task: &TaskRecord) -> Option<String> {
+    task.note_dir.as_ref().and_then(|_| {
+        let edits = if !task.kept_edits.is_empty() {
+            &task.kept_edits
+        } else {
+            &task.events.kept_edits
+        };
+        crate::run::kept_edits_notice(edits)
+    })
+}
+
+pub fn task_log_text(task: &TaskRecord) -> Option<String> {
+    let logs = if !task.logs.is_empty() {
+        &task.logs
+    } else {
+        &task.events.logs
+    };
+    let text = logs
         .iter()
-        .map(|(name, stored)| {
-            let name = name.clone();
-            let live = active
-                .then_some(stored)
-                .filter(|stage| !stage.elapsed().is_zero());
-            let done = stored.done;
-            let outcomes = if active {
-                task.events
-                    .done
+        .chain(task.error.iter().map(|e| &e.message))
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!text.trim().is_empty()).then_some(text)
+}
+
+/// Resolves the speech model `task` would use right now under current `Preferences`.
+pub fn task_model_request(
+    preferences: &desktop_prefs::preferences::Store,
+    task: &TaskRecord,
+    fallback: c2m_config::config::AsrProvider,
+) -> desktop_prefs::model_status::Request {
+    if let Some((provider, model)) = task.error.as_ref().and_then(|e| e.missing_model.as_ref()) {
+        let config = preferences.defaults_config();
+        return desktop_prefs::model_status::Request::new(
+            *provider,
+            Some(model.as_str()),
+            &c2m_core::paths::model_dir_from(config.defaults.model_dir.as_deref()),
+        );
+    }
+    let config = crate::run::current_config_for(
+        preferences,
+        &task.source,
+        task.subtitle.as_deref(),
+        fallback,
+    );
+    let defaults = &config.defaults;
+    desktop_prefs::model_status::Request::new(
+        defaults.provider.unwrap_or(fallback),
+        defaults.asr_model.as_deref(),
+        &c2m_core::paths::model_dir_from(defaults.model_dir.as_deref()),
+    )
+}
+
+/// Failed tasks waiting on `request`'s local speech model so they auto-retry once prepared.
+pub fn tasks_awaiting_model(
+    preferences: &desktop_prefs::preferences::Store,
+    tasks: &[TaskRecord],
+    request: &desktop_prefs::model_status::Request,
+    fallback: c2m_config::config::AsrProvider,
+) -> Vec<String> {
+    tasks
+        .iter()
+        .filter(|task| {
+            task.status == TaskStatus::Failed
+                && task
+                    .error
                     .as_ref()
-                    .and_then(|done| done.outcomes.as_ref())
-            } else {
-                task.events.outcomes.as_ref()
-            };
-            let status = if let Some(outcome) = ai_stage_outcome(&name, outcomes) {
-                outcome
-            } else if done {
-                StageStatus::Complete
-            } else if active {
-                match task.intent {
-                    Intent::Pause | Intent::Quit => StageStatus::Pausing,
-                    Intent::Cancel => StageStatus::Stopping,
-                    Intent::Run => StageStatus::Running,
-                }
-            } else {
-                match task.state {
-                    TaskState::Paused | TaskState::Pausing => StageStatus::Paused,
-                    TaskState::Uncertain => StageStatus::Uncertain,
-                    TaskState::Cancelled => StageStatus::Cancelled,
-                    TaskState::Queued => StageStatus::Waiting,
-                    _ => StageStatus::Failed,
-                }
-            };
-            let (detail, fraction) = stage_progress(&name, done, live, stored, false);
-            let (compact_detail, _) = stage_progress(&name, done, live, stored, true);
-            TaskStage {
-                id: format!("task-stage-{}-{name}", task.id),
-                title: activity::title(&name),
-                status,
-                detail,
-                compact_detail,
-                fraction,
-            }
+                    .is_some_and(|err| err.missing_model.is_some())
+                && task_model_request(preferences, task, fallback) == *request
         })
+        .map(|task| task.id.clone())
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        LEGACY_LOGIN_HINT, StageStatus, WorkerWait, ai_stage_outcome, failure_summary_in,
-        stage_progress, task_failure_summary, worker_wait_state,
-    };
-    use crate::plan::tests::source;
-    use c2m_protocol::progress::Stage;
+    use super::*;
+    use c2m_config::config::AsrProvider;
+    use desktop_store::workspace::{RunMode, StageKey, StageState, TaskError, course_dir_name};
 
-    /// The card offers resending a published note's uncertain requests only when the
-    /// repair accepts them: an unfinished translation's batches can be resent, and a
-    /// request whose part has finished is never offered as if it could.
-    #[test]
-    fn resend_is_offered_only_where_the_repair_accepts_it() {
-        use super::{Component, TaskAction, TaskFacts, TaskState, TaskSurface, task_actions};
-        use c2m_artifact::artifact::{Outcome, Outcomes, Status};
-        let facts = TaskFacts {
-            active: false,
-            expanded: false,
-            library: None,
-            needs_reassociation: false,
-            queue: Vec::new(),
-        };
-        let mut task = task_record("task");
-        task.state = TaskState::Uncertain;
-        task.artifact = Some("note".into());
-        task.events
-            .blocked
-            .push(desktop_store::workspace::BlockedRequest {
-                reason: c2m_protocol::progress::BlockReason::Uncertain,
-                request_id: Some("translation.3".into()),
-                purpose: Some("translation".into()),
-                description: "翻译 00:00–06:38 的文字".into(),
-                kind: Some(c2m_artifact::artifact::FailureKind::Uncertain),
-                message: "未完整收到服务响应".into(),
-            });
-        let mut outcomes = Outcomes {
-            transcript: Outcome::succeeded(),
-            proofreading: Outcome::succeeded(),
-            summary: Outcome::succeeded(),
-            translation: Outcome {
-                status: Status::Partial,
-                completed: Some(95),
-                total: Some(135),
-                ..Outcome::failed("翻译未全部完成（40/135 失败）")
-            },
-            ..Default::default()
-        };
-        task.events.outcomes = Some(outcomes.clone());
-        assert_eq!(
-            task.uncertain_components().unwrap(),
-            vec![Component::Translation]
-        );
-        assert!(task_actions(&task, TaskSurface::Menu, &facts).contains(&TaskAction::Resend));
-        assert_eq!(
-            super::task_status_label(&task),
-            c2m_i18n::tr!("AI 翻译结果未确认")
-        );
-
-        outcomes.translation = Outcome::succeeded();
-        task.events.outcomes = Some(outcomes);
-        assert!(task.uncertain_components().is_err());
-        assert!(!task_actions(&task, TaskSurface::Menu, &facts).contains(&TaskAction::Resend));
-    }
-
-    fn task_record(id: &str) -> desktop_store::workspace::TaskRecord {
-        desktop_store::workspace::TaskRecord {
-            id: id.into(),
-            plan: desktop_store::workspace::TaskPlan {
-                operation: Default::default(),
-                source: source("https://example.test/video", "课程"),
-                source_id: "online:video".into(),
-                title: "课程".into(),
-                library_id: "library".into(),
-                folder: None,
-                subtitle: None,
-                repair: None,
-            },
-            state: desktop_store::workspace::TaskState::Paused,
-            intent: desktop_store::workspace::Intent::Run,
+    fn sample_task(status: TaskStatus) -> TaskRecord {
+        TaskRecord {
+            id: "task-1".into(),
+            library_id: "lib-1".into(),
+            course_id: course_dir_name("video-1"),
+            source_id: "video-1".into(),
+            source: crate::plan::tests::source("https://example.test/v1", "课程"),
+            title: "课程".into(),
+            title_from_probe: false,
+            author: String::new(),
+            duration: 60.,
+            subtitle: None,
+            subtitle_events: None,
+            target_folder: None,
+            note_dir: None,
+            work_dir: "/tmp/work".into(),
+            legacy_work_dir: None,
+            status,
+            run_mode: RunMode::Resume,
+            stages: Default::default(),
+            error: None,
+            logs: Vec::new(),
+            unread: false,
             created: 0,
             updated: 0,
-            parent: None,
-            handled_by: None,
-            held: false,
-            work_dir: "work".into(),
-            events: desktop_store::activity::JobEvents {
-                error: None,
-                ..Default::default()
-            },
-            artifact: None,
-            unread: false,
-            resend: Vec::new(),
-            replaced_by: None,
-            rework: None,
-            rework_accepted: None,
-            ai_answered_by: Vec::new(),
-            ran_with: None,
+            outcomes: None,
+            kept_video: false,
+            kept_edits: Vec::new(),
+            events: Default::default(),
         }
     }
 
-    use desktop_store::workspace::{Intent, TaskState};
-
     #[test]
-    fn a_task_an_earlier_worker_still_holds_reads_as_saving_its_progress() {
-        let mut task = task_record("task");
-        task.state = TaskState::Running;
-        task.held = true;
-        assert_eq!(super::task_status_label(&task), "正在保存进度");
-    }
-
-    #[test]
-    fn a_waiting_task_offers_the_moves_its_place_allows() {
-        use super::{TaskAction, task_moves};
-        let task = task_record("b");
-        let moves = |queue: &[&str]| -> Vec<Option<usize>> {
-            task_moves(&task, queue)
-                .into_iter()
-                .map(|action| match action {
-                    TaskAction::Move { to, .. } => to,
-                    _ => panic!("only moves"),
-                })
-                .collect()
-        };
+    fn groups_and_actions_cover_all_five_states_without_history_chains() {
         assert_eq!(
-            moves(&["a", "b", "c"]),
-            [Some(0), Some(0), Some(2), Some(2)]
-        );
-        assert_eq!(moves(&["b", "c"]), [None, None, Some(1), Some(1)]);
-        assert!(moves(&["a"]).is_empty());
-    }
-
-    #[test]
-    fn one_action_is_filled_and_an_unconfirmed_request_leaves_the_card_without_one() {
-        use super::{TaskAction as Action, TaskSurface, lead_action};
-        let mut task = task_record("task");
-        task.state = TaskState::Partial;
-        let home = [Action::Read, Action::Repair, Action::ViewTask];
-        assert_eq!(
-            lead_action(&home, &task, TaskSurface::Home),
-            Some(&Action::Read)
+            task_group(&sample_task(TaskStatus::Running)),
+            TaskGroup::Running
         );
         assert_eq!(
-            lead_action(&home, &task, TaskSurface::Card),
-            Some(&Action::Repair)
+            task_group(&sample_task(TaskStatus::Failed)),
+            TaskGroup::Attention
         );
-        // A running task has nothing to decide: the link field above takes the next video.
-        task.state = TaskState::Running;
-        let running = [Action::Cancel, Action::ViewTask];
-        assert_eq!(lead_action(&running, &task, TaskSurface::Home), None);
-        // The resend button in the card's own block is that decision's one main action.
-        task.state = TaskState::Uncertain;
-        let uncertain = [Action::Adjust, Action::ViewTask];
-        assert_eq!(lead_action(&uncertain, &task, TaskSurface::Home), None);
-    }
-
-    /// A task stopped for a speech model asks to prepare it; it never downloads one
-    /// on its own, and continuing first would only stop again.
-    #[test]
-    fn a_task_stopped_for_its_speech_model_leads_with_preparing_it() {
-        use super::{TaskAction as Action, TaskFacts, TaskSurface, lead_action, task_actions};
-        use c2m_protocol::progress::{ErrorCode, Event};
-        let mut task = task_record("task");
-        task.state = TaskState::NeedsAttention;
-        let facts = || TaskFacts {
-            active: false,
-            expanded: false,
-            library: None,
-            needs_reassociation: false,
-            queue: Vec::new(),
-        };
-        task.events.apply(&Event::Error {
-            message: "识别模型 qwen3 尚未下载，请先下载并准备模型，再继续".into(),
-            code: ErrorCode::ModelRequired,
-            parts: Vec::new(),
-            path: None,
-        });
-        let actions = task_actions(&task, TaskSurface::Card, &facts());
-        // Preparing the model resumes the task; continuing before that would stop again.
-        assert!(!actions.contains(&Action::Resume));
         assert_eq!(
-            lead_action(&actions, &task, TaskSurface::Card),
-            Some(&Action::PrepareModel)
+            task_group(&sample_task(TaskStatus::Queued)),
+            TaskGroup::Queued
         );
-        // Another failure afterwards is that failure's to answer.
-        task.events.apply(&Event::Error {
-            message: "其他错误".into(),
-            code: ErrorCode::Other,
-            parts: Vec::new(),
-            path: None,
-        });
-        let actions = task_actions(&task, TaskSurface::Card, &facts());
-        assert!(!actions.contains(&Action::PrepareModel));
-    }
-
-    /// The engine names a missing model by its id; the task names it as the app does.
-    #[test]
-    fn a_missing_model_reads_by_its_display_name() {
-        use c2m_i18n::i18n::Lang;
-        let saved = "识别模型 qwen3-1.7b 尚未下载，请先下载并准备模型，再继续";
         assert_eq!(
-            super::failure_summary_in(TaskState::NeedsAttention, Some(saved), Lang::ZhHans)
-                .as_deref(),
-            Some("识别模型「Qwen3 1.7B」还没有下载")
+            task_group(&sample_task(TaskStatus::Paused)),
+            TaskGroup::Queued
         );
-    }
-
-    /// A saved error reads in the interface language shown now, whatever language
-    /// it was saved in, and under the wording that replaced an older one.
-    #[test]
-    fn a_saved_error_reads_in_the_current_language_and_wording() {
-        use c2m_i18n::i18n::{Lang, t_for};
-        let now = "任务使用的服务已从设置中删除";
-        for saved in [
-            "任务使用的服务已不在设置中，请调整后重试并选择服务",
-            "The service this task used is no longer in settings. Adjust and try again with a service selected.",
-            "找不到任务使用的服务版本，请选择服务后建立新尝试",
-            "找不到任務使用的服務版本，請選擇服務後建立新嘗試",
-            "タスクで使用されているサービスのバージョンが見つかりません。サービスを選択し、新しい試行を作成してください。",
-            t_for(now, Lang::En),
-            t_for(now, Lang::Ja),
-        ] {
-            assert_eq!(
-                super::failure_summary_in(TaskState::NeedsAttention, Some(saved), Lang::En)
-                    .as_deref(),
-                Some(t_for(now, Lang::En))
-            );
-            assert_eq!(
-                super::failure_summary_in(TaskState::NeedsAttention, Some(saved), Lang::ZhHans)
-                    .as_deref(),
-                Some(now)
-            );
-        }
-    }
-
-    /// Copies at the limit stop a task: the card says, in full and in the
-    /// interface language, to move the copies to keep out of the folder, and offers
-    /// to open it.
-    #[test]
-    fn copies_at_the_limit_tell_the_task_what_frees_it() {
-        use super::{
-            TaskAction as Action, TaskFacts, TaskSurface, task_actions, task_error_summary_in,
-        };
-        use c2m_i18n::i18n::Lang;
-        use c2m_protocol::progress::{ErrorCode, Event};
-        let swap = std::path::PathBuf::from(
-            "/Users/someone/Documents/course2md/a-rather-long-library-name/.course2md/swap/course-0123456789abcdef",
+        assert_eq!(
+            task_group(&sample_task(TaskStatus::Completed)),
+            TaskGroup::Finished
         );
-        let mut task = task_record("task");
-        task.state = TaskState::NeedsAttention;
-        task.events.apply(&Event::Error {
-            message: c2m_core::outcome::copies_kept_message(&swap, Lang::ZhHans),
-            code: ErrorCode::NoteCopiesKept,
-            parts: Vec::new(),
-            path: Some(swap.clone()),
-        });
-        for lang in [Lang::En, Lang::Ja, Lang::ZhHant] {
-            let text = task_error_summary_in(&task, lang).unwrap();
-            assert_eq!(text, c2m_core::outcome::copies_kept_message(&swap, lang));
-        }
+
         let facts = TaskFacts {
             active: false,
             expanded: false,
@@ -1452,620 +908,68 @@ mod tests {
             needs_reassociation: false,
             queue: Vec::new(),
         };
-        assert!(
-            task_actions(&task, TaskSurface::Card, &facts).contains(&Action::OpenRecoveryFolder)
-        );
-    }
 
-    /// A note whose replacement cannot be finished says what to do with the full
-    /// path in the interface language, and offers to open that folder.
-    #[test]
-    fn a_blocked_note_tells_the_task_what_to_do() {
-        use super::{
-            TaskAction as Action, TaskFacts, TaskSurface, task_actions, task_error_summary_in,
-        };
-        use c2m_i18n::i18n::Lang;
-        use c2m_protocol::progress::{ErrorCode, Event};
-        let swap = std::path::PathBuf::from(
-            "/Users/someone/Documents/course2md/a-rather-long-library-name/.course2md/swap/course-0123456789abcdef",
-        );
-        let mut task = task_record("task");
-        task.state = TaskState::NeedsAttention;
-        task.events.apply(&Event::Error {
-            message: c2m_core::outcome::recovery_blocked_message(&swap, Lang::ZhHans),
-            code: ErrorCode::NoteRecoveryBlocked,
-            parts: Vec::new(),
-            path: Some(swap.clone()),
+        // Missing local model -> PrepareModel + Retry.
+        let mut model_task = sample_task(TaskStatus::Failed);
+        model_task.error = Some(TaskError {
+            message: "模型未下载".into(),
+            failed_stages: Vec::new(),
+            missing_model: Some((AsrProvider::Cpu, "qwen3-0.6b".into())),
+            needs_settings: false,
         });
-        for lang in [Lang::En, Lang::Ja, Lang::ZhHant] {
-            let text = task_error_summary_in(&task, lang).unwrap();
-            assert_eq!(
-                text,
-                c2m_core::outcome::recovery_blocked_message(&swap, lang)
-            );
-            assert!(text.contains(&swap.display().to_string()), "{text}");
-            assert!(!text.ends_with('…'), "{text}");
-        }
-        let facts = TaskFacts {
-            active: false,
-            expanded: false,
-            library: None,
-            needs_reassociation: false,
-            queue: Vec::new(),
-        };
-        assert!(
-            task_actions(&task, TaskSurface::Card, &facts).contains(&Action::OpenRecoveryFolder)
+        let actions = task_actions(&model_task, TaskSurface::Card, &facts);
+        assert!(actions.contains(&TaskAction::PrepareModel));
+        assert!(actions.contains(&TaskAction::Retry));
+        assert_eq!(
+            lead_action(&actions, &model_task, TaskSurface::Card),
+            Some(&TaskAction::PrepareModel)
         );
-    }
 
-    /// A refused result is shown in the interface language from the parts the
-    /// error names, not from the worker's Simplified Chinese words.
-    #[test]
-    fn a_kept_note_is_explained_in_the_interface_language() {
-        use super::task_error_summary_in;
-        use c2m_core::outcome::{KeptPart, NoteKept};
-        use c2m_i18n::i18n::Lang;
-        use c2m_protocol::progress::{ErrorCode, Event};
-        let parts = vec![
-            KeptPart {
-                part: "proofreading".into(),
-                cause: Some("校对未全部完成（1/1 失败），原文已保留；首个错误：HTTP 503".into()),
-            },
-            KeptPart {
-                part: "translation".into(),
-                cause: Some("翻译未全部完成（2/2 失败）".into()),
-            },
-            KeptPart {
-                part: "summary".into(),
-                cause: None,
-            },
-        ];
-        let mut task = task_record("task");
-        task.state = TaskState::NeedsAttention;
-        task.events.apply(&Event::Error {
-            message: NoteKept::new(parts.clone()).message,
-            code: ErrorCode::NoteKept,
-            parts,
-            path: None,
+        // Missing/invalid AI service -> Retry + OpenSettings.
+        let mut settings_task = sample_task(TaskStatus::Failed);
+        settings_task.note_dir = Some("/tmp/note".into());
+        settings_task.error = Some(TaskError {
+            message: "HTTP 401".into(),
+            failed_stages: vec![Component::Summary],
+            missing_model: None,
+            needs_settings: true,
         });
-        let han = |text: &str| text.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
-        let en = task_error_summary_in(&task, Lang::En).unwrap();
-        assert!(en.contains("Proofreading, Translation, Summary"), "{en}");
-        assert!(en.contains("Proofreading incomplete (1/1 failed)"), "{en}");
-        assert!(en.contains("Translation incomplete (2/2 failed)"), "{en}");
-        assert!(!han(&en), "{en}");
-        let ja = task_error_summary_in(&task, Lang::Ja).unwrap();
-        assert!(ja.contains("校正、翻訳、要約"), "{ja}");
-        assert!(ja.contains("翻訳が完了していません（2/2 件失敗）"), "{ja}");
-        let hant = task_error_summary_in(&task, Lang::ZhHant).unwrap();
-        assert!(hant.contains("校對、翻譯、摘要"), "{hant}");
-        assert!(hant.contains("翻譯未全部完成（2/2 失敗）"), "{hant}");
-        // Another failure afterwards is shown as that failure.
-        task.events.apply(&Event::Error {
-            message: "其他错误".into(),
-            code: ErrorCode::Other,
-            parts: Vec::new(),
-            path: None,
-        });
-        assert_eq!(task_error_summary_in(&task, Lang::En).unwrap(), "其他错误");
-    }
+        let card_actions = task_actions(&settings_task, TaskSurface::Card, &facts);
+        assert!(card_actions.contains(&TaskAction::Retry));
+        assert!(card_actions.contains(&TaskAction::OpenSettings));
+        assert!(card_actions.contains(&TaskAction::OpenNote));
+        assert_eq!(task_status_label(&settings_task), "部分未完成");
 
-    /// Once the model a task would run with is ready, a task that stopped for a
-    /// model continues; one the person paused or cancelled meanwhile does not, nor
-    /// one when Settings name another model.
-    #[test]
-    fn tasks_stopped_for_a_model_continue_once_it_is_ready() {
-        use super::{task_model_request, tasks_awaiting_model};
-        use c2m_config::config::{AsrProvider, TranscriptSource};
-        use c2m_protocol::progress::{ErrorCode, Event};
-        let dir = tempfile::tempdir().unwrap();
-        let mut preferences = desktop_prefs::preferences::Store::open(
-            dir.path().join("preferences"),
-            std::sync::Arc::new(desktop_prefs::credentials::MemoryCredentialVault::new()),
-        );
-        let mut settings = preferences.generation().clone();
-        settings.options.provider = Some(AsrProvider::Gpu);
-        settings.options.transcript_source = Some(TranscriptSource::Asr);
-        preferences.save_generation(settings.clone()).unwrap();
-        let stopped = |id: &str| {
-            let mut task = task_record(id);
-            task.state = TaskState::NeedsAttention;
-            task.events.apply(&Event::Error {
-                message: "识别模型尚未下载".into(),
-                code: ErrorCode::ModelRequired,
-                parts: Vec::new(),
-                path: None,
-            });
-            task
-        };
-        let waiting = stopped("waiting");
-        let mut paused = stopped("paused");
-        paused.state = TaskState::Paused;
-        let mut cancelled = stopped("cancelled");
-        cancelled.state = TaskState::Cancelled;
-        let mut continued = stopped("continued");
-        continued.state = TaskState::Queued;
-        let mut other_failure = stopped("other-failure");
-        other_failure.events.apply(&Event::Error {
-            message: "其他错误".into(),
-            code: ErrorCode::Other,
-            parts: Vec::new(),
-            path: None,
-        });
-        let request = task_model_request(&preferences, &waiting, AsrProvider::Coreml);
-        let tasks = [waiting, paused, cancelled, continued, other_failure];
-        assert_eq!(
-            tasks_awaiting_model(&preferences, &tasks, &request, AsrProvider::Coreml),
-            ["waiting"]
-        );
-        // Settings now name another engine: what was prepared is not what it needs.
-        settings.options.provider = Some(AsrProvider::Coreml);
-        preferences.save_generation(settings.clone()).unwrap();
-        assert!(
-            tasks_awaiting_model(&preferences, &tasks, &request, AsrProvider::Coreml).is_empty()
-        );
-        // Settings naming no engine wait for the one this machine would use.
-        settings.options.provider = None;
-        preferences.save_generation(settings).unwrap();
-        assert_eq!(
-            tasks_awaiting_model(&preferences, &tasks, &request, AsrProvider::Gpu),
-            ["waiting"]
-        );
-    }
-
-    /// A task held by a worker from an earlier session is still queued in its record;
-    /// the header counts it once, as processing, and offers no pause for it.
-    #[test]
-    fn a_held_task_counts_once_as_processing() {
-        use super::{TaskCounts, task_counts};
-        let mut held = task_record("held");
-        held.state = TaskState::Queued;
-        held.held = true;
-        let mut waiting = task_record("waiting");
-        waiting.state = TaskState::Queued;
-        assert_eq!(
-            task_counts(&[held.clone()]),
-            TaskCounts {
-                running: 1,
-                ..TaskCounts::default()
-            }
-        );
-        assert_eq!(
-            task_counts(&[held, waiting]),
-            TaskCounts {
-                running: 1,
-                queued: 1,
-                pausable: 1,
-                ..TaskCounts::default()
-            }
-        );
+        // Completed task offers OpenNote on Card and Regenerate on Home/Menu.
+        let mut done_task = sample_task(TaskStatus::Completed);
+        done_task.note_dir = Some("/tmp/note".into());
+        let home_actions = task_actions(&done_task, TaskSurface::Home, &facts);
+        assert!(home_actions.contains(&TaskAction::OpenNote));
+        assert!(home_actions.contains(&TaskAction::Regenerate));
     }
 
     #[test]
-    fn a_closed_intermediate_stage_does_not_claim_the_task_is_finishing() {
-        assert_eq!(
-            worker_wait_state(true, false, Intent::Run, []),
-            Some(WorkerWait::Starting)
-        );
-        assert_eq!(
-            worker_wait_state(
-                true,
-                false,
-                Intent::Run,
-                [(&Stage::parse("subtitle"), true)]
-            ),
-            Some(WorkerWait::BetweenStages),
-        );
-        assert_eq!(
-            worker_wait_state(
-                true,
-                false,
-                Intent::Run,
-                [
-                    (&Stage::parse("subtitle"), true),
-                    (&Stage::parse("download"), false)
-                ]
-            ),
-            None,
-        );
-        assert_eq!(
-            worker_wait_state(
-                true,
-                false,
-                Intent::Run,
-                [
-                    (&Stage::parse("subtitle"), true),
-                    (&Stage::parse("download"), true)
-                ]
-            ),
-            Some(WorkerWait::BetweenStages),
-        );
-    }
-
-    #[test]
-    fn finishing_uses_worker_evidence_and_stops_with_the_process() {
-        let stages = [
-            (&Stage::parse("subtitle"), true),
-            (&Stage::parse("render"), true),
-        ];
-        assert_eq!(
-            worker_wait_state(true, false, Intent::Run, stages),
-            Some(WorkerWait::Finishing),
-        );
-        // Reusing a complete artifact can emit Done without any new stages.
-        assert_eq!(
-            worker_wait_state(true, true, Intent::Run, []),
-            Some(WorkerWait::Finishing),
-        );
-        // A retry/remaining active stage keeps its real progress visible.
-        assert_eq!(
-            worker_wait_state(
-                true,
-                false,
-                Intent::Run,
-                [
-                    (&Stage::parse("render"), true),
-                    (&Stage::parse("summary"), false)
-                ]
-            ),
-            None,
-        );
-        assert_eq!(worker_wait_state(false, true, Intent::Run, stages), None);
-        assert_eq!(worker_wait_state(false, false, Intent::Run, []), None);
-    }
-
-    #[test]
-    fn ai_dispatch_counts_do_not_claim_received_results() {
-        for name in [&Stage::Llm, &Stage::Summary] {
-            let mut activity = desktop_store::activity::Activity::new();
-            for (current, total) in [(0, 3), (1, 3), (3, 3), (1, 1)] {
-                activity.update(current, total, None);
-                let (detail, fraction) =
-                    stage_progress(name, activity.done, Some(&activity), &activity, false);
-                assert!(fraction.is_none());
-                assert!(!detail.contains('%'));
-                assert!(!detail.contains("收尾"));
-                assert!(!activity.done);
-            }
-            activity.finish();
-            // The finished stage keeps its clock as the record, still without a fraction.
-            let (detail, fraction) = stage_progress(name, true, Some(&activity), &activity, false);
-            assert_eq!(detail, "用时 0 秒");
-            assert!(fraction.is_none());
-        }
-        // Quantities that measure completed work keep their determinate progress.
-        let mut screenshots = desktop_store::activity::Activity::new();
-        screenshots.update(2, 6, None);
-        let (detail, fraction) = stage_progress(
-            &Stage::parse("scenes/extract"),
-            false,
-            Some(&screenshots),
-            &screenshots,
-            false,
-        );
-        assert!(detail.contains("2 / 6"));
-        assert_eq!(fraction, Some(2. / 6.));
-    }
-
-    #[test]
-    fn a_finished_ai_stage_keeps_its_tokens_once_the_task_no_longer_runs() {
-        use c2m_protocol::progress::{Event, StageStatus};
-        let mut events = desktop_store::activity::JobEvents::default();
-        for event in [
-            Event::Stage {
-                stage: Stage::Summary,
-                status: StageStatus::Start,
+    fn stage_rows_derive_from_persisted_stages_when_live_events_are_absent() {
+        let mut task = sample_task(TaskStatus::Failed);
+        task.stages.insert(
+            StageKey::Transcription,
+            StageState {
+                phase: StagePhase::Completed,
+                detail: None,
             },
-            Event::Tokens {
-                stage: Stage::Summary,
-                prompt: 4_656,
-                completion: 94,
+        );
+        task.stages.insert(
+            StageKey::Summary,
+            StageState {
+                phase: StagePhase::Failed,
+                detail: Some("摘要未生成：服务暂时无法完成请求".into()),
             },
-            Event::Stage {
-                stage: Stage::Summary,
-                status: StageStatus::Done,
-            },
-        ] {
-            events.apply(&event);
-        }
-        let summary = &events.stages[&Stage::Summary];
-        // A saved record has no clock to show, only what was sent and received.
-        let (detail, fraction) = stage_progress(&Stage::Summary, true, None, summary, false);
-        assert_eq!(detail, "↑ 4,656 · ↓ 94 词元");
-        assert!(fraction.is_none());
-        let (detail, _) = stage_progress(&Stage::Summary, true, Some(summary), summary, false);
-        assert_eq!(detail, "用时 0 秒 · ↑ 4,656 · ↓ 94 词元");
-    }
-
-    #[test]
-    fn pause_and_cancel_intents_do_not_report_continued_generation() {
-        for intent in [Intent::Pause, Intent::Quit, Intent::Cancel] {
-            assert_eq!(worker_wait_state(true, false, intent, []), None);
-            assert_eq!(
-                worker_wait_state(true, false, intent, [(&Stage::parse("llm"), true)]),
-                None
-            );
-            assert_eq!(
-                worker_wait_state(true, true, intent, [(&Stage::parse("render"), true)]),
-                None
-            );
-            assert_eq!(worker_wait_state(false, false, intent, []), None);
-        }
-    }
-
-    #[test]
-    fn completed_ai_attempts_use_component_results_to_classify_success() {
-        use c2m_artifact::artifact::{Outcome, Outcomes, Status};
-        let mut outcomes = Outcomes {
-            proofreading: Outcome::failed("服务拒绝凭据"),
-            summary: Outcome::succeeded(),
-            ..Default::default()
-        };
-        let value = outcomes.clone();
-        assert_eq!(
-            ai_stage_outcome(&Stage::parse("llm"), Some(&value)),
-            Some(StageStatus::Failed)
         );
-        assert_eq!(
-            ai_stage_outcome(&Stage::parse("summary"), Some(&value)),
-            Some(StageStatus::Complete)
-        );
-        outcomes.proofreading.status = Status::Partial;
-        let value = outcomes.clone();
-        assert_eq!(
-            ai_stage_outcome(&Stage::parse("llm"), Some(&value)),
-            Some(StageStatus::Failed)
-        );
-        outcomes.proofreading = Outcome::succeeded();
-        let value = outcomes.clone();
-        assert_eq!(
-            ai_stage_outcome(&Stage::parse("llm"), Some(&value)),
-            Some(StageStatus::Complete)
-        );
-        assert_eq!(ai_stage_outcome(&Stage::parse("llm"), None), None);
-        assert_eq!(
-            ai_stage_outcome(&Stage::parse("scenes/extract"), Some(&value)),
-            None
-        );
-    }
-
-    #[test]
-    fn user_stops_have_no_feedback_and_worker_failures_have_a_localized_summary() {
-        let paused = "生成已暂停，进度已保留 / Generation paused; progress retained";
-        assert_eq!(task_failure_summary(TaskState::Paused, Some(paused)), None);
-        assert_eq!(
-            task_failure_summary(TaskState::Cancelled, Some("任务已取消 / Task cancelled")),
-            None
-        );
-        assert_eq!(
-            task_failure_summary(
-                TaskState::NeedsAttention,
-                Some("服务拒绝凭据，请检查 API Key\nraw details")
-            ),
-            Some("服务拒绝凭据，请检查 API Key".into()),
-        );
-        let Some(message) = task_failure_summary(
-            TaskState::NeedsAttention,
-            Some("ERROR: request failed\nTraceback: provider transport details"),
-        ) else {
-            panic!("a failed task needs a user-facing summary");
-        };
-        assert!(!message.contains("ERROR"));
-        assert!(!message.contains("Traceback"));
-        // A download's own reason leads, even when long; the hint follows on its own line.
-        let cause = format!(
-            "yt-dlp: [BiliBili] BV1: {}",
-            "Unable to download ".repeat(12)
-        );
-        let summary = task_failure_summary(
-            TaskState::NeedsAttention,
-            Some(&format!("{cause}\n提示：若视频需要登录…\nyt-dlp 运行失败")),
-        )
-        .unwrap();
-        assert!(summary.starts_with("yt-dlp: [BiliBili] BV1: Unable"));
-        assert!(summary.ends_with('…'));
-        assert_eq!(summary.chars().count(), 140);
-    }
-
-    #[test]
-    fn a_worker_failure_reads_in_the_interface_language() {
-        use c2m_i18n::i18n::Lang;
-        let error = "启动 yt-dlp 失败: No such file or directory (os error 2)";
-        assert_eq!(
-            failure_summary_in(TaskState::NeedsAttention, Some(error), Lang::En).as_deref(),
-            Some("Failed to start yt-dlp: No such file or directory (os error 2)")
-        );
-        assert_eq!(
-            failure_summary_in(TaskState::NeedsAttention, Some(error), Lang::Ja).as_deref(),
-            Some("yt-dlp の起動に失敗しました: No such file or directory (os error 2)")
-        );
-        assert_eq!(
-            failure_summary_in(TaskState::NeedsAttention, Some(error), Lang::ZhHans).as_deref(),
-            Some(error)
-        );
-        // A record an older engine wrote keeps its cause and loses the misplaced hint.
-        let older = format!("{LEGACY_LOGIN_HINT}: {error}");
-        assert_eq!(
-            failure_summary_in(TaskState::NeedsAttention, Some(&older), Lang::En).as_deref(),
-            Some("Failed to start yt-dlp: No such file or directory (os error 2)")
-        );
-    }
-
-    #[test]
-    fn partial_task_recovery_excludes_successful_and_unrequested_components() {
-        use c2m_artifact::artifact::{Outcome, Outcomes, Status};
-        use desktop_store::workspace::{Intent, TaskPlan, TaskRecord, TaskState};
-
-        let mut outcomes = Outcomes {
-            transcript: Outcome::succeeded(),
-            screenshots: Outcome::succeeded(),
-            ..Default::default()
-        };
-        outcomes.proofreading = Outcome {
-            status: Status::Partial,
-            message: Some("服务拒绝凭据".into()),
-            completed: Some(1),
-            total: Some(2),
-            kind: Some(c2m_artifact::artifact::FailureKind::Authentication),
-            first_failure: None,
-        };
-        outcomes.exports.insert("md".into(), Outcome::succeeded());
-        outcomes
-            .exports
-            .insert("json".into(), Outcome::not_requested());
-        outcomes
-            .exports
-            .insert("html".into(), Outcome::failed("HTML 写入失败"));
-        let path = std::path::PathBuf::from("published-note");
-        let mut task = TaskRecord {
-            id: "partial-task".into(),
-            plan: TaskPlan {
-                operation: Default::default(),
-                source: source("https://example.test/video", "课程"),
-                source_id: "online:video".into(),
-                title: "课程".into(),
-                library_id: "library".into(),
-                folder: None,
-                subtitle: None,
-                repair: None,
-            },
-            state: TaskState::Partial,
-            intent: Intent::Run,
-            created: 0,
-            updated: 0,
-            parent: None,
-            handled_by: None,
-            held: false,
-            work_dir: "work".into(),
-            events: desktop_store::activity::JobEvents {
-                outcomes: Some(outcomes.clone()),
-                ..Default::default()
-            },
-            artifact: Some(path.clone()),
-            unread: false,
-            resend: Vec::new(),
-            replaced_by: None,
-            rework: None,
-            rework_accepted: None,
-            ai_answered_by: Vec::new(),
-            ran_with: None,
-        };
-        // The first recovery action in Recent Notes and every action in the
-        // task cards must target actual incomplete work, never the first success.
-        let failures = super::task_component_failures(&task);
-        assert_eq!(
-            failures
-                .iter()
-                .map(|(key, _, _)| key.as_str())
-                .collect::<Vec<_>>(),
-            vec!["proofreading", "exports"]
-        );
-        assert_eq!(failures[0].2.status, Status::Partial);
-        assert_eq!(failures[0].2.completed, Some(1));
-        // A partly proofread note retries only what is unfinished, and says so.
-        assert_eq!(
-            super::task_retry_label(&task, "proofreading"),
-            c2m_i18n::tr!("重试未完成的校对部分")
-        );
-        assert_eq!(
-            super::task_retry_label(&task, "exports"),
-            super::retry_component_label("exports")
-        );
-        // The reader and the library name it the same way.
-        assert_eq!(
-            super::task_retry_components_label(Some(&task), &["proofreading".into()]),
-            c2m_i18n::tr!("重试未完成的校对部分")
-        );
-        assert_eq!(
-            super::task_retry_components_label(None, &["proofreading".into()]),
-            super::retry_component_label("proofreading")
-        );
-        assert_eq!(failures[1].2.message.as_deref(), Some("HTML 写入失败"));
-
-        for (message, kind, requires_repair) in [
-            (
-                "服务未接受此任务保存的凭据",
-                c2m_artifact::artifact::FailureKind::Authentication,
-                true,
-            ),
-            (
-                "服务未找到此任务指定的接口或模型",
-                c2m_artifact::artifact::FailureKind::Model,
-                true,
-            ),
-            (
-                "服务拒绝了请求参数（HTTP 422）",
-                c2m_artifact::artifact::FailureKind::Parameters,
-                true,
-            ),
-            (
-                "服务请求次数达到限制，请稍后重试。",
-                c2m_artifact::artifact::FailureKind::RateLimit,
-                false,
-            ),
-            (
-                "服务未完成此请求（HTTP 500）。",
-                c2m_artifact::artifact::FailureKind::Service,
-                false,
-            ),
-            (
-                "请求超时，请稍后重试。",
-                c2m_artifact::artifact::FailureKind::Other,
-                false,
-            ),
-        ] {
-            outcomes.proofreading.message = Some(message.into());
-            outcomes.proofreading.kind = Some(kind);
-            task.events.outcomes = Some(outcomes.clone());
-            assert_eq!(
-                super::task_requires_service_repair(&task),
-                requires_repair,
-                "{message}"
-            );
-        }
-        outcomes.proofreading.message = Some("服务拒绝凭据".into());
-        outcomes.proofreading.kind = Some(c2m_artifact::artifact::FailureKind::Authentication);
-        task.events.outcomes = Some(outcomes.clone());
-        task.events
-            .blocked
-            .push(desktop_store::workspace::BlockedRequest {
-                reason: c2m_protocol::progress::BlockReason::Uncertain,
-                request_id: Some("pending".into()),
-                purpose: Some("summary".into()),
-                description: "摘要".into(),
-                kind: Some(c2m_artifact::artifact::FailureKind::Uncertain),
-                message: "结果尚未确认".into(),
-            });
-        assert!(!super::task_requires_service_repair(&task));
-        task.events.blocked.clear();
-        task.handled_by = Some("recovery".into());
-        assert!(!super::task_requires_service_repair(&task));
-        task.handled_by = None;
-
-        outcomes.proofreading = Outcome::succeeded();
-        outcomes.exports.insert("html".into(), Outcome::succeeded());
-        task.events.outcomes = Some(outcomes);
-        assert!(super::task_component_failures(&task).is_empty());
-        task.events.error = Some("服务拒绝凭据".into());
-        assert!(!super::task_requires_service_repair(&task));
-        task.events.outcomes = None;
-        assert!(super::task_component_failures(&task).is_empty());
-
-        let mut completed = task.clone();
-        completed.id = "recovered".into();
-        completed.state = TaskState::Complete;
-        let mut history = task.clone();
-        history.id = "original".into();
-        history.state = TaskState::Paused;
-        history.handled_by = Some(completed.id.clone());
-        let mut running = task.clone();
-        running.id = "running".into();
-        running.state = TaskState::Running;
-        assert_eq!(super::task_group(&task), super::TaskGroup::Attention);
-        assert_eq!(super::task_group(&history), super::TaskGroup::History);
-        assert_eq!(
-            super::task_navigation_summary(&[task, completed, history, running]).0,
-            2
-        );
+        let work = Work::new();
+        let rows = task_stage_rows(&task, &work);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].status, StageStatus::Complete);
+        assert_eq!(rows[1].status, StageStatus::Failed);
+        assert!(rows[1].detail.contains("摘要未生成"));
     }
 }

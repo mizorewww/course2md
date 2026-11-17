@@ -309,8 +309,8 @@ mod tests {
         state: &mut workspace::State,
         link: &storage::LibraryLink,
     ) -> anyhow::Result<()> {
-        let tasks = storage::finish_link(link)?;
-        storage::publish_link(state, link, tasks)
+        storage::finish_link(link)?;
+        storage::publish_link(state, link)
     }
 
     fn test_location(root: PathBuf) -> workspace::LibraryLocation {
@@ -386,25 +386,21 @@ mod tests {
         draft.online = false;
         draft.source = Some(source.clone());
         let draft_id = draft.id.clone();
-        let plan = workspace::TaskPlan {
-            operation: c2m_engine::execution::Operation::Generate,
+        let input = workspace::NewTask {
+            library_id: id.clone(),
             source: source.clone(),
             source_id: source.identity.clone(),
             title: "Frozen task".into(),
-            library_id: id.clone(),
-            folder: Some(7),
+            title_from_probe: false,
             subtitle: None,
-            repair: None,
+            subtitle_events: None,
+            target_folder: Some(7),
+            note_dir: None,
+            run_mode: workspace::RunMode::Resume,
         };
-        let (task_id, _) = workspace.state.enqueue(plan, None).unwrap();
+        let task_id = workspace.state.enqueue(input).unwrap();
         let task = workspace.state.task_mut(&task_id).unwrap();
-        task.state = workspace::TaskState::Uncertain;
-        task.intent = workspace::Intent::Pause;
-        task.ran_with = Some(workspace::RunSettings::new(
-            &Default::default(),
-            Some("fixed-service-version".into()),
-            None,
-        ));
+        task.status = workspace::TaskStatus::Paused;
         let work = task.work_dir.clone();
         workspace
             .state
@@ -419,16 +415,12 @@ mod tests {
             crate::notes::read_preview(crate::notes::scan_library(&old).unwrap().courses.remove(0))
                 .unwrap();
         let original_text = preview.plain_text.clone();
-        workspace.state.task_mut(&task_id).unwrap().artifact = Some(preview.course.dir.clone());
+        workspace.state.task_mut(&task_id).unwrap().note_dir = Some(preview.course.dir.clone());
         workspace.transaction(|_| Ok(())).unwrap();
         let binding = br#"{"task_id":"kept","source_id":"kept"}"#;
         std::fs::create_dir_all(&work).unwrap();
         std::fs::write(work.join("task-identity.json"), binding).unwrap();
-        std::fs::write(
-            work.join("control.json"),
-            br#"{"intent":"pause","resend":[]}"#,
-        )
-        .unwrap();
+        std::fs::write(work.join("control.json"), br#"{"intent":"pause"}"#).unwrap();
         std::fs::rename(&old, &new).unwrap();
         let new = new.canonicalize().unwrap();
         assert!(!old.exists());
@@ -446,12 +438,7 @@ mod tests {
             new.join("video.mp4").display().to_string()
         );
         let task = state.task(&task_id).unwrap();
-        assert_eq!(task.state, workspace::TaskState::Uncertain);
-        assert_eq!(task.intent, workspace::Intent::Pause);
-        assert_eq!(
-            task.ran_with.as_ref().unwrap().asr_service.as_deref(),
-            Some("fixed-service-version")
-        );
+        assert_eq!(task.status, workspace::TaskStatus::Paused);
         assert_eq!(state.reader_sources["inside"], new.join("video.mp4"));
         assert_eq!(state.reader_sources["outside"], external);
         assert!(
@@ -464,7 +451,7 @@ mod tests {
         );
         assert_eq!(
             std::fs::read(task.work_dir.join("control.json")).unwrap(),
-            br#"{"intent":"pause","resend":[]}"#
+            br#"{"intent":"pause"}"#
         );
         assert_eq!(
             std::fs::read_to_string(new.join(".course2md-library-id")).unwrap(),
@@ -752,29 +739,21 @@ mod tests {
         draft.input = source.input.clone();
         draft.source = Some(source.clone());
         let original_draft_id = draft.id.clone();
-        let mut config = c2m_config::settings::ConfigFile::default();
-        config.defaults.model_dir = Some(old.join("models"));
-        let plan = workspace::TaskPlan {
-            operation: c2m_engine::execution::Operation::Reprocess {
-                note_dir: old.join("note"),
-                base_task_id: "old-version".into(),
-                components: vec![c2m_engine::execution::Component::Summary],
-                prior_work_dir: Some(old.join(".course2md/work/old-task")),
-            },
+        let input = workspace::NewTask {
+            library_id: library_id.clone(),
             source: source.clone(),
             source_id: source.identity.clone(),
             title: "Frozen title".into(),
-            library_id: library_id.clone(),
-            folder: Some(17),
+            title_from_probe: false,
             subtitle: Some(old.join("subtitles/selected.srt")),
-            repair: None,
+            subtitle_events: None,
+            target_folder: Some(17),
+            note_dir: Some(old.join("note")),
+            run_mode: workspace::RunMode::Resume,
         };
-        let (task_id, _) = workspace.state.enqueue(plan, None).unwrap();
-        workspace.state.task_mut(&task_id).unwrap().ran_with = Some(workspace::RunSettings::new(
-            &config,
-            Some("fixed-asr-version".into()),
-            None,
-        ));
+        let task_id = workspace.state.enqueue(input).unwrap();
+        workspace.state.task_mut(&task_id).unwrap().legacy_work_dir =
+            Some(old.join(".course2md/work/old-task"));
         let old_task_work = workspace.state.task(&task_id).unwrap().work_dir.clone();
         source.input = directory.path().join("outside.mp4").display().to_string();
         let outside_input = source.input.clone();
@@ -857,17 +836,19 @@ mod tests {
         );
         assert_eq!(state.drafts.len(), 1);
         let task = state.task(&task_id).unwrap();
-        assert_eq!(task.plan.title, "Frozen title");
-        let ran_with = task.ran_with.as_ref().unwrap();
-        assert_eq!(ran_with.asr_service.as_deref(), Some("fixed-asr-version"));
-        assert_eq!(ran_with.config.defaults.model_dir, Some(new.join("models")));
+        assert_eq!(task.title, "Frozen title");
         assert_eq!(
             task.work_dir,
             new.join(old_task_work.strip_prefix(&old).unwrap())
         );
-        assert!(
-            matches!(&task.plan.operation, c2m_engine::execution::Operation::Reprocess {note_dir, prior_work_dir:Some(work),..}
-            if note_dir.starts_with(&new) && work.starts_with(&new))
+        assert_eq!(task.note_dir.as_ref(), Some(&new.join("note")));
+        assert_eq!(
+            task.legacy_work_dir.as_ref(),
+            Some(&new.join(".course2md/work/old-task"))
+        );
+        assert_eq!(
+            task.subtitle.as_ref(),
+            Some(&new.join("subtitles/selected.srt"))
         );
         assert_eq!(state.storage_backups[0].path, old);
         assert!(

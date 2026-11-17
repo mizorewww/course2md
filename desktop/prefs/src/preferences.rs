@@ -1081,25 +1081,6 @@ impl Store {
     pub fn version(&self, id: &str) -> Option<&ServiceVersion> {
         self.services.versions.get(id)
     }
-    /// Whether `id` names a saved version of a service that is not deleted, as loaded.
-    /// For display and previews; dispatch still runs `check_dispatch`.
-    pub fn usable_in_snapshot(&self, id: &str) -> bool {
-        self.version(id)
-            .is_some_and(|version| !self.service_retired_in_snapshot(&version.service_id))
-    }
-    /// Whether `references` name a service `base` needs that is no longer saved or was
-    /// deleted: a task running with them can only stop again. Unreadable service
-    /// records are another obstacle.
-    pub fn services_missing(&self, base: &ConfigFile, references: &ServiceRefs) -> bool {
-        if self.is_blocked(PreferenceGroup::Services) {
-            return false;
-        }
-        let required = references.required_for(base);
-        [required.asr, required.llm]
-            .iter()
-            .flatten()
-            .any(|id| !self.usable_in_snapshot(id))
-    }
     pub fn is_service_retired(&self, service_id: &str) -> bool {
         self.services.stopped.contains_key(service_id) || self.retired_marker(service_id).exists()
     }
@@ -2820,7 +2801,6 @@ mod tests {
             asr: None,
             llm: Some(chosen.id.clone()),
         };
-        assert!(!store.services_missing(&config, &held));
         store.delete_service(&chosen.service_id).unwrap();
         let store = open(directory.path(), store.vault());
         let error = store.config_for_preview(&config, &held).unwrap_err();
@@ -2833,9 +2813,6 @@ mod tests {
             .config_for_refs(&config, &store.default_refs())
             .unwrap();
         assert_eq!(preview.llm.model, "default-model");
-        assert!(store.services_missing(&config, &held));
-        // Only what the task's configuration uses counts.
-        assert!(!store.services_missing(&ConfigFile::default(), &held));
 
         // Deleted while loaded elsewhere: the snapshot's stop list counts too.
         let (_directory, mut store) = isolated();
@@ -2845,7 +2822,7 @@ mod tests {
             llm: Some(only.id.clone()),
         };
         store.services.stopped.insert(only.service_id.clone(), 1);
-        assert!(store.services_missing(&config, &held));
+        assert!(store.config_for_preview(&config, &held).is_err());
 
         // A superseded version is still saved and stays the explicit choice.
         let (_directory, mut store) = isolated();
@@ -2860,7 +2837,7 @@ mod tests {
             asr: None,
             llm: Some(old.id.clone()),
         };
-        assert!(!store.services_missing(&config, &held));
+        assert!(store.config_for_refs(&config, &held).is_ok());
 
         // Recovered from an older backup that predates the version.
         let (directory, mut store) = isolated();
@@ -2875,10 +2852,8 @@ mod tests {
             llm: Some(newer.id.clone()),
         };
         assert!(recovered.config_for_refs(&config, &held).is_err());
-        assert!(recovered.services_missing(&config, &held));
 
-        // Unreadable, backup included: nothing is known to be gone, so the explicit
-        // choice stays and nothing reports it missing.
+        // Unreadable, backup included: dispatch refuses while blocked.
         let (directory, mut store) = isolated();
         publish(&mut store, "first", BindingScope::Defaults);
         let chosen = publish(&mut store, "chosen", BindingScope::Saved);
@@ -2891,7 +2866,7 @@ mod tests {
             asr: None,
             llm: Some(chosen.id.clone()),
         };
-        assert!(!unreadable.services_missing(&config, &held));
+        assert!(unreadable.config_for_refs(&config, &held).is_err());
 
         // Reset: nothing is saved and nothing is the default any more.
         let (_directory, mut store) = isolated();
@@ -2901,7 +2876,7 @@ mod tests {
             llm: Some(only.id.clone()),
         };
         store.reset_group(PreferenceGroup::Services).unwrap();
-        assert!(store.services_missing(&config, &held));
+        assert!(store.config_for_refs(&config, &held).is_err());
         assert_eq!(store.default_refs().llm, None);
         assert_eq!(
             store

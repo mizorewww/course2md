@@ -132,21 +132,17 @@ impl LibraryViewCache {
                 })
                 .collect();
             let seen: Vec<order::Seen> = named.iter().map(|(_, seen)| seen.clone()).collect();
-            // Notes waiting on the person: being replaced (and so not listed), or with
-            // copies kept beside them. They are never forgotten, and a scan that could
-            // not list one does not count notes as gone.
+            // Notes whose swap recovery failed due to I/O errors are never forgotten.
             let waiting: Vec<PathBuf> = scan
                 .attention
                 .iter()
-                .filter_map(|attention| match attention {
-                    c2m_artifact::artifact::NoteAttention::Blocked { note, .. }
-                    | c2m_artifact::artifact::NoteAttention::Kept { note, .. }
-                    | c2m_artifact::artifact::NoteAttention::Failed { note, .. } => {
+                .filter_map(
+                    |c2m_artifact::artifact::NoteAttention::Failed { note, .. }| {
                         organize::relative_key(&location.root, note)
                             .ok()
                             .or_else(|| note.strip_prefix(&location.root).ok().map(Into::into))
-                    }
-                })
+                    },
+                )
                 .collect();
             let listed: std::collections::HashSet<&std::path::Path> =
                 seen.iter().map(|seen| seen.folder.as_path()).collect();
@@ -211,7 +207,7 @@ pub fn note_has_unfinished_task(
     note_unfinished_task(tasks, library_id, source_id).is_some()
 }
 
-/// The one unfinished task that will replace the note of `source_id` in `library_id`.
+/// The one unfinished task for `source_id` in `library_id`.
 pub fn note_unfinished_task<'a>(
     tasks: &'a [crate::workspace::TaskRecord],
     library_id: &str,
@@ -219,11 +215,7 @@ pub fn note_unfinished_task<'a>(
 ) -> Option<&'a crate::workspace::TaskRecord> {
     let source = source_id?;
     tasks.iter().find(|task| {
-        // An attempt a follow-up replaced stays unfinished, but is no longer worked on.
-        !task.state.finished()
-            && task.handled_by.is_none()
-            && task.plan.source_id == source
-            && task.plan.library_id == library_id
+        !task.status.is_finished() && task.source_id == source && task.library_id == library_id
     })
 }
 
@@ -441,35 +433,29 @@ impl LibraryState {
             }
         }
         self.view_cache.notes_by_source = notes_by_source;
-        let wanted: std::collections::HashSet<&str> = self
-            .courses
-            .iter()
-            .filter_map(|course| Some(course.manifest.as_ref()?.task_id.as_str()))
-            .collect();
-        self.view_cache.sources = tasks
-            .iter()
-            .filter(|task| wanted.contains(task.id.as_str()))
-            .map(|task| {
-                let source = &task.plan.source;
-                (
-                    task.id.clone(),
-                    NoteSource {
-                        author: source.author.clone(),
-                        duration: (source.duration.is_finite() && source.duration > 0.)
-                            .then_some(source.duration),
-                        published: source.published.clone(),
-                        local: !source.online,
-                        link: source.online.then(|| source.input.clone()),
-                    },
-                )
-            })
-            .collect();
+        let mut sources = std::collections::HashMap::new();
+        for task in tasks {
+            let source = &task.source;
+            let info = NoteSource {
+                author: source.author.clone(),
+                duration: (source.duration.is_finite() && source.duration > 0.)
+                    .then_some(source.duration),
+                published: source.published.clone(),
+                local: !source.online,
+                link: source.online.then(|| source.input.clone()),
+            };
+            sources.insert(task.course_id.clone(), info.clone());
+            sources.insert(task.id.clone(), info);
+        }
+        self.view_cache.sources = sources;
     }
 
     pub fn note_source(&self, course: &Course) -> Option<&NoteSource> {
+        let manifest = course.manifest.as_ref()?;
         self.view_cache
             .sources
-            .get(&course.manifest.as_ref()?.task_id)
+            .get(&manifest.course_id)
+            .or_else(|| self.view_cache.sources.get(&manifest.task_id))
     }
 
     pub fn course_display_title(&self, course: &Course) -> String {
@@ -560,13 +546,13 @@ mod tests {
             attention,
             newer: Vec::new(),
         };
-        let blocked = c2m_artifact::artifact::NoteAttention::Blocked {
+        let failed = c2m_artifact::artifact::NoteAttention::Failed {
             note: root.join("course-a"),
-            swap: root.join(".course2md/swap/course-a"),
+            message: "I/O".into(),
         };
         for _ in 0..crate::order::FORGET_AFTER + 1 {
             let cache =
-                super::LibraryViewCache::inspect(&location, Some(&scan(vec![blocked.clone()])));
+                super::LibraryViewCache::inspect(&location, Some(&scan(vec![failed.clone()])));
             assert_eq!(cache.orders[&root].added("course-a"), Some(7));
         }
         // Once nothing waits and it is still gone, it is forgotten in time.
@@ -612,63 +598,47 @@ mod tests {
 
     #[test]
     fn a_note_with_a_running_task_is_not_trashed() {
-        use crate::workspace::{Intent, TaskPlan, TaskRecord, TaskState};
-        let task = |state: TaskState| TaskRecord {
+        use crate::workspace::{RunMode, Source, TaskRecord, TaskStatus, course_dir_name};
+        let task = |status: TaskStatus| TaskRecord {
             id: "task-1".into(),
-            plan: TaskPlan {
-                operation: Default::default(),
-                source: Default::default(),
-                source_id: "video-a".into(),
-                title: "Course A".into(),
-                library_id: "library-1".into(),
-                folder: None,
-                subtitle: None,
-                repair: None,
-            },
-            state,
-            intent: Intent::Run,
+            library_id: "library-1".into(),
+            course_id: course_dir_name("video-a"),
+            source_id: "video-a".into(),
+            source: Source::default(),
+            title: "Course A".into(),
+            title_from_probe: false,
+            author: String::new(),
+            duration: 0.,
+            subtitle: None,
+            subtitle_events: None,
+            target_folder: None,
+            note_dir: None,
+            work_dir: "/tmp/work".into(),
+            legacy_work_dir: None,
+            status,
+            run_mode: RunMode::Resume,
+            stages: Default::default(),
+            error: None,
+            logs: Vec::new(),
+            unread: false,
             created: 0,
             updated: 0,
-            parent: None,
-            handled_by: None,
-            held: false,
-            work_dir: "/tmp/work".into(),
-            events: crate::activity::JobEvents {
-                error: None,
-                ..Default::default()
-            },
-            artifact: None,
-            unread: false,
-            resend: vec![],
-            replaced_by: None,
-            rework: None,
-            rework_accepted: None,
-            ai_answered_by: Vec::new(),
-            ran_with: None,
+            outcomes: None,
+            kept_video: false,
+            kept_edits: Vec::new(),
+            events: Default::default(),
         };
         let busy = super::note_has_unfinished_task;
-        let running = [task(TaskState::Running)];
+        let running = [task(TaskStatus::Running)];
         assert!(busy(&running, "library-1", Some("video-a")));
-        // The old guard compared the id with the library's root path.
         assert!(!busy(&running, "/Users/someone/Notes", Some("video-a")));
         assert!(!busy(&running, "library-2", Some("video-a")));
         assert!(!busy(&running, "library-1", Some("video-b")));
         assert!(!busy(&running, "library-1", None));
         assert!(!busy(
-            &[task(TaskState::Complete)],
+            &[task(TaskStatus::Completed)],
             "library-1",
             Some("video-a")
         ));
-        // An uncertain attempt whose resend ran in a follow-up that has finished.
-        let replaced = TaskRecord {
-            handled_by: Some("task-2".into()),
-            ..task(TaskState::Uncertain)
-        };
-        let followup = TaskRecord {
-            id: "task-2".into(),
-            parent: Some("task-1".into()),
-            ..task(TaskState::Complete)
-        };
-        assert!(!busy(&[replaced, followup], "library-1", Some("video-a")));
     }
 }

@@ -2,7 +2,7 @@
 //! original stays as a backup until someone deletes it, and only a check that passes switches
 //! the library. An interrupted move starts its copy over. Registry publication is owned by
 //! the UI transaction.
-use crate::workspace::{self, LibraryLocation, TaskRecord};
+use crate::workspace::{self, LibraryLocation};
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -709,9 +709,9 @@ pub fn inspect_link(
     })
 }
 
-/// Blocking: after any confirmation, checks the folder is still the one reviewed, gives it
-/// its identity if it had none, and reads the tasks it carries.
-pub fn finish_link(link: &LibraryLink) -> Result<Vec<TaskRecord>> {
+/// Blocking: after any confirmation, checks the folder is still the one reviewed and gives it
+/// its identity if it had none.
+pub fn finish_link(link: &LibraryLink) -> Result<()> {
     ensure!(
         directory_stamp(&link.folder)? == link.stamp,
         c2m_i18n::tr!("所选文件夹已被替换，请重新选择")
@@ -726,15 +726,11 @@ pub fn finish_link(link: &LibraryLink) -> Result<Vec<TaskRecord>> {
         Some(_) => workspace::create_library_marker(&location)?,
         None => workspace::check_library(&location)?,
     }
-    Ok(workspace::read_library_tasks(&location).0)
+    Ok(())
 }
 
 /// Applies a finished link; touches no disk.
-pub fn publish_link(
-    state: &mut workspace::State,
-    link: &LibraryLink,
-    tasks: Vec<TaskRecord>,
-) -> Result<()> {
+pub fn publish_link(state: &mut workspace::State, link: &LibraryLink) -> Result<()> {
     ensure!(
         state
             .library(&link.library_id)
@@ -748,7 +744,6 @@ pub fn publish_link(
             &link.folder,
         )?;
     }
-    state.adopt_tasks(tasks);
     Ok(())
 }
 

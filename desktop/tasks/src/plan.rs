@@ -454,7 +454,7 @@ impl PlanInputs<'_> {
             c2m_i18n::tr!("还没读取到视频信息，请重新预览")
         );
         ensure!(
-            self.import.subtitle_error.is_none(),
+            !self.import.subtitle_failed(),
             c2m_i18n::tr!("字幕还没读取完成，请重新读取，或改用语音识别")
         );
         let source = draft
@@ -502,15 +502,33 @@ impl PlanInputs<'_> {
                 c2m_i18n::tr!("字幕还未确认。请读取字幕，或明确选择语音识别。")
             );
         }
+        let subtitle_events = source
+            .selected_subtitle
+            .as_ref()
+            .filter(|sub| !sub.events.is_empty())
+            .map(|sub| sub.events.clone());
+        let existing_note = self
+            .library
+            .courses
+            .iter()
+            .find(|course| {
+                course.dir
+                    == library
+                        .root
+                        .join(workspace::course_dir_name(&source.identity))
+            })
+            .map(|course| course.dir.clone());
         let plan = TaskPlan {
-            operation: Default::default(),
+            library_id: library.id.clone(),
             source_id: source.identity.clone(),
+            title_from_probe: source.online && source.title.trim().is_empty(),
             source,
             title,
-            library_id: library.id.clone(),
-            folder: None,
             subtitle: draft.subtitle.clone(),
-            repair: None,
+            subtitle_events,
+            target_folder: None,
+            note_dir: existing_note,
+            run_mode: workspace::RunMode::Resume,
         };
         self.finish_plan(plan, validation, environment, None)
     }
@@ -554,15 +572,28 @@ impl PlanInputs<'_> {
             online: true,
             ..source::Source::default()
         };
+        let existing_note = self
+            .library
+            .courses
+            .iter()
+            .find(|course| {
+                course.dir
+                    == library
+                        .root
+                        .join(workspace::course_dir_name(&source.identity))
+            })
+            .map(|course| course.dir.clone());
         let plan = TaskPlan {
-            operation: Default::default(),
+            library_id: library.id.clone(),
             source_id: source.identity.clone(),
+            title_from_probe: source.online && source.title.trim().is_empty(),
             source,
             title: display_title,
-            library_id: library.id.clone(),
-            folder: None,
             subtitle: None,
-            repair: None,
+            subtitle_events: None,
+            target_folder: None,
+            note_dir: existing_note,
+            run_mode: workspace::RunMode::Resume,
         };
         // Subtitles-only never reaches speech recognition; other modes may fall back to it
         // when a video has none, so local recognition is checked as well.
@@ -900,7 +931,7 @@ pub mod tests {
 
     #[test]
     fn a_note_is_named_after_its_video_and_a_new_source_keeps_the_submitted_task() {
-        use desktop_store::workspace::{TaskPlan, Workspace};
+        use desktop_store::workspace::{NewTask, RunMode, Workspace};
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("workspace.json");
         let root = dir.path().join("library");
@@ -914,22 +945,14 @@ pub mod tests {
                     note_title(state.draft().unwrap()).as_deref(),
                     Some("课程 A")
                 );
-                state.enqueue(
-                    TaskPlan {
-                        operation: Default::default(),
-                        source: a.clone(),
-                        source_id: a.identity.clone(),
-                        title: a.title.clone(),
-                        library_id: state.default_library.clone(),
-                        folder: None,
-                        subtitle: None,
-                        repair: None,
-                    },
-                    None,
-                )
+                state.enqueue(NewTask::from_source(
+                    state.default_library.clone(),
+                    a.clone(),
+                    a.title.clone(),
+                    RunMode::Resume,
+                ))
             })
-            .unwrap()
-            .0;
+            .unwrap();
         // Until B's metadata arrives the note would take its link as its name.
         workspace
             .transaction(|state| {
@@ -962,8 +985,8 @@ pub mod tests {
         assert_eq!(note_title(draft).as_deref(), Some("课程 B"));
         assert_eq!(draft.source.as_ref().unwrap(), &b);
         let task = restored.state.task(&id).unwrap();
-        assert_eq!(task.plan.source, a);
-        assert_eq!(task.plan.title, "课程 A");
+        assert_eq!(task.source, a);
+        assert_eq!(task.title, "课程 A");
     }
 
     #[test]

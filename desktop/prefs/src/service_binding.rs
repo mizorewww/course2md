@@ -1,11 +1,10 @@
-//! What publishing a service changes: its defaults, and the repair it continues.
+//! What publishing a service changes: its defaults, and the task retry it continues.
 use crate::preferences::{BindingScope, ServicePurpose};
-use c2m_engine::execution::Component;
 
 /// What a service publication continues with once its credential is checked.
 pub struct PublishPlan {
     pub continue_repair: bool,
-    pub repair_task: Option<(String, Vec<Component>)>,
+    pub repair_task: Option<String>,
     pub scope: BindingScope,
 }
 

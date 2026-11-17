@@ -66,19 +66,14 @@ pub(crate) fn migrate_library(location: &LibraryLocation, busy: &[PathBuf]) -> M
             return migration;
         }
     };
-    // A note that needs the person is shown by the next scan; a failure is told now.
+    // Any I/O failure recovering an interrupted note swap is reported now.
     migration
         .issues
-        .extend(
-            crate::notes::recover_library(root).into_iter().filter_map(
-                |attention| match attention {
-                    c2m_artifact::artifact::NoteAttention::Failed { note, message } => {
-                        Some(format!("{}: {message}", note.display()))
-                    }
-                    _ => None,
-                },
-            ),
-        );
+        .extend(crate::notes::recover_library(root).into_iter().map(
+            |c2m_artifact::artifact::NoteAttention::Failed { note, message }| {
+                format!("{}: {message}", note.display())
+            },
+        ));
     let same = |a: &Path, b: &Path| {
         a == b
             || a.canonicalize()

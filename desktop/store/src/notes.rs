@@ -155,13 +155,9 @@ pub fn recover_library(root: &Path) -> Vec<artifact::NoteAttention> {
 }
 
 fn record_attention(scan: &mut LibraryScan, attention: artifact::NoteAttention) {
-    match attention {
-        artifact::NoteAttention::Failed { note, message } => {
-            scan.issues
-                .push(c2m_i18n::tr!("{}：{}", note.display(), message))
-        }
-        attention => scan.attention.push(attention),
-    }
+    let artifact::NoteAttention::Failed { note, message } = attention;
+    scan.issues
+        .push(c2m_i18n::tr!("{}：{}", note.display(), message));
 }
 
 pub fn scan_library(root: &Path) -> Result<LibraryScan> {
@@ -720,10 +716,10 @@ mod tests {
         assert!(course.incomplete());
     }
 
-    /// A note whose replacement cannot be finished is not listed silently: the
-    /// scan names it, with the folder to look at.
+    /// Even when a swap's `live` marker is damaged, `recover_folder` automatically
+    /// restores the intact `old-*` note copy without deadlocking the library scan.
     #[test]
-    fn a_blocked_note_is_named_by_the_scan() {
+    fn a_damaged_swap_marker_automatically_recovers_the_valid_note() {
         let root = tempfile::tempdir().unwrap();
         let note = published_note(root.path(), 1, &[10.], Default::default());
         let swap = root.path().join(".course2md/swap/course");
@@ -731,15 +727,10 @@ mod tests {
         std::fs::rename(&note.dir, swap.join("old-task")).unwrap();
         std::fs::write(swap.join("live"), "garbage").unwrap();
         let scan = scan_library(root.path()).unwrap();
-        assert!(scan.courses.is_empty());
-        assert_eq!(
-            scan.attention,
-            vec![artifact::NoteAttention::Blocked {
-                note: note.dir.clone(),
-                swap: swap.clone()
-            }]
-        );
-        assert!(swap.join("old-task/manifest.json").is_file());
+        assert_eq!(scan.courses.len(), 1);
+        assert!(scan.attention.is_empty());
+        assert!(!swap.exists());
+        assert!(note.dir.join("manifest.json").is_file());
     }
 
     /// The command line keeps notes in `<platform>/<id>`, each folder with its own

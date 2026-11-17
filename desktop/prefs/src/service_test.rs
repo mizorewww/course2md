@@ -66,32 +66,6 @@ impl TestKind {
     }
 }
 
-/// A recorded, explicit configuration refusal can stop a repair from immediately
-/// resending course data. It is not a prerequisite for saving a service or for
-/// trying an untested configuration. Authentication applies to the connection;
-/// model refusals remain scoped to the capabilities being repaired.
-pub fn blocks_reprocessing(
-    evidence: &ServiceTestEvidence,
-    config: &ServiceConfiguration,
-    required_contracts: &[&str],
-) -> bool {
-    if evidence.fingerprint != config.fingerprint(&evidence.contract) {
-        return false;
-    }
-    // A rate limit or server failure says nothing about the configuration.
-    if evidence
-        .http_status
-        .is_some_and(|status| status == 429 || status >= 500)
-    {
-        return false;
-    }
-    match evidence.outcome {
-        TestOutcome::AuthenticationRefused => true,
-        TestOutcome::ModelRefused => required_contracts.contains(&evidence.contract.as_str()),
-        _ => false,
-    }
-}
-
 /// Runs one capability check on the calling thread; call it from a blocking IO thread.
 /// A request already sent cannot be retracted: only attach the result if the
 /// configuration fingerprint still matches.
@@ -245,7 +219,7 @@ fn classify_status(status: Option<u16>, model_error: bool, transport: bool) -> T
     }
 }
 
-/// A missing or refused login is a configuration refusal and blocks a repair.
+/// A missing or refused login is an authentication refusal.
 /// Transport failures, timeouts, rate limits and server errors leave the result
 /// unknown; any other answer did not satisfy the check.
 fn codex_failure(error: &anyhow::Error) -> CodexFailure {
@@ -834,58 +808,6 @@ mod tests {
     }
 
     #[test]
-    fn repair_blocks_only_matching_explicit_configuration_refusals() {
-        let original = config();
-        let required = [TestKind::Proofread.contract()];
-        let refusal = run(&transport(
-            401,
-            json!({"error": {"code": "invalid_api_key"}}),
-        ));
-        assert!(blocks_reprocessing(&refusal, &original, &required));
-        let mut renamed = original.clone();
-        renamed.name = "Renamed service".into();
-        assert!(blocks_reprocessing(&refusal, &renamed, &required));
-        for changed in [
-            ServiceConfiguration {
-                endpoint: "https://other.test/v1/chat/completions".into(),
-                ..original.clone()
-            },
-            ServiceConfiguration {
-                model: "another-model".into(),
-                ..original.clone()
-            },
-            ServiceConfiguration {
-                authentication: Authentication::ApiKey,
-                credential: Some("credential-new".into()),
-                ..original.clone()
-            },
-        ] {
-            assert!(!blocks_reprocessing(&refusal, &changed, &required));
-        }
-        let model_refusal = run(&transport(
-            404,
-            json!({"error": {"code": "model_not_found"}}),
-        ));
-        assert!(blocks_reprocessing(&model_refusal, &original, &required));
-        assert!(!blocks_reprocessing(
-            &model_refusal,
-            &original,
-            &[TestKind::Summary.contract()]
-        ));
-        for outcome in [
-            TestOutcome::Passed,
-            TestOutcome::NotSent,
-            TestOutcome::OutcomeUnknown,
-            TestOutcome::ContractMismatch,
-            TestOutcome::SampleMismatch,
-        ] {
-            let mut evidence = refusal.clone();
-            evidence.outcome = outcome;
-            assert!(!blocks_reprocessing(&evidence, &original, &required));
-        }
-    }
-
-    #[test]
     fn retryable_http_status_is_not_a_configuration_refusal() {
         for status in [429, 500, 503] {
             let evidence = run(&transport(
@@ -896,25 +818,9 @@ mod tests {
                 evidence.outcome,
                 TestOutcome::AuthenticationRefused | TestOutcome::ModelRefused
             ));
-            assert!(!blocks_reprocessing(
-                &evidence,
-                &config(),
-                &[TestKind::Proofread.contract()]
-            ));
-            let mut older = evidence;
-            older.outcome = TestOutcome::ModelRefused;
-            assert!(!blocks_reprocessing(
-                &older,
-                &config(),
-                &[TestKind::Proofread.contract()]
-            ));
         }
         let forbidden = run(&transport(403, json!({"error": {"code": "forbidden"}})));
-        assert!(blocks_reprocessing(
-            &forbidden,
-            &config(),
-            &[TestKind::Proofread.contract()]
-        ));
+        assert_eq!(forbidden.outcome, TestOutcome::AuthenticationRefused);
     }
 
     fn qwen(endpoint: String) -> ServiceConfiguration {
