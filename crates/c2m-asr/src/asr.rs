@@ -1399,10 +1399,10 @@ mod cloud_tests {
     use super::*;
 
     /// A receipt as the version before the in-process cut wrote it: its identity hashes
-    /// a chunk from this exact ffmpeg command. The task must find that receipt, stop
-    /// without sending, and resend only under the receipt's own authorization.
+    /// a chunk from this exact ffmpeg command. Completed receipts replay without sending;
+    /// unfinished receipts from a crashed run retry cleanly under the same identity.
     #[test]
-    fn a_request_left_unconfirmed_by_an_earlier_version_waits_for_authorization() {
+    fn a_receipt_saved_by_an_earlier_version_replays_when_completed_and_retries_when_sending() {
         use crate::dispatch::{ControlSource, Receipt, SNAPSHOT_PREFIX, State};
         if which::which("ffmpeg").is_err() {
             assert!(std::env::var_os("CI").is_none(), "ffmpeg is required in CI");
@@ -1464,65 +1464,59 @@ mod cloud_tests {
         let requests = dir.path().join("requests");
         std::fs::create_dir_all(&requests).unwrap();
         let receipt_path = requests.join(format!("{stable_id}.json"));
-        let receipt = Receipt {
+        let make_receipt = |state: State, response: Option<Value>| Receipt {
             schema: 1,
             stable_id: stable_id.clone(),
             request_id: format!("{stable_id}.1"),
             purpose: "transcription".into(),
             description: String::new(),
-            service_version,
+            service_version: service_version.clone(),
             attempt: 1,
-            state: State::Sending,
-            http_status: None,
-            response: None,
+            state,
+            http_status: response.as_ref().map(|_| 200),
+            response,
             message: None,
             unsupported_response_format: false,
             refused_parameter: None,
             repeats: false,
             unusable: false,
             detail: None,
-            retry_authorized: None,
         };
-        std::fs::write(&receipt_path, serde_json::to_vec(&receipt).unwrap()).unwrap();
-        let control_path = dir.path().join("control.json");
-        let open_control = || {
-            crate::dispatch::TaskControl::open(
-                dir.path(),
-                ControlSource {
-                    control_path: Some(control_path.clone()),
-                    ..Default::default()
-                },
-            )
-            .unwrap()
-        };
+        let open_control =
+            || crate::dispatch::TaskControl::open(dir.path(), ControlSource::default()).unwrap();
         let identity = AsrIdentity::new("api", "test-asr", 30.);
         let run = |control: &TaskControl| {
-            let mut cp = Checkpoint::open(dir.path(), true, &identity).unwrap();
+            let mut cp = Checkpoint::open(dir.path(), false, &identity).unwrap();
             transcribe_all(Backend::Api(api.clone()), &wav, 30., &mut cp, control)
         };
         let saved = || -> Receipt {
             serde_json::from_slice(&std::fs::read(&receipt_path).unwrap()).unwrap()
         };
 
-        // Without authorization: blocked on this receipt, and nothing reached the service.
+        // Completed receipt under the old identity replays at zero cost without network I/O.
+        std::fs::write(
+            &receipt_path,
+            serde_json::to_vec(&make_receipt(
+                State::Completed,
+                Some(json!({"text": "replayed"})),
+            ))
+            .unwrap(),
+        )
+        .unwrap();
         listener.set_nonblocking(true).unwrap();
-        let error = run(&open_control()).unwrap_err();
-        let failure = error.downcast_ref::<crate::dispatch::Failure>();
-        assert!(failure.is_some_and(|f| f.uncertain()), "{error:#}");
+        let replayed = run(&open_control()).unwrap();
+        assert_eq!(replayed[0].text, "replayed");
         assert_eq!(
             listener.accept().unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock,
-            "the request was sent again"
+            "completed receipt must replay without sending"
         );
-        // Matched by identity: this exact receipt moved on, and no other was started.
-        assert_eq!(saved().state, State::Uncertain);
-        assert_eq!(saved().attempt, 1);
         assert_eq!(std::fs::read_dir(&requests).unwrap().count(), 1);
 
-        // Authorizing that attempt sends it once more, under the same identity.
+        // Sending receipt left by a crashed process retries cleanly under the same identity.
         std::fs::write(
-            &control_path,
-            serde_json::to_vec(&json!({"resend":[format!("{stable_id}.1")]})).unwrap(),
+            &receipt_path,
+            serde_json::to_vec(&make_receipt(State::Sending, None)).unwrap(),
         )
         .unwrap();
         listener.set_nonblocking(false).unwrap();
@@ -1535,6 +1529,7 @@ mod cloud_tests {
         assert_eq!(events[0].text, "spoken");
         assert_eq!(saved().state, State::Completed);
         assert_eq!(saved().attempt, 2);
+        assert_eq!(std::fs::read_dir(&requests).unwrap().count(), 1);
     }
 
     /// Cloud transcription runs its chunks on the shared worker pool and

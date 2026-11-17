@@ -137,6 +137,15 @@ impl Component {
     }
 }
 
+/// Whether a run reuses saved stage checkpoints in `work_dir` or starts fresh.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunMode {
+    #[default]
+    Resume,
+    Fresh,
+}
+
 /// Sent once over stdin. Do not derive Debug: config contains decrypted credentials.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -144,6 +153,8 @@ pub struct Request {
     pub schema: u32,
     #[serde(default)]
     pub operation: Operation,
+    #[serde(default)]
+    pub run_mode: RunMode,
     pub task_id: String,
     pub course_id: String,
     /// The id a task's identity records as `version_id`: always its task id since
@@ -186,10 +197,7 @@ impl Request {
             course_id: self.course_id.clone(),
             source_id: self.source_id.clone(),
             course_dir: self.course_dir.clone(),
-            replaces: match &self.operation {
-                Operation::Generate => None,
-                Operation::Reprocess { base_task_id, .. } => Some(base_task_id.clone()),
-            },
+            replaces: None,
         }
     }
 
@@ -292,9 +300,7 @@ impl Request {
                 tr!("补做内容无效 / Invalid requested components")
             );
             anyhow::ensure!(
-                prior_work_dir
-                    .as_ref()
-                    .is_none_or(|p| p.is_absolute() && p != &self.work_dir),
+                prior_work_dir.as_ref().is_none_or(|p| p.is_absolute()),
                 tr!("原任务进度位置无效 / Invalid prior work directory")
             );
         }
@@ -460,13 +466,14 @@ impl WorkDir {
 }
 
 /// Enters a task's work directory in one order for every entry point: create
-/// it, take the task lock, check the identity it was bound to, then open the
-/// request ledger.
+/// it, take the task lock, clear stage caches when `run_mode == RunMode::Fresh`,
+/// check the identity it was bound to, then open the request ledger.
 pub(crate) fn enter_work_dir(
     work_dir: &Path,
     binding: &serde_json::Value,
     former: Option<&serde_json::Value>,
     settings_may_change: bool,
+    run_mode: RunMode,
     source: crate::dispatch::ControlSource,
 ) -> Result<WorkDir> {
     std::fs::create_dir_all(work_dir)?;
@@ -478,6 +485,9 @@ pub(crate) fn enter_work_dir(
         .with_context(|| {
             crate::tr!("目录正被另一任务使用：{}。请等待任务结束", path.display()).to_string()
         })?;
+    if run_mode == RunMode::Fresh {
+        clear_work_dir_for_fresh_run(work_dir, binding)?;
+    }
     bind_work_dir(work_dir, binding, former, settings_may_change)?;
     let control = crate::dispatch::TaskControl::open(work_dir, source)?;
     Ok(WorkDir {
@@ -489,12 +499,68 @@ pub(crate) fn enter_work_dir(
     })
 }
 
+fn clear_work_dir_for_fresh_run(work_dir: &Path, binding: &serde_json::Value) -> Result<()> {
+    let identity_path = work_dir.join("task-identity.json");
+    let keep_media = identity_path
+        .is_file()
+        .then(|| std::fs::read(&identity_path).ok())
+        .flatten()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .is_some_and(|old| same_task(&old, binding) && !redone_work(&old, binding).media)
+        && verified_media_in(work_dir);
+    for file in [
+        "transcript.json",
+        "screenshots.json",
+        "timeline.jsonl",
+        "asr.jsonl",
+        ".asr_done",
+        ".asr_identity",
+        "audio.wav",
+        "audio.sha256",
+        "run.json",
+        "task-identity.json",
+    ] {
+        match std::fs::remove_file(work_dir.join(file)) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
+            _ => {}
+        }
+    }
+    if !keep_media {
+        for file in ["media.mp4", "media.sha256"] {
+            match std::fs::remove_file(work_dir.join(file)) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(error.into());
+                }
+                _ => {}
+            }
+        }
+    }
+    for dir in ["requests", "frames", "base"] {
+        match std::fs::remove_dir_all(work_dir.join(dir)) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn verified_media_in(work_dir: &Path) -> bool {
+    let media = work_dir.join("media.mp4");
+    let marker = work_dir.join("media.sha256");
+    media.is_file()
+        && marker.is_file()
+        && std::fs::read_to_string(marker)
+            .ok()
+            .zip(file_digest(&media).ok())
+            .is_some_and(|(expected, actual)| expected == actual)
+}
+
 /// A mismatch is evidence that this is a different task; preserve both old work and error.
 /// `former` is the identity the same task bound before, which takes the current one.
 /// With `settings_may_change` (a desktop task, which runs with the settings current
-/// when it starts), the same task bound with other settings or service versions
-/// takes the new ones: its saved work keeps its own identity (speech progress names
-/// its model, a request its service version and payload).
+/// when it starts), the same course task bound with other settings, title, operation,
+/// or service versions takes the new ones: its saved work keeps its own identity
+/// (speech progress names its model, a request its service version and payload).
 pub(crate) fn bind_work_dir(
     work_dir: &Path,
     binding: &serde_json::Value,
@@ -523,39 +589,27 @@ pub(crate) fn bind_work_dir(
             )
         );
     } else {
-        anyhow::ensure!(
-            !work_dir.join("asr.jsonl").exists() && !work_dir.join("media.mp4").exists(),
-            tr!(
-                "此文件夹里有无法确认来源的旧进度，请换一个位置 / This folder contains earlier progress of unknown origin; choose another location"
-            )
-        );
+        if !settings_may_change {
+            anyhow::ensure!(
+                !work_dir.join("asr.jsonl").exists() && !work_dir.join("media.mp4").exists(),
+                tr!(
+                    "此文件夹里有无法确认来源的旧进度，请换一个位置 / This folder contains earlier progress of unknown origin; choose another location"
+                )
+            );
+        }
         crate::fsio::atomic_write(&path, &serde_json::to_vec_pretty(binding)?)?;
     }
     Ok(())
 }
 
-/// The parts of a binding that follow the settings a desktop task runs with: its
-/// configuration, services, and the subtitles its text source takes.
-const SETTINGS_KEYS: [&str; 5] = [
-    "config",
-    "service_versions",
-    "allow_unauthenticated_asr",
-    "subtitle_digest",
-    "subtitle_events",
-];
-
-/// Whether two bindings are of one task, whatever settings each was bound with.
+/// Whether two bindings in the same `work_dir` belong to the same course source.
 fn same_task(old: &serde_json::Value, new: &serde_json::Value) -> bool {
-    let without_settings = |binding: &serde_json::Value| {
-        let mut binding = binding.clone();
-        if let Some(object) = binding.as_object_mut() {
-            for key in SETTINGS_KEYS {
-                object.remove(key);
-            }
-        }
-        binding
-    };
-    old.get("task_id").is_some() && without_settings(old) == without_settings(new)
+    old.get("course_id") == new.get("course_id")
+        && old.get("source_id") == new.get("source_id")
+        && old
+            .get("source_id")
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| !s.is_empty())
 }
 
 /// What a desktop task's run under other settings redoes of the work an earlier run
@@ -616,17 +670,23 @@ pub fn settings_binding(cfg: &PipelineConfig) -> serde_json::Value {
 }
 
 /// Saved work in `work_dir` that the settings of `old` made and `new` would make
-/// differently.
+/// differently. A `reprocess` run only touches screenshots/media when `screenshots`
+/// is among its requested components, and never touches `transcript.json`.
 fn outdated_work(old: &serde_json::Value, new: &serde_json::Value) -> Vec<&'static str> {
+    let is_reprocess = new.pointer("/operation/kind").and_then(|v| v.as_str()) == Some("reprocess");
+    let reprocesses_screenshots = new
+        .pointer("/operation/components")
+        .and_then(|v| v.as_array())
+        .is_some_and(|items| items.iter().any(|c| c.as_str() == Some("screenshots")));
     let redone = redone_work(old, new);
     let mut outdated = Vec::new();
-    if redone.media {
+    if (!is_reprocess || reprocesses_screenshots) && redone.media {
         outdated.extend(["media.mp4", "media.sha256"]);
     }
-    if redone.screenshots {
+    if (!is_reprocess || reprocesses_screenshots) && redone.screenshots {
         outdated.push("screenshots.json");
     }
-    if redone.transcript {
+    if !is_reprocess && redone.transcript {
         outdated.push("transcript.json");
     }
     outdated
@@ -809,26 +869,144 @@ mod tests {
     }
 
     /// A desktop task runs with the settings current when it starts: resumed with
-    /// another model or service version it keeps its work directory, while another
-    /// task, or another source, is still refused.
+    /// another model, service version, title, task_id, or operation on the same
+    /// `(course_id, source_id)` it keeps its work directory, while another course
+    /// or source is refused.
     #[test]
-    fn a_desktop_task_resumes_with_changed_settings_but_not_as_another_task() {
+    fn a_desktop_task_resumes_across_in_place_updates_but_rejects_another_source() {
         let dir = tempfile::tempdir().unwrap();
-        let bound = |model: &str, version: &str, task: &str| {
+        let bound = |model: &str, version: &str, task: &str, course: &str, source: &str| {
             serde_json::json!({
-                "task_id": task, "source_id": "video",
+                "task_id": task, "course_id": course, "source_id": source,
                 "config": {"asr_model": model}, "service_versions": {"llm": version},
             })
         };
-        bind_work_dir(dir.path(), &bound("old", "v1", "task"), None, true).unwrap();
+        bind_work_dir(
+            dir.path(),
+            &bound("old", "v1", "task-1", "course-1", "video-1"),
+            None,
+            true,
+        )
+        .unwrap();
         // Outside the desktop, changed inputs are still another task.
-        assert!(bind_work_dir(dir.path(), &bound("new", "v2", "task"), None, false).is_err());
-        bind_work_dir(dir.path(), &bound("new", "v2", "task"), None, true).unwrap();
+        assert!(
+            bind_work_dir(
+                dir.path(),
+                &bound("new", "v2", "task-1", "course-1", "video-1"),
+                None,
+                false
+            )
+            .is_err()
+        );
+        // Updating settings or task_id on the same course/source succeeds.
+        bind_work_dir(
+            dir.path(),
+            &bound("new", "v2", "task-2", "course-1", "video-1"),
+            None,
+            true,
+        )
+        .unwrap();
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(dir.path().join("task-identity.json")).unwrap())
                 .unwrap();
-        assert_eq!(saved, bound("new", "v2", "task"));
-        assert!(bind_work_dir(dir.path(), &bound("new", "v2", "other"), None, true).is_err());
+        assert_eq!(saved, bound("new", "v2", "task-2", "course-1", "video-1"));
+        // Different course or source is rejected.
+        assert!(
+            bind_work_dir(
+                dir.path(),
+                &bound("new", "v2", "task-2", "course-2", "video-1"),
+                None,
+                true
+            )
+            .is_err()
+        );
+        assert!(
+            bind_work_dir(
+                dir.path(),
+                &bound("new", "v2", "task-2", "course-1", "video-2"),
+                None,
+                true
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn fresh_run_clears_stage_caches_while_preserving_verified_media_of_same_height() {
+        let dir = tempfile::tempdir().unwrap();
+        let bound = |height: u32| {
+            serde_json::json!({
+                "task_id": "course-1", "course_id": "course-1", "source_id": "bilibili:BV1",
+                "config": {"max_height": height},
+            })
+        };
+        bind_work_dir(dir.path(), &bound(1080), None, true).unwrap();
+        std::fs::write(dir.path().join("media.mp4"), b"verified-video").unwrap();
+        std::fs::write(
+            dir.path().join("media.sha256"),
+            file_digest(&dir.path().join("media.mp4")).unwrap(),
+        )
+        .unwrap();
+        for file in [
+            "transcript.json",
+            "screenshots.json",
+            "timeline.jsonl",
+            "asr.jsonl",
+            ".asr_done",
+            ".asr_identity",
+            "run.json",
+        ] {
+            std::fs::write(dir.path().join(file), b"cached").unwrap();
+        }
+        for sub in ["requests", "frames", "base"] {
+            std::fs::create_dir_all(dir.path().join(sub)).unwrap();
+            std::fs::write(dir.path().join(sub).join("item"), b"x").unwrap();
+        }
+        let work = enter_work_dir(
+            dir.path(),
+            &bound(1080),
+            None,
+            true,
+            RunMode::Fresh,
+            Default::default(),
+        )
+        .unwrap();
+        drop(work);
+        assert!(dir.path().join("media.mp4").is_file());
+        assert!(dir.path().join("media.sha256").is_file());
+        for cleared in [
+            "transcript.json",
+            "screenshots.json",
+            "timeline.jsonl",
+            "asr.jsonl",
+            ".asr_done",
+            ".asr_identity",
+            "run.json",
+            "frames",
+            "base",
+        ] {
+            assert!(!dir.path().join(cleared).exists(), "{cleared}");
+        }
+        assert!(
+            std::fs::read_dir(dir.path().join("requests"))
+                .unwrap()
+                .next()
+                .is_none()
+        );
+
+        // Changing max_height on a Fresh run also discards media.mp4 + media.sha256.
+        let work = enter_work_dir(
+            dir.path(),
+            &bound(720),
+            None,
+            true,
+            RunMode::Fresh,
+            Default::default(),
+        )
+        .unwrap();
+        drop(work);
+        assert!(!dir.path().join("media.mp4").exists());
+        assert!(!dir.path().join("media.sha256").exists());
     }
 
     #[test]
@@ -907,6 +1085,7 @@ mod tests {
                 components: vec![Component::Summary],
                 prior_work_dir: None,
             },
+            run_mode: RunMode::Resume,
             task_id: "repair-1".into(),
             course_id: "course".into(),
             version_id: None,
@@ -991,6 +1170,7 @@ mod tests {
             let request = Request {
                 schema: REQUEST_SCHEMA,
                 operation: Operation::Generate,
+                run_mode: RunMode::Resume,
                 task_id: "task".into(),
                 course_id: "course".into(),
                 version_id: None,

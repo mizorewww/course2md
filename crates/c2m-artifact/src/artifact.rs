@@ -95,7 +95,7 @@ fn parallel_map<T: Sync, R: Send>(
     crate::pool::map_pool(items.iter().collect(), IO_PARALLELISM, control, f)
 }
 
-/// Where a task publishes, and whose note it may replace.
+/// Where a task publishes its note.
 #[derive(Debug, Clone)]
 pub struct Target {
     pub task_id: String,
@@ -103,8 +103,7 @@ pub struct Target {
     pub source_id: String,
     /// The note folder.
     pub course_dir: PathBuf,
-    /// A repair replaces only the note it was planned from: the task id recorded
-    /// in that note's manifest. `None` (a generate) replaces whatever is there.
+    /// Retained temporarily for compatibility; in-place retries always replace `course_dir`.
     pub replaces: Option<String>,
 }
 
@@ -122,20 +121,6 @@ impl std::fmt::Display for NewerSchema {
 }
 
 impl std::error::Error for NewerSchema {}
-
-/// The note a repair was planned from has since been replaced by another task.
-#[derive(Debug)]
-pub struct NoteChanged;
-
-impl std::fmt::Display for NoteChanged {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(tr!(
-            "计划补做后笔记已被更改，请重新补做 / The note changed since this repair was planned"
-        ))
-    }
-}
-
-impl std::error::Error for NoteChanged {}
 
 fn check_schema(schema: u32, newest: u32) -> Result<()> {
     if schema > newest {
@@ -291,24 +276,15 @@ pub fn claim_note(note_dir: &Path) -> Result<crate::runtime::FileLock> {
     }
 }
 
-/// A note in a folder of notes that needs the person after recovery.
+/// A note in a folder of notes whose interrupted replacement could not be completed.
 #[derive(Debug, Clone, PartialEq)]
 pub enum NoteAttention {
-    /// Its replacement stopped and cannot be finished on its own; nothing changed.
-    Blocked { note: PathBuf, swap: PathBuf },
-    /// Copies are kept beside it for the person to look at.
-    Kept {
-        note: PathBuf,
-        swap: PathBuf,
-        copies: Vec<PathBuf>,
-    },
     /// Recovery could not run (permissions, a full disk).
     Failed { note: PathBuf, message: String },
 }
 
 /// Completes the interrupted replacements of every note whose swap folder is in
-/// `folder/.course2md/swap`, the notes directly in `folder`, and returns those
-/// that need the person.
+/// `folder/.course2md/swap`, and returns those whose recovery failed due to I/O errors.
 pub fn recover_folder(folder: &Path) -> Vec<NoteAttention> {
     let Ok(entries) = std::fs::read_dir(folder.join(".course2md").join("swap")) else {
         return Vec::new();
@@ -319,27 +295,14 @@ pub fn recover_folder(folder: &Path) -> Vec<NoteAttention> {
         .collect()
 }
 
-/// Completes an interrupted replacement of the note, and says whether the note
-/// needs the person.
+/// Completes an interrupted replacement of the note, returning `Some` only on I/O error.
 pub fn note_attention(note: &Path) -> Option<NoteAttention> {
-    let note = note.to_path_buf();
-    let swap = resolve_note(&note)
-        .and_then(|real| swap_dir(&real))
-        .unwrap_or_default();
-    match recover(&note) {
-        Err(error) if error.is::<crate::outcome::RecoveryBlocked>() => {
-            Some(NoteAttention::Blocked { note, swap })
-        }
+    match recover(note) {
         Err(error) => Some(NoteAttention::Failed {
-            note,
+            note: note.to_path_buf(),
             message: format!("{error:#}"),
         }),
-        // Another writer holds the note: its copies may be its own work in progress.
-        Ok(false) => None,
-        Ok(true) => {
-            let copies = kept_copies(&note);
-            (!copies.is_empty()).then_some(NoteAttention::Kept { note, swap, copies })
-        }
+        Ok(_) => None,
     }
 }
 
@@ -483,8 +446,7 @@ pub fn publish_blocking(
 
 /// Builds and syncs the whole note in the swap folder on the note's volume, then
 /// replaces the note with two renames. The files of the old note that are not its
-/// own (added by hand, or edited) come along. A task that already published here
-/// gets its note back unchanged.
+/// own (added by hand, or edited) come along.
 #[allow(clippy::too_many_arguments)]
 pub fn publish(
     target: &Target,
@@ -512,25 +474,16 @@ pub fn publish(
         Err(error) if error.is::<NewerSchema>() => return Err(error),
         Err(_) => None,
     };
-    if let Some(manifest) = &old
-        && manifest.task_id == target.task_id
-        && validate_note(note, manifest).is_ok()
-    {
-        return Ok(Publication {
-            manifest: manifest.clone(),
-            kept_edits: Vec::new(),
-        });
-    }
-    if let Some(base) = &target.replaces {
-        anyhow::ensure!(
-            old.as_ref()
-                .is_some_and(|manifest| &manifest.task_id == base),
-            NoteChanged
-        );
-    }
-    if let Some(old) = &old {
-        refuse_worse(&old.outcomes, &outcomes)?;
-    }
+    let preserved_summary = if summary.is_none() && outcomes.summary.is_incomplete() {
+        old.as_ref().and_then(|old_manifest| {
+            let path = safe_asset_path(note, &old_manifest.document).ok()?;
+            let doc: Document = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+            doc.summary
+        })
+    } else {
+        None
+    };
+    let summary = summary.or(preserved_summary.as_ref());
     // The note keeps every export it had, made again from the new content.
     let mut formats = formats.to_vec();
     for format in old.iter().flat_map(|old| export_formats(&old.outputs)) {
@@ -744,45 +697,6 @@ fn export_formats(outputs: &[String]) -> Vec<crate::config::OutputFormat> {
             outputs.contains(&path)
         })
         .collect()
-}
-
-/// How much of a part a note holds: all of it, the finished batches of it, or none.
-fn finished(outcome: &Outcome) -> usize {
-    match outcome.status {
-        Status::Succeeded => usize::MAX,
-        Status::Partial => outcome.completed.unwrap_or(0),
-        Status::NotRequested | Status::Failed => 0,
-    }
-}
-
-/// Refuses to replace a note with a result that holds less of any part the new
-/// task tried to make: its transcript, screenshots, proofreading, translation or
-/// summary. A part the new task did not ask for (AI turned off, a transcript
-/// already in the target language) is a choice, not a loss. The saved note stays,
-/// and the task ends failed, naming the parts; what it paid for stays in its work.
-pub fn refuse_worse(saved: &Outcomes, new: &Outcomes) -> Result<()> {
-    let parts = [
-        ("transcript", &saved.transcript, &new.transcript),
-        ("screenshots", &saved.screenshots, &new.screenshots),
-        ("proofreading", &saved.proofreading, &new.proofreading),
-        ("translation", &saved.translation, &new.translation),
-        ("summary", &saved.summary, &new.summary),
-    ];
-    let worse: Vec<crate::outcome::KeptPart> = parts
-        .iter()
-        .filter(|(_, saved, new)| {
-            matches!(new.status, Status::Failed | Status::Partial)
-                && finished(new) < finished(saved)
-        })
-        .map(|(part, _, new)| crate::outcome::KeptPart {
-            part: (*part).to_owned(),
-            cause: new.message.clone(),
-        })
-        .collect();
-    if worse.is_empty() {
-        return Ok(());
-    }
-    Err(crate::outcome::NoteKept::new(worse).into())
 }
 
 /// Replaces `note` with the finished `staging`, which is on the same volume.
@@ -1158,14 +1072,6 @@ fn discard_old(note: &Path, old: &Path) {
     }
 }
 
-/// Replaced notes that could not be deleted. This many refuses a new task until
-/// they are cleared, so copies of a whole note do not pile up.
-pub const MAX_KEPT_COPIES: usize = crate::outcome::MAX_KEPT_COPIES;
-
-fn stuck_olds(note: &Path) -> Result<Vec<PathBuf>> {
-    Ok(kept_copies(note))
-}
-
 /// Lets the owner delete everything below `root`.
 fn make_writable(root: &Path) {
     let entries = walk(root).unwrap_or_default();
@@ -1235,15 +1141,11 @@ pub fn recover(note_dir: &Path) -> Result<bool> {
 
 fn recover_locked(note: &Path) -> Result<()> {
     let swap = swap_dir(note)?;
-    recover_in(note, &swap).map_err(|error| {
-        if error.is::<crate::outcome::RecoveryBlocked>() {
-            return error;
-        }
-        // The message names both causes: the error below says which it was.
-        error.context(tr!(
+    recover_in(note, &swap).with_context(|| {
+        tr!(
             "无法完成这份笔记的恢复，所有文件都已保留；请检查 {} 的权限和可用空间后重试",
             swap.display()
-        ))
+        )
     })
 }
 
@@ -1251,100 +1153,76 @@ fn recover_in(note: &Path, swap: &Path) -> Result<()> {
     if !swap.is_dir() {
         return Ok(());
     }
-    // Everything is read before anything changes.
     let record = read_record(swap);
     let mut olds = Vec::new();
-    let mut discardable = Vec::new();
     for entry in std::fs::read_dir(swap)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        let kind = entry.file_type()?;
-        if name == LIVE_MARKER || name.starts_with("displaced") {
-            continue;
-        }
         if name.starts_with("old-") {
             olds.push((name, entry.path()));
-        } else if name.starts_with("stale-") || name.starts_with("new-") {
-            // A replaced note known to be stale, or a new note never put in place.
-            discardable.push(entry.path());
-        } else if kind.is_file() && name.starts_with(".tmp") {
-            // The temporary file of a record a crash stopped writing.
-            discardable.push(entry.path());
         }
     }
-    let blocked = || -> anyhow::Error {
-        crate::outcome::RecoveryBlocked {
-            swap: swap.to_path_buf(),
-        }
-        .into()
-    };
-    let note_whole = holds_note(note);
-    match record {
-        // A note is in place: it stays usable, and every copy and the record stay
-        // for the person to look at.
-        Record::Damaged(why) if note_whole => {
-            tracing::warn!(
-                "笔记的替换记录无法读取，已保留 / The note's replacement record cannot be read; kept: {}: {why}",
-                swap.display()
-            );
-            return Ok(());
-        }
-        Record::Damaged(_) => return Err(blocked()),
-        Record::Names { copy, publication } => {
-            let copy_path = swap.join(&copy);
-            // Only the note this replacement made proves the copy is the one it
-            // replaced: a note restored from a backup, or written by another app
-            // meanwhile, does not.
-            let replacement = note_whole
-                && publication.as_deref().is_some_and(|publication| {
-                    note_manifest(note).is_ok_and(|manifest| {
-                        manifest.is_some_and(|manifest| manifest.publication == publication)
-                    })
-                });
-            if replacement {
-                if copy_path.symlink_metadata().is_ok() {
-                    let stale = unused_name(swap, &format!("stale-{}", &copy["old-".len()..]));
-                    std::fs::rename(&copy_path, &stale)?;
-                    sync_dir(swap)?;
-                    discardable.push(stale);
-                    olds.retain(|(old, _)| old != &copy);
-                }
-            } else if note_whole {
-                // Another note is in place: both are kept, the copy for the person.
-                tracing::warn!(
-                    "笔记位置上是另一份笔记，替换前的副本已保留 / Another note is in place; the copy from before the replacement was kept: {}",
-                    copy_path.display()
-                );
-            } else if holds_note(&copy_path) {
-                restore(note, &copy_path, swap)?;
-                olds.retain(|(old, _)| old != &copy);
-            } else {
-                return Err(blocked());
+    if !holds_note(note) {
+        let named_copy = match &record {
+            Record::Names { copy, .. } => {
+                let path = swap.join(copy);
+                holds_note(&path).then_some(path)
             }
-            std::fs::remove_file(swap.join(LIVE_MARKER))?;
-            sync_dir(swap)?;
+            Record::None | Record::Damaged => None,
+        };
+        let chosen = named_copy.or_else(|| {
+            olds.iter()
+                .filter(|(_, path)| holds_note(path))
+                .max_by_key(|(name, path)| {
+                    let created = note_manifest(path)
+                        .ok()
+                        .flatten()
+                        .map_or(0, |m| m.created_at_ms);
+                    let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+                    (created, modified, name.clone())
+                })
+                .map(|(_, path)| path.clone())
+        });
+        if let Some(copy_path) = chosen {
+            restore(note, &copy_path, swap)?;
         }
-        // No record and no note: the one copy that holds a note goes back. With
-        // several, which one was the note is not known: all stay for the person.
-        Record::None if !note_whole => {
-            let notes: Vec<_> = olds.iter().filter(|(_, path)| holds_note(path)).collect();
-            if let [(name, path)] = notes[..] {
-                let name = name.clone();
-                restore(note, path, swap)?;
-                olds.retain(|(old, _)| old != &name);
-            }
-        }
-        Record::None => {}
     }
-    for path in discardable {
-        if path.is_dir() {
-            discard_old(note, &path);
+    clean_swap(note, swap);
+    Ok(())
+}
+
+fn clean_swap(note: &Path, swap: &Path) {
+    let live = swap.join(LIVE_MARKER);
+    if let Ok(meta) = std::fs::symlink_metadata(&live) {
+        if meta.file_type().is_dir() {
+            discard_old(note, &live);
         } else {
+            let _ = std::fs::remove_file(&live);
+        }
+    }
+    let Ok(entries) = std::fs::read_dir(swap) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let path = entry.path();
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if ["old-", "stale-", "new-", "displaced"]
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+        {
+            if kind.is_dir() {
+                discard_old(note, &path);
+            } else {
+                let _ = std::fs::remove_file(&path);
+            }
+        } else if kind.is_file() && name.starts_with(".tmp") {
             let _ = std::fs::remove_file(&path);
         }
     }
     let _ = std::fs::remove_dir(swap);
-    Ok(())
 }
 
 /// A token unique to one publication of a note: the task, the time, this process
@@ -1382,41 +1260,34 @@ struct LiveRecord {
 /// What a note's swap folder records about a replacement in progress.
 enum Record {
     None,
-    /// The copy that holds the note while it is moved aside, and the publication
-    /// of the note that replaces it (unknown in a record of an earlier build).
+    /// The copy that holds the note while it is moved aside.
     Names {
         copy: String,
-        publication: Option<String>,
     },
-    /// A record that exists but cannot be trusted: nothing may be decided from it.
-    Damaged(String),
+    /// A record that exists but cannot be trusted.
+    Damaged,
 }
 
 fn read_record(swap: &Path) -> Record {
     let path = swap.join(LIVE_MARKER);
     let metadata = match std::fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Record::None,
-        Err(error) => return Record::Damaged(error.to_string()),
+        Err(_) => return Record::Damaged,
         Ok(metadata) => metadata,
     };
     if !metadata.file_type().is_file() || metadata.len() > 1024 {
-        return Record::Damaged(path.display().to_string());
+        return Record::Damaged;
     }
-    let text = match std::fs::read(&path).map(String::from_utf8) {
-        Ok(Ok(text)) => text,
-        Ok(Err(_)) => return Record::Damaged(path.display().to_string()),
-        Err(error) => return Record::Damaged(error.to_string()),
+    let Ok(Ok(text)) = std::fs::read(&path).map(String::from_utf8) else {
+        return Record::Damaged;
     };
     if let Ok(record) = serde_json::from_str::<LiveRecord>(&text) {
         let valid = |id: &Option<String>| id.as_deref().is_none_or(valid_placed);
         return if is_copy_name(&record.copy) && valid(&record.placed) && valid(&record.publication)
         {
-            Record::Names {
-                copy: record.copy,
-                publication: record.publication,
-            }
+            Record::Names { copy: record.copy }
         } else {
-            Record::Damaged(path.display().to_string())
+            Record::Damaged
         };
     }
     // An earlier build wrote the copy's name alone; one line ending is allowed.
@@ -1424,10 +1295,9 @@ fn read_record(swap: &Path) -> Record {
     if is_copy_name(name) {
         Record::Names {
             copy: name.to_owned(),
-            publication: None,
         }
     } else {
-        Record::Damaged(path.display().to_string())
+        Record::Damaged
     }
 }
 
@@ -1481,30 +1351,6 @@ fn restore(note: &Path, copy: &Path, swap: &Path) -> Result<()> {
     sync_dir(&note_parent(note)?)
 }
 
-/// Copies kept beside a note for the person to look at: copies from before a
-/// replacement that could not be confirmed stale, folders moved aside from the
-/// note's place, and replaced notes that could not be deleted.
-pub fn kept_copies(note_dir: &Path) -> Vec<PathBuf> {
-    let Ok(swap) = resolve_note(note_dir).and_then(|note| swap_dir(&note)) else {
-        return Vec::new();
-    };
-    let Ok(entries) = std::fs::read_dir(&swap) else {
-        return Vec::new();
-    };
-    let mut copies: Vec<PathBuf> = entries
-        .flatten()
-        .filter(|entry| {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            ["old-", "displaced", "stale-"]
-                .iter()
-                .any(|prefix| name.starts_with(prefix))
-        })
-        .map(|entry| entry.path())
-        .collect();
-    copies.sort();
-    copies
-}
-
 /// `<dir>/<base>`, or `<base>-2`, … — the first that does not exist.
 fn unused_name(dir: &Path, base: &str) -> PathBuf {
     (1..)
@@ -1527,20 +1373,7 @@ pub fn prepare_note(note_dir: &Path) -> Result<()> {
     }
     let _lock = lock_note(note_dir)?;
     recover_locked(note_dir)?;
-    let at_limit = || -> Result<()> {
-        if stuck_olds(note_dir)?.len() >= MAX_KEPT_COPIES {
-            return Err(crate::outcome::CopiesKept {
-                swap: swap_dir(note_dir)?,
-            }
-            .into());
-        }
-        Ok(())
-    };
-    at_limit()?;
     flatten_tolerant(note_dir)?;
-    // Taking an older app's later version keeps the flat note as a copy, which
-    // may reach the limit: the task stops before its work, as it would have.
-    at_limit()?;
     // The publication takes an older app's lock left in the note: one it cannot
     // open stops the task now, before its work, not after. One that is held is
     // waited for then.
@@ -1567,9 +1400,7 @@ pub fn prepare_note(note_dir: &Path) -> Result<()> {
 /// leaves the course as it was or flat; running it again finishes the job.
 ///
 /// A flat note into which an older app saved a newer version since is flattened the
-/// same way: that version becomes the note, the person's files come along, and the
-/// flat note as this app showed it is kept beside it, among the note's copies
-/// (`displaced-before-older-app`).
+/// same way: that version becomes the note, and the person's files come along.
 /// Returns the flat note's manifest, or `None` when the folder needed neither.
 pub fn flatten_legacy(note_dir: &Path) -> Result<Option<Manifest>> {
     let note_dir = &resolve_note(note_dir)?;
@@ -1591,29 +1422,18 @@ fn flatten_tolerant(note: &Path) -> Result<()> {
 }
 
 fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
-    // A flat note an older app saved a newer version into after this app flattened
-    // it: that version becomes the note, and the flat note is kept beside it.
     let resaved = !is_legacy(note);
     if resaved && !resaved_by_older_app(note) {
         return Ok(None);
     }
-    // The older app holds this lock for its whole publication of a version: one
-    // that started first finishes before the course is read, and one that starts
-    // meanwhile fails to take it and stops, its paid work kept, instead of
-    // landing in the course this replaces.
     let older_app = take_legacy_lock(note)?;
     let flat = if resaved { note_manifest(note)? } else { None };
     let (version, mut manifest, passed_over) = current_version(note)?;
     let swap = swap_dir(note)?;
     std::fs::create_dir_all(&swap).map_err(|error| disk_full(error.into()))?;
     let staging = swap.join("new-flatten");
-    // The flat note as this app showed it, while it is copied.
-    let kept_staging = swap.join("new-flatten-kept");
     let publication = new_publication("flatten");
     remove_tree(&staging)?;
-    remove_tree(&kept_staging)?;
-    // What the older app wrote, which is not the flat note's: its versions, the
-    // pointer, its lock and task progress, and exports made from its versions.
     let versions = note.join("versions");
     let legacy_part = |relative: &str| {
         let mut parts = relative.split('/');
@@ -1656,15 +1476,8 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
             }
         }
         if resaved {
-            // The person's files come along; the flat note's own stay with its copy.
+            // The person's files come along into the flattened note.
             carry_over(note, flat.as_ref(), &staging, &legacy_part, false)?;
-            for (relative, kind) in walk(note)? {
-                if !legacy_part(&relative) {
-                    copy_entry(&note.join(&relative), &kept_staging.join(&relative), kind)?;
-                }
-            }
-            std::fs::create_dir_all(&kept_staging)?;
-            sync_tree_dirs(&kept_staging)?;
         }
         // Anything else a person put in the course folder.
         for entry in std::fs::read_dir(note)?.filter(|_| !resaved) {
@@ -1753,13 +1566,9 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
     if let Err(error) = built {
         if !simulated_crash(&error) {
             let _ = remove_tree(&staging);
-            let _ = remove_tree(&kept_staging);
         }
         return Err(disk_full(error));
     }
-    // The flat note carries the lock too, held across the swap: the older app's
-    // path to it then reaches this held lock, not a free one. Taken before the
-    // copy is kept, so a failure here leaves no copy behind.
     let locked = fail_point(FailPoint::Locking)
         .and_then(|()| crate::runtime::lock_file(&staging.join(LEGACY_PUBLISH_LOCK)));
     let flat_lock = match locked {
@@ -1767,63 +1576,14 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
         Err(error) => {
             if !simulated_crash(&error) {
                 let _ = remove_tree(&staging);
-                let _ = remove_tree(&kept_staging);
             }
             return Err(error);
         }
     };
-    // Kept before the swap: a crash after it must not lose the flat note. A crash
-    // before it leaves a second copy at worst.
-    let kept = if resaved {
-        let kept = unused_name(&swap, OLDER_APP_COPY);
-        let placed = std::fs::rename(&kept_staging, &kept)
-            .map_err(anyhow::Error::from)
-            .and_then(|()| fail_point(FailPoint::KeptPlaced))
-            .and_then(|()| sync_dir(&swap));
-        if let Err(error) = placed {
-            // Nothing was replaced: the note still holds the flat note, and a retry
-            // makes the copy again. The lock open in the staged note goes first:
-            // Windows cannot delete a file that is open.
-            drop(flat_lock);
-            if !simulated_crash(&error) {
-                let _ = remove_tree(&kept);
-                let _ = remove_tree(&kept_staging);
-                let _ = remove_tree(&staging);
-            }
-            return Err(error);
-        }
-        Some(kept)
-    } else {
-        None
-    };
-    // Windows refuses to rename a folder with a file open inside it. An older app
-    // that takes the lock in the gap before the rename holds a file open in the
-    // note, so the rename is refused and nothing changes (see `publish`).
     #[cfg(windows)]
     drop((older_app, flat_lock));
-    if let Err(error) = swap_in(note, &staging, "flatten", &publication) {
-        // Before the new note was in place, the note is as it was (or recovery puts
-        // it back) and still holds the flat note: its copy goes. Once the new note
-        // is in place, recovery deletes the replaced note, and the copy is the
-        // only flat note left: it stays. Only a note in place that is known not to
-        // be the new one lets the copy go; when that cannot be read, a second copy
-        // is the safe mistake.
-        let not_placed = fail_point(FailPoint::ReadingPlaced)
-            .and_then(|()| note_manifest(note))
-            .is_ok_and(|in_place| {
-                in_place.is_some_and(|in_place| in_place.publication != publication)
-            });
-        if !simulated_crash(&error)
-            && not_placed
-            && let Some(kept) = &kept
-        {
-            let _ = remove_tree(kept);
-        }
-        return Err(error);
-    }
-    // Not part of the flat note: removed while still held, then let go.
+    swap_in(note, &staging, "flatten", &publication)?;
     let _ = std::fs::remove_file(note.join(LEGACY_PUBLISH_LOCK));
-    // Already let go on Windows, above.
     #[cfg(not(windows))]
     drop((older_app, flat_lock));
     Ok(Some(manifest))
@@ -1831,27 +1591,6 @@ fn flatten_locked(note: &Path) -> Result<Option<Manifest>> {
 
 /// The lock an older app holds in a course while it publishes a version.
 const LEGACY_PUBLISH_LOCK: &str = ".publish.lock";
-
-/// The name of the copy a flatten keeps of a flat note whose place an older
-/// app's later version took (then `-2`, … when taken).
-const OLDER_APP_COPY: &str = "displaced-before-older-app";
-
-/// Whether a kept copy is a flat note an older app's later version replaced,
-/// rather than one an interrupted replacement left.
-pub fn is_older_app_copy(copy: &Path) -> bool {
-    copy.file_name()
-        .is_some_and(|name| name.to_string_lossy().starts_with(OLDER_APP_COPY))
-}
-
-/// Says that an older app saved the note again and where the previous note is
-/// kept, in `lang`.
-pub fn older_app_copy_message(swap: &Path, lang: crate::i18n::Lang) -> String {
-    crate::i18n::t_for(
-        "旧版应用之后又保存过这份笔记：它保存的较新结果现在是这份笔记，之前的笔记作为副本保留在 {}",
-        lang,
-    )
-    .replacen("{}", &swap.display().to_string(), 1)
-}
 
 /// Takes the lock an older app holds while it publishes a version, waiting for a
 /// publication under way to finish. A lock that stays held is told apart from one
@@ -2106,10 +1845,6 @@ enum FailPoint {
     Staged,
     /// Before a flatten takes the lock the flat note carries.
     Locking,
-    /// Once a flatten has placed its copy of the flat note.
-    KeptPlaced,
-    /// When a failed flatten reads which note is in place.
-    ReadingPlaced,
     BetweenRenames,
     AfterRenames,
     BeforeDeletingOld,

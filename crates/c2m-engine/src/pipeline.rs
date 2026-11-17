@@ -126,6 +126,11 @@ pub async fn run(cfg: &PipelineConfig, models: ModelDownload<'_>) -> Result<()> 
     let request = execution::Request {
         schema: execution::REQUEST_SCHEMA,
         operation: execution::Operation::Generate,
+        run_mode: if cfg.resume {
+            execution::RunMode::Resume
+        } else {
+            execution::RunMode::Fresh
+        },
         work_dir: artifact::work_dir(&course_dir, &task_id)?,
         task_id,
         course_id,
@@ -200,27 +205,6 @@ pub(crate) async fn run_task(
     }
     // Held until the task ends: a second task for this note stops before it pays.
     let _claim = artifact::claim_note(&target.course_dir)?;
-    if let execution::Operation::Reprocess {
-        note_dir,
-        base_task_id,
-        ..
-    } = &request.operation
-    {
-        // A repair that already replaced the note is done: restarting it after a
-        // crash sends nothing, whatever its saved progress says.
-        let (note, task_id) = (note_dir.clone(), request.task_id.clone());
-        if let Some(manifest) = blocking(move || artifact::published_by(&note, &task_id)).await? {
-            let document = read_document(note_dir, &manifest)?;
-            emit_done(&target, &manifest, &[], &document.sections, started);
-            return Ok(());
-        }
-        let note = note_dir.clone();
-        let current = blocking(move || artifact::note_manifest(&note)).await?;
-        anyhow::ensure!(
-            current.is_some_and(|manifest| &manifest.task_id == base_task_id),
-            artifact::NoteChanged
-        );
-    }
     let preverified_local_digest = match &caller {
         Caller::Cli(cli) if cli.probed.is_none() => Some(cli.meta.id.clone()),
         _ => None,
@@ -241,6 +225,7 @@ pub(crate) async fn run_task(
         &binding,
         former,
         parent.is_some(),
+        request.run_mode,
         ControlSource {
             control_path: request.control_path.clone(),
             service_versions: request.service_versions.clone(),
@@ -545,12 +530,17 @@ impl Task<'_> {
             cfg, job, target, ..
         } = *self;
         job.control.check()?;
-        let (note, task_id) = (target.course_dir.clone(), target.task_id.clone());
-        if let Some(manifest) = blocking(move || artifact::published_by(&note, &task_id)).await? {
-            // This task already replaced the note: a restart sends nothing again.
-            let document = read_document(&target.course_dir, &manifest)?;
-            emit_done(target, &manifest, &[], &document.sections, self.started);
-            return Ok(());
+        if matches!(credentials, Credentials::Cli(_)) && cfg.resume {
+            let (note, task_id) = (target.course_dir.clone(), target.task_id.clone());
+            if let Some(manifest) =
+                blocking(move || artifact::published_by(&note, &task_id)).await?
+                && !manifest.partial
+            {
+                // This CLI task already published a complete note: `--resume` sends nothing again.
+                let document = read_document(&target.course_dir, &manifest)?;
+                emit_done(target, &manifest, &[], &document.sections, self.started);
+                return Ok(());
+            }
         }
         if cfg.llm.uses_service() {
             crate::llm::validate(&cfg.llm)?;
@@ -694,7 +684,7 @@ impl Task<'_> {
             !has(Component::Translation) || translation_target.is_some(),
             tr!("补做翻译需要选择翻译语言 / Choose a translation language to redo the translation")
         );
-        if let Some(prior) = prior_work {
+        if let Some(prior) = prior_work.filter(|prior| *prior != job.dir) {
             self.import_prior_work(request, &base, components, prior)
                 .await?;
         }
@@ -885,56 +875,6 @@ impl Task<'_> {
                 .iter()
                 .map(|&component| part(&this_run, component))
                 .find(|outcome| outcome.status != Status::Succeeded);
-            // A retry of a partial note's unfinished parts that finished nothing
-            // more leaves the note as it was: still partial, for the same reasons,
-            // with the same retry. It reports that note, unchanged, instead of an
-            // error. A request left without a known result still stops the task
-            // for the person's decision.
-            if base.partial
-                && !job.control.has_unresolved()
-                && unfinished
-                    .as_ref()
-                    .is_none_or(|outcome| outcome.kind != Some(artifact::FailureKind::Uncertain))
-            {
-                tracing::warn!(
-                    "补做没有完成更多内容，笔记未改动 / Nothing more was finished; the note is unchanged"
-                );
-                // The note's record, with each part retried now saying why it is
-                // still unfinished this time (a rejected key, a rate limit).
-                // Only the cause is this run's: the note's status and counts are
-                // what it holds, even when this run could not read back answers
-                // it had and finished none.
-                let mut reported = base.outcomes.clone();
-                for &component in &redone {
-                    let now = part(&this_run, component);
-                    let note = match component {
-                        Component::Proofreading => &mut reported.proofreading,
-                        Component::Translation => &mut reported.translation,
-                        _ => &mut reported.summary,
-                    };
-                    if now.status != Status::Succeeded
-                        && now.status != Status::NotRequested
-                        && note.status != Status::Succeeded
-                    {
-                        note.kind = now.kind;
-                        note.first_failure = now.first_failure;
-                        note.message = retried_cause(note.message.as_deref(), now.message);
-                    }
-                }
-                progress::emit(&progress::Event::Done(Box::new(progress::Done {
-                    task_id: request.task_id.clone(),
-                    course_id: base.course_id.clone(),
-                    out_dir: base_dir.to_path_buf(),
-                    manifest: Some(base_dir.join("manifest.json")),
-                    title: base.title.clone(),
-                    slides: base.frames.len(),
-                    outputs: base.outputs.iter().map(PathBuf::from).collect(),
-                    partial: Some(true),
-                    outcomes: Some(reported),
-                    ..done_counts(&document.sections, self.started)
-                })));
-                return Ok(());
-            }
             let message = unfinished
                 .as_ref()
                 .and_then(|outcome| outcome.message.clone())
@@ -1110,7 +1050,7 @@ impl Task<'_> {
         );
         let ledger_dir = job.dir.join("requests");
         std::fs::create_dir_all(&ledger_dir)?;
-        for mut receipt in crate::dispatch::receipts(prior)? {
+        for receipt in crate::dispatch::receipts(prior)? {
             // Translation is redone with proofreading as well as on its own.
             let needed = Component::parse(&receipt.purpose).is_some_and(|c| {
                 c.is_ai()
@@ -1120,19 +1060,11 @@ impl Task<'_> {
                             && self.cfg.llm.translation_target().is_some()))
             });
             if needed
-                && imports_prior_receipt(&receipt, request.service_versions.get("llm"))
+                && receipt.state == crate::dispatch::State::Completed
                 && execution::valid_id(&receipt.stable_id)
             {
                 let destination = ledger_dir.join(format!("{}.json", receipt.stable_id));
                 if !destination.exists() {
-                    // This new task explicitly requests another attempt at selected
-                    // failed components. Persist authorization only while importing;
-                    // restarting this task must never refresh a consumed authorization.
-                    receipt.retry_authorized = matches!(
-                        receipt.state,
-                        crate::dispatch::State::Failed | crate::dispatch::State::Rejected
-                    )
-                    .then(|| receipt.request_id.clone());
                     crate::fsio::atomic_write(&destination, &serde_json::to_vec_pretty(&receipt)?)?;
                 }
             }
@@ -1609,22 +1541,6 @@ fn build_sections(
     }
 }
 
-/// Whether a repair takes a request record of the work it repairs. A finished
-/// request comes along whichever version of the service answered it: a repair runs
-/// with the current service, and the same request to the same endpoint replays its
-/// answer instead of being paid for again (see the ledger's earlier versions). An
-/// unfinished one belongs to the version it was made with, whose retry it
-/// authorizes.
-fn imports_prior_receipt(receipt: &crate::dispatch::Receipt, current: Option<&String>) -> bool {
-    receipt.state == crate::dispatch::State::Completed
-        || current.map_or(
-            receipt
-                .service_version
-                .starts_with(crate::dispatch::SNAPSHOT_PREFIX),
-            |version| version == &receipt.service_version,
-        )
-}
-
 /// 读取转写缓存；全空的缓存是上次失败运行的残留（端点持续返回空文本却
 /// 无报错），丢弃并重新识别，而不是用"所选字幕没有可读文字"误导用户。
 fn cached_transcript(cache_path: &Path) -> Result<Option<TranscriptCache>> {
@@ -1643,29 +1559,6 @@ fn cached_transcript(cache_path: &Path) -> Result<Option<TranscriptCache>> {
     );
     let _ = std::fs::remove_file(cache_path);
     Ok(None)
-}
-
-/// A batch report's message: nothing when every batch worked, else `base` and the
-/// first error.
-/// The record of a part a retry left unfinished: the note's own words for what
-/// is unfinished (its counts), with this run's first error, when it names one;
-/// this run's words otherwise.
-fn retried_cause(note: Option<&str>, now: Option<String>) -> Option<String> {
-    let separator = tr!("{}；首个错误：{}", "", "");
-    let first_error = now
-        .as_deref()
-        .and_then(|now| now.split_once(separator.as_str()))
-        .map(|(_, first)| first.to_owned());
-    match (note, first_error) {
-        (Some(note), Some(first)) => {
-            let head = note
-                .split_once(separator.as_str())
-                .map_or(note, |(head, _)| head);
-            Some(tr!("{}；首个错误：{}", head, first))
-        }
-        (note, None) => now.or(note.map(str::to_owned)),
-        (None, Some(_)) => now,
-    }
 }
 
 fn report_message(base: String, report: &crate::llm::PolishReport) -> Option<String> {
@@ -1758,47 +1651,6 @@ fn should_delete_media(
 #[cfg(test)]
 mod tests {
     use super::{run, should_delete_media};
-
-    /// A repair after the AI service was edited (a new key or name) takes the
-    /// finished requests of the note it repairs, so their answers are replayed rather
-    /// than paid for again; an unfinished one stays with its own version.
-    #[test]
-    fn a_repair_takes_finished_requests_of_another_service_version() {
-        use crate::dispatch::{Receipt, State};
-        let receipt = |state: State| Receipt {
-            schema: 1,
-            stable_id: "id".into(),
-            request_id: "id.1".into(),
-            purpose: "proofreading".into(),
-            description: String::new(),
-            service_version: "version-1".into(),
-            attempt: 1,
-            state,
-            http_status: None,
-            response: None,
-            message: None,
-            unsupported_response_format: false,
-            refused_parameter: None,
-            repeats: false,
-            unusable: false,
-            detail: None,
-            retry_authorized: None,
-        };
-        let current = "version-2".to_string();
-        assert!(super::imports_prior_receipt(
-            &receipt(State::Completed),
-            Some(&current)
-        ));
-        assert!(!super::imports_prior_receipt(
-            &receipt(State::Failed),
-            Some(&current)
-        ));
-        let same = "version-1".to_string();
-        assert!(super::imports_prior_receipt(
-            &receipt(State::Failed),
-            Some(&same)
-        ));
-    }
 
     #[test]
     fn batch_tasks_discover_subtitles_at_runtime_only_without_confirmed_text() {

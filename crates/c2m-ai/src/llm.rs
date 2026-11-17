@@ -504,7 +504,9 @@ where
             }
             EmptyAnswer::GiveUp => (
                 0,
-                Some(unfinished(anyhow::anyhow!(output_limit_message()))),
+                Some(unfinished(anyhow::Error::new(crate::dispatch::Repeats(
+                    output_limit_message().into(),
+                )))),
                 sent,
             ),
             EmptyAnswer::Halve => {
@@ -717,8 +719,20 @@ fn run_batches(
             let image = image_path
                 .as_deref()
                 .and_then(|path| section_image_b64(path, &batches.warned));
-            let (done, unfinished, sent) =
+            let (mut done, mut unfinished, mut sent) =
                 batches.send(image.as_deref(), &mut chunk, 0, false, false);
+            // If an earlier run saved `repeats` receipts without any completed
+            // full-budget/split escalation, the first pass probed the saved tree
+            // (`!sent`); ask cleanly now.
+            if done == 0
+                && !sent
+                && unfinished
+                    .as_ref()
+                    .is_some_and(|u| u.error.is::<crate::dispatch::Repeats>())
+            {
+                (done, unfinished, sent) =
+                    batches.send(image.as_deref(), &mut chunk, 0, false, false);
+            }
             if sent {
                 pb.advance(1);
             } else {
@@ -2722,54 +2736,40 @@ mod tests {
     }
 
     #[test]
-    fn only_the_persons_retry_sends_an_answer_that_ran_out_again() {
-        for authorize in [true, false] {
-            let healthy = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let answers = healthy.clone();
-            let (url, bodies) = scripted_service(move |_, items| {
-                if answers.load(std::sync::atomic::Ordering::SeqCst) {
-                    streamed(&proofread(items), "stop")
-                } else {
-                    streamed("", "length")
-                }
-            });
-            let settings = LlmSettings {
-                auto_retry: false,
-                ..polish_settings(url, 1)
-            };
-            let work = tempfile::tempdir().unwrap();
-            let run = || {
-                let control =
-                    crate::dispatch::TaskControl::open(work.path(), Default::default()).unwrap();
-                let mut sections = one_section(&["一", "二", "三", "四"]);
-                polish_sections_report(&mut sections, Path::new(""), &settings, &control)
-                    .unwrap()
-                    .succeeded
-            };
-            assert_eq!(run(), 0);
-            // The batch, its full budget, then two rounds of halves.
-            assert_eq!(bodies.lock().unwrap().len(), 8);
-            if authorize {
-                // As a retry from the task page, reader or library imports them.
-                for entry in std::fs::read_dir(work.path().join("requests")).unwrap() {
-                    let path = entry.unwrap().path();
-                    let mut receipt: serde_json::Value =
-                        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-                    if receipt["state"] == "failed" {
-                        receipt["retry_authorized"] = receipt["request_id"].clone();
-                    }
-                    std::fs::write(&path, serde_json::to_vec(&receipt).unwrap()).unwrap();
-                }
-            }
-            healthy.store(true, std::sync::atomic::Ordering::SeqCst);
-            let succeeded = run();
-            let sent = bodies.lock().unwrap().len() - 8;
-            if authorize {
-                assert_eq!((succeeded, sent), (4, 1), "the person's retry is sent");
+    fn only_a_new_run_sends_an_answer_that_ran_out_again() {
+        let healthy = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let answers = healthy.clone();
+        let (url, bodies) = scripted_service(move |_, items| {
+            if answers.load(std::sync::atomic::Ordering::SeqCst) {
+                streamed(&proofread(items), "stop")
             } else {
-                assert_eq!((succeeded, sent), (0, 0), "nothing is sent unasked");
+                streamed("", "length")
             }
-        }
+        });
+        let settings = LlmSettings {
+            auto_retry: false,
+            ..polish_settings(url, 1)
+        };
+        let work = tempfile::tempdir().unwrap();
+        let control = crate::dispatch::TaskControl::open(work.path(), Default::default()).unwrap();
+        let run_with = |control: &crate::dispatch::TaskControl| {
+            let mut sections = one_section(&["一", "二", "三", "四"]);
+            polish_sections_report(&mut sections, Path::new(""), &settings, control)
+                .unwrap()
+                .succeeded
+        };
+        assert_eq!(run_with(&control), 0);
+        // The batch, its full budget, then two rounds of halves.
+        assert_eq!(bodies.lock().unwrap().len(), 8);
+        healthy.store(true, std::sync::atomic::Ordering::SeqCst);
+        // Within the same run (`control`), `repeats` short-circuits without sending again.
+        assert_eq!(run_with(&control), 0);
+        assert_eq!(bodies.lock().unwrap().len(), 8);
+        // A new run (user-initiated retry) opens a fresh TaskControl and sends the batch cleanly.
+        let retry_control =
+            crate::dispatch::TaskControl::open(work.path(), Default::default()).unwrap();
+        assert_eq!(run_with(&retry_control), 4);
+        assert_eq!(bodies.lock().unwrap().len(), 9);
     }
 
     #[test]
@@ -2951,13 +2951,9 @@ mod tests {
     }
 
     #[test]
-    fn a_free_service_resends_what_an_earlier_run_left_unresolved() {
-        for (provider, resent) in [
-            (LlmProvider::Ollama, true),
-            (LlmProvider::OpenAiCompatible, false),
-        ] {
+    fn a_new_run_resends_what_an_earlier_run_left_in_flight() {
+        for provider in [LlmProvider::Ollama, LlmProvider::OpenAiCompatible] {
             let (url, bodies) = scripted_service(|_, items| streamed(&proofread(items), "stop"));
-            // Automatic retries on, as by default.
             let settings = LlmSettings {
                 provider,
                 ..polish_settings(url, 1)
@@ -2982,8 +2978,8 @@ mod tests {
             let mut sections = one_section(&["一"]);
             let report =
                 polish_sections_report(&mut sections, Path::new(""), &settings, &control).unwrap();
-            assert_eq!(report.succeeded == 1, resent, "{provider:?}");
-            assert_eq!(bodies.lock().unwrap().len(), 1 + usize::from(resent));
+            assert_eq!(report.succeeded, 1, "{provider:?}");
+            assert_eq!(bodies.lock().unwrap().len(), 2);
         }
     }
 

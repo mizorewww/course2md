@@ -1424,7 +1424,6 @@ mod tests {
             &path,
             &serde_json::to_vec(&crate::dispatch::Control {
                 intent: crate::dispatch::Intent::Cancel,
-                ..Default::default()
             })
             .unwrap(),
         )

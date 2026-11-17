@@ -189,43 +189,14 @@ pub enum ErrorCode {
     RateLimit,
     /// A service failed to complete the request.
     Service,
-    /// A request was sent but its result is unknown.
+    /// Legacy code retained so historical records deserialize cleanly.
     Uncertain,
-    /// The result did less than the saved note in a part it tried; the note was kept.
-    NoteKept,
     /// Another writer has the note. Another task: nothing was done. An older app
     /// saving into it, met when publishing: the task's work is kept in its work
     /// folder, and running the task again reuses it. The note is unchanged.
     NoteBusy,
-    /// A replacement of the note stopped and cannot be finished on its own;
-    /// `path` names the folder to look at. Nothing was changed.
-    NoteRecoveryBlocked,
-    /// Copies kept beside the note reached the limit; `path` names their folder.
-    /// New tasks for the note stop until the person sorts them out.
-    NoteCopiesKept,
     #[default]
     Other,
-}
-
-/// The folder a `note_recovery_blocked` or `note_copies_kept` error names;
-/// `None` for any other error.
-pub fn blocked_path(error: &anyhow::Error) -> Option<PathBuf> {
-    error
-        .downcast_ref::<crate::outcome::RecoveryBlocked>()
-        .map(|blocked| blocked.swap.clone())
-        .or_else(|| {
-            error
-                .downcast_ref::<crate::outcome::CopiesKept>()
-                .map(|kept| kept.swap.clone())
-        })
-}
-
-/// The parts a `note_kept` error names; empty for any other error.
-pub fn kept_parts(error: &anyhow::Error) -> Vec<crate::outcome::KeptPart> {
-    error
-        .downcast_ref::<crate::outcome::NoteKept>()
-        .map(|kept| kept.parts.clone())
-        .unwrap_or_default()
 }
 
 impl ErrorCode {
@@ -253,20 +224,8 @@ impl ErrorCode {
         {
             return Self::InvalidConfiguration;
         }
-        if error.downcast_ref::<crate::outcome::NoteKept>().is_some() {
-            return Self::NoteKept;
-        }
         if error.downcast_ref::<crate::outcome::NoteBusy>().is_some() {
             return Self::NoteBusy;
-        }
-        if error
-            .downcast_ref::<crate::outcome::RecoveryBlocked>()
-            .is_some()
-        {
-            return Self::NoteRecoveryBlocked;
-        }
-        if error.downcast_ref::<crate::outcome::CopiesKept>().is_some() {
-            return Self::NoteCopiesKept;
         }
         match error
             .downcast_ref::<crate::outcome::Failure>()
@@ -371,14 +330,6 @@ pub enum Event {
         /// Stable for consumers; the message is for people and may change.
         #[serde(default)]
         code: ErrorCode,
-        /// With `note_kept`: the parts the result did less of, and why, so a
-        /// reader shows the message in its own language.
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        parts: Vec<crate::outcome::KeptPart>,
-        /// With `note_recovery_blocked` or `note_copies_kept`: the note's swap
-        /// folder, to look at.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        path: Option<PathBuf>,
     },
     Done(Box<Done>),
     ModelReady {

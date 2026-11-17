@@ -22,6 +22,7 @@ fn request(source: &str, source_id: &str, config: ConfigFile) -> execution::Requ
     execution::Request {
         schema: execution::REQUEST_SCHEMA,
         operation: execution::Operation::Generate,
+        run_mode: execution::RunMode::Resume,
         task_id: "task-1".into(),
         course_id: "course-1".into(),
         version_id: Some("version-1".into()),

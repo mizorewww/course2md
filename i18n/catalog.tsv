@@ -486,7 +486,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 删除此服务	删除此服务	Delete this service	刪除此服務	このサービスを削除する
 刷新二维码	刷新二维码	Refresh QR code	重新整理 QR 碼	QRコードを更新
 刷新模型列表	刷新模型列表	Refresh model list	重新整理模型清單	モデル一覧を更新
-前一步请求结果尚不确定；已保留进度，没有继续发送 / A previous request is unresolved; progress retained	前一步请求结果尚不确定；已保留进度，没有继续发送	A previous request is unresolved; progress retained	前一步請求結果尚不確定；已保留進度，沒有繼續傳送	前回のリクエストの結果はまだ確定していません。進行状況は保持され、送信は続行されません。
 前往「{}」	前往「{}」	Go to “{}”	前往「{}」	「{}」に移動します
 前往笔记库	前往笔记库	Go to note library	前往筆記庫	ノートライブラリに移動
 副本已核验，保存位置尚未切换	副本已核验，保存位置尚未切换	The copy has been verified, but the save location has not been switched.	副本已核驗，儲存位置尚未切換	コピーは確認されましたが、保存場所は切り替えられていません。
@@ -1143,7 +1142,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 服务返回的校对结构无效 / Invalid proofreading structure	服务返回的校对结构无效	Invalid proofreading structure	服務傳回的校對結構無效	サービスから返された校正の構造が無効です
 服务返回的模型列表过大	服务返回的模型列表过大	The list of models returned by the service is too large	服務傳回的模型列表過大	サービスによって返されるモデルのリストが大きすぎます
 服务返回空响应；请确认模型可用 / The service returned an empty response; make sure the model works	服务返回空响应；请确认模型可用	The service returned an empty response; make sure the model works	服務傳回空回應；請確認模型可用	サービスは空の応答を返しました。モデルが利用可能であることを確認してください
-服务返回错误，无法确认是否已处理。再次提交可能产生额外费用 / Service processing is uncertain	服务返回错误，无法确认是否已处理。再次提交可能产生额外费用	Service processing is uncertain	服務傳回錯誤，無法確認是否已處理。再次提交可能產生額外費用	サービスがエラーを返したため、処理されたかどうかを確認できません。再送信すると追加料金が発生する場合があります
 服务返回错误，未收到确定结果，测试可能已产生费用	服务返回错误，未收到确定结果，测试可能已产生费用	The service returned an error and no definite result was received. The test may have incurred charges.	服務傳回錯誤，未收到確定結果，測試可能已產生費用	サービスがエラーを返し、確定した結果を受信できませんでした。テストで料金が発生した可能性があります。
 服务选择尚未保存：{}	服务选择尚未保存：{}	Service selection not saved yet: {}	服務選擇尚未儲存：{}	サービスの選択はまだ保存されていません: {}
 服务配置	服务配置	Service configuration	服務設定	サービス設定
@@ -1164,7 +1162,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 未找到字幕。请选择已有字幕，或改用语音识别	未找到字幕。请选择已有字幕，或改用语音识别	No subtitles found. Select existing subtitles, or use speech recognition.	找不到字幕。請選擇現有字幕，或改用語音辨識	字幕が見つかりません。既存の字幕を選択するか、代わりに音声認識を使用してください
 未提供 API 密钥。请在向导中输入，或设置环境变量 COURSE2MD_ASR_API_KEY 后重试。 / No API key provided. Enter one in setup, or set COURSE2MD_ASR_API_KEY and retry.	未提供 API 密钥。请在向导中输入，或设置环境变量 COURSE2MD_ASR_API_KEY 后重试。	No API key provided. Enter one in setup, or set COURSE2MD_ASR_API_KEY and retry.	未提供 API 金鑰。請在嚮導中輸入，或設定環境變數 COURSE2MD_ASR_API_KEY 後重試。	API キーが提供されていません。ウィザードに入力するか、環境変数 COURSE2MD_ASR_API_KEY を設定して再試行してください。
 未提取到截图	未提取到截图	No screenshots extracted	未提取到截圖	スクリーンショットを抽出できませんでした
-未收到服务的确定结果。服务可能已处理这部分，再次提交可能产生额外费用 / Service result is uncertain; resending may incur additional charges	未收到服务的确定结果。服务可能已处理这部分，再次提交可能产生额外费用	Service result is uncertain; resending may incur additional charges	未收到服務的確定結果。服務可能已處理這部分，再次提交可能產生額外費用	サービスからの確認は受信されませんでした。サービスはこの部分をすでに処理している可能性があり、再送信には追加料金が発生する可能性があります。
 未收到确定结果，测试可能已产生费用	未收到确定结果，测试可能已产生费用	No definite result was received; the test may have incurred charges	未收到確定結果，測試可能已產生費用	確定した結果を受信できませんでした。テストで料金が発生した可能性があります
 未改动的条目不记 raw	未改动的条目不记 raw	Unmodified entries are not recorded in raw	未改動的條目不記 raw	変更されていないエントリは raw に記録されません
 未检查字幕	未检查字幕	Subtitles not checked	未檢查字幕	字幕未チェック
@@ -1361,7 +1358,6 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 此服务不支持所选用途	此服务不支持所选用途	This service does not support the selected purpose	此服務不支援所選用途	このサービスは選択した用途をサポートしていません
 此服务已删除。请添加新的服务，原任务不会自动恢复外发	此服务已删除。请添加新的服务，原任务不会自动恢复外发	This service has been deleted. Add a new service; the original task will not automatically resume sending.	此服務已刪除。請新增新的服務，原任務不會自動恢復外發	このサービスは削除されました。新しいサービスを追加してください。元のタスクの送信は自動的には再開されません。
 此服务已删除，尚未发送新的请求	此服务已删除，尚未发送新的请求	This service has been deleted and no new requests have been sent yet	此服務已刪除，尚未傳送新的請求	このサービスは削除されており、新しいリクエストはまだ送信されていません
-此服务已删除，没有发送新请求 / Service deleted; no new request sent	此服务已删除，没有发送新请求	Service deleted; no new request sent	此服務已刪除，沒有傳送新請求	このサービスは削除されており、新しいリクエストは送信されていません
 此服务的凭据无法读取，请重新保存 API Key	此服务的凭据无法读取，请重新保存 API Key	The credentials for this service cannot be read. Save the API key again.	此服務的憑證無法讀取，請重新儲存 API Key	このサービスの認証情報を読み取ることができません。API キーを再度保存してください。
 此来源暂不支持读取字幕，可以识别视频声音 / This source does not support reading subtitles yet; you can transcribe the video audio instead	此来源暂不支持读取字幕，可以识别视频声音	This source does not support reading subtitles yet; you can transcribe the video audio instead	此來源暫不支援讀取字幕，可以辨識影片聲音	このソースは現在字幕の読み取りに対応していません。代わりに動画の音声を認識できます。
 此版本不支持 Apple 识别，请改用 GPU 或 CPU 识别 / This build lacks Apple transcription; use GPU or CPU transcription.	此版本不支持 Apple 识别，请改用 GPU 或 CPU 识别	This build lacks Apple transcription; use GPU or CPU transcription.	此版本不支援 Apple 辨識，請改用 GPU 或 CPU 辨識	このバージョンは Apple 認識をサポートしていません。代わりに GPU または CPU 認識を使用してください。
@@ -2176,7 +2172,6 @@ AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not conf
 还会翻译此前未能完成的 1 段	还会翻译此前未能完成的 1 段	The 1 paragraph not translated before is translated too	還會翻譯此前未能完成的 1 段	以前に翻訳できなかった 1 段落も翻訳されます
 还会生成此前未能开始的翻译	还会生成此前未能开始的翻译	The translation that could not start before is made too	還會產生此前未能開始的翻譯	以前に開始できなかった翻訳も作成されます
 此笔记需要更新版本的软件 / This note needs a newer version of course2md	此笔记需要更新版本的软件	This note needs a newer version of course2md	此筆記需要更新版本的軟體	このノートには新しいバージョンの course2md が必要です
-计划补做后笔记已被更改，请重新补做 / The note changed since this repair was planned	计划补做后笔记已被更改，请重新补做	The note changed since this repair was planned	計畫補做後筆記已被更改，請重新補做	やり直しを計画した後にノートが変更されました。もう一度やり直してください
 工作目录不能位于笔记文件夹内 / The work directory must be outside the note folder	工作目录不能位于笔记文件夹内	The work directory must be outside the note folder	工作目錄不能位於筆記資料夾內	作業ディレクトリはノートのフォルダの外に置く必要があります
 补做的笔记与任务不一致 / The repaired note does not match the task	补做的笔记与任务不一致	The repaired note does not match the task	補做的筆記與任務不一致	やり直すノートがタスクと一致しません
 笔记位置无效 / Invalid note location	笔记位置无效	Invalid note location	筆記位置無效	ノートの場所が無効です
@@ -2214,26 +2209,19 @@ AI 翻译结果未确认	AI 翻译结果未确认	AI translation result not conf
 笔记已更新	笔记已更新	Note updated	筆記已更新	ノートを更新しました
 生成日期	生成日期	Generated	產生日期	生成日
 保留当前笔记	保留当前笔记	Keep the current note	保留目前筆記	現在のノートを残す
-这次的结果在这些部分不如现有笔记，现有笔记已保留：{}	这次的结果在这些部分不如现有笔记，现有笔记已保留：{}	This run did less than the saved note in: {}; the saved note was kept	這次的結果在這些部分不如現有筆記，現有筆記已保留：{}	今回の結果は次の部分で既存のノートに及ばないため、既存のノートを残しました：{}
 磁盘空间不足，无法替换笔记；原笔记未改动 / Not enough disk space to replace the note; it is unchanged	磁盘空间不足，无法替换笔记；原笔记未改动	Not enough disk space to replace the note; it is unchanged	磁碟空間不足，無法取代筆記；原筆記未變動	ディスクの空き容量が足りないため、ノートを置き換えられません。ノートは変更されていません
 没有权限替换笔记；原笔记未改动 / No permission to replace the note; it is unchanged	没有权限替换笔记；原笔记未改动	No permission to replace the note; it is unchanged	沒有權限取代筆記；原筆記未變動	ノートを置き換える権限がありません。ノートは変更されていません
 笔记文件夹是一个无法打开的链接：{} / The note folder is a link that cannot be followed: {}	笔记文件夹是一个无法打开的链接：{}	The note folder is a link that cannot be followed: {}	筆記資料夾是一個無法開啟的連結：{}	ノートのフォルダは開けないリンクです：{}
 另一个任务正在处理这份笔记，请等它结束后再试 / Another task is working on this note; try again when it ends	另一个任务正在处理这份笔记，请等它结束后再试	Another task is working on this note; try again when it ends	另一個任務正在處理這份筆記，請等它結束後再試	別のタスクがこのノートを処理しています。終わってからもう一度お試しください
 刚才的尝试没有成功：macOS 仍然不允许 course2md 读取 {} 的数据。	刚才的尝试没有成功：macOS 仍然不允许 course2md 读取 {} 的数据。	That attempt did not work: macOS still does not allow course2md to read {}’s data.	剛才的嘗試沒有成功：macOS 仍然不允許 course2md 讀取 {} 的資料。	今の試行はうまくいきませんでした。macOS はまだ course2md による {} のデータの読み取りを許可していません。
 course2md 不在“应用程序”文件夹中。请先退出 course2md，在访达中把它移到“应用程序”文件夹（这台 Mac 的，或这个磁盘上的），再从那里打开，然后回到这里。	course2md 不在“应用程序”文件夹中。请先退出 course2md，在访达中把它移到“应用程序”文件夹（这台 Mac 的，或这个磁盘上的），再从那里打开，然后回到这里。	course2md is not in an Applications folder. Quit course2md, move it in Finder into an Applications folder (this Mac’s, or one on this drive), open it from there, then come back here.	course2md 不在「應用程式」檔案夾中。請先結束 course2md，在 Finder 中把它移到「應用程式」檔案夾（這台 Mac 的，或這個磁碟上的），再從那裡開啟，然後回到這裡。	course2md が「アプリケーション」フォルダにありません。course2md を終了し、Finder で「アプリケーション」フォルダ（この Mac のもの、またはこのドライブ上のもの）へ移動してからそこで開き、ここに戻ってください。
-这次的结果在这些部分不如现有笔记，现有笔记已保留：{}（{}）	这次的结果在这些部分不如现有笔记，现有笔记已保留：{}（{}）	This run did less than the saved note in: {} ({}); the saved note was kept	這次的結果在這些部分不如現有筆記，現有筆記已保留：{}（{}）	今回の結果は次の部分で既存のノートに及ばないため、既存のノートを残しました：{}（{}）
 磁盘空间不足，无法保存新笔记；原笔记未改动 / Not enough disk space to save the new note; it is unchanged	磁盘空间不足，无法保存新笔记；原笔记未改动	Not enough disk space to save the new note; it is unchanged	磁碟空間不足，無法儲存新筆記；原筆記未變動	ディスクの空き容量が足りないため、新しいノートを保存できません。ノートは変更されていません
 无法打开这份笔记的任务锁：{} / Could not open the note's task lock: {}	无法打开这份笔记的任务锁：{}	Could not open the note's task lock: {}	無法開啟這份筆記的任務鎖：{}	このノートのタスクロックを開けません：{}
-这份笔记上次被替换时中断，无法自动恢复，所有文件都已原样保留。请打开 {}，把其中存有你笔记的 old- 开头的文件夹移到 {} 并改名为 {}，再删除那里的 live 文件，然后重试。	这份笔记上次被替换时中断，无法自动恢复，所有文件都已原样保留。请打开 {}，把其中存有你笔记的 old- 开头的文件夹移到 {} 并改名为 {}，再删除那里的 live 文件，然后重试。	Replacing this note was interrupted and cannot be finished automatically; every file was kept as it was. Open {}, move the folder starting with old- that holds your note to {} and rename it {}, delete the live file there, then try again.	這份筆記上次被取代時中斷，無法自動復原，所有檔案都已原樣保留。請開啟 {}，把其中存有你筆記的 old- 開頭的資料夾移到 {} 並改名為 {}，再刪除那裡的 live 檔案，然後重試。	このノートの置き換えが途中で止まり、自動では元に戻せません。すべてのファイルはそのまま残っています。{} を開き、ノートが入っている old- で始まるフォルダを {} に移して名前を {} に変え、そこにある live ファイルを削除してから、もう一度お試しください。
 无法完成这份笔记的恢复，所有文件都已保留；请检查 {} 的权限和可用空间后重试	无法完成这份笔记的恢复，所有文件都已保留；请检查 {} 的权限和可用空间后重试	Could not finish recovering this note; every file was kept. Check the permissions and free space of {} and try again	無法完成這份筆記的復原，所有檔案都已保留；請檢查 {} 的權限和可用空間後重試	このノートの復元を完了できませんでした。すべてのファイルは残っています。{} の権限と空き容量を確認してから、もう一度お試しください
-笔记旁保留了 {} 份副本，请查看：{}	笔记旁保留了 {} 份副本，请查看：{}	{} copies are kept beside a note; please look at: {}	筆記旁保留了 {} 份副本，請查看：{}	ノートの横にコピーが {} 件残っています。確認してください：{}
 {} 的文件夹里保留了 {} 份副本，无法确认是否还需要，请查看后删除不需要的	{} 的文件夹里保留了 {} 份副本，无法确认是否还需要，请查看后删除不需要的	{} has {} copies kept in its folder; whether they are still needed is not known. Look at them and delete what you do not need	{} 的資料夾裡保留了 {} 份副本，無法確認是否還需要，請查看後刪除不需要的	{} のフォルダーにコピーが {} 件残っています。まだ必要かどうか分かりません。確認して不要なものを削除してください
-旧版应用之后又保存过这份笔记：它保存的较新结果现在是这份笔记，之前的笔记作为副本保留在 {}	旧版应用之后又保存过这份笔记：它保存的较新结果现在是这份笔记，之前的笔记作为副本保留在 {}	An older version of the app saved this note again: its newer result is now the note, and the previous note is kept as a copy in {}	舊版應用程式之後又儲存過這份筆記：它儲存的較新結果現在是這份筆記，之前的筆記作為副本保留在 {}	以前のバージョンのアプリがこのノートを再び保存しました。その新しい結果が現在のノートになり、以前のノートはコピーとして {} に残っています
 旧版应用之后又保存过 1 份笔记：它保存的较新结果现在是这份笔记，之前的笔记作为副本保留在旁边。	旧版应用之后又保存过 1 份笔记：它保存的较新结果现在是这份笔记，之前的笔记作为副本保留在旁边。	An older version of the app saved a note again: its newer result is now the note, and the previous note is kept beside it as a copy.	舊版應用程式之後又儲存過 1 份筆記：它儲存的較新結果現在是這份筆記，之前的筆記作為副本保留在旁邊。	以前のバージョンのアプリがノート 1 件を再び保存しました。その新しい結果が現在のノートになり、以前のノートはコピーとして横に残っています。
 旧版应用之后又保存过 {} 份笔记：它们保存的较新结果现在是这些笔记，之前的笔记作为副本保留在旁边。	旧版应用之后又保存过 {} 份笔记：它们保存的较新结果现在是这些笔记，之前的笔记作为副本保留在旁边。	An older version of the app saved {} notes again: their newer results are now the notes, and the previous notes are kept beside them as copies.	舊版應用程式之後又儲存過 {} 份筆記：它們儲存的較新結果現在是這些筆記，之前的筆記作為副本保留在旁邊。	以前のバージョンのアプリがノート {} 件を再び保存しました。その新しい結果が現在のノートになり、以前のノートはコピーとして横に残っています。
-笔记旁保留了 1 份副本，请查看：{}	笔记旁保留了 1 份副本，请查看：{}	1 copy is kept beside a note; please look at: {}	筆記旁保留了 1 份副本，請查看：{}	ノートの横にコピーが 1 件残っています。確認してください：{}
 打开需要处理的文件夹	打开需要处理的文件夹	Open the folder to sort out	開啟需要處理的資料夾	対応が必要なフォルダを開く
-这份笔记旁保留的副本已达上限，在处理之前，这份笔记的新任务都会停下。请打开 {}，把要留下的副本移出这个文件夹，删除其余的，然后重试；文件夹里只要还有 {} 份或更多副本，新任务就仍会停下。	这份笔记旁保留的副本已达上限，在处理之前，这份笔记的新任务都会停下。请打开 {}，把要留下的副本移出这个文件夹，删除其余的，然后重试；文件夹里只要还有 {} 份或更多副本，新任务就仍会停下。	Too many copies are kept beside this note, so new tasks for it stop until they are sorted out. Open {}, move the copies you want to keep out of that folder, delete the rest, then try again. While {} or more copies stay in it, new tasks keep stopping.	這份筆記旁保留的副本已達上限，在處理之前，這份筆記的新任務都會停下。請開啟 {}，把要留下的副本移出這個資料夾，刪除其餘的，然後重試；資料夾裡只要還有 {} 份或更多副本，新任務就仍會停下。	このノートの横に残っているコピーが上限に達したため、整理するまでこのノートの新しいタスクは止まります。{} を開き、残したいコピーはこのフォルダの外へ移し、残りを削除してから、もう一度お試しください。フォルダにコピーが {} 件以上残っている間は、新しいタスクは止まったままです。
 旧版应用正在保存这份笔记，请等它完成后重试 / An older version of the app is saving this note; try again when it finishes	旧版应用正在保存这份笔记，请等它完成后重试	An older version of the app is saving this note; try again when it finishes	舊版應用程式正在儲存這份筆記，請等它完成後重試	以前のバージョンのアプリがこのノートを保存しています。完了してからもう一度お試しください
 没有权限打开这份笔记的保存锁 {}，请检查这个文件夹的权限后重试 / No permission to open the note's save lock {}; check the folder's permissions and try again	没有权限打开这份笔记的保存锁 {}，请检查这个文件夹的权限后重试	No permission to open the note's save lock {}; check the folder's permissions and try again	沒有權限開啟這份筆記的儲存鎖 {}，請檢查這個資料夾的權限後重試	このノートの保存ロック {} を開く権限がありません。フォルダの権限を確認してから、もう一度お試しください
 无法打开这份笔记的保存锁 {} / Could not open the note's save lock {}	无法打开这份笔记的保存锁 {}	Could not open the note's save lock {}	無法開啟這份筆記的儲存鎖 {}	このノートの保存ロック {} を開けませんでした

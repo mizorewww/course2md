@@ -231,6 +231,7 @@ fn former_settings(provider: LlmProvider, vision: bool, prompt: bool) -> LlmSett
         vision,
         prompt: prompt.then(|| "UX-RULE-42".into()),
         concurrency: 1,
+        auto_retry: false,
         ..Default::default()
     }
 }
@@ -314,19 +315,24 @@ fn receipts_saved_by_2_0_1_are_found_in_every_language() {
                 );
             }
             assert_eq!(receipt_ids(work.path()), [former_id], "{case}");
-
-            // In flight when 2.0.1 stopped: still unresolved, never sent again unasked.
-            // (Ollama is free, so it sends again, as 2.0.1 did.)
-            if provider == LlmProvider::OpenAiCompatible {
-                let work = tempfile::tempdir().unwrap();
-                write_receipt(work.path(), former_id, "sending");
-                i18n::set_lang(Lang::En);
-                let control = TaskControl::open(work.path(), ControlSource::default()).unwrap();
-                assert_eq!(polish(&control).succeeded, 0, "{case}");
-                assert_eq!(receipt_ids(work.path()), [former_id], "{case}");
-                assert_eq!(receipt_state(work.path(), former_id), "uncertain", "{case}");
-            }
         }
+    }
+
+    // In flight when 2.0.1 stopped: a new run matches `former_id` and retries in place
+    // rather than deadlocking or creating a duplicate receipt file.
+    for &(vision, prompt, started_in, former_id) in &FORMER_IDS[..4] {
+        let settings = former_settings(LlmProvider::OpenAiCompatible, vision, prompt);
+        let work = tempfile::tempdir().unwrap();
+        write_receipt(work.path(), former_id, "sending");
+        i18n::set_lang(Lang::En);
+        let control = TaskControl::open(work.path(), ControlSource::default()).unwrap();
+        let report =
+            llm::polish_sections_report(&mut former_sections(), frames.path(), &settings, &control)
+                .unwrap();
+        let case = format!("vision={vision} prompt={prompt} {started_in:?}");
+        assert_eq!(report.succeeded, 0, "{case}");
+        assert_eq!(receipt_ids(work.path()), [former_id], "{case}");
+        assert_eq!(receipt_state(work.path(), former_id), "not_sent", "{case}");
     }
 
     // A new task's request has 2.0.1's Simplified Chinese id, in whichever language: the

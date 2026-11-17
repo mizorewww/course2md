@@ -28,6 +28,7 @@ fn request(root: &Path, source: &Path) -> Request {
     Request {
         schema: 1,
         operation: Default::default(),
+        run_mode: Default::default(),
         task_id: "task-one".into(),
         course_id: "course-one".into(),
         version_id: None,
@@ -257,15 +258,29 @@ fn explicit_subtitles_zero_exports_and_confirmed_title_survive_real_conversion_a
     assert!(String::from_utf8_lossy(&original).contains("这里是已选字幕中的实际正文"));
     let resumed = run(root.path(), &request);
     assert!(resumed.status.success(), "{:?}", events(&resumed));
-    assert_eq!(
-        std::fs::read(version.join("document.json")).unwrap(),
-        original
+    assert!(
+        String::from_utf8_lossy(&std::fs::read(version.join("document.json")).unwrap())
+            .contains("这里是已选字幕中的实际正文")
     );
+    // Updating title in place on the same `(course_id, source_id)` succeeds cleanly.
     request.title = "后来在添加页填写的不同标题".into();
-    assert!(!run(root.path(), &request).status.success());
+    let retitled = run(root.path(), &request);
+    assert!(retitled.status.success(), "{:?}", events(&retitled));
+    assert_eq!(
+        artifact::read_manifest(&version.join("manifest.json"))
+            .unwrap()
+            .title,
+        request.title
+    );
+    // Reusing the work directory for a different source is still rejected.
+    let updated_doc = std::fs::read(version.join("document.json")).unwrap();
+    let mut wrong_source = request.clone();
+    wrong_source.source = "https://example.invalid/other".into();
+    wrong_source.source_id = "online:example:other".into();
+    assert!(!run(root.path(), &wrong_source).status.success());
     assert_eq!(
         std::fs::read(version.join("document.json")).unwrap(),
-        original
+        updated_doc
     );
     let persisted = std::fs::read_to_string(request.work_dir.join("task-identity.json")).unwrap();
     assert!(!persisted.contains("environment-key-must-not-be-used"));
@@ -672,8 +687,6 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
     let original_files = note_files();
     std::fs::remove_file(&source).unwrap();
     let mut retry = initial.clone();
-    retry.task_id = "summary-retry".into();
-    retry.work_dir = root.path().join("retry-work");
     retry.operation = course2md::execution::Operation::Reprocess {
         note_dir: base.clone(),
         base_task_id: initial.task_id.clone(),
@@ -682,15 +695,13 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
     };
     let second = run(root.path(), &retry);
     let second_events = events(&second);
-    // The summary was the only thing asked for and failed again, so the note
-    // stays as it was, still partial, and is reported with the reason it has.
-    assert!(second.status.success(), "{second_events:#?}");
+    // The summary failed again (HTTP 400), so `Reprocess` surfaces the failure
+    // clearly via `Event::Error` while leaving the note on disk unchanged.
+    assert!(!second.status.success(), "{second_events:#?}");
     assert!(second_events.iter().any(|event| {
-        let summary = &event["outcomes"]["summary"];
-        event["type"] == "done"
-            && event["partial"] == true
-            && summary["kind"] == "parameters"
-            && summary["message"]
+        event["type"] == "error"
+            && event["code"] == "parameters"
+            && event["message"]
                 .as_str()
                 .is_some_and(|m| m.contains("HTTP 400"))
     }));
@@ -698,7 +709,7 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
     assert_eq!(
         mock.calls.load(Ordering::SeqCst),
         3,
-        "the selected known-failed summary must be attempted again"
+        "the failed summary must be attempted again in the new run"
     );
     assert!(
         second_events
@@ -713,40 +724,9 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
                 .as_str()
                 .is_some_and(|stage| stage.starts_with("scenes/"))
     }));
-    // 首轮降级重发留下过两张 receipt（原负载与去 response_format 的负载各一张）；
-    // 重新尝试只针对与当前负载匹配的那张。
-    let receipts = course2md::dispatch::receipts(&retry.work_dir).unwrap();
-    let receipt = receipts.iter().find(|r| r.attempt == 2).unwrap();
-    assert!(
-        receipt.retry_authorized.is_none(),
-        "a consumed authorization must not survive the retried attempt"
-    );
-    // Running that retry again sends nothing and reports the same partial note.
-    let resumed = run(root.path(), &retry);
-    assert!(
-        events(&resumed)
-            .iter()
-            .any(|event| event["type"] == "done" && event["partial"] == true),
-        "{:?}",
-        events(&resumed)
-    );
-    assert_eq!(
-        mock.calls.load(Ordering::SeqCst),
-        3,
-        "normal continuation must not renew an explicit retry"
-    );
-    let mut final_retry = retry.clone();
-    final_retry.task_id = "summary-final".into();
-    final_retry.work_dir = root.path().join("final-work");
-    final_retry.operation = course2md::execution::Operation::Reprocess {
-        note_dir: base.clone(),
-        base_task_id: initial.task_id.clone(),
-        components: vec![Component::Summary],
-        // A failed retry left the note as it was; the next repair starts from
-        // the note's own task, as the desktop's repair does.
-        prior_work_dir: Some(initial.work_dir.clone()),
-    };
-    let third = run(root.path(), &final_retry);
+
+    // Retrying in place again succeeds once the service returns 200.
+    let third = run(root.path(), &retry);
     let third_events = events(&third);
     assert!(third.status.success(), "{third_events:#?}");
     assert_eq!(mock.calls.load(Ordering::SeqCst), 4);
@@ -755,7 +735,7 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
     assert!(done.get("version_id").is_none());
     let final_dir = initial.course_dir.clone();
     let manifest = artifact::read_manifest(&final_dir.join("manifest.json")).unwrap();
-    assert_eq!(manifest.task_id, "summary-final");
+    assert_eq!(manifest.task_id, initial.task_id);
     assert_eq!(
         manifest.outcomes.summary.status,
         artifact::Status::Succeeded
@@ -780,26 +760,6 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
                     .unwrap()
             )
     );
-    // A restart after the note was replaced, before the task recorded it, sends
-    // nothing and leaves the note alone.
-    let replaced = std::fs::read(final_dir.join("manifest.json")).unwrap();
-    let restarted = run(root.path(), &final_retry);
-    assert!(restarted.status.success(), "{:?}", events(&restarted));
-    assert_eq!(mock.calls.load(Ordering::SeqCst), 4);
-    assert_eq!(
-        std::fs::read(final_dir.join("manifest.json")).unwrap(),
-        replaced
-    );
-    // The older repair, planned from the note it replaced, no longer applies.
-    let stale = run(root.path(), &retry);
-    assert!(!stale.status.success());
-    assert!(events(&stale).iter().any(|event| {
-        event["type"] == "error"
-            && event["message"]
-                .as_str()
-                .is_some_and(|m| m.contains("计划补做后笔记已被更改"))
-    }));
-    assert_eq!(mock.calls.load(Ordering::SeqCst), 4);
     let bodies = mock.bodies.lock().unwrap();
     // The single sanctioned resend drops response_format and changes nothing else.
     assert!(bodies[0].get("response_format").is_some());
@@ -807,7 +767,7 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
     let mut relaxed = bodies[0].clone();
     relaxed.as_object_mut().unwrap().remove("response_format");
     assert_eq!(bodies[1], relaxed);
-    // Later tasks resend the full payload, byte-identical to the first request.
+    // Later runs resend the full payload, byte-identical to the first request.
     assert_eq!(bodies[0], bodies[2]);
     assert_eq!(bodies[2], bodies[3]);
 }
@@ -1054,67 +1014,71 @@ fn proofreading_resend_continues_unsent_summary_without_repeating_source_work() 
     let first = run(root.path(), &original);
     let first_events = events(&first);
     assert!(first.status.success(), "{first_events:#?}");
-    assert!(
-        first_events
-            .iter()
-            .any(|event| event["type"] == "blocked" && event["reason"] == "uncertain")
-    );
-    assert_eq!(mock.calls.load(Ordering::SeqCst), 1);
-    let mut receipts = course2md::dispatch::receipts(&original.work_dir).unwrap();
-    assert_eq!(
-        receipts.len(),
-        1,
-        "blocked summary must not create an attempt"
-    );
-    let receipt = receipts.remove(0);
-    assert_eq!(receipt.state, course2md::dispatch::State::Uncertain);
-    assert_eq!(receipt.purpose, "proofreading");
-    assert!(receipt.description.contains("00:00–00:07"));
+    assert!(!first_events.iter().any(|event| event["type"] == "blocked"));
+    // Proofreading lost its connection (recorded Failed, never blocking Summary),
+    // and Summary ran and succeeded right away!
+    assert_eq!(mock.calls.load(Ordering::SeqCst), 2);
+    let receipts = course2md::dispatch::receipts(&original.work_dir).unwrap();
+    assert_eq!(receipts.len(), 2);
+    let polish_receipt = receipts
+        .iter()
+        .find(|r| r.purpose == "proofreading")
+        .unwrap();
+    assert_eq!(polish_receipt.state, course2md::dispatch::State::Failed);
+    assert!(polish_receipt.description.contains("00:00–00:07"));
     assert!(!String::from_utf8_lossy(&first.stdout).contains("private-task-key"));
     let base = original.course_dir.clone();
     let manifest = artifact::read_manifest(&base.join("manifest.json")).unwrap();
-    assert_eq!(manifest.outcomes.summary.status, artifact::Status::Failed);
+    assert_eq!(
+        manifest.outcomes.proofreading.status,
+        artifact::Status::Failed
+    );
+    assert_eq!(
+        manifest.outcomes.summary.status,
+        artifact::Status::Succeeded
+    );
     std::fs::remove_file(&source).unwrap();
+    // In-place retry on the shared `work_dir` needs no `control.json` authorization:
+    // Proofreading retries on its existing receipt (`attempt == 2`), and Summary is
+    // regenerated for the newly proofread transcript text (`2 + 2 = 4` total calls).
     let mut retry = original.clone();
-    retry.task_id = "retry-polish".into();
-    retry.work_dir = root.path().join("retry-work");
-    retry.control_path = Some(retry.work_dir.join("control.json"));
     retry.operation = course2md::execution::Operation::Reprocess {
         note_dir: base.clone(),
         base_task_id: original.task_id.clone(),
         components: vec![Component::Proofreading, Component::Summary],
-        prior_work_dir: Some(original.work_dir.clone()),
+        prior_work_dir: None,
     };
-    std::fs::create_dir_all(&retry.work_dir).unwrap();
-    std::fs::write(
-        retry.control_path.as_ref().unwrap(),
-        serde_json::to_vec(&serde_json::json!({"intent":"run","resend":[receipt.request_id]}))
-            .unwrap(),
-    )
-    .unwrap();
     let second = run(root.path(), &retry);
     let observed = events(&second);
     assert!(second.status.success(), "{observed:#?}");
-    assert_eq!(mock.calls.load(Ordering::SeqCst), 3);
+    assert_eq!(mock.calls.load(Ordering::SeqCst), 4);
     assert!(
         !observed
             .iter()
             .any(|event| event["stage"] == "transcribe" || event["stage"] == "download")
     );
     let updated = artifact::read_manifest(&base.join("manifest.json")).unwrap();
-    assert_eq!(updated.task_id, "retry-polish");
+    assert_eq!(updated.task_id, original.task_id);
     assert_eq!(
         updated.outcomes.proofreading.status,
         artifact::Status::Succeeded
     );
     assert_eq!(updated.outcomes.summary.status, artifact::Status::Succeeded);
     let receipts = course2md::dispatch::receipts(&retry.work_dir).unwrap();
-    assert_eq!(receipts.len(), 2);
-    for (purpose, attempt) in [("proofreading", 2), ("summary", 1)] {
-        let receipt = receipts.iter().find(|r| r.purpose == purpose).unwrap();
-        assert_eq!(receipt.state, course2md::dispatch::State::Completed);
-        assert_eq!(receipt.attempt, attempt);
-    }
+    assert_eq!(receipts.len(), 3);
+    let polish = receipts
+        .iter()
+        .find(|r| r.purpose == "proofreading")
+        .unwrap();
+    assert_eq!(polish.state, course2md::dispatch::State::Completed);
+    assert_eq!(polish.attempt, 2);
+    assert_eq!(
+        receipts
+            .iter()
+            .filter(|r| r.purpose == "summary" && r.state == course2md::dispatch::State::Completed)
+            .count(),
+        2
+    );
 }
 
 /// Answers a proofreading or translation batch item for item, so the note keeps
@@ -1145,13 +1109,11 @@ fn is_translation(body: &serde_json::Value) -> bool {
         .starts_with("You translate lecture transcripts")
 }
 
-/// The owner's deadlock in the engine: a translation batch lost its response after
-/// the note was saved. Redoing the translation alone sends exactly that batch (as
-/// authorized) and the batch it held back, plus the summary the uncertain step kept
-/// from starting. The finished batch comes back from its receipt, and proofreading
-/// is never sent again.
+/// A translation batch loses its response during generation: sibling batches and
+/// the summary still finish, and redoing translation in-place sends only the one
+/// unfinished batch without needing manual resend authorization.
 #[test]
-fn translation_resend_sends_only_unfinished_batches_and_the_held_back_summary() {
+fn translation_retry_sends_only_unfinished_batches() {
     if common::ffmpeg_available() {
         translation_resend(false, false);
     }
@@ -1166,9 +1128,8 @@ fn a_translated_batch_without_its_receipt_is_not_sent_again() {
     }
 }
 
-/// A repair whose resend is lost again finishes nothing new: it sends the one
-/// authorized batch, holds the rest back, and leaves the note as it was, even
-/// with the summary riding along.
+/// A repair whose retry fails again finishes nothing new: it sends the one
+/// unfinished batch, surfaces the failure, and leaves the note as it was.
 #[test]
 fn a_repair_that_finishes_nothing_new_leaves_the_note_unchanged() {
     if common::ffmpeg_available() {
@@ -1228,7 +1189,6 @@ fn translation_resend(missing_receipt: bool, lose_again: bool) {
     llm.base_url = mock.url.clone();
     llm.model = "test-model".into();
     llm.api_key = "private-task-key".into();
-    // Lost answers wait for the person only without automatic retries.
     llm.auto_retry = false;
     original
         .service_versions
@@ -1236,26 +1196,29 @@ fn translation_resend(missing_receipt: bool, lose_again: bool) {
     let first = run(root.path(), &original);
     let first_events = events(&first);
     assert!(first.status.success(), "{first_events:#?}");
-    // Three proofreading batches, then translation: the first answered, the second lost.
-    assert_eq!(mock.calls.load(Ordering::SeqCst), 5);
+    // Three proofreading batches, three translation batches (one lost), and one summary.
+    assert_eq!(mock.calls.load(Ordering::SeqCst), 7);
     let receipts = course2md::dispatch::receipts(&original.work_dir).unwrap();
-    let uncertain: Vec<_> = receipts
+    let failed: Vec<_> = receipts
         .iter()
-        .filter(|r| r.state == course2md::dispatch::State::Uncertain)
+        .filter(|r| r.state == course2md::dispatch::State::Failed)
         .collect();
-    assert_eq!(uncertain.len(), 1);
-    assert_eq!(uncertain[0].purpose, Component::Translation.as_str());
+    assert_eq!(failed.len(), 1);
+    assert_eq!(failed[0].purpose, Component::Translation.as_str());
     let base = original.course_dir.clone();
     let manifest = artifact::read_manifest(&base.join("manifest.json")).unwrap();
     assert_eq!(
         manifest.outcomes.proofreading.status,
         artifact::Status::Succeeded
     );
-    assert_ne!(
+    assert_eq!(
         manifest.outcomes.translation.status,
+        artifact::Status::Partial
+    );
+    assert_eq!(
+        manifest.outcomes.summary.status,
         artifact::Status::Succeeded
     );
-    assert_eq!(manifest.outcomes.summary.status, artifact::Status::Failed);
     let untouched = std::fs::read(base.join("document.json")).unwrap();
     let untouched_manifest = std::fs::read(base.join("manifest.json")).unwrap();
     std::fs::remove_file(&source).unwrap();
@@ -1276,33 +1239,23 @@ fn translation_resend(missing_receipt: bool, lose_again: bool) {
     }
     lose_all.store(lose_again, Ordering::SeqCst);
 
+    // Retry in-place on the same work_dir with the same task_id and no control.json resend list.
     let mut retry = original.clone();
-    retry.task_id = "retry-translation".into();
-    retry.work_dir = root.path().join("retry-work");
-    retry.control_path = Some(retry.work_dir.join("control.json"));
-    // As the desktop asks for it: no proofreading, translation and the summary.
     retry.config.llm.enabled = false;
     retry.operation = course2md::execution::Operation::Reprocess {
         note_dir: base.clone(),
         base_task_id: original.task_id.clone(),
-        components: vec![Component::Translation, Component::Summary],
+        components: vec![Component::Translation],
         prior_work_dir: Some(original.work_dir.clone()),
     };
-    std::fs::create_dir_all(&retry.work_dir).unwrap();
-    std::fs::write(
-        retry.control_path.as_ref().unwrap(),
-        serde_json::to_vec(&serde_json::json!({"intent":"run","resend":[uncertain[0].request_id]}))
-            .unwrap(),
-    )
-    .unwrap();
     let sent_before = mock.bodies.lock().unwrap().len();
     let second = run(root.path(), &retry);
     let observed = events(&second);
     let bodies = mock.bodies.lock().unwrap()[sent_before..].to_vec();
     let translated: Vec<_> = bodies.iter().filter(|body| is_translation(body)).collect();
     if lose_again {
-        assert!(!second.status.success() || observed.iter().any(|e| e["type"] == "error"));
-        // The authorized batch once; lost again, it holds the rest and the summary back.
+        assert!(!second.status.success(), "{observed:#?}");
+        assert!(observed.iter().any(|e| e["type"] == "error"));
         assert_eq!(translated.len(), 1, "{bodies:#?}");
         assert_eq!(bodies.len(), 1, "{bodies:#?}");
         assert_eq!(
@@ -1317,13 +1270,18 @@ fn translation_resend(missing_receipt: bool, lose_again: bool) {
         return;
     }
     assert!(second.status.success(), "{observed:#?}");
-    // The lost batch once and the third batch it held back; the summary once.
-    assert_eq!(translated.len(), 2, "{bodies:#?}");
-    assert_eq!(bodies.len(), 3, "{bodies:#?}");
+    // Only the one unfinished translation batch is sent.
+    assert_eq!(translated.len(), 1, "{bodies:#?}");
+    assert_eq!(bodies.len(), 1, "{bodies:#?}");
     let first_sent = mock.bodies.lock().unwrap()[..sent_before].to_vec();
-    let answered = first_sent.iter().find(|body| is_translation(body)).unwrap();
+    let first_translations: Vec<_> = first_sent
+        .iter()
+        .filter(|body| is_translation(body))
+        .collect();
+    assert_eq!(first_translations.len(), 3);
     assert!(
-        !translated.contains(&answered),
+        !translated.contains(&first_translations[0])
+            && !translated.contains(&first_translations[2]),
         "a finished batch was sent again"
     );
     assert!(
@@ -1332,7 +1290,7 @@ fn translation_resend(missing_receipt: bool, lose_again: bool) {
             .any(|event| event["stage"] == "llm" || event["stage"] == "transcribe")
     );
     let updated = artifact::read_manifest(&base.join("manifest.json")).unwrap();
-    assert_eq!(updated.task_id, "retry-translation");
+    assert_eq!(updated.task_id, original.task_id);
     assert_eq!(
         updated.outcomes.translation.status,
         artifact::Status::Succeeded
@@ -1359,30 +1317,28 @@ fn translation_resend(missing_receipt: bool, lose_again: bool) {
     let receipts = course2md::dispatch::receipts(&retry.work_dir).unwrap();
     let resent = receipts
         .iter()
-        .find(|r| r.stable_id == uncertain[0].stable_id)
+        .find(|r| r.stable_id == failed[0].stable_id)
         .unwrap();
     assert_eq!(resent.state, course2md::dispatch::State::Completed);
-    assert_eq!(resent.attempt, uncertain[0].attempt + 1);
+    assert_eq!(resent.attempt, failed[0].attempt + 1);
 }
 
-/// Several paid batches lose their responses while in flight together, so each is
-/// uncertain and everything after them is held back. Resending all of them sends each
-/// once, with the batches they held back and the summary, and the repair finishes in
-/// one run even with concurrent batches: an authorized request never holds back
-/// another (it did, and nothing was sent).
+/// Several concurrent batches lose their responses while in flight together:
+/// sibling batches and downstream steps still finish, and retrying in-place
+/// replays every completed receipt and sends only the failed batches once each.
 #[test]
-fn resending_several_uncertain_paid_batches_sends_each_once_and_finishes() {
+fn retrying_several_failed_paid_batches_sends_each_once_and_finishes() {
     if !common::ffmpeg_available() {
         return;
     }
     for lost_kind in ["translation", "proofreading"] {
         for lost in [2, 3] {
-            several_uncertain_batches(lost_kind, lost);
+            several_failed_batches(lost_kind, lost);
         }
     }
 }
 
-fn several_uncertain_batches(lost_kind: &'static str, lost: usize) {
+fn several_failed_batches(lost_kind: &'static str, lost: usize) {
     let losing = Arc::new(AtomicBool::new(true));
     let (losses, still_losing) = (Arc::new(AtomicUsize::new(0)), losing.clone());
     let summary = common::fake_ai()["responses"]["summary"].clone();
@@ -1437,7 +1393,6 @@ fn several_uncertain_batches(lost_kind: &'static str, lost: usize) {
     llm.base_url = mock.url.clone();
     llm.model = "test-model".into();
     llm.api_key = "private-task-key".into();
-    // Lost answers wait for the person only without automatic retries.
     llm.auto_retry = false;
     original
         .service_versions
@@ -1445,21 +1400,17 @@ fn several_uncertain_batches(lost_kind: &'static str, lost: usize) {
     let first = run(root.path(), &original);
     assert!(first.status.success(), "{:#?}", events(&first));
     let receipts = course2md::dispatch::receipts(&original.work_dir).unwrap();
-    let uncertain: Vec<_> = receipts
+    let failed: Vec<_> = receipts
         .iter()
-        .filter(|r| r.state == course2md::dispatch::State::Uncertain)
+        .filter(|r| r.state == course2md::dispatch::State::Failed)
         .collect();
-    assert_eq!(uncertain.len(), lost, "{lost_kind} {lost}: {receipts:#?}");
-    assert!(uncertain.iter().all(|r| r.purpose == lost_kind));
-    let answered_before: Vec<_> = mock.bodies.lock().unwrap().clone();
+    assert_eq!(failed.len(), lost, "{lost_kind} {lost}: {receipts:#?}");
+    assert!(failed.iter().all(|r| r.purpose == lost_kind));
+    let before_count = mock.bodies.lock().unwrap().len();
     losing.store(false, Ordering::SeqCst);
 
     let base = original.course_dir.clone();
     let mut retry = original.clone();
-    retry.task_id = "retry".into();
-    retry.work_dir = root.path().join("retry-work");
-    retry.control_path = Some(retry.work_dir.join("control.json"));
-    // As the desktop asks for it: the uncertain part and the summary it held back.
     let part = if lost_kind == "translation" {
         retry.config.llm.enabled = false;
         Component::Translation
@@ -1472,17 +1423,10 @@ fn several_uncertain_batches(lost_kind: &'static str, lost: usize) {
         components: vec![part, Component::Summary],
         prior_work_dir: Some(original.work_dir.clone()),
     };
-    std::fs::create_dir_all(&retry.work_dir).unwrap();
-    let ids: Vec<_> = uncertain.iter().map(|r| r.request_id.clone()).collect();
-    std::fs::write(
-        retry.control_path.as_ref().unwrap(),
-        serde_json::to_vec(&serde_json::json!({"intent":"run","resend":ids})).unwrap(),
-    )
-    .unwrap();
     let second = run(root.path(), &retry);
     let observed = events(&second);
     assert!(second.status.success(), "{observed:#?}");
-    let sent = mock.bodies.lock().unwrap()[answered_before.len()..].to_vec();
+    let sent = mock.bodies.lock().unwrap()[before_count..].to_vec();
     let kinds = |kind: &str| {
         sent.iter()
             .filter(|body| match kind {
@@ -1494,39 +1438,18 @@ fn several_uncertain_batches(lost_kind: &'static str, lost: usize) {
             })
             .count()
     };
-    // Every batch of the redone parts once (none had finished), the summary once,
-    // and nothing that was answered before.
-    let expected_proofreading = if lost_kind == "proofreading" { 4 } else { 0 };
-    assert_eq!(
-        kinds("proofreading"),
-        expected_proofreading,
-        "{lost_kind} {lost}"
-    );
-    assert_eq!(kinds("translation"), 4, "{lost_kind} {lost}");
-    assert_eq!(kinds("summary"), 1, "{lost_kind} {lost}");
+    // Only the `lost` failed batches are sent again; all completed batches and the
+    // summary replay from their saved receipts at zero cost.
+    assert_eq!(kinds(lost_kind), lost, "{lost_kind} {lost}: {sent:#?}");
+    assert_eq!(sent.len(), lost, "{lost_kind} {lost}: {sent:#?}");
     for (index, body) in sent.iter().enumerate() {
         assert!(
             !sent[..index].contains(body),
             "{lost_kind} {lost}: a request was sent twice"
         );
     }
-    // Before, only the lost batches of that kind went out; everything else was answered.
-    let answered: Vec<_> = answered_before
-        .iter()
-        .filter(|body| {
-            if lost_kind == "translation" {
-                !is_translation(body)
-            } else {
-                is_translation(body) || !body["messages"][1]["content"].is_array()
-            }
-        })
-        .collect();
-    assert!(
-        sent.iter().all(|body| !answered.contains(&body)),
-        "{lost_kind} {lost}: an answered request was sent again"
-    );
     let updated = artifact::read_manifest(&retry.course_dir.join("manifest.json")).unwrap();
-    assert_eq!(updated.task_id, "retry");
+    assert_eq!(updated.task_id, original.task_id);
     for outcome in [
         &updated.outcomes.proofreading,
         &updated.outcomes.translation,
@@ -1658,11 +1581,10 @@ fn a_failed_part_of_a_mixed_repair_keeps_what_the_note_had() {
     );
 }
 
-/// Retrying the unfinished part of a partial note that fails again leaves the note
-/// as it was and reports it, still partial for the same reason, rather than an
-/// error: the person sees the same unfinished part and the same retry.
+/// Retrying the unfinished part of a partial note that fails again surfaces the
+/// new stage failure clearly and leaves the note on disk untouched.
 #[test]
-fn a_retry_that_finishes_nothing_more_reports_the_partial_note_unchanged() {
+fn a_retry_that_finishes_nothing_more_surfaces_error_and_leaves_note_unchanged() {
     if !common::ffmpeg_available() {
         return;
     }
@@ -1709,16 +1631,13 @@ fn a_retry_that_finishes_nothing_more_reports_the_partial_note_unchanged() {
     };
     let output = run(root.path(), &retry);
     let observed = events(&output);
-    assert!(output.status.success(), "{observed:#?}");
-    assert!(!observed.iter().any(|event| event["type"] == "error"));
-    let done = observed
+    assert!(!output.status.success(), "{observed:#?}");
+    assert!(!observed.iter().any(|event| event["type"] == "done"));
+    let error = observed
         .iter()
-        .find(|event| event["type"] == "done")
-        .expect("the unchanged note is reported");
-    assert_eq!(done["partial"], true);
-    assert_eq!(done["outcomes"]["summary"]["status"], "failed");
-    // Why it is still unfinished this time, not the note's old reason.
-    assert_eq!(done["outcomes"]["summary"]["kind"], "authentication");
+        .find(|event| event["type"] == "error")
+        .expect("the retry failure is surfaced");
+    assert_eq!(error["code"], "authentication");
     assert_eq!(
         std::fs::read(note.join("manifest.json")).unwrap(),
         before,
@@ -1727,10 +1646,9 @@ fn a_retry_that_finishes_nothing_more_reports_the_partial_note_unchanged() {
 }
 
 /// A proofreading left partial by one refused paragraph, then a retry of it that
-/// an alpha.8 app ran and that finished nothing new (it ended in an error, its
-/// note unchanged). Continuing from that retry's work, as a repair of the same
-/// note, is accepted: its receipts are the note's, finished batches come back
-/// from them, and only the refused part is asked again.
+/// finished nothing new (ending in an error, its note unchanged). Continuing from
+/// that retry's work, as a repair of the same note, is accepted: finished batches
+/// come back from their receipts, and only the refused part is asked again.
 #[test]
 fn a_repair_continues_from_an_earlier_repair_of_the_same_note() {
     if !common::ffmpeg_available() {
@@ -1802,21 +1720,25 @@ fn a_repair_continues_from_an_earlier_repair_of_the_same_note() {
         };
         repair
     };
-    // The alpha.8 retry: from the note's task.
+    // First retry from the note's task: finishes nothing more, surfaces error, keeps receipts.
     let first = repair("retry-alpha8", &original.work_dir);
-    assert!(run(root.path(), &first).status.success());
+    assert!(!run(root.path(), &first).status.success());
     // Continued from that retry's own work.
     let sent_before = mock.calls.load(Ordering::SeqCst);
     let second = repair("retry-again", &first.work_dir);
     let output = run(root.path(), &second);
     let observed = events(&output);
-    assert!(output.status.success(), "{observed:#?}");
-    let done = observed
+    assert!(!output.status.success(), "{observed:#?}");
+    let error = observed
         .iter()
-        .find(|event| event["type"] == "done")
-        .expect("the partial note is reported");
-    assert_eq!(done["partial"], true);
-    assert_eq!(done["outcomes"]["proofreading"]["completed"], 44);
+        .find(|event| event["type"] == "error")
+        .expect("the refusal error is surfaced");
+    assert!(
+        error["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("1/45") || m.contains("Content Exists Risk")),
+        "{error:#}"
+    );
     // Only the refused part was asked again, once per halving down to it: no
     // finished batch went out.
     let bodies = mock.bodies.lock().unwrap()[sent_before..].to_vec();
@@ -1828,7 +1750,7 @@ fn a_repair_continues_from_an_earlier_repair_of_the_same_note() {
     assert_eq!(std::fs::read(note.join("manifest.json")).unwrap(), before);
 
     // A retry that has no earlier answers to read back and whose key is now
-    // refused finishes nothing: it says why, but the note still holds 44 of 45.
+    // refused finishes nothing: it says why, and the note on disk still holds 44 of 45.
     key_refused.store(true, Ordering::SeqCst);
     let mut fresh = repair("retry-refused-key", &first.work_dir);
     if let course2md::execution::Operation::Reprocess { prior_work_dir, .. } = &mut fresh.operation
@@ -1837,17 +1759,12 @@ fn a_repair_continues_from_an_earlier_repair_of_the_same_note() {
     }
     let output = run(root.path(), &fresh);
     let observed = events(&output);
-    assert!(output.status.success(), "{observed:#?}");
-    let proofreading = &observed
+    assert!(!output.status.success(), "{observed:#?}");
+    let error = observed
         .iter()
-        .find(|event| event["type"] == "done")
-        .expect("the partial note is reported")["outcomes"]["proofreading"];
-    assert_eq!(proofreading["status"], "partial");
-    assert_eq!(proofreading["completed"], 44);
-    assert_eq!(proofreading["total"], 45);
-    assert_eq!(proofreading["kind"], "authentication");
-    let message = proofreading["message"].as_str().unwrap();
-    assert!(message.contains("1/45"), "{message}");
+        .find(|event| event["type"] == "error")
+        .expect("the authentication error is surfaced");
+    assert_eq!(error["code"], "authentication");
     assert_eq!(std::fs::read(note.join("manifest.json")).unwrap(), before);
     key_refused.store(false, Ordering::SeqCst);
 
@@ -1870,11 +1787,11 @@ fn a_repair_continues_from_an_earlier_repair_of_the_same_note() {
     );
 }
 
-/// A regenerate whose AI service is unreachable ends failed and leaves the
-/// complete note, its summary and its exports as they were; a later repair that
-/// asks for no export still keeps every export the note had.
+/// A regenerate whose summary fails publishes the updated note without blocking
+/// while preserving the existing summary on disk; a later repair that asks for
+/// no export still keeps every export the note had.
 #[test]
-fn a_regenerate_that_loses_paid_work_leaves_the_note() {
+fn a_regenerate_with_failed_summary_preserves_existing_summary_and_exports() {
     use course2md::config::OutputFormat;
     if !common::ffmpeg_available() {
         return;
@@ -1891,30 +1808,33 @@ fn a_regenerate_that_loses_paid_work_leaves_the_note() {
     original.config.llm.api_key = "private-task-key".into();
     assert!(run(root.path(), &original).status.success());
     let note = original.course_dir.clone();
-    let before: Vec<_> = ["manifest.json", "document.json", "exports/course.zip"]
-        .iter()
-        .map(|name| std::fs::read(note.join(name)).unwrap())
-        .collect();
-    // The service is gone: nothing listens there any more.
+    let original_doc: artifact::Document =
+        serde_json::from_slice(&std::fs::read(note.join("document.json")).unwrap()).unwrap();
+    assert!(original_doc.summary.is_some());
+
+    // The service is gone: summary fails, yet publication succeeds and preserves old summary.
     let mut regenerate = original.clone();
     regenerate.task_id = "regenerate".into();
     regenerate.work_dir = root.path().join("regenerate-work");
     regenerate.config.llm.base_url = "http://127.0.0.1:9".into();
+    regenerate.config.llm.auto_retry = false;
     let output = run(root.path(), &regenerate);
     let observed = events(&output);
-    assert!(!output.status.success(), "{observed:#?}");
-    assert!(observed.iter().any(|event| {
-        event["type"] == "error"
-            && event["code"] == "note_kept"
-            && event["message"].as_str().is_some_and(|m| {
-                m.contains("不如现有笔记") && m.contains("摘要") && m.contains("（")
-            })
-    }));
-    let after: Vec<_> = ["manifest.json", "document.json", "exports/course.zip"]
-        .iter()
-        .map(|name| std::fs::read(note.join(name)).unwrap())
-        .collect();
-    assert_eq!(after, before);
+    assert!(output.status.success(), "{observed:#?}");
+    let regen_manifest = artifact::read_manifest(&note.join("manifest.json")).unwrap();
+    assert!(regen_manifest.partial);
+    assert_eq!(
+        regen_manifest.outcomes.summary.status,
+        artifact::Status::Failed
+    );
+    let regen_doc: artifact::Document =
+        serde_json::from_slice(&std::fs::read(note.join("document.json")).unwrap()).unwrap();
+    assert_eq!(
+        serde_json::to_value(&regen_doc.summary).unwrap(),
+        serde_json::to_value(&original_doc.summary).unwrap()
+    );
+    assert!(note.join("exports/course.zip").is_file());
+
     // A summary-only repair asks for no export; the note keeps its archive.
     let mut repair = original.clone();
     repair.task_id = "repair".into();
@@ -1922,7 +1842,7 @@ fn a_regenerate_that_loses_paid_work_leaves_the_note() {
     repair.config.defaults.formats = Some(vec![]);
     repair.operation = course2md::execution::Operation::Reprocess {
         note_dir: note.clone(),
-        base_task_id: original.task_id.clone(),
+        base_task_id: regen_manifest.task_id.clone(),
         components: vec![Component::Summary],
         prior_work_dir: None,
     };
@@ -1930,6 +1850,10 @@ fn a_regenerate_that_loses_paid_work_leaves_the_note() {
     assert!(output.status.success(), "{:#?}", events(&output));
     let manifest = artifact::read_manifest(&note.join("manifest.json")).unwrap();
     assert_eq!(manifest.task_id, "repair");
+    assert_eq!(
+        manifest.outcomes.summary.status,
+        artifact::Status::Succeeded
+    );
     assert_eq!(manifest.outputs, vec!["exports/course.zip"]);
     assert!(note.join("exports/course.zip").is_file());
 }
@@ -2139,20 +2063,25 @@ fn identity(work: &Path) -> serde_json::Value {
     serde_json::from_slice(&std::fs::read(work.join("task-identity.json")).unwrap()).unwrap()
 }
 
-/// A run after the interruption: it continues `work` and sends nothing, holding back the
-/// summary whose response was lost, and publishes the proofread note.
-fn assert_continued_without_paying(output: &Output, ai: &MockAi, work: &Path) {
+/// A run after the interruption: it continues `work`, replays the paid proofreading
+/// from its completed receipt, retries the interrupted summary, and publishes the
+/// complete note.
+fn assert_continued_without_paying_twice(output: &Output, ai: &MockAi, work: &Path) {
     let observed = events(output);
     assert!(output.status.success(), "{observed:#?}");
-    assert_eq!(ai.calls.load(Ordering::SeqCst), 2, "{observed:#?}");
-    assert!(observed.iter().any(|event| event["type"] == "blocked"
-        && event["reason"] == "uncertain"
-        && event["purpose"] == "summary"));
+    // Run 1 sent 2 calls (proofreading + interrupted summary); Run 2 sends only 1 (summary retry).
+    assert_eq!(ai.calls.load(Ordering::SeqCst), 3, "{observed:#?}");
+    assert!(!observed.iter().any(|event| event["type"] == "blocked"));
     let done = observed.last().unwrap();
     assert_eq!(done["type"], "done");
+    assert_eq!(done["partial"], false, "{done:#}");
     assert_eq!(done["task_id"].as_str(), work.file_name().unwrap().to_str());
     assert_eq!(
         done["outcomes"]["proofreading"]["status"], "succeeded",
+        "{done:#}"
+    );
+    assert_eq!(
+        done["outcomes"]["summary"]["status"], "succeeded",
         "{done:#}"
     );
     let note = Path::new(done["out_dir"].as_str().unwrap());
@@ -2163,16 +2092,20 @@ fn assert_continued_without_paying(output: &Output, ai: &MockAi, work: &Path) {
             .contains("第二段原文。")
     );
     let receipts = course2md::dispatch::receipts(work).unwrap();
-    assert_eq!(receipts.len(), 2);
     use course2md::dispatch::State;
-    let receipt = |purpose| receipts.iter().find(|r| r.purpose == purpose).unwrap();
-    assert_eq!(receipt("proofreading").state, State::Completed);
-    // Sent once; its outcome is unknown whether or not the run that sent it got to say so.
-    assert!(matches!(
-        receipt("summary").state,
-        State::Sending | State::Uncertain
-    ));
-    assert!(receipts.iter().all(|receipt| receipt.attempt == 1));
+    let polish = receipts
+        .iter()
+        .find(|r| r.purpose == "proofreading")
+        .unwrap();
+    assert_eq!(polish.state, State::Completed);
+    assert_eq!(polish.attempt, 1);
+    let summary = receipts
+        .iter()
+        .find(|r| r.purpose == "summary" && r.state == State::Completed)
+        .expect("completed summary receipt");
+    if receipts.len() == 2 {
+        assert_eq!(summary.attempt, 2);
+    }
     assert_eq!(identity(work)["operation"]["kind"], "generate");
 }
 
@@ -2206,22 +2139,22 @@ fn the_command_line_runs_a_task_and_resumes_it_without_paying_twice() {
     );
     assert!(!bound.to_string().contains("private-cli-key"));
 
-    // The same command continues that task: the proofreading it paid for is reused,
-    // and the summary whose response was lost is not sent again.
+    // The same command continues that task: the proofreading it paid for is replayed,
+    // and the interrupted summary is retried cleanly to completion.
     let second = spawn_cli(root.path(), &source, &ai, |_| {})
         .wait_with_output()
         .unwrap();
-    assert_continued_without_paying(&second, &ai, &work);
+    assert_continued_without_paying_twice(&second, &ai, &work);
     assert_eq!(identity(&work), bound);
 
-    // Once the task has published its note, running it again sends nothing.
+    // Once the task has published its complete note, running it again with `--resume` sends nothing.
     let third = spawn_cli(root.path(), &source, &ai, |_| {})
         .wait_with_output()
         .unwrap();
     let observed = events(&third);
     assert!(third.status.success(), "{observed:#?}");
     assert_eq!(observed.last().unwrap()["type"], "done");
-    assert_eq!(ai.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(ai.calls.load(Ordering::SeqCst), 3);
     assert_eq!(
         std::fs::read_dir(library.join(".course2md/work"))
             .unwrap()
@@ -2299,7 +2232,7 @@ fi
     let second = spawn_cli(root.path(), source, &ai, site("Renamed Teacher", "3.5"))
         .wait_with_output()
         .unwrap();
-    assert_continued_without_paying(&second, &ai, &work);
+    assert_continued_without_paying_twice(&second, &ai, &work);
     assert_eq!(identity(&work), bound);
     let done = events(&second).pop().unwrap();
     let note =
@@ -2310,9 +2243,9 @@ fi
 
 /// A command-line task interrupted before the command line ran tasks bound its work
 /// folder to the identity it chose then. It continues there under the task's identity,
-/// and a request whose outcome its receipts leave unknown stays held, not sent again.
+/// replays completed receipts, and retries any legacy `"uncertain"` receipt cleanly.
 #[test]
-fn a_task_from_before_the_command_line_ran_tasks_keeps_its_uncertain_request_held() {
+fn a_task_from_before_the_command_line_ran_tasks_replays_completed_and_retries_uncertain() {
     if !common::ffmpeg_available() {
         return;
     }
@@ -2360,8 +2293,7 @@ fn a_task_from_before_the_command_line_ran_tasks_keeps_its_uncertain_request_hel
         serde_json::to_vec_pretty(&former).unwrap(),
     )
     .unwrap();
-    // Its summary receipt says the outcome is unknown, as a run that saw the
-    // connection drop would have recorded.
+    // Simulate a legacy `"uncertain"` receipt saved on disk by an older release.
     let summary = course2md::dispatch::receipts(&work)
         .unwrap()
         .into_iter()
@@ -2378,6 +2310,93 @@ fn a_task_from_before_the_command_line_ran_tasks_keeps_its_uncertain_request_hel
     let second = spawn_cli(root.path(), &source, &ai, |_| {})
         .wait_with_output()
         .unwrap();
-    assert_continued_without_paying(&second, &ai, &work);
+    assert_continued_without_paying_twice(&second, &ai, &work);
     assert_ne!(identity(&work), former);
+}
+
+/// Repeated in-place `Generate`, `Reprocess`, and `RunMode::Fresh` runs on the shared
+/// `<library>/.course2md/work/<course_id>` directory never deadlock on `published_by`,
+/// `NoteChanged`, `bind_work_dir`, or swap copies, and `Fresh` clears stage caches while
+/// preserving verified `media.mp4` + `media.sha256` when `max_height` is unchanged.
+#[test]
+fn in_place_task_retries_and_fresh_mode_on_shared_work_dir() {
+    if !common::ffmpeg_available() {
+        return;
+    }
+    let fail_summary = Arc::new(AtomicBool::new(true));
+    let failing = fail_summary.clone();
+    let mock = MockAi::respond_with(move |_, body| {
+        let proofreading = body["messages"][1]["content"].is_array();
+        if proofreading {
+            return Some((200, batch_reply(body, false)));
+        }
+        if failing.load(Ordering::SeqCst) {
+            return Some((502, serde_json::json!({"error":{"message":"Bad gateway"}})));
+        }
+        Some((200, summary_response()))
+    });
+    let root = tempfile::tempdir().unwrap();
+    let video = local_lecture(root.path());
+    let mut task = request(root.path(), &video);
+    task.task_id = task.course_id.clone();
+    task.work_dir = root.path().join(".course2md/work").join(&task.course_id);
+    task.control_path = Some(task.work_dir.join("control.json"));
+    task.config.llm.enabled = true;
+    task.config.llm.summarize = true;
+    task.config.llm.base_url = mock.url.clone();
+    task.config.llm.model = "test-model".into();
+    task.config.llm.api_key = "private-task-key".into();
+    task.config.llm.auto_retry = false;
+
+    // 1. Initial Generate publishes partial note (proofreading succeeded, summary failed).
+    let out1 = run(root.path(), &task);
+    assert!(out1.status.success(), "{:#?}", events(&out1));
+    assert_eq!(mock.calls.load(Ordering::SeqCst), 2);
+    let m1 = artifact::read_manifest(&task.course_dir.join("manifest.json")).unwrap();
+    assert!(m1.partial);
+
+    // 2. In-place Reprocess with same task_id and same work_dir completes summary.
+    fail_summary.store(false, Ordering::SeqCst);
+    let mut reprocess = task.clone();
+    reprocess.operation = course2md::execution::Operation::Reprocess {
+        note_dir: task.course_dir.clone(),
+        base_task_id: task.task_id.clone(),
+        components: vec![Component::Summary],
+        prior_work_dir: None,
+    };
+    let out2 = run(root.path(), &reprocess);
+    assert!(out2.status.success(), "{:#?}", events(&out2));
+    assert_eq!(mock.calls.load(Ordering::SeqCst), 3);
+    let m2 = artifact::read_manifest(&task.course_dir.join("manifest.json")).unwrap();
+    assert!(!m2.partial);
+    assert_eq!(m2.outcomes.summary.status, artifact::Status::Succeeded);
+
+    // 3. Repeated in-place Generate (Resume) with same task_id does NOT short-circuit on
+    // `published_by`, replays completed receipts (0 extra calls), and publishes cleanly
+    // across >4 publications (no MAX_KEPT_COPIES deadlock).
+    for _ in 0..4 {
+        let out = run(root.path(), &task);
+        assert!(out.status.success(), "{:#?}", events(&out));
+    }
+    assert_eq!(mock.calls.load(Ordering::SeqCst), 3);
+
+    // Seed verified media.mp4 + media.sha256 in work_dir, then run Fresh mode:
+    // receipts are cleared so AI runs fresh (+2 calls), while verified media.mp4 stays!
+    let media = task.work_dir.join("media.mp4");
+    std::fs::copy(&video, &media).unwrap();
+    let media_sha = course2md::execution::file_digest(&media).unwrap();
+    std::fs::write(task.work_dir.join("media.sha256"), &media_sha).unwrap();
+
+    let mut fresh = task.clone();
+    fresh.run_mode = course2md::execution::RunMode::Fresh;
+    let out_fresh = run(root.path(), &fresh);
+    assert!(out_fresh.status.success(), "{:#?}", events(&out_fresh));
+    assert_eq!(mock.calls.load(Ordering::SeqCst), 5);
+    assert!(media.is_file());
+    assert_eq!(
+        std::fs::read_to_string(task.work_dir.join("media.sha256"))
+            .unwrap()
+            .trim(),
+        media_sha
+    );
 }

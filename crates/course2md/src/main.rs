@@ -166,8 +166,6 @@ fn main() -> std::process::ExitCode {
                 progress::emit(&progress::Event::Error {
                     message: tr!("参数无效：{}", error),
                     code: progress::ErrorCode::InvalidArguments,
-                    parts: Vec::new(),
-                    path: None,
                 });
             } else if course2md::i18n::lang() == course2md::i18n::Lang::En {
                 let _ = error.print();
@@ -244,8 +242,6 @@ fn main() -> std::process::ExitCode {
                 progress::emit(&progress::Event::Error {
                     code: progress::ErrorCode::of(&error),
                     message,
-                    parts: progress::kept_parts(&error),
-                    path: progress::blocked_path(&error),
                 });
             } else if helper.is_some() {
                 // The parent puts the helper's words into its own error.
@@ -577,19 +573,7 @@ fn note_dir(dir: &std::path::Path) -> anyhow::Result<Option<std::path::PathBuf>>
         );
     }
     if artifact::needs_flatten(note) {
-        let resaved = !artifact::is_legacy(note);
         artifact::flatten_legacy(note)?;
-        if resaved
-            && let Some(copy) = artifact::kept_copies(note)
-                .into_iter()
-                .find(|copy| artifact::is_older_app_copy(copy))
-            && let Some(swap) = copy.parent()
-        {
-            eprintln!(
-                "{}",
-                artifact::older_app_copy_message(swap, course2md::i18n::lang())
-            );
-        }
         tracing::info!(
             "已将笔记的旧版本整理为一份笔记 / Turned the note's versions into one note: {}",
             note.display()
@@ -605,44 +589,11 @@ fn note_dir(dir: &std::path::Path) -> anyhow::Result<Option<std::path::PathBuf>>
 fn collect_targets(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>, depth: usize) {
     // A replacement a crash interrupted is completed before the folder is read.
     for attention in course2md::artifact::recover_folder(dir) {
-        use course2md::artifact::NoteAttention;
-        // A copy an older app's later version replaced says so on its own.
-        if let NoteAttention::Kept { swap, copies, .. } = &attention
-            && copies
-                .iter()
-                .any(|copy| course2md::artifact::is_older_app_copy(copy))
-        {
-            eprintln!(
-                "{}",
-                course2md::artifact::older_app_copy_message(swap, course2md::i18n::lang())
-            );
-        }
-        match attention {
-            NoteAttention::Blocked { swap, .. } => eprintln!(
-                "{}",
-                course2md::outcome::recovery_blocked_message(&swap, course2md::i18n::lang())
-            ),
-            NoteAttention::Kept { swap, copies, .. }
-                if copies.len() >= course2md::artifact::MAX_KEPT_COPIES =>
-            {
-                eprintln!(
-                    "{}",
-                    course2md::outcome::copies_kept_message(&swap, course2md::i18n::lang())
-                )
-            }
-            NoteAttention::Kept { swap, copies, .. } if copies.len() == 1 => {
-                eprintln_tr!("笔记旁保留了 1 份副本，请查看：{}", swap.display())
-            }
-            NoteAttention::Kept { swap, copies, .. } => eprintln_tr!(
-                "笔记旁保留了 {} 份副本，请查看：{}",
-                copies.len(),
-                swap.display()
-            ),
-            NoteAttention::Failed { note, message } => tracing::warn!(
-                "跳过无法读取的笔记 / Skipped unreadable note {}: {message}",
-                note.display()
-            ),
-        }
+        let course2md::artifact::NoteAttention::Failed { note, message } = attention;
+        tracing::warn!(
+            "跳过无法读取的笔记 / Skipped unreadable note {}: {message}",
+            note.display()
+        );
     }
     match note_dir(dir) {
         Ok(Some(note)) => {
@@ -728,6 +679,11 @@ fn summarize_note(
             base_task_id: base.task_id.clone(),
             components: vec![execution::Component::Summary],
             prior_work_dir: None,
+        },
+        run_mode: if force {
+            execution::RunMode::Fresh
+        } else {
+            execution::RunMode::Resume
         },
         task_id: task_id.clone(),
         course_id: base.course_id.clone(),
