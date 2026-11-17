@@ -316,9 +316,20 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         if self.work.read(cx).job.is_some() {
-            self.message = Some(job_busy().into());
+            self.settings_ui.model_diagnostics.outcome = Some(Outcome {
+                key: request.key(),
+                message: job_busy().into(),
+                error: true,
+                cancelled: false,
+            });
+            if for_tasks {
+                self.set_task_page_notice(Some(job_busy().into()), cx);
+            }
             cx.notify();
             return;
+        }
+        if for_tasks {
+            self.set_task_page_notice(None, cx);
         }
         self.follow_setup_model(&request);
         let state = &mut self.settings_ui.model_diagnostics;
@@ -386,9 +397,22 @@ impl Desktop {
                 )
             })
             .unwrap_or_default();
-        for id in ids {
-            self.set_task_intent(id, crate::workspace::Intent::Run, cx);
+        if ids.is_empty() {
+            return;
         }
+        if let Some(Err(error)) = self.with_workspace(cx, |workspace| {
+            workspace.transaction(|state| {
+                for id in &ids {
+                    let _ = state.retry_task(id, crate::workspace::RunMode::Resume);
+                }
+                Ok(())
+            })
+        }) {
+            self.workspace_error =
+                Some(course2md::tr!("任务状态尚未保存：{}", format!("{error:#}")));
+            return;
+        }
+        self.start_next_task(cx);
     }
     /// Why the engine cannot run here; `None` while detection is pending.
     pub(crate) fn engine_issue(&self, provider: AsrProvider) -> Option<DeviceIssue> {

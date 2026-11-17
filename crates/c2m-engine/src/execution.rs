@@ -197,7 +197,6 @@ impl Request {
             course_id: self.course_id.clone(),
             source_id: self.source_id.clone(),
             course_dir: self.course_dir.clone(),
-            replaces: None,
         }
     }
 

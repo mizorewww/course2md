@@ -103,8 +103,6 @@ pub struct Target {
     pub source_id: String,
     /// The note folder.
     pub course_dir: PathBuf,
-    /// Retained temporarily for compatibility; in-place retries always replace `course_dir`.
-    pub replaces: Option<String>,
 }
 
 /// A manifest written by a newer app. Unlike damage, it is neither read as this

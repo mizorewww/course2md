@@ -1,19 +1,10 @@
-//! What publishing a service changes: its defaults, and the task retry it continues.
+//! Service-binding labels and default-scope helpers for settings and setup.
 use crate::preferences::{BindingScope, ServicePurpose};
 
-/// What a service publication continues with once its credential is checked.
-pub struct PublishPlan {
-    pub continue_repair: bool,
-    pub repair_task: Option<String>,
-    pub scope: BindingScope,
-}
-
-/// Where a published service applies. Every task runs with the default services
-/// current when it starts, so a repair's service becomes the default: that is the
-/// service the repair runs with. A service saved in settings is the default only
-/// when chosen so.
-pub fn publish_scope(repairing: bool, also_default: bool) -> BindingScope {
-    if repairing || also_default {
+/// Where a published service applies: a service saved in settings becomes the
+/// default only when chosen so.
+pub fn publish_scope(also_default: bool) -> BindingScope {
+    if also_default {
         BindingScope::Defaults
     } else {
         BindingScope::Saved
@@ -39,15 +30,8 @@ mod tests {
     use super::{BindingScope, publish_scope};
 
     #[test]
-    fn a_repair_saves_the_default_service_it_runs_with() {
-        for also_default in [false, true] {
-            assert_eq!(publish_scope(true, also_default), BindingScope::Defaults);
-        }
-    }
-
-    #[test]
     fn a_service_saved_in_settings_changes_defaults_only_when_asked() {
-        assert_eq!(publish_scope(false, false), BindingScope::Saved);
-        assert_eq!(publish_scope(false, true), BindingScope::Defaults);
+        assert_eq!(publish_scope(false), BindingScope::Saved);
+        assert_eq!(publish_scope(true), BindingScope::Defaults);
     }
 }

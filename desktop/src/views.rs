@@ -5,9 +5,9 @@ use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit_material::{
     color::{ColorRole, Scheme},
     components::{
-        Badge, ButtonTone, ButtonVariant, CaptionLabels, IconButton, MaterialTooltip, NoticeKind,
-        Snackbar, SnackbarDuration, SnackbarPosition, TitleBar as AppBar, material_button,
-        notice_banner, spinner, title_bar_control,
+        Badge, ButtonTone, ButtonVariant, CaptionLabels, MaterialTooltip, NoticeKind, Snackbar,
+        SnackbarDuration, SnackbarPosition, TitleBar as AppBar, material_button, notice_banner,
+        spinner, title_bar_control,
     },
     icons::SymbolIcon,
     motion,
@@ -364,122 +364,6 @@ impl Desktop {
                 .child(settings),
         )
     }
-
-    fn task_result_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        // A new result can briefly announce itself. Historical unresolved work
-        // remains in Tasks; it must not consume every unrelated page's height.
-        let (announced_id, shown) = self.work.read(cx).result_shown.as_ref()?;
-        if shown.elapsed() >= desktop_tasks::job::RESULT_SHOWN {
-            return None;
-        }
-        let visible_task = if self.page == Page::New {
-            self.current_input_task(cx).map(|task| task.id.as_str())
-        } else {
-            None
-        };
-        let task = self
-            .workspace(cx)?
-            .state
-            .tasks
-            .iter()
-            .filter(|task| {
-                &task.id == announced_id
-                    && task.unread
-                    && task.handled_by.is_none()
-                    && visible_task != Some(task.id.as_str())
-                    && !(self.page == Page::New
-                        && self.opened(cx).reading
-                        && self
-                            .import
-                            .following_conversion
-                            .as_ref()
-                            .is_some_and(|follow| {
-                                follow.follows(&task.id, self.import.preview_generation)
-                            }))
-            })
-            .max_by_key(|task| task.updated)?;
-        let id = task.id.clone();
-        let dismiss_id = id.clone();
-        let exports_only = task.exports_only() && task.state == workspace::TaskState::Complete;
-        let result = if matches!(
-            task.state,
-            workspace::TaskState::Complete | workspace::TaskState::Partial
-        ) {
-            task.artifact.clone().map(|out_dir| crate::backend::Done {
-                out_dir,
-                title: task.plan.title.clone(),
-                ..Default::default()
-            })
-        } else {
-            None
-        };
-        let action = match task.state {
-            workspace::TaskState::Complete if exports_only => course2md::tr!("打开导出位置"),
-            workspace::TaskState::Complete => course2md::tr!("阅读笔记"),
-            workspace::TaskState::Partial if result.is_some() => course2md::tr!("阅读笔记"),
-            workspace::TaskState::Partial => course2md::tr!("查看未完成部分"),
-            workspace::TaskState::Uncertain => course2md::tr!("查看结果"),
-            _ => course2md::tr!("查看任务"),
-        };
-        Some(motion::enter(
-            SharedString::from(format!("task-result-notice-{}", task.id)),
-            shell_column_for(self.page).py_2().flex_shrink_0().child(
-                notice_banner(
-                    "background-task-result",
-                    NoticeKind::Info,
-                    course2md::tr!(
-                        "《{}》：{}",
-                        task.plan.title,
-                        if exports_only {
-                            course2md::tr!("文件已导出")
-                        } else {
-                            task.state.label()
-                        },
-                    ),
-                )
-                .child(
-                    // Tonal would be the notice's own container color.
-                    material_button("open-task-result", ButtonVariant::Filled)
-                        .icon(symbols::arrow_forward())
-                        .child(action)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if exports_only {
-                                this.open_task_export_location(id.clone(), cx);
-                            } else if let Some(done) = &result {
-                                this.open_course(Course::from_completed(done), cx);
-                            } else {
-                                this.select_task(&id, cx);
-                                this.navigate(Page::Task, cx);
-                            }
-                        })),
-                )
-                .child(
-                    IconButton::new(
-                        "dismiss-task-result",
-                        symbols::close(),
-                        course2md::tr!("关闭提示"),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.work.change(cx, |work, _| work.result_shown = None);
-                        if let Some(Err(error)) = this.with_workspace(cx, |workspace| {
-                            workspace.transaction(|state| {
-                                if let Some(task) = state.task_mut(&dismiss_id) {
-                                    task.unread = false;
-                                }
-                                Ok(())
-                            })
-                        }) {
-                            this.workspace_error = Some(course2md::tr!(
-                                "提示关闭状态未能保存：{}",
-                                format!("{error:#}")
-                            ));
-                        }
-                        cx.notify();
-                    })),
-                ),
-            ),
-        ))
-    }
 }
 
 impl Desktop {
@@ -619,11 +503,7 @@ impl Render for Desktop {
                 |v| v.h_full().min_h_0(),
             )
             .when(
-                // The workbench card already shows a followed result opening.
-                // The reader page does not read the reader: it is drawn on its own.
-                !matches!(self.page, Page::Library | Page::Result)
-                    && !(self.page == Page::New && self.import.following_conversion.is_some())
-                    && self.opened(cx).reading,
+                !matches!(self.page, Page::Library | Page::Result) && self.opened(cx).reading,
                 |v| {
                     v.child(
                         h_flex()
@@ -652,28 +532,15 @@ impl Render for Desktop {
             motion::page_enter(("page-content", self.page as usize), content)
         };
         let topbar = self.shell_topbar(window, cx);
-        let task_notice = self.task_result_notice(cx);
         let model_notice = self.onboarding_background_notice(cx);
         let body = v_flex()
             .flex_1()
             .min_w_0()
             .min_h_0()
             .w_full()
-            .when_some(task_notice, |body, notice| body.child(notice))
             .when_some(model_notice, |body, notice| {
                 body.child(shell_column_for(self.page).py_2().child(notice))
             })
-            .when(
-                self.page == Page::Library
-                    && self
-                        .settings_group_notice(crate::preferences::PreferenceGroup::Application)
-                        .is_some_and(|(_, error)| error),
-                |v| {
-                    v.child(shell_column_for(self.page).pb_3().flex_shrink_0().child(
-                        self.group_feedback(crate::preferences::PreferenceGroup::Application, cx),
-                    ))
-                },
-            )
             .when_some(self.workspace_error.clone(), |v, message| {
                 v.child(motion::enter(
                     SharedString::from(format!("workspace-error-{message}")),

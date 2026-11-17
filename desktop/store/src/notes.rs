@@ -552,7 +552,6 @@ pub mod fixtures {
             course_id: "fixture-course".into(),
             source_id: "fixture-source".into(),
             course_dir: root.join("course"),
-            replaces: None,
         };
         let manifest = publish(&target, revision, times, outcomes, translation);
         Course {
@@ -849,7 +848,6 @@ mod tests {
             course_id: "course-legacy".into(),
             source_id: "legacy-source".into(),
             course_dir: root.path().join("legacy"),
-            replaces: None,
         };
         fixtures::legacy_version(&target, 1, &[5.], Default::default());
         fixtures::point_at(&target.course_dir, "course-legacy", "old-task");

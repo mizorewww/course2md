@@ -380,7 +380,8 @@ impl Desktop {
             .get(&storage)
             .map(|location| location.root.clone());
         if own_root.as_ref().is_some_and(|own| *own != root) {
-            self.message = Some(course2md::tr!("笔记只能移到它所在保存位置里的文件夹").into());
+            self.library_ui.notice =
+                Some(course2md::tr!("笔记只能移到它所在保存位置里的文件夹").into());
             cx.notify();
             return;
         }
@@ -390,7 +391,8 @@ impl Desktop {
             move |library| library.assign(&target, &storage, folder),
             |this, result, _| {
                 if let Err(error) = result {
-                    this.message = Some(course2md::tr!("无法移动笔记：{}", format!("{error:#}")))
+                    this.library_ui.notice =
+                        Some(course2md::tr!("无法移动笔记：{}", format!("{error:#}")))
                 }
             },
             cx,
@@ -415,7 +417,8 @@ impl Desktop {
                     }
                 }
                 Err(error) => {
-                    this.message = Some(course2md::tr!("无法移动文件夹：{}", format!("{error:#}")));
+                    this.library_ui.notice =
+                        Some(course2md::tr!("无法移动文件夹：{}", format!("{error:#}")));
                     cx.notify();
                 }
             },
@@ -601,7 +604,8 @@ impl Desktop {
             }))
             .on_drop(cx.listener(move |this, drag: &FolderDrag, _, cx| {
                 if drag.root != folder_root {
-                    this.message = Some(course2md::tr!("文件夹只能在同一个保存位置里移动").into());
+                    this.library_ui.notice =
+                        Some(course2md::tr!("文件夹只能在同一个保存位置里移动").into());
                     cx.notify();
                 } else if Some(drag.id) != folder {
                     this.move_folder_into(folder_root.clone(), drag.id, folder, cx)

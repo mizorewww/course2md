@@ -615,7 +615,6 @@ impl Desktop {
             cx.notify();
             return;
         }
-        self.refresh_dispatch_controls(cx);
         self.hydrate_setup_service(purpose, Some(&version.id), window, cx);
         self.setup_step(
             match purpose {

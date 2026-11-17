@@ -20,7 +20,6 @@ use crate::{
     folder_tree::{Command, command_context_menu, with_context_menu},
 };
 use anyhow::{Result, anyhow};
-use course2md::execution::Component;
 use gpui::{prelude::*, *};
 use gpui_base::slider::{SliderEvent, SliderState};
 use gpui_base::{h_flex, v_flex};
@@ -60,7 +59,6 @@ enum EditField {
 
 struct ServiceEditor {
     form: ServiceForm,
-    repair_task: Option<(String, Vec<Component>)>,
     scroll: ScrollHandle,
     also_default: bool,
     status: Option<String>,
@@ -68,8 +66,6 @@ struct ServiceEditor {
     test_running: Option<Arc<AtomicBool>>,
     evidence: Option<preferences::ServiceTestEvidence>,
     received_tests: BTreeMap<String, preferences::ServiceTestEvidence>,
-    pending_binding: Option<ServiceVersion>,
-    saved_configuration: Option<ServiceVersion>,
     test_details_open: bool,
     save_failed: bool,
 }
@@ -84,7 +80,7 @@ pub struct OrdinaryPreferenceIssue {
 #[derive(Clone, Copy)]
 enum AfterDraftSaved {
     Test,
-    Publish { continue_repair: bool },
+    Publish,
 }
 
 /// A settings menu's width in design px: its longest labels stay whole.
@@ -119,7 +115,6 @@ pub(crate) struct State {
     failures: BTreeMap<PreferenceGroup, String>,
     failure_details: BTreeMap<PreferenceGroup, String>,
     expanded_feedback: BTreeSet<PreferenceGroup>,
-    generation_block_messages: BTreeSet<String>,
     pub(crate) pending_generation: Option<GenerationPreferences>,
     pub(crate) pending_application: Option<ApplicationPreferences>,
     pub(crate) font_scale: Entity<SliderState>,
@@ -217,7 +212,6 @@ impl State {
             failures: BTreeMap::new(),
             failure_details: BTreeMap::new(),
             expanded_feedback: Default::default(),
-            generation_block_messages: Default::default(),
             pending_generation: None,
             pending_application: None,
             font_scale,
@@ -1655,11 +1649,6 @@ impl Desktop {
 
     /// Records why a group's save failed; it shows until the next save succeeds.
     pub(crate) fn set_settings_failure(&mut self, group: PreferenceGroup, message: String) {
-        if group == PreferenceGroup::Generation {
-            self.settings_ui
-                .generation_block_messages
-                .insert(message.clone());
-        }
         self.settings_ui.failure_details.remove(&group);
         self.settings_ui.failures.insert(group, message);
     }
@@ -1867,7 +1856,11 @@ impl Desktop {
         .detach();
     }
     fn storage_location_failed(&mut self, message: String, cx: &mut Context<Self>) {
-        self.workspace_error = Some(message);
+        if self.page == Page::Library {
+            self.library_ui.notice = Some(message);
+        } else {
+            self.storage_ui.error = Some(message);
+        }
         cx.notify();
     }
     fn application_settings_page(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -2374,7 +2367,6 @@ impl Desktop {
                 if group == PreferenceGroup::Generation {
                     self.clear_resolved_generation_errors(previous);
                 }
-                self.advance_conversion_when_ready(cx);
                 cx.notify();
                 true
             }
@@ -2389,14 +2381,11 @@ impl Desktop {
         if self.ordinary_preferences_submit_issue().is_some() {
             return;
         }
-        let mut messages = std::mem::take(&mut self.settings_ui.generation_block_messages);
-        if let Some(previous) = previous {
-            messages.insert(previous);
-        }
-        for error in [&mut self.import.source_validation, &mut self.message] {
-            if error.as_ref().is_some_and(|error| messages.contains(error)) {
-                *error = None;
-            }
+        if let Some(issue) = &self.import.issue
+            && (issue.kind == desktop_tasks::import::WorkbenchIssueKind::Plan
+                || previous.as_deref() == Some(issue.message.as_str()))
+        {
+            self.import.issue = None;
         }
     }
     pub fn relocate_settings_paths(
@@ -2447,8 +2436,12 @@ impl Desktop {
         if self.settings_ui.pending_generation.is_some()
             || self.settings_ui.pending_application.is_some()
         {
-            self.message = Some(course2md::tr!("修改暂时无法保存，请重试").into());
-            cx.notify();
+            self.settings_tab = if self.settings_ui.pending_generation.is_some() {
+                SettingsTab::Generation
+            } else {
+                SettingsTab::Appearance
+            };
+            self.navigate(Page::Settings, cx);
             return false;
         }
         true

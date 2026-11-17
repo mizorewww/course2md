@@ -336,7 +336,6 @@ mod tests {
             course_id: "course-relocate".into(),
             source_id: "local:original-video".into(),
             course_dir: old.join("note"),
-            replaces: None,
         };
         let sections = vec![c2m_core::timeline::Section {
             t: 0.,

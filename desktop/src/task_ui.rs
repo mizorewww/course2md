@@ -1,9 +1,10 @@
-//! The task page: one card for every task, and one table of what can be done to it.
+//! The task page: 4 clean groups (`Running`, `Attention`, `Queued`, `Finished`),
+//! in-place course task cards, stage rows, and copyable diagnostic logs.
 use crate::{
     Desktop, Page, activity,
     import_ui::{self, video_cover, video_title},
     symbols, ui,
-    workspace::{Intent, TaskRecord, TaskState},
+    workspace::{TaskRecord, TaskStatus},
 };
 use desktop_store::records::Records;
 use desktop_tasks::job::Work;
@@ -38,7 +39,7 @@ pub(crate) struct TaskListUi {
     pub focus: Vec<FocusHandle>,
     pub rem: f32,
     /// Disclosure open state that outlives a virtualized row's unmount.
-    pub logs_open: std::collections::HashSet<String>,
+    pub logs_open: HashSet<String>,
     pub log_scrolls: HashMap<String, ScrollHandle>,
     pub copied_logs: HashSet<String>,
     /// The task row showing its details on the task page.
@@ -67,6 +68,8 @@ enum QueueItem {
     /// The page heading with its counts; it scrolls with the sections and
     /// shares their column.
     Header,
+    /// Inline page notice for an action error on the Tasks page.
+    PageNotice(String),
     Unavailable,
     Empty,
     GroupLabel {
@@ -86,7 +89,7 @@ enum QueueItem {
         hidden: usize,
         open: Entity<bool>,
     },
-    /// Folds finished work and earlier records behind one tile.
+    /// Folds finished work behind one tile.
     CompletedToggle {
         count: usize,
         open: bool,
@@ -100,6 +103,7 @@ impl QueueItem {
     fn key(&self, tasks: &[TaskRecord]) -> String {
         match self {
             QueueItem::Header => "header".to_owned(),
+            QueueItem::PageNotice(_) => "page-notice".to_owned(),
             QueueItem::Unavailable => "unavailable".to_owned(),
             QueueItem::Empty => "empty".to_owned(),
             QueueItem::GroupLabel { group, .. } => format!("group-{group:?}"),
@@ -132,6 +136,8 @@ const QUEUE_PREVIEW: usize = 5;
 const TASK_COLUMN: Rems = rem(760.);
 /// Between the page heading and each section.
 const TASK_SECTION_GAP: Rems = rem(28.);
+/// The cover's width on a task card away from home.
+const COVER_WIDTH: Rems = rem(160.);
 
 /// A queued task being dragged to a new place in the queue.
 #[derive(Clone)]
@@ -147,6 +153,7 @@ impl Render for QueueDrag {
             .icon(symbols::drag_indicator())
     }
 }
+
 /// How a step's state draws.
 trait StageStatusView {
     fn role(self) -> ColorRole;
@@ -154,9 +161,7 @@ trait StageStatusView {
     fn icon(self) -> SymbolIcon;
 }
 
-/// The task page: the queue of every task and its cards, which the workbench and the
-/// library also show. It reads the records and the running work, keeps what is open,
-/// and asks the window for everything that changes a task.
+/// The task page: the queue of every task and its cards, which the workbench also shows.
 pub(crate) struct TasksPage {
     records: Entity<Records>,
     work: Entity<Work>,
@@ -164,6 +169,8 @@ pub(crate) struct TasksPage {
     pub(crate) task_list: TaskListUi,
     /// What the window knows beyond the records and the work.
     facts: ShellFacts,
+    /// Inline notice for task-page actions (such as opening a missing export folder).
+    notice: Option<String>,
     /// Details already shown once; a virtualized row remounts without replaying them.
     entered: HashSet<String>,
     /// The workbench's running card: its actions, taken from its text column to run
@@ -171,21 +178,15 @@ pub(crate) struct TasksPage {
     home_footer: Option<Div>,
 }
 
-/// What the cards show that neither the records nor the work hold. The window sets it
-/// before it draws.
+/// What the cards show that neither the records nor the work hold.
 #[derive(Default, PartialEq)]
 pub(crate) struct ShellFacts {
-    /// The names of the AI services the tasks send to, by saved version.
-    pub services: HashMap<String, String>,
     /// Libraries whose location must be associated again.
     pub reassociate: HashSet<String>,
     /// A storage operation is under way.
     pub storage_busy: bool,
-    /// Where the model a waiting task needs stands, once its card asked to prepare it.
+    /// Where the model a failed task needs stands, once its card asked to prepare it.
     pub models: HashMap<String, ModelPreparation>,
-    /// Tasks that name a service no longer saved or deleted: they cannot continue as
-    /// they are, and adjusting them (a new attempt) is the way on.
-    pub services_missing: HashSet<String>,
 }
 
 /// The model preparation a task's card started.
@@ -205,8 +206,6 @@ pub(crate) enum TasksEvent {
         id: String,
         expand: bool,
     },
-    /// Send a task's uncertain requests again, as its card's button says.
-    Resend(String),
     /// Move a waiting task to this place in the queue.
     Move {
         id: String,
@@ -233,16 +232,6 @@ pub(crate) fn action_click(
             cx.emit(TasksEvent::Run(id.clone(), action.clone()))
         });
     }
-}
-
-/// Where a task's plan goes and what it does: a card's second line.
-/// Whether a task's way on repairs what stopped it: a missing model, a deleted or
-/// refused service, an adjustment. Such a stop is an obstacle, not a failure.
-pub(crate) fn recoverable(lead: Option<&TaskAction>) -> bool {
-    matches!(
-        lead,
-        Some(TaskAction::PrepareModel | TaskAction::Repair | TaskAction::Adjust)
-    )
 }
 
 fn task_support_line(id: &str, support: String) -> Stateful<Div> {
@@ -289,7 +278,6 @@ fn stage_row(stage: TaskStage, window: &mut Window, cx: &mut App) -> Div {
                 .gap(rem(16.))
                 .child(
                     semantic_label(SharedString::from(stage.id.clone()), stage.title, icon)
-                        // The name keeps one line; the measurement wraps instead.
                         .whitespace_nowrap()
                         .flex_shrink_0(),
                 )
@@ -310,9 +298,6 @@ fn stage_row(stage: TaskStage, window: &mut Window, cx: &mut App) -> Div {
         })
 }
 
-/// The cover's width on a task card away from home.
-const COVER_WIDTH: Rems = rem(160.);
-
 impl TasksPage {
     pub(crate) fn new(
         records: Entity<Records>,
@@ -327,6 +312,7 @@ impl TasksPage {
             this: cx.weak_entity(),
             task_list: TaskListUi::new(),
             facts: ShellFacts::default(),
+            notice: None,
             entered: HashSet::new(),
             home_footer: None,
         }
@@ -336,6 +322,13 @@ impl TasksPage {
     pub(crate) fn set_facts(&mut self, facts: ShellFacts, cx: &mut Context<Self>) {
         if self.facts != facts {
             self.facts = facts;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn set_notice(&mut self, notice: Option<String>, cx: &mut Context<Self>) {
+        if self.notice != notice {
+            self.notice = notice;
             cx.notify();
         }
     }
@@ -390,27 +383,17 @@ impl TasksPage {
         }
     }
 
-    /// Whether a service task `id` needs is no longer saved or was deleted.
-    pub(crate) fn services_missing(&self, id: &str) -> bool {
-        self.facts.services_missing.contains(id)
-    }
-
     pub(crate) fn task_actions(
         &self,
         task: &TaskRecord,
         surface: TaskSurface,
         cx: &App,
     ) -> Vec<TaskAction> {
-        task_actions_for(
-            task,
-            surface,
-            &self.task_facts(task, cx),
-            self.facts.services_missing.contains(&task.id),
-        )
+        task_actions(task, surface, &self.task_facts(task, cx))
     }
 
     fn task_stage_rows(&self, task: &TaskRecord, cx: &App) -> Vec<TaskStage> {
-        task_stage_rows(task, self.is_running_task(&task.id, cx))
+        task_stage_rows(task, self.work.read(cx))
     }
 
     fn queue_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -435,15 +418,15 @@ impl TasksPage {
                 {
                     Rc::clone(tasks)
                 } else {
-                    // Running and queued work keeps its run order; the rest
-                    // shows the newest first.
+                    // Running and queued work keeps its run order; attention and finished
+                    // show the most recently updated first.
                     let mut tasks: Vec<_> =
                         workspace.state.tasks.iter().cloned().enumerate().collect();
                     tasks.sort_by_key(|(index, task)| {
                         let group = task_group(task);
                         let order = match group {
                             TaskGroup::Running | TaskGroup::Queued => *index as i64,
-                            _ => -(task.created as i64),
+                            _ => -(task.updated.max(task.created) as i64),
                         };
                         (group, order)
                     });
@@ -456,15 +439,18 @@ impl TasksPage {
         };
         if self.records.read(cx).workspace.is_some() {
             items.insert(0, QueueItem::Header);
+            if let Some(notice) = &self.notice {
+                items.insert(1, QueueItem::PageNotice(notice.clone()));
+            }
         }
         let completed_state = window.use_keyed_state("task-history-open", cx, |_, _| None::<bool>);
         let queue_open = window.use_keyed_state("task-queue-open", cx, |_, _| false);
         let done = |task: &TaskRecord| task_group(task).settled();
         let count = tasks.iter().filter(|task| done(task)).count();
         let only_settled = count > 0 && count == tasks.len();
-        // Finished work and earlier records fold behind one tile while active work is
-        // above them, and open by default when nothing else is on the page; a task the
-        // person went to (from the library or a notice) also stays visible.
+        // Finished work folds behind one tile while active/failed work is above it,
+        // and opens by default when nothing else is on the page; a task the person
+        // went to also stays visible.
         let expanded_done = self
             .task_list
             .expanded
@@ -495,7 +481,7 @@ impl TasksPage {
                     count: members.len(),
                     queued: members
                         .iter()
-                        .filter(|&&index| tasks[index].state == TaskState::Queued)
+                        .filter(|&&index| tasks[index].status == TaskStatus::Queued)
                         .count(),
                 });
             }
@@ -589,7 +575,7 @@ impl TasksPage {
             .into_any_element()
     }
 
-    /// The page title and the action that stops or resumes all of the work.
+    /// The page title and the actions that stop, resume, or clear settled work.
     fn queue_page_header(&self, tasks: &[TaskRecord], cx: &mut Context<Self>) -> Div {
         let TaskCounts {
             resumable,
@@ -597,7 +583,6 @@ impl TasksPage {
             clearable,
             ..
         } = task_counts(tasks);
-        // Each group below names its kind of work; the title does not count it again.
         h_flex()
             .w_full()
             .min_w_0()
@@ -665,8 +650,22 @@ impl TasksPage {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match item {
-            // The page heading summarizes the counts; group headings stay names.
             QueueItem::Header => self.queue_page_header(tasks, cx).into_any_element(),
+            QueueItem::PageNotice(message) => {
+                notice_banner("task-page-notice", NoticeKind::Warning, message.clone())
+                    .child(
+                        IconButton::new(
+                            "dismiss-task-page-notice",
+                            symbols::close(),
+                            course2md::tr!("关闭提示"),
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.notice = None;
+                            cx.notify();
+                        })),
+                    )
+                    .into_any_element()
+            }
             QueueItem::Unavailable => notice_banner(
                 "task-records-unavailable",
                 NoticeKind::Danger,
@@ -707,8 +706,6 @@ impl TasksPage {
                 count,
                 queued,
             } => {
-                // Paused work keeps its place in the queue; when nothing in it
-                // is waiting to run, the section says so.
                 let label = if *group == TaskGroup::Queued && *queued == 0 {
                     course2md::tr!("已暂停")
                 } else {
@@ -767,7 +764,6 @@ impl TasksPage {
             QueueItem::CompletedToggle { count, open, state } => {
                 let toggle = state.clone();
                 let open = *open;
-                // The tile names what it folds; the count is the record's size.
                 ListItem::new(
                     "toggle-task-history",
                     if open {
@@ -780,8 +776,6 @@ impl TasksPage {
                 .trailing_text(count.to_string())
                 .trailing(ListTrailing::Icon(disclosure_chevron(open)))
                 .segment([true; 4])
-                // Folding also closes a finished task that was opened
-                // from elsewhere, or the fold could not close.
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if open
                         && let Some(id) = this.task_list.expanded.clone()
@@ -811,7 +805,6 @@ impl TasksPage {
         let entity = self.this.clone();
         let id = task.id.clone();
         let actions = self.task_actions(task, TaskSurface::Menu, cx);
-        // A divider ends each menu section.
         let items: Vec<_> = actions
             .iter()
             .enumerate()
@@ -1085,8 +1078,7 @@ impl TasksPage {
     /// Where a task saves, as its supporting line.
     fn task_destination(&self, task: &TaskRecord, cx: &App) -> String {
         match self.task_library(task, cx) {
-            // Only a note that exists (or was superseded after saving) is saved; until then it is where it will go.
-            Some(location) if task.artifact.is_some() || task.replaced_by.is_some() => {
+            Some(location) if task.note_dir.is_some() => {
                 course2md::tr!("保存在「{}」", location.label())
             }
             Some(location) => course2md::tr!("将保存到「{}」", location.label()),
@@ -1094,45 +1086,13 @@ impl TasksPage {
         }
     }
 
-    /// Which service received the text in the task's latest run, when one did.
-    /// The services whose answers the task's AI results are, which a result replayed
-    /// from an earlier service keeps: never a service that did not produce the text.
-    fn task_ai_destination(&self, task: &TaskRecord) -> Option<String> {
-        let ran_with = task.ran_with.as_ref()?;
-        let names: Vec<&str> = desktop_tasks::task_view::ai_producers(task)
-            .into_iter()
-            .filter_map(|id| {
-                self.facts.services.get(id).map(String::as_str).or_else(|| {
-                    (ran_with.ai_service.as_deref() == Some(id))
-                        .then_some(ran_with.ai_service_name.as_deref())
-                        .flatten()
-                })
-            })
-            .collect();
-        if names.is_empty() {
-            return None;
-        }
-        let name = names.join(course2md::tr!("、"));
-        Some(course2md::tr!(
-            "{}发送到「{}」",
-            if ran_with.options().vision {
-                course2md::tr!("文字与截图")
-            } else {
-                course2md::tr!("文字")
-            },
-            name,
-        ))
-    }
-
-    /// Where a task saves, and, once it has run, what its latest run used: its
-    /// details on the task page.
+    /// Destination details shown when a task row or card expands its details.
     pub(crate) fn task_detail_rows(&self, task: &TaskRecord, cx: &App) -> Vec<Div> {
         let library = self
             .workspace(cx)
-            .and_then(|workspace| workspace.state.library(&task.plan.library_id));
+            .and_then(|workspace| workspace.state.library(&task.library_id));
         let folder = task
-            .plan
-            .folder
+            .target_folder
             .and_then(|id| {
                 self.library(cx)
                     .indexes
@@ -1153,40 +1113,20 @@ impl TasksPage {
             course2md::tr!("保存到"),
             destination,
         )];
-        if let (Some(ran_with), Some(source)) = (&task.ran_with, task_text_source(task)) {
-            let options = ran_with.options();
-            let mut ai: Vec<String> = [
-                desktop_tasks::import::ConversionAiOption::Proofread,
-                desktop_tasks::import::ConversionAiOption::Summary,
-                desktop_tasks::import::ConversionAiOption::Vision,
-            ]
-            .into_iter()
-            .filter(|option| desktop_tasks::import::conversion_ai_option_enabled(&options, *option))
-            .map(|option| desktop_tasks::import::conversion_ai_option_label(option).to_owned())
-            .collect();
-            if options.translate.is_some() {
-                ai.push(course2md::tr!("双语翻译").to_owned());
-            }
-            let ai = if ai.is_empty() {
-                course2md::tr!("不使用 AI").to_owned()
-            } else {
-                ai.join(course2md::tr!("、"))
-            };
-            let ai = match self.task_ai_destination(task) {
-                Some(destination) => format!("{ai} · {destination}"),
-                None => ai,
-            };
+        if !task.source.input.trim().is_empty() {
             rows.push((
-                format!("task-text-source-{id}"),
-                symbols::subtitles(),
-                course2md::tr!("文字来源"),
-                source.to_owned(),
-            ));
-            rows.push((
-                format!("task-ai-{id}"),
-                symbols::auto_fix_high(),
-                course2md::tr!("AI 处理"),
-                ai,
+                format!("task-source-{id}"),
+                if task.source.online {
+                    symbols::open_in_new()
+                } else {
+                    symbols::movie()
+                },
+                if task.source.online {
+                    course2md::tr!("视频链接")
+                } else {
+                    course2md::tr!("本地视频")
+                },
+                task.source.input.clone(),
             ));
         }
         let scale = TileScale::Compact;
@@ -1201,10 +1141,10 @@ impl TasksPage {
     }
 
     fn task_cover(&self, task: &TaskRecord, cx: &App) -> Option<PathBuf> {
-        task.plan.source.cover.clone().or_else(|| {
+        task.source.cover.clone().or_else(|| {
             self.library(cx)
                 .cover_by_source
-                .get(&task.plan.source_id)
+                .get(&task.source_id)
                 .cloned()
         })
     }
@@ -1220,33 +1160,19 @@ impl TasksPage {
         let id = &task.id;
         let expanded = self.task_list.expanded.as_ref() == Some(id);
         let more = self.task_menu_button(task, window, cx);
-        // On the workbench the running card's status is its step; Tasks owns the rest.
         let on_home_running = matches!(place, CardPlace::Home) && runs_in_card(task);
-        // In its group on Tasks, a card whose state is the group's title does not
-        // repeat it, and a running card's step line says what it is doing.
-        let generating = task.state == TaskState::Running && task.intent == Intent::Run;
+        let generating = task.status == TaskStatus::Running;
         let named_by_group = matches!(place, CardPlace::Open { .. })
             && (generating || task_status_label(task) == task_group(task).label());
         let chip = (!on_home_running
             && !named_by_group
-            && (task.state != TaskState::Queued || !matches!(place, CardPlace::Row { .. })))
-        .then(|| {
-            // A task whose note another replaced is history, not a success.
-            status_chip(if task.replaced_by.is_some() {
-                StatusKind::Neutral
-            } else {
-                task_status_kind(task.state)
-            })
-            .child(task_status_label(task))
-        });
+            && (task.status != TaskStatus::Queued || !matches!(place, CardPlace::Row { .. })))
+        .then(|| status_chip(task_status_kind(task)).child(task_status_label(task)));
         let context_menu = self.task_menu(task, cx);
-        // The running card's progress and actions stay in its text column; a task that
-        // waits on the person says why across the card, as the draft's obstacle does.
         let in_column = on_home_running && !needs_person(task);
         let inner = in_column.then(|| self.task_body(task, place, window, cx));
         let (outer, head, body) = match place {
             CardPlace::Row { outer, number } => {
-                // An open row's details continue its surface below it.
                 let corners = if expanded {
                     [outer[0], outer[1], false, false]
                 } else {
@@ -1256,8 +1182,6 @@ impl TasksPage {
                 (outer, head.into_any_element(), expanded)
             }
             CardPlace::Open { outer } => {
-                // Once several steps are reached, their chips under the bar say which
-                // runs; the title column does not say it again.
                 let stages = self.task_stage_rows(task, cx);
                 let chips = stages.len() > 1
                     && (stages.iter().any(|stage| stage.status.running())
@@ -1266,7 +1190,7 @@ impl TasksPage {
                     self.task_destination(task, cx),
                     self.task_cover(task, cx),
                     COVER_WIDTH,
-                    (!chips)
+                    (!chips && task.status == TaskStatus::Running)
                         .then(|| self.task_step_line(task, false, cx))
                         .flatten(),
                 );
@@ -1278,7 +1202,9 @@ impl TasksPage {
                     self.task_destination(task, cx),
                     self.task_cover(task, cx),
                     import_ui::cover_width(window),
-                    self.task_step_line(task, true, cx),
+                    (task.status == TaskStatus::Running)
+                        .then(|| self.task_step_line(task, true, cx))
+                        .flatten(),
                 );
                 let head = self.task_card_head(task, place, chip, more, inner, facts);
                 ([true; 4], head.into_any_element(), !in_column)
@@ -1286,7 +1212,6 @@ impl TasksPage {
         };
         let body = body.then(|| self.task_body(task, place, window, cx));
         let footer = self.home_footer.take();
-        // Shift+F10 or the Menu key opens the commands while focus is in the card.
         let menu_focus = window
             .use_keyed_state(
                 SharedString::from(format!("task-menu-focus-{id}")),
@@ -1318,7 +1243,6 @@ impl TasksPage {
                 CardPlace::Row { .. } => card
                     .child(head)
                     .children(body.map(|body| div().px(rem(16.)).pb(rem(16.)).child(body))),
-                // A card of its own on Tasks is roomy, as its large corners are (T6).
                 CardPlace::Open { .. } => card.p(rem(20.)).gap(rem(16.)).child(head).children(body),
                 _ => card
                     .p(rem(16.))
@@ -1330,9 +1254,6 @@ impl TasksPage {
             .into_any_element()
     }
 
-    /// A row of its group: the grip for queued work, the row that folds details out,
-    /// and what it says and offers at its trailing edge. The whole row is one tile
-    /// button, grip and commands included, with the inset cover of a note row (U21, V6).
     fn task_row_head(
         &self,
         task: &TaskRecord,
@@ -1343,19 +1264,24 @@ impl TasksPage {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let id = task.id.clone();
-        let waiting = number.map(|_| task.state);
+        let waiting = number.map(|_| task.status);
         let scale = TileScale::Regular;
         let cover = crate::course_library::row_cover(
             self.task_cover(task, cx),
             match waiting {
-                Some(TaskState::Paused) => symbols::pause(),
+                Some(TaskStatus::Paused) => symbols::pause(),
                 Some(_) => symbols::schedule(),
                 None => symbols::movie(),
             },
         );
+        let display_title = if task.title.trim().is_empty() {
+            task.source.title.clone()
+        } else {
+            task.title.clone()
+        };
         let row = scale
             .button(SharedString::from(format!("select-{id}")), corners)
-            .accessibility_label(task.plan.title.clone())
+            .accessibility_label(display_title.clone())
             .on_click(cx.listener({
                 let id = id.clone();
                 move |this, _, _, cx| this.toggle_task_row(&id, cx)
@@ -1363,7 +1289,6 @@ impl TasksPage {
             .child(
                 scale
                     .row()
-                    // At narrow widths or large text the commands move under the identity.
                     .flex_wrap()
                     .when(number.is_some(), |row| {
                         row.child(h_flex().flex_shrink_0().cursor_grab().child(
@@ -1381,7 +1306,7 @@ impl TasksPage {
                                 scale
                                     .label(
                                         SharedString::from(format!("task-row-title-{id}")),
-                                        task.plan.title.clone(),
+                                        display_title.clone(),
                                     )
                                     .whitespace_normal()
                                     .line_clamp(2)
@@ -1391,7 +1316,6 @@ impl TasksPage {
                                 SharedString::from(format!("task-row-place-{id}")),
                                 self.task_destination(task, cx),
                             ))
-                            // A consequence worth seeing without opening the row.
                             .children(task_kept_edits(task).map(|text| {
                                 scale.support(
                                     SharedString::from(format!("task-row-kept-edits-{id}")),
@@ -1407,7 +1331,7 @@ impl TasksPage {
                             .items_center()
                             .children(chip)
                             .when(
-                                task.artifact.is_some() && task_group(task) != TaskGroup::Queued,
+                                task.note_dir.is_some() && task_group(task) != TaskGroup::Queued,
                                 |row| {
                                     row.child(
                                         material_button(
@@ -1419,7 +1343,7 @@ impl TasksPage {
                                             action_click(
                                                 cx.weak_entity(),
                                                 id.clone(),
-                                                TaskAction::Read,
+                                                TaskAction::OpenNote,
                                             ),
                                         ),
                                     )
@@ -1437,7 +1361,7 @@ impl TasksPage {
             Some(number) => {
                 let drag = QueueDrag {
                     id,
-                    title: task.plan.title.clone().into(),
+                    title: display_title.into(),
                 };
                 head.on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
                     .drag_over::<QueueDrag>(|style, _, _, _| {
@@ -1462,7 +1386,6 @@ impl TasksPage {
         chip: Option<Div>,
         more: AnyElement,
         inner: Option<Div>,
-        // Where it saves, its cover and the cover's width, and the step it is on.
         (destination, cover, cover_width, step): (
             String,
             Option<PathBuf>,
@@ -1472,28 +1395,27 @@ impl TasksPage {
     ) -> Div {
         let id = &task.id;
         let home = matches!(place, CardPlace::Home);
-        let title = if task.plan.title.trim().is_empty() {
-            task.plan.source.title.clone()
+        let title = if task.title.trim().is_empty() {
+            task.source.title.clone()
         } else {
-            task.plan.title.clone()
+            task.title.clone()
         };
-        // The video's name: its group and step line say what is happening to it.
-        // Where it saves, where its text comes from and which service
-        // receives it, on one line; on the workbench, whose video it is.
         let support = if home {
-            desktop_tasks::import::source_metadata(&task.plan.source)
+            desktop_tasks::import::source_metadata(&task.source)
         } else {
-            std::iter::once(destination)
-                .chain(task_text_source(task).map(str::to_owned))
-                .chain(self.task_ai_destination(task))
-                .collect::<Vec<_>>()
-                .join(" · ")
+            destination
         };
-        // A running task's status ends its title; one that waits says so below it.
         let (title_chip, line_chip) = if home || needs_person(task) {
             (None, chip)
         } else {
             (chip, None)
+        };
+        let duration_secs = if task.duration.is_finite() && task.duration > 0. {
+            Some(task.duration)
+        } else if task.source.duration.is_finite() && task.source.duration > 0. {
+            Some(task.source.duration)
+        } else {
+            None
         };
         h_flex()
             .w_full()
@@ -1501,13 +1423,8 @@ impl TasksPage {
             .items_start()
             .flex_wrap()
             .gap(rem(16.))
-            // Every task leads with its video; one that needs the person says so in
-            // the notice under it (red for a failure, amber for a pause or a partial).
             .child({
-                // The same cover as the video's preview, its duration included.
-                let source = &task.plan.source;
-                let duration = (source.duration.is_finite() && source.duration > 0.)
-                    .then(|| course2md::render::fmt_ts(source.duration));
+                let duration = duration_secs.map(course2md::render::fmt_ts);
                 video_cover(cover, cover_width).when_some(duration, |cover, duration| {
                     cover.child(
                         media_label(format!("task-duration-{id}"), duration)
@@ -1529,13 +1446,10 @@ impl TasksPage {
                             .min_w_0()
                             .items_start()
                             .gap(rem(8.))
-                            .child(video_title(format!("task-title-{id}"), title.clone()).flex_1())
+                            .child(video_title(format!("task-title-{id}"), title).flex_1())
                             .children(title_chip)
                             .child(more),
                     )
-                    // Whose video first on the workbench, where the step belongs to the bar.
-                    // On the workbench it reads as the draft's line did before the
-                    // task started: body size, under the title.
                     .when(home, |column| {
                         column.when(!support.is_empty(), |column| {
                             column
@@ -1548,8 +1462,6 @@ impl TasksPage {
                                 .role(Role::Status)
                                 .text_size(TEXT_BODY)
                                 .text_color(color(ColorRole::ON_SURFACE_VARIANT));
-                        // Steps side by side stay on one line, so the card does not
-                        // grow when a second one starts; one step wraps as it did.
                         column.child(if side_by_side {
                             line.w_full().min_w_0().truncate()
                         } else {
@@ -1557,21 +1469,15 @@ impl TasksPage {
                         })
                     })
                     .when(!home && !support.is_empty(), |column| {
-                        column.child(task_support_line(id, support.clone()))
+                        column.child(task_support_line(id, support))
                     })
                     .child(h_flex().pt(rem(4.)).children(line_chip))
                     .children(inner),
             )
     }
 
-    /// The step a running task is on. Later steps depend on what the video turns out
-    /// to need, so the position counts the steps reached so far, without a total. The
-    /// workbench says the step and its measure instead, above the bar. Also says
-    /// whether several steps run side by side.
     fn task_step_line(&self, task: &TaskRecord, home: bool, cx: &App) -> Option<(String, bool)> {
         let stages = self.task_stage_rows(task, cx);
-        // Steps that run side by side (scanning while speech is recognized) are all
-        // where the task is, each with its own number, on the one line.
         let running: Vec<String> = stages
             .iter()
             .enumerate()
@@ -1598,7 +1504,6 @@ impl TasksPage {
         worker_wait_state(
             self.is_running_task(&task.id, cx),
             task.events.done.is_some(),
-            task.intent,
             task.events
                 .stages
                 .iter()
@@ -1606,9 +1511,6 @@ impl TasksPage {
         )
     }
 
-    /// One indicator for the step in progress: its measured fraction when the
-    /// worker reports one, motion otherwise. The line under it carries the step's
-    /// own measurement and clock, never an estimate.
     fn task_progress(
         &self,
         task: &TaskRecord,
@@ -1626,7 +1528,6 @@ impl TasksPage {
         if !active || (current.is_none() && self.task_wait(task, cx).is_none()) {
             return None;
         }
-        // How long the job has run, when no step measures itself yet.
         let elapsed = || {
             self.work
                 .read(cx)
@@ -1646,8 +1547,7 @@ impl TasksPage {
                         SharedString::from(format!("task-progress-{id}")),
                         current.map_or("", |stage| stage.title.as_str()).to_owned(),
                     )
-                    .value(current.and_then(|stage| stage.fraction))
-                    .muted(task.state == TaskState::Pausing || task.intent != Intent::Run),
+                    .value(current.and_then(|stage| stage.fraction)),
                 )
                 .children(lines.iter().enumerate().map(|(index, line)| {
                     let key = if index == 0 {
@@ -1672,95 +1572,6 @@ impl TasksPage {
         )
     }
 
-    /// The uncertain-outcome decision: exactly what may be billed again, beside the
-    /// one button that sends it. Nothing here runs without that press.
-    fn uncertain_block(&self, task: &TaskRecord, cx: &mut Context<Self>) -> Option<Div> {
-        let id = &task.id;
-        let uncertain: Vec<_> = task
-            .events
-            .blocked
-            .iter()
-            .filter(|blocked| blocked.is_uncertain())
-            .collect();
-        if uncertain.is_empty() || task.handled_by.is_some() {
-            return None;
-        }
-        let active = self.is_running_task(id, cx);
-        // A published note resends by redoing the part the requests were made for. When
-        // none explains them, say why instead of offering what the repair refuses.
-        let refusal = task
-            .artifact
-            .as_ref()
-            .and_then(|_| task.uncertain_components().err())
-            .map(|error| format!("{error:#}"));
-        Some(
-            notice_banner(
-                SharedString::from(format!("unknown-effect-{id}")),
-                NoticeKind::Warning,
-                course2md::tr!("服务可能已处理这些内容，重新发送可能产生额外费用"),
-            )
-            .rounded(RADIUS_LARGE)
-            .child(
-                v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .gap(rem(8.))
-                    .text_size(TEXT_BODY)
-                    .children(uncertain.iter().enumerate().map(|(index, blocked)| {
-                        accessible_text(
-                            SharedString::from(format!("unknown-scope-{id}-{index}")),
-                            request_scope(blocked),
-                        )
-                        .whitespace_normal()
-                    }))
-                    // What else the resend sends, which is not uncertain but is sent too.
-                    .children(task.resend_also_sends().into_iter().enumerate().map(
-                        |(index, also)| {
-                            accessible_text(
-                                SharedString::from(format!("unknown-also-{id}-{index}")),
-                                also,
-                            )
-                            .whitespace_normal()
-                            .text_color(color(ColorRole::ON_SURFACE_VARIANT))
-                        },
-                    ))
-                    .when(active, |view| {
-                        view.child(accessible_text(
-                            SharedString::from(format!("unknown-saving-{id}")),
-                            course2md::tr!("正在保存当前结果…"),
-                        ))
-                    })
-                    .when_some(refusal.clone(), |view, refusal| {
-                        view.child(
-                            accessible_text(
-                                SharedString::from(format!("unknown-refused-{id}")),
-                                refusal,
-                            )
-                            .whitespace_normal(),
-                        )
-                    })
-                    .when(refusal.is_none(), |view| {
-                        view.child(
-                            material_button(
-                                SharedString::from(format!("resend-{id}")),
-                                ButtonVariant::Filled,
-                            )
-                            .self_start()
-                            .icon(symbols::refresh())
-                            .child(course2md::tr!("重新发送以上内容"))
-                            .disabled(active)
-                            .on_click(cx.listener({
-                                let id = id.clone();
-                                move |_, _, _, cx| cx.emit(TasksEvent::Resend(id.clone()))
-                            })),
-                        )
-                    }),
-            ),
-        )
-    }
-
-    /// What a card shows under its identity: why it stopped, what is decided next,
-    /// how far it got, and the actions; its record once its details are open.
     fn task_body(
         &mut self,
         task: &TaskRecord,
@@ -1776,9 +1587,24 @@ impl TasksPage {
             TaskSurface::Card
         };
         let mut actions = self.task_actions(task, surface, cx);
-        // A row carries reading at its edge and folds itself.
-        actions.retain(|action| !row || !matches!(action, TaskAction::Read | TaskAction::Details));
-        let lead = lead_action(&actions, task, surface).cloned();
+        actions
+            .retain(|action| !row || !matches!(action, TaskAction::OpenNote | TaskAction::Details));
+        if task.status == TaskStatus::Failed
+            && task_log_text(task).is_some()
+            && !actions.contains(&TaskAction::Log)
+        {
+            actions.push(TaskAction::Log);
+        }
+
+        // On `Failed` (`Attention`) cards, `[重试]` is the primary action (`Filled`);
+        // on other cards `lead_action` chooses the single primary button.
+        let primary_action =
+            if task.status == TaskStatus::Failed && actions.contains(&TaskAction::Retry) {
+                Some(TaskAction::Retry)
+            } else {
+                lead_action(&actions, task, surface).cloned()
+            };
+
         let failures = task_note_failures(task);
         let consequence = (!failures.is_empty()).then(|| {
             course2md::tr!(
@@ -1791,11 +1617,9 @@ impl TasksPage {
             )
         });
         let stages = self.task_stage_rows(task, cx);
-        // Between two steps the job still runs: the steps it has reached stay in view.
         let running = stages.iter().any(|stage| stage.status.running())
             || self.is_running_task(&task.id, cx) && !stages.is_empty();
         let progress = self.task_progress(task, &stages, surface, cx);
-        // A single reached step is already the step line above.
         let chips = (running && stages.len() > 1 && surface != TaskSurface::Home).then(|| {
             h_flex()
                 .w_full()
@@ -1819,21 +1643,46 @@ impl TasksPage {
                     .child(stage.title.clone())
                 }))
         });
-        // A repair inside the notice that states its obstacle is tonal, as every
-        // notice's repair is; the card's filled action is one that finishes it.
-        let lead_in_notice = !row && needs_person(task) && !task_reasons(task).is_empty();
-        let recoverable_stop = recoverable(lead.as_ref());
+
+        // One clean `notice_banner` on `Failed` (`Attention`) cards:
+        // `NoticeKind::Warning` when `task.note_dir.is_some()`, `NoticeKind::Danger` when `None`.
+        let notice = (!row && task.status == TaskStatus::Failed).then(|| {
+            let reasons = task_reasons(task);
+            let message = if reasons.is_empty() {
+                task_attention_summary(task)
+            } else {
+                reasons.join("\n")
+            };
+            notice_banner(
+                SharedString::from(format!("task-reason-{id}")),
+                if task.note_dir.is_some() {
+                    NoticeKind::Warning
+                } else {
+                    NoticeKind::Danger
+                },
+                message,
+            )
+            .rounded(RADIUS_LARGE)
+        });
+
+        let show_failed_stages_inline =
+            !row && task.status == TaskStatus::Failed && !stages.is_empty();
+        let failed_stage_rows = show_failed_stages_inline.then(|| {
+            v_flex()
+                .w_full()
+                .min_w_0()
+                .gap(rem(10.))
+                .children(stages.into_iter().map(|stage| stage_row(stage, window, cx)))
+        });
+
         let buttons = actions.iter().map(|action| {
             let (label, icon, disabled) = self.present(action, task, cx);
-            let variant = if lead.as_ref() == Some(action) && lead_in_notice {
-                ButtonVariant::Tonal
-            } else if lead.as_ref() == Some(action) {
+            let variant = if primary_action.as_ref() == Some(action) {
                 ButtonVariant::Filled
             } else {
                 match action {
-                    TaskAction::Pause => ButtonVariant::Tonal,
-                    TaskAction::Read
-                    | TaskAction::Details
+                    TaskAction::Pause | TaskAction::PrepareModel => ButtonVariant::Tonal,
+                    TaskAction::Details
                     | TaskAction::Log
                     | TaskAction::Cancel
                     | TaskAction::Remove
@@ -1845,8 +1694,6 @@ impl TasksPage {
                 .when(variant == ButtonVariant::Outlined, |b| {
                     b.tone(ButtonTone::Accent)
                 })
-                // What only shows more of the task is quieter than what acts on it (G4),
-                // and stopping the work is never the saturated action, on any page.
                 .when(
                     matches!(
                         action,
@@ -1860,43 +1707,11 @@ impl TasksPage {
                 .icon(icon)
                 .child(label)
                 .disabled(disabled)
-                .when(
-                    disabled && matches!(action, TaskAction::Pause | TaskAction::Cancel),
-                    |b| b.loading(true, label),
-                )
                 .on_click(action_click(cx.weak_entity(), id.clone(), action.clone()))
         });
         let mut buttons: Vec<Option<MaterialButton>> = buttons.map(Some).collect();
         let home_running = surface == TaskSurface::Home && runs_in_card(task);
-        // Why the task stopped is one notice in its card that holds the way on, the
-        // card's one primary action, as a draft's obstacle is on the workbench.
-        let reasons = task_reasons(task);
-        let notice = (!row && needs_person(task) && !reasons.is_empty()).then(|| {
-            let lead = lead
-                .as_ref()
-                .and_then(|lead| actions.iter().position(|action| action == lead))
-                .and_then(|index| buttons[index].take());
-            notice_banner(
-                SharedString::from(format!("task-reason-{id}")),
-                // An obstacle with its repair is amber, as the workbench says it; red is
-                // for a failure with nothing to repair.
-                if task.state == TaskState::NeedsAttention && !recoverable_stop {
-                    NoticeKind::Danger
-                } else {
-                    NoticeKind::Warning
-                },
-                reasons.join("\n"),
-            )
-            .rounded(RADIUS_LARGE)
-            .children(lead)
-        });
-        let reasons = if notice.is_some() {
-            Vec::new()
-        } else {
-            reasons
-        };
-        // Stopping stands apart from what goes on; those wrap as one trailing group.
-        let leading_cancel = (home_running)
+        let leading_cancel = home_running
             .then(|| {
                 actions
                     .iter()
@@ -1905,7 +1720,6 @@ impl TasksPage {
             .flatten()
             .and_then(|index| buttons[index].take());
         let buttons: Vec<MaterialButton> = buttons.into_iter().flatten().collect();
-        // The card's actions are one trailing group, stopping first.
         let buttons = h_flex()
             .w_full()
             .min_w_0()
@@ -1914,6 +1728,7 @@ impl TasksPage {
             .justify_end()
             .children(leading_cancel)
             .children(buttons);
+
         let details = (self.task_list.expanded.as_ref() == Some(&id)).then(|| {
             let content = v_flex()
                 .w_full()
@@ -1923,11 +1738,13 @@ impl TasksPage {
                     "task-detail-divider-{id}"
                 ))))
                 .children(self.task_detail_rows(task, cx))
-                .children(
-                    self.task_stage_rows(task, cx)
-                        .into_iter()
-                        .map(|stage| stage_row(stage, window, cx)),
-                );
+                .when(!show_failed_stages_inline, |view| {
+                    view.children(
+                        self.task_stage_rows(task, cx)
+                            .into_iter()
+                            .map(|stage| stage_row(stage, window, cx)),
+                    )
+                });
             let key = format!("task-detail-{id}");
             if self.enter_once(key.clone()) {
                 motion::enter(SharedString::from(key), content)
@@ -1938,19 +1755,12 @@ impl TasksPage {
         let log = task_log_text(task)
             .filter(|_| self.task_list.logs_open.contains(&id))
             .map(|text| self.task_log_panel(&id, text, cx));
+
         v_flex()
             .w_full()
             .min_w_0()
             .gap(rem(12.))
             .children(notice)
-            .children(reasons.into_iter().enumerate().map(|(index, reason)| {
-                error_text(
-                    SharedString::from(format!("task-reason-{id}-{index}")),
-                    reason,
-                )
-                .text_size(TEXT_BODY)
-                .whitespace_normal()
-            }))
             .children(
                 consequence
                     .map(|text| ("consequence", text))
@@ -1981,10 +1791,9 @@ impl TasksPage {
                         .into_any_element(),
                 }
             }))
-            .children(self.uncertain_block(task, cx))
+            .children(failed_stage_rows)
             .children(progress)
             .children(chips)
-            // Why 下载并准备模型 cannot start yet, beside it.
             .when(
                 actions.contains(&TaskAction::PrepareModel) && self.work.read(cx).job.is_some(),
                 |body| {
@@ -2059,17 +1868,12 @@ impl TasksPage {
         task: &TaskRecord,
         cx: &App,
     ) -> (&'static str, SymbolIcon, bool) {
-        let cancelling = task.state == TaskState::Pausing && task.intent == Intent::Cancel;
-        let pausing = task.state == TaskState::Pausing && !cancelling;
         let details = self.task_list.expanded.as_ref() == Some(&task.id);
         let log = self.task_list.logs_open.contains(&task.id);
         use course2md::tr;
         match action {
-            TaskAction::Read => (tr!("阅读笔记"), symbols::menu_book(), false),
+            TaskAction::OpenNote => (tr!("阅读笔记"), symbols::menu_book(), false),
             TaskAction::OpenNoteFolder => (tr!("打开笔记保存位置"), symbols::folder_open(), false),
-            TaskAction::OpenRecoveryFolder => {
-                (tr!("打开需要处理的文件夹"), symbols::folder_open(), false)
-            }
             TaskAction::OpenExports => (tr!("打开导出位置"), symbols::folder_open(), false),
             TaskAction::OpenSource => (tr!("打开原视频"), symbols::open_in_new(), false),
             TaskAction::CopyLink => (tr!("复制视频链接"), symbols::content_copy(), false),
@@ -2079,7 +1883,6 @@ impl TasksPage {
             TaskAction::Details => (tr!("查看详情"), symbols::keyboard_arrow_down(), false),
             TaskAction::Log if log => (tr!("收起日志"), symbols::description(), false),
             TaskAction::Log => (tr!("查看日志"), symbols::description(), false),
-            TaskAction::Followup(_) => (tr!("查看后续处理任务"), symbols::arrow_forward(), false),
             TaskAction::Move { label, up, to } => (
                 label,
                 if *up {
@@ -2089,26 +1892,21 @@ impl TasksPage {
                 },
                 to.is_none(),
             ),
-            TaskAction::Pause if pausing => (tr!("正在暂停…"), symbols::pause(), true),
             TaskAction::Pause => (tr!("暂停"), symbols::pause(), false),
             TaskAction::Resume => (tr!("继续生成"), symbols::play_arrow(), false),
+            TaskAction::Retry => (task_retry_action_label(task), symbols::refresh(), false),
+            TaskAction::Regenerate => (tr!("重新生成"), symbols::restart_alt(), false),
             TaskAction::PrepareModel => (
                 tr!("下载并准备模型"),
                 symbols::download(),
                 self.work.read(cx).job.is_some(),
             ),
-            TaskAction::Repair => (tr!("修复 AI 服务并补做"), symbols::settings(), false),
-            TaskAction::Retry(component) => {
-                (task_retry_label(task, component), symbols::refresh(), false)
-            }
+            TaskAction::OpenSettings => (tr!("打开设置"), symbols::settings(), false),
             TaskAction::Reassociate(_) => (
                 tr!("重新关联此保存位置"),
                 symbols::database(),
                 self.facts.storage_busy,
             ),
-            TaskAction::Resend => (tr!("重新发送以上内容"), symbols::refresh(), false),
-            TaskAction::Adjust => (adjust_label(task), symbols::home(), false),
-            TaskAction::Cancel if cancelling => (tr!("正在取消…"), symbols::close(), true),
             TaskAction::Cancel => (tr!("取消任务"), symbols::close(), false),
             TaskAction::Remove => (tr!("移除任务记录"), symbols::delete(), false),
             TaskAction::ViewTask => (tr!("查看任务"), symbols::task(), false),
@@ -2116,13 +1914,13 @@ impl TasksPage {
     }
 }
 
-pub(crate) fn task_status_kind(state: TaskState) -> StatusKind {
-    match state {
-        TaskState::Complete => StatusKind::Success,
-        TaskState::Running | TaskState::Pausing => StatusKind::Progress,
-        TaskState::NeedsAttention => StatusKind::Danger,
-        TaskState::Uncertain | TaskState::Partial => StatusKind::Warning,
-        _ => StatusKind::Neutral,
+pub(crate) fn task_status_kind(task: &TaskRecord) -> StatusKind {
+    match task.status {
+        TaskStatus::Completed => StatusKind::Success,
+        TaskStatus::Running => StatusKind::Progress,
+        TaskStatus::Failed if task.note_dir.is_some() => StatusKind::Warning,
+        TaskStatus::Failed => StatusKind::Danger,
+        TaskStatus::Queued | TaskStatus::Paused => StatusKind::Neutral,
     }
 }
 
@@ -2132,7 +1930,6 @@ impl StageStatusView for StageStatus {
             Self::Running => ColorRole::PRIMARY,
             Self::Complete => ColorRole::SUCCESS,
             Self::Failed => ColorRole::ERROR,
-            Self::Uncertain => ColorRole::WARNING,
             _ => ColorRole::ON_SURFACE_VARIANT,
         }
     }
@@ -2141,7 +1938,6 @@ impl StageStatusView for StageStatus {
         match self {
             Self::Complete => StatusKind::Success,
             Self::Failed => StatusKind::Danger,
-            Self::Uncertain => StatusKind::Warning,
             _ if self.running() => StatusKind::Progress,
             _ => StatusKind::Neutral,
         }
@@ -2151,9 +1947,8 @@ impl StageStatusView for StageStatus {
         match self {
             Self::Running => symbols::refresh(),
             Self::Complete => symbols::check_circle(),
-            Self::Paused | Self::Pausing => symbols::pause(),
-            Self::Stopping | Self::Cancelled => symbols::close(),
-            Self::Failed | Self::Uncertain => symbols::warning(),
+            Self::Paused => symbols::pause(),
+            Self::Failed => symbols::warning(),
             Self::Waiting => symbols::schedule(),
         }
     }
@@ -2307,19 +2102,15 @@ mod tests {
             let keys: Vec<String> = items.iter().map(|item| item.key(&tasks)).collect();
             let unique: std::collections::HashSet<_> = keys.iter().collect();
             assert_eq!(unique.len(), keys.len(), "queue rows need distinct keys");
-            // Content updates with the same identities leave keys untouched.
             let tasks = vec![task_record("task-a"), task_record("task-b")];
             let again: Vec<String> = items.iter().map(|item| item.key(&tasks)).collect();
             assert_eq!(keys, again);
-            // Task rows key on the task id, not the position in the queue.
             let mut moved = tasks;
             moved.swap(0, 1);
             assert_eq!(row(0).key(&moved), "task-task-b");
         });
     }
 
-    /// Opening a row asks the window to select the task, which then opens it; folding the
-    /// open row is the page's own and closes its log with it.
     #[gpui::test]
     fn a_row_opens_through_the_window_and_folds_on_its_own(cx: &mut gpui::TestAppContext) {
         use super::{TasksEvent, TasksPage};
@@ -2375,36 +2166,32 @@ mod tests {
     fn task_record(id: &str) -> crate::workspace::TaskRecord {
         crate::workspace::TaskRecord {
             id: id.into(),
-            plan: crate::workspace::TaskPlan {
-                operation: Default::default(),
-                source: source("https://example.test/video", "课程"),
-                source_id: "online:video".into(),
-                title: "课程".into(),
-                library_id: "library".into(),
-                folder: None,
-                subtitle: None,
-                repair: None,
-            },
-            state: crate::workspace::TaskState::Paused,
-            intent: crate::workspace::Intent::Run,
+            library_id: "library".into(),
+            course_id: format!("course-{id}"),
+            source_id: "online:video".into(),
+            source: source("https://example.test/video", "课程"),
+            title: "课程".into(),
+            title_from_probe: false,
+            author: String::new(),
+            duration: 0.,
+            subtitle: None,
+            subtitle_events: None,
+            target_folder: None,
+            note_dir: None,
+            work_dir: "work".into(),
+            legacy_work_dir: None,
+            status: crate::workspace::TaskStatus::Paused,
+            run_mode: crate::workspace::RunMode::Resume,
+            stages: Default::default(),
+            error: None,
+            logs: Vec::new(),
+            unread: false,
             created: 0,
             updated: 0,
-            parent: None,
-            handled_by: None,
-            held: false,
-            work_dir: "work".into(),
-            events: crate::activity::JobEvents {
-                error: None,
-                ..Default::default()
-            },
-            artifact: None,
-            unread: false,
-            resend: Vec::new(),
-            replaced_by: None,
-            rework: None,
-            rework_accepted: None,
-            ai_answered_by: Vec::new(),
-            ran_with: None,
+            outcomes: None,
+            kept_video: false,
+            kept_edits: Vec::new(),
+            events: crate::activity::JobEvents::default(),
         }
     }
 

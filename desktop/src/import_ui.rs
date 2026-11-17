@@ -1,9 +1,8 @@
-//! The workbench: a link, its video and options, and one start intent carried through
-//! preparation to a readable note.
+//! The workbench: paste a link or drop a local video, preview its metadata and text
+//! source, and submit an in-place conversion task.
 use crate::Change as _;
 use crate::{
-    ConversionOptions, Desktop, Field, Page, notes::Course, preferences::ServicePurpose, source,
-    symbols, task_ui::CardPlace, ui, workspace,
+    Desktop, Field, Page, notes::Course, source, symbols, task_ui::CardPlace, ui, workspace,
 };
 use course2md::config::TranscriptSource;
 use course2md::subtitle::{SubtitleEvidence, SubtitleReadError, SubtitleTrack};
@@ -19,12 +18,8 @@ use std::{
 
 /// The workbench's one column.
 const WORKBENCH_WIDTH: Rems = rem(760.);
-/// Rhythm inside the column: title, link and video.
-/// The hero title to the link field (H4).
 const HERO_GAP: Rems = rem(20.);
-/// The link field to the line under it: the drop hint or the source switch (H4).
 const HERO_HINT_GAP: Rems = rem(24.);
-/// The link / local file switch: room for both labels with their icons.
 const SOURCE_KIND_WIDTH: Rems = rem(360.);
 
 fn workbench_column() -> Div {
@@ -37,7 +32,6 @@ fn workbench_column() -> Div {
         .flex_col()
 }
 
-/// How far the hero sits below the bar: with nothing under it, near the optical center.
 fn hero_top(quiet: bool, compact: bool) -> f32 {
     match (quiet, compact) {
         (true, true) => 96.,
@@ -47,7 +41,6 @@ fn hero_top(quiet: bool, compact: bool) -> f32 {
     }
 }
 
-/// The mark on a cover slot whose video has no cover image.
 pub(crate) fn cover_placeholder(size: Rems) -> Icon {
     Icon::from(symbols::movie().filled(true))
         .size(size)
@@ -58,9 +51,6 @@ pub(crate) fn cover_width(window: &Window) -> Rems {
     rem(if is_compact(window) { 200. } else { 256. })
 }
 
-/// A cover image cropped to fill its whole slot. It is laid over the slot's own box,
-/// not sized by the slot's flex layout, so a frame of any shape covers the slot edge to
-/// edge; the slot's mark under it shows while the image loads or if it cannot.
 pub(crate) fn cover_fill(cover: PathBuf) -> Img {
     img(cover)
         .absolute()
@@ -69,7 +59,6 @@ pub(crate) fn cover_fill(cover: PathBuf) -> Img {
         .object_fit(ObjectFit::Cover)
 }
 
-/// A video's 16:9 cover, or its mark while it has none.
 pub(crate) fn video_cover(cover: Option<PathBuf>, width: Rems) -> Div {
     div()
         .relative()
@@ -87,7 +76,6 @@ pub(crate) fn video_cover(cover: Option<PathBuf>, width: Rems) -> Div {
         .children(cover.map(cover_fill))
 }
 
-/// A video's title, on the workbench and on a task's card.
 pub(crate) fn video_title(id: String, title: impl Into<SharedString>) -> Stateful<Div> {
     let role = TypeRole::TitleLarge.scale();
     accessible_text(ElementId::Name(id.into()), title)
@@ -100,7 +88,6 @@ pub(crate) fn video_title(id: String, title: impl Into<SharedString>) -> Statefu
         .line_clamp(2)
 }
 
-/// Text that names one thing beside a control.
 fn supporting(id: &'static str, text: impl Into<SharedString>) -> Stateful<Div> {
     accessible_text(id, text)
         .min_w_0()
@@ -109,8 +96,6 @@ fn supporting(id: &'static str, text: impl Into<SharedString>) -> Stateful<Div> 
         .whitespace_normal()
 }
 
-/// A button that shows or hides the technical text under it.
-/// A quiet link to technical details: ink, so it never competes with a repair.
 fn details_toggle(id: impl Into<ElementId>, open: bool) -> MaterialButton {
     material_button(id, ButtonVariant::Text)
         .tone(ButtonTone::Neutral)
@@ -122,26 +107,19 @@ fn details_toggle(id: impl Into<ElementId>, open: bool) -> MaterialButton {
         })
 }
 
-/// The first line of a message when it is already readable. A raw download
-/// tool line (`WARNING:` / `ERROR:`) is not, and the caller supplies a summary.
-fn readable_first_line(message: &str) -> Option<&str> {
+pub(crate) fn readable_first_line(message: &str) -> Option<&str> {
     let first = message.lines().next().unwrap_or(message);
     (!first.contains("WARNING:") && !first.contains("ERROR:")).then_some(first)
 }
 
-/// What stands between the previewed video and its conversion, placed where it belongs
-/// in the card: facts beside the video, one notice for an obstacle with its repairs, and
-/// the actions that take the start action's place.
 #[derive(Default)]
-struct Recovery {
-    facts: Vec<AnyElement>,
-    notice: Option<Div>,
+struct PreviewContext {
+    info_line: Option<AnyElement>,
     actions: Vec<MaterialButton>,
-    /// An obstacle stands: 开始转换 stays in its place, unavailable, until it is resolved.
+    has_primary_override: bool,
     blocked: bool,
 }
 
-/// What a subtitle read belongs to. Its late result counts only while all of this holds.
 struct SubtitleRead {
     generation: u64,
     source_generation: u64,
@@ -150,7 +128,7 @@ struct SubtitleRead {
 }
 
 impl Desktop {
-    /// Explicit confirmation of an already visible preview owns submission.
+    /// Explicit confirmation of a previewed source submits the conversion directly.
     pub fn start_conversion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.page == Page::New {
             self.reader.change(cx, |reader, _| {
@@ -161,100 +139,38 @@ impl Desktop {
         }
         let input = self.value(Field::Source, cx);
         if self.draft(cx).is_some_and(|draft| draft.input != input) {
-            if !self.prepare_next_import(&input, cx) {
-                return;
-            }
-            self.import.following_conversion = None;
+            self.followed_task = None;
             self.invalidate_source();
         }
-        if input.is_empty() {
-            self.import.source_validation = Some(
-                if self.online(cx) {
-                    course2md::tr!("先粘贴视频链接")
-                } else {
-                    course2md::tr!("先选择一个视频")
-                }
-                .into(),
-            );
+        if let Err(issue) = validate_workbench_input(self.online(cx), &input) {
+            self.import.set_issue(issue);
             if self.online(cx) {
                 self.inputs[&Field::Source].update(cx, |input, cx| input.focus(window, cx));
             }
             cx.notify();
             return;
         }
-        // Preview is a separate user step. Never queue an unseen source,
-        // including callers returning from login or selecting a local file.
         if self.import.source_preview.is_none() {
             self.inspect_source(window, cx);
             return;
         }
-        self.import.begin_start(self.page == Page::New);
-        self.advance_conversion(window, cx);
-    }
-
-    pub fn advance_conversion_when_ready(&mut self, cx: &mut Context<Self>) {
-        if self.import.pending_conversion.is_none() {
-            return;
-        }
-        let Some(handle) = cx.windows().first().copied() else {
-            return;
-        };
-        let desktop = cx.entity().downgrade();
-        cx.defer(move |cx| {
-            let _ = cx.update_window(handle, |_, window, cx| {
-                let _ = desktop.update(cx, |desktop, cx| desktop.advance_conversion(window, cx));
-            });
-        });
-    }
-
-    pub fn advance_conversion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(generation) = self.import.pending_conversion else {
-            return;
-        };
-        let reading = self.import.reading();
         let source_mode = self.text_mode(cx);
-        if generation == self.import.preview_generation
-            && !reading
+        let subtitle_err = self
+            .import
+            .issue
+            .as_ref()
+            .filter(|i| i.kind == WorkbenchIssueKind::Subtitle)
+            .map(|i| i.message.clone());
+        if !self.import.reading()
             && let Some(source) = &mut self.import.source_preview
-            && automatic_subtitle_fallback(
-                source,
-                source_mode,
-                self.import.subtitle_error.as_deref(),
-            )
+            && automatic_subtitle_fallback(source, source_mode, subtitle_err.as_deref())
         {
-            self.import.subtitle_error = None;
+            self.import.issue = None;
             if !self.save_current_draft(cx) {
-                self.import.pending_conversion = None;
                 return;
             }
         }
-        let missing_text_source = self.text_source_missing(cx);
-        match conversion_gate(GateInputs {
-            requested_revision: self.import.pending_conversion,
-            current_revision: self.import.preview_generation,
-            reading,
-            has_source: self.import.source_preview.is_some(),
-            needs_text_choice: self.subtitle_attention_required(cx),
-            missing_text_source,
-            environment_ready: self.environment.is_some(),
-            library_ready: !self.library(cx).loading,
-            existing_note: self.existing_source_note(cx).is_some(),
-        }) {
-            ConversionGate::Wait => cx.notify(),
-            // Without a text source the intent ends as a refused Start does: the card
-            // shows the obstacle, and nothing is left following it.
-            ConversionGate::Stop
-                if missing_text_source && generation == self.import.preview_generation =>
-            {
-                self.import.cancel_start();
-                cx.notify();
-            }
-            ConversionGate::Stop => {
-                self.import.pending_conversion = None;
-                cx.notify();
-            }
-            ConversionGate::Submit => self.enqueue_current(window, cx),
-        }
+        self.enqueue_current(window, cx);
     }
 
     fn subtitle_read_is_current(&self, read: &SubtitleRead, cx: &App) -> bool {
@@ -271,8 +187,6 @@ impl Desktop {
             })
     }
 
-    /// Runs one subtitle read off the UI thread: `mark` records what was asked for
-    /// before any I/O, and `finish` takes the result unless the source moved on.
     fn read_subtitles<T: Send + 'static>(
         &mut self,
         mark: impl FnOnce(&mut Self, &mut Context<Self>),
@@ -288,7 +202,7 @@ impl Desktop {
         let cancel = Arc::new(AtomicBool::new(false));
         self.import.subtitle_cancel = Some(cancel.clone());
         self.import.subtitle_loading = true;
-        self.import.subtitle_error = None;
+        self.import.clear_issue_of(WorkbenchIssueKind::Subtitle);
         mark(self, cx);
         if !self.save_current_draft(cx) {
             self.import.subtitle_loading = false;
@@ -316,7 +230,6 @@ impl Desktop {
                 this.import.subtitle_loading = false;
                 this.import.subtitle_cancel = None;
                 finish(this, result, cx);
-                this.advance_conversion_when_ready(cx);
                 cx.notify();
             });
         })
@@ -328,9 +241,6 @@ impl Desktop {
         self.read_track(track, false, cx);
     }
 
-    /// Read the track the source's order put first. When it cannot be read, the
-    /// next ones are tried, as the command line does; a track the person picked,
-    /// or one they had before, is read alone.
     pub fn confirm_default_subtitle(&mut self, track: SubtitleTrack, cx: &mut Context<Self>) {
         self.read_track(track, true, cx);
     }
@@ -365,12 +275,10 @@ impl Desktop {
                             source.subtitle_read_error = None;
                         }
                     }
-                    Err(SubtitleReadError::Cancelled) => {
-                        this.import.pending_conversion = None;
-                        return;
-                    }
+                    Err(SubtitleReadError::Cancelled) => return,
                     Err(error) => {
-                        this.import.subtitle_error = Some(error.to_string());
+                        this.import
+                            .set_issue(WorkbenchIssue::subtitle(error.to_string()));
                         if let Some(source) = &mut this.import.source_preview {
                             source.subtitle_read_error = Some(error);
                         }
@@ -413,12 +321,16 @@ impl Desktop {
                     }
                     Ok(Ok(None)) => {}
                     Ok(Err(error)) => {
-                        this.import.subtitle_error = Some(course2md::tr!(
-                            "无法打开字幕选择器：{}",
-                            format!("{error:#}")
-                        ))
+                        this.import
+                            .set_issue(WorkbenchIssue::subtitle(course2md::tr!(
+                                "无法打开字幕选择器：{}",
+                                format!("{error:#}")
+                            )));
                     }
-                    Err(error) => this.import.subtitle_error = Some(error.to_string()),
+                    Err(error) => {
+                        this.import
+                            .set_issue(WorkbenchIssue::subtitle(error.to_string()));
+                    }
                 }
                 cx.notify();
             });
@@ -428,7 +340,10 @@ impl Desktop {
 
     fn attach_subtitle(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         if !course2md::subtitle::is_subtitle_file(&path) {
-            self.import.subtitle_error = Some(course2md::tr!("请选择 SRT 或 VTT 字幕文件").into());
+            self.import
+                .set_issue(WorkbenchIssue::subtitle(course2md::tr!(
+                    "请选择 SRT 或 VTT 字幕文件"
+                )));
             return;
         }
         let track = course2md::subtitle::file_track(path, None);
@@ -474,13 +389,13 @@ impl Desktop {
         let mut evidence = match result {
             Ok(evidence) => evidence,
             Err(error) => {
-                self.import.subtitle_error = Some(format!("{error:#}"));
+                let message = format!("{error:#}");
+                self.import.set_issue(WorkbenchIssue::from_error(
+                    WorkbenchIssueKind::Subtitle,
+                    &error,
+                ));
                 if let Some(source) = &mut self.import.source_preview {
-                    source.subtitle_read_error = self
-                        .import
-                        .subtitle_error
-                        .clone()
-                        .map(|message| SubtitleReadError::Failed { message });
+                    source.subtitle_read_error = Some(SubtitleReadError::Failed { message });
                 }
                 self.save_current_draft(cx);
                 return;
@@ -510,16 +425,16 @@ impl Desktop {
             None => evidence.tracks().first(),
         }
         .cloned();
+        let mut subtitle_err_msg = None;
         if old_id.is_some() && track.is_none() {
-            self.import.subtitle_error = Some(course2md::tr!("原字幕无法重新读取").into());
+            let msg = course2md::tr!("原字幕无法重新读取").to_owned();
+            self.import.set_issue(WorkbenchIssue::subtitle(msg.clone()));
+            subtitle_err_msg = Some(msg);
         }
         if let Some(source) = &mut self.import.source_preview {
             source.subtitles = evidence;
-            source.subtitle_read_error = self
-                .import
-                .subtitle_error
-                .clone()
-                .map(|message| SubtitleReadError::Failed { message });
+            source.subtitle_read_error =
+                subtitle_err_msg.map(|message| SubtitleReadError::Failed { message });
         }
         self.save_current_draft(cx);
         match track {
@@ -529,12 +444,10 @@ impl Desktop {
         }
     }
 
-    /// Cancel any subtitle read in flight and ignore its late result.
     fn stop_subtitle_read(&mut self) -> u64 {
         self.import.stop_subtitle_read()
     }
 
-    /// Stop reading subtitles and drop the unfinished request.
     fn abort_subtitle_read(&mut self) {
         self.stop_subtitle_read();
         if let Some(source) = &mut self.import.source_preview {
@@ -543,18 +456,13 @@ impl Desktop {
         }
     }
 
-    /// The person settled which of the video's subtitles to use: drop what was in
-    /// flight and go on.
     fn settle_subtitle(&mut self, cx: &mut Context<Self>) {
         self.abort_subtitle_read();
-        self.import.subtitle_error = None;
+        self.import.clear_issue_of(WorkbenchIssueKind::Subtitle);
         self.check_import_model(cx);
-        self.advance_conversion_when_ready(cx);
         cx.notify();
     }
 
-    /// The local speech model Settings would recognize this video with, when they
-    /// name a local engine: the engine, the model and where models are kept.
     fn import_model_request(&self) -> Option<(course2md::config::AsrProvider, String, PathBuf)> {
         use course2md::config::AsrProvider;
         let mut config = self.preferences.defaults_config();
@@ -563,28 +471,28 @@ impl Desktop {
             Some(provider) => provider,
             None => self.recommended_local_provider(),
         };
-        // The run's rule: an empty model takes the engine's default.
         desktop_tasks::plan::fill_default_asr_model(&mut config, provider);
         let model = config.defaults.asr_model.unwrap_or_default();
         let root = course2md::config::model_dir_from(config.defaults.model_dir.as_deref());
         Some((provider, model, root))
     }
 
-    /// The video has subtitles and Settings use them, but none is chosen or being
-    /// read: the card asks for one, and nothing starts until then. (A failed read is
-    /// not this: starting may fall back to speech recognition.)
+    fn has_subtitle_issue(&self) -> bool {
+        self.import
+            .issue
+            .as_ref()
+            .is_some_and(|i| i.kind == WorkbenchIssueKind::Subtitle)
+    }
+
     fn subtitle_choice_missing(&self, cx: &App) -> bool {
         let mode = self.text_mode(cx);
         !self.import.subtitle_loading
-            && self.import.subtitle_error.is_none()
+            && !self.has_subtitle_issue()
             && self.import.source_preview.as_ref().is_some_and(|source| {
                 desktop_tasks::import::default_track_to_read(source, mode).is_some()
             })
     }
 
-    /// After Settings' 文字来源 changed: a preview taken under speech recognition read
-    /// no subtitles, so with subtitles allowed now the video's first track is read,
-    /// as a fresh preview would.
     pub(crate) fn confirm_default_subtitle_if_needed(&mut self, cx: &mut Context<Self>) {
         if self.text_mode(cx) == TranscriptSource::Asr || self.import.subtitle_loading {
             return;
@@ -601,7 +509,6 @@ impl Desktop {
         self.confirm_default_subtitle(track, cx);
     }
 
-    /// Checks, off the render path, the model this video would be recognized with.
     pub(crate) fn check_import_model(&mut self, cx: &mut Context<Self>) {
         if self.import_uses_speech(cx)
             && let Some((provider, model, root)) = self.import_model_request()
@@ -631,6 +538,7 @@ impl Desktop {
             state.set_value("", window, cx);
             state.focus(window, cx);
         });
+        self.followed_task = None;
         self.invalidate_source();
         self.save_current_draft(cx);
         let source_input = self.inputs[&Field::Source].clone();
@@ -658,6 +566,7 @@ impl Desktop {
             }
             [] => {}
             _ => {
+                self.followed_task = None;
                 self.invalidate_source();
                 self.import.source_collection_title =
                     Some(course2md::tr!("选择要处理的视频").into());
@@ -680,27 +589,33 @@ impl Desktop {
         }
     }
 
-    /// Settings' 文字来源 is 仅字幕 and this video has no subtitle to use, with no read
-    /// on its way: the card names the obstacle and its repairs, and nothing starts.
     pub(super) fn text_source_missing(&self, cx: &App) -> bool {
         !self.import.subtitle_loading
             && self.import.source_preview.as_ref().is_some_and(|source| {
                 subtitles_required_but_missing(
                     source,
                     self.text_mode(cx),
-                    self.import.subtitle_error.is_some(),
+                    self.has_subtitle_issue(),
                 )
             })
     }
 
     pub(super) fn subtitle_attention_required(&self, cx: &App) -> bool {
         self.import.subtitle_loading
-            || self.import.subtitle_error.is_some()
+            || self.has_subtitle_issue()
             || self
                 .import
                 .source_preview
                 .as_ref()
                 .is_some_and(|source| subtitle_needs_confirmation(source, self.text_mode(cx)))
+    }
+
+    fn input_issue_message(&self) -> Option<String> {
+        self.import
+            .issue
+            .as_ref()
+            .filter(|issue| issue.kind == WorkbenchIssueKind::Input)
+            .map(|issue| issue.message.clone())
     }
 
     /// The link and what can be done with it, or the local file in its place.
@@ -712,8 +627,6 @@ impl Desktop {
                 .min_w_0()
                 .gap(HERO_HINT_GAP)
                 .child(
-                    // The kit's segmented button, bounded so its two segments read as one
-                    // switch under the title rather than a full-width bar.
                     h_flex().w_full().justify_center().child(
                         div().w(SOURCE_KIND_WIDTH).max_w_full().child(
                             ConnectedButtonGroup::new("source-kind", course2md::tr!("视频来源"))
@@ -744,21 +657,15 @@ impl Desktop {
             .import
             .source_preview
             .is_none()
-            .then(|| self.import.source_validation.clone())
+            .then(|| self.input_issue_message())
             .flatten();
-        // A collection whose videos are listed did not fail: what it could not confirm
-        // is a note under the list, not an error on the link.
-        let failed = validation.is_some()
-            || (self.import.preview_error.is_some() && self.import.source_candidates.is_empty());
-        // The start action owns the submit focus once it is on screen.
+        let failed = validation.is_some();
         let start_shown = self.import.source_preview.is_some() && self.can_start_input(cx);
         let preview_label = course2md::tr!("预览视频");
         let preview_disabled = self.import.preview_cancel.is_some()
             || self.value(Field::Source, cx).is_empty()
-            || self.workbench_linked_task(cx).is_some();
+            || self.followed_live_task(cx).is_some();
         let preview_click = cx.listener(|this, _, window, cx| this.inspect_source(window, cx));
-        // The action keeps its label while the field still leaves the link room to
-        // read; only when it would not does it fold to its icon, named by its tooltip.
         let preview = if !preview_label_fits(preview_label, window) {
             ui::tip_button(
                 "preview-source",
@@ -824,10 +731,9 @@ impl Desktop {
             )
     }
 
-    /// The local source: a drop target while empty, the file once chosen; the preview
-    /// card takes its place when the file has been read.
     fn local_source_input(&self, cx: &mut Context<Self>) -> Option<Div> {
         let input = self.value(Field::Source, cx);
+        let input_error = self.input_issue_message();
         let choose = |id: &'static str, variant, label: &'static str, cx: &mut Context<Self>| {
             material_button(id, variant)
                 .when(variant == ButtonVariant::Outlined, |button| {
@@ -837,44 +743,48 @@ impl Desktop {
                 .child(label)
                 .on_click(cx.listener(|this, _, window, cx| this.pick_video(window, cx)))
         };
-        // While a task owns the input its card shows the task, and the drop zone
-        // stays above it for the next video, as the link field does online.
-        if input.is_empty() || self.workbench_linked_task(cx).is_some() {
+        if input.is_empty() || self.followed_live_task(cx).is_some() {
             return Some(
-                // The kit's drop target on the tile's surface: dashed at rest, primary
-                // while a file is dragged over it.
-                div().w_full().min_w_0().child(
-                    drop_target("import-drop-zone", course2md::tr!("拖入本地视频"), false)
-                        .w_full()
-                        .min_w_0()
-                        .bg(color(ColorRole::SURFACE))
-                        // A panel on its own, as the video card that takes its place.
-                        .rounded(RADIUS_HERO)
-                        .flex()
-                        .flex_col()
-                        .gap(rem(16.))
-                        .p(rem(32.))
-                        .items_center()
-                        .child(
-                            Icon::from(symbols::file_upload())
-                                .size(rem(32.))
-                                .color(color(ColorRole::PRIMARY)),
-                        )
-                        .child(
-                            accessible_text(
-                                "import-drop-instruction",
-                                course2md::tr!("拖入本地视频"),
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(rem(8.))
+                    .child(
+                        drop_target("import-drop-zone", course2md::tr!("拖入本地视频"), false)
+                            .w_full()
+                            .min_w_0()
+                            .bg(color(ColorRole::SURFACE))
+                            .rounded(RADIUS_HERO)
+                            .flex()
+                            .flex_col()
+                            .gap(rem(16.))
+                            .p(rem(32.))
+                            .items_center()
+                            .child(
+                                Icon::from(symbols::file_upload())
+                                    .size(rem(32.))
+                                    .color(color(ColorRole::PRIMARY)),
                             )
-                            .text_size(TEXT_BODY)
-                            .font_weight(FontWeight::MEDIUM),
+                            .child(
+                                accessible_text(
+                                    "import-drop-instruction",
+                                    course2md::tr!("拖入本地视频"),
+                                )
+                                .text_size(TEXT_BODY)
+                                .font_weight(FontWeight::MEDIUM),
+                            )
+                            .child(choose(
+                                "choose-video",
+                                ButtonVariant::Filled,
+                                course2md::tr!("选择视频"),
+                                cx,
+                            )),
+                    )
+                    .when_some(input_error, |view, error| {
+                        view.child(
+                            error_text("import-local-input-error", error).whitespace_normal(),
                         )
-                        .child(choose(
-                            "choose-video",
-                            ButtonVariant::Filled,
-                            course2md::tr!("选择视频"),
-                            cx,
-                        )),
-                ),
+                    }),
             );
         }
         if self.import.source_preview.is_some() {
@@ -926,13 +836,12 @@ impl Desktop {
                             )
                         }),
                 )
-                .when_some(self.import.source_validation.clone(), |view, error| {
+                .when_some(input_error, |view, error| {
                     view.child(error_text("import-preview-error", error).whitespace_normal())
                 }),
         )
     }
 
-    /// While the video is read, a card in the shape its result will take.
     fn source_reading(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let label = course2md::tr!("取消读取视频");
         let bar = |width: f32| {
@@ -1015,8 +924,6 @@ impl Desktop {
             .is_some_and(|identity| self.notes_for_source(identity, cx).next().is_some())
     }
 
-    /// Candidates that can be checked for a batch: identified online entries, including
-    /// those that already have a note (replacing them is already explained beside the action).
     fn selectable_candidates<'a>(
         &'a self,
         cx: &'a App,
@@ -1028,9 +935,6 @@ impl Desktop {
             .filter(move |candidate| batch && candidate.identity.is_some())
     }
 
-    /// The candidate list. Online lists queue several at once, but only candidates
-    /// with a confirmed identity can be checked; the rest, and dropped local files
-    /// (a local identity needs a content hash), open one at a time.
     fn candidate_list(&self, title: &str, cx: &mut Context<Self>) -> Stateful<Div> {
         let batch = self.online(cx);
         let selectable = self.selectable_candidates(cx).count();
@@ -1038,7 +942,6 @@ impl Desktop {
             .selectable_candidates(cx)
             .filter(|candidate| self.import.selected_candidates.contains(&candidate.input))
             .count();
-        // A checked candidate that already has a note has it replaced; say so beside the action.
         let noted_selected = self
             .import
             .source_candidates
@@ -1121,7 +1024,6 @@ impl Desktop {
                             )
                         })
                         .child(
-                            // An empty selection cannot run, as with 开始转换.
                             material_button("start-batch-conversion", ButtonVariant::Filled)
                                 .ml_auto()
                                 .icon(symbols::arrow_forward())
@@ -1132,7 +1034,6 @@ impl Desktop {
                                 } else {
                                     course2md::tr!("整理选中的视频").to_owned()
                                 })
-                                // The component check decides whether these can run at all.
                                 .disabled(selected_count == 0 || self.environment.is_none())
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     if noted_selected > 0 {
@@ -1215,115 +1116,277 @@ impl Desktop {
         }
     }
 
-    /// A source failure beside the field, with retry, login and details still reachable.
-    fn source_preview_error(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let error = self.import.preview_error.as_ref()?;
-        if !self.import.source_candidates.is_empty() {
-            return Some(supporting("import-source-error", error.clone()).into_any_element());
+    /// Resolves the single active `WorkbenchIssue` to display below the source/preview card.
+    fn active_workbench_issue(&mut self, cx: &mut App) -> Option<WorkbenchIssue> {
+        if let Some(issue) = &self.import.issue {
+            if issue.kind == WorkbenchIssueKind::Input {
+                return None;
+            }
+            return Some(issue.clone());
         }
-        let needs_login = source::legacy_login_failure_from_text(error);
-        // A tool the read needs is missing: Settings › 应用程序 checks and repairs them.
+        let source = self.import.source_preview.as_ref()?;
+        if self.import.reading() || self.import.subtitle_loading {
+            return None;
+        }
+        if let SubtitleEvidence::Found {
+            warning: Some(message),
+            ..
+        } = &source.subtitles
+        {
+            return Some(WorkbenchIssue::subtitle(course2md::tr!(
+                "部分字幕无法读取：{}",
+                message
+            )));
+        }
+        if self.text_source_missing(cx) {
+            let unchecked = matches!(source.subtitles, SubtitleEvidence::Unchecked);
+            let summary = if unchecked {
+                course2md::tr!("还没读取这个视频的字幕，而文字来源设置为仅字幕")
+            } else {
+                course2md::tr!("这个视频没有字幕，而文字来源设置为仅字幕")
+            };
+            return Some(WorkbenchIssue {
+                kind: WorkbenchIssueKind::Subtitle,
+                message: summary.into(),
+                needs_settings: true,
+            });
+        }
+        if let Some(pref_issue) = self.ordinary_preferences_submit_issue() {
+            return Some(WorkbenchIssue {
+                kind: WorkbenchIssueKind::Plan,
+                message: pref_issue.message,
+                needs_settings: true,
+            });
+        }
+        if !self.subtitle_attention_required(cx)
+            && let Err((issue, false)) = self.cached_preview_plan(cx)
+        {
+            return Some(issue);
+        }
+        None
+    }
+
+    /// Single unified `notice_banner` rendered below the source/preview card on Home.
+    fn workbench_issue_banner(
+        &mut self,
+        issue: Option<WorkbenchIssue>,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let issue = issue?;
+        if issue.kind == WorkbenchIssueKind::Preview && !self.import.source_candidates.is_empty() {
+            return Some(supporting("import-source-error", issue.message).into_any_element());
+        }
+        let raw = issue.message.clone();
+        let needs_login = source::legacy_login_failure_from_text(&raw);
         let components_missing = self.environment.as_ref().is_some_and(|environment| {
-            !environment.ffmpeg || !environment.ffprobe || (self.online(cx) && !environment.ytdlp)
+            !environment.engine
+                || !environment.ffmpeg
+                || !environment.ffprobe
+                || (self.online(cx) && !environment.ytdlp)
         });
-        let message = if components_missing {
-            // The action beside it says where to check; the message says what is wrong.
-            course2md::tr!("缺少读取视频所需的组件")
-        } else if needs_login {
-            course2md::tr!("视频需要登录后读取，请登录后重试预览")
-        } else {
-            readable_first_line(error)
+        let summary = match issue.kind {
+            WorkbenchIssueKind::Preview if components_missing => {
+                course2md::tr!("缺少读取视频所需的组件").to_owned()
+            }
+            WorkbenchIssueKind::Preview if needs_login => {
+                course2md::tr!("视频需要登录后读取，请登录后重试预览").to_owned()
+            }
+            WorkbenchIssueKind::Preview => readable_first_line(&raw)
                 .unwrap_or(course2md::tr!("暂时无法读取这个视频，请检查链接或稍后重试"))
+                .to_owned(),
+            WorkbenchIssueKind::Subtitle => {
+                let first = readable_first_line(&raw)
+                    .unwrap_or(course2md::tr!("无法读取字幕，可重试或改用语音识别"));
+                first.to_owned()
+            }
+            _ => readable_first_line(&raw).unwrap_or(raw.as_str()).to_owned(),
         };
-        let open = self.import.show_preview_details;
-        Some(motion::state_enter(
-            "source-error",
-            v_flex().w_full().min_w_0().gap(rem(8.)).child(
-                notice_banner(
-                    "import-source-failure",
-                    // A missing component is an obstacle with a repair, amber as
-                    // Settings' run check says it; a failed read is red.
-                    if components_missing {
-                        NoticeKind::Warning
+
+        let show_technical = summary != raw.trim();
+        let open = if issue.kind == WorkbenchIssueKind::Subtitle {
+            self.import.subtitle_issue_open
+        } else {
+            self.import.show_preview_details
+        };
+
+        let mut actions: Vec<MaterialButton> = Vec::new();
+        let source_preview = self.import.source_preview.clone();
+        let input_url = self.value(Field::Source, cx);
+
+        if components_missing {
+            actions.push(
+                material_button("workbench-components-repair", ButtonVariant::Tonal)
+                    .icon(symbols::settings())
+                    .child(course2md::tr!("检查所需组件"))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_settings(window, cx);
+                        this.select_settings_tab(
+                            crate::settings_ui::SettingsTab::Application,
+                            window,
+                            cx,
+                        );
+                    })),
+            );
+        }
+
+        if self.online(cx) && needs_login && course2md::auth::is_bilibili_url(&input_url) {
+            actions.push(
+                material_button("workbench-login-bilibili", ButtonVariant::Tonal)
+                    .icon(symbols::bilibili())
+                    .child(course2md::tr!("登录 Bilibili"))
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.open_account_dialog(window, cx)),
+                    ),
+            );
+        } else if self.online(cx) && needs_login && course2md::auth::is_youtube_url(&input_url) {
+            actions.push(
+                material_button("workbench-login-youtube", ButtonVariant::Tonal)
+                    .icon(symbols::smart_display())
+                    .child(course2md::tr!("连接 YouTube"))
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.open_youtube_dialog(window, cx)),
+                    ),
+            );
+        }
+
+        if issue.kind == WorkbenchIssueKind::Subtitle
+            && let Some(src) = &source_preview
+        {
+            actions.push(
+                material_button("workbench-retry-subtitles", ButtonVariant::Tonal)
+                    .icon(symbols::refresh())
+                    .child(course2md::tr!("重新读取字幕"))
+                    .disabled(self.import.subtitle_loading)
+                    .on_click(cx.listener(|this, _, _, cx| this.retry_subtitles(cx))),
+            );
+            if src.selected_subtitle.is_some() {
+                actions.push(
+                    material_button("workbench-use-previous-subtitle", ButtonVariant::Outlined)
+                        .tone(ButtonTone::Accent)
+                        .icon(symbols::subtitles())
+                        .child(course2md::tr!("继续使用之前的字幕"))
+                        .on_click(cx.listener(|this, _, _, cx| this.use_confirmed_subtitle(cx))),
+                );
+            }
+            if !src.online && self.text_mode(cx) == TranscriptSource::Subtitle {
+                actions.push(
+                    material_button("workbench-attach-subtitle", ButtonVariant::Outlined)
+                        .tone(ButtonTone::Accent)
+                        .icon(symbols::file_upload())
+                        .child(course2md::tr!("选择字幕文件"))
+                        .disabled(self.import.subtitle_loading)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.choose_attached_subtitle(window, cx)
+                        })),
+                );
+            }
+        }
+
+        if let Some(pref_issue) = self.ordinary_preferences_submit_issue() {
+            actions.push(
+                material_button("workbench-repair-preferences", ButtonVariant::Tonal)
+                    .icon(if pref_issue.can_retry {
+                        symbols::refresh()
                     } else {
-                        NoticeKind::Danger
-                    },
-                    message.to_owned(),
-                )
-                .child(
-                    h_flex()
-                        .gap(rem(8.))
-                        .flex_wrap()
-                        // The field's own 预览视频 tries again; the notice offers only
-                        // what that cannot do.
-                        .when(components_missing, |row| {
-                            row.child(
-                                material_button("source-components-repair", ButtonVariant::Tonal)
-                                    .icon(symbols::settings())
-                                    .child(course2md::tr!("检查所需组件"))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.open_settings(window, cx);
-                                        this.select_settings_tab(
-                                            crate::settings_ui::SettingsTab::Application,
-                                            window,
-                                            cx,
-                                        );
-                                    })),
-                            )
-                        })
-                        .when(
-                            self.online(cx)
-                                && needs_login
-                                && course2md::auth::is_bilibili_url(&self.value(Field::Source, cx)),
-                            |row| {
-                                row.child(
-                                    material_button("source-login-repair", ButtonVariant::Tonal)
-                                        .icon(symbols::bilibili())
-                                        .child(course2md::tr!("登录 Bilibili"))
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.open_account_dialog(window, cx)
-                                        })),
-                                )
-                            },
-                        )
-                        .when(
-                            self.online(cx)
-                                && needs_login
-                                && course2md::auth::is_youtube_url(&self.value(Field::Source, cx)),
-                            |row| {
-                                row.child(
-                                    material_button("source-youtube-repair", ButtonVariant::Tonal)
-                                        .icon(symbols::smart_display())
-                                        .child(course2md::tr!("连接 YouTube"))
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.open_youtube_dialog(window, cx)
-                                        })),
-                                )
-                            },
-                        ),
-                )
-                // The details are a quiet link inside the notice, on their own
-                // line under its message, not a second action beside its repair.
-                .child(
-                    v_flex()
-                        .w_full()
-                        .min_w_0()
-                        .child(
-                            h_flex().w_full().child(
-                                details_toggle("source-error-details", open)
-                                    .on_click(cx.listener(Self::toggle_preview_details)),
-                            ),
-                        )
-                        .child(motion::disclosure(
-                            "source-error-disclosure",
-                            open,
-                            v_flex().child(supporting_info(
-                                "import-source-error-details",
-                                error.clone(),
+                        symbols::restart_alt()
+                    })
+                    .child(if pref_issue.can_retry {
+                        course2md::tr!("重试保存生成笔记设置")
+                    } else {
+                        course2md::tr!("重置生成笔记设置")
+                    })
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        if !this.save_current_draft(cx) {
+                            return;
+                        }
+                        if pref_issue.can_retry {
+                            this.retry_ordinary_preferences(pref_issue.group, cx);
+                        } else {
+                            this.restore_ordinary_preferences(pref_issue.group, window, cx);
+                        }
+                    })),
+            );
+        }
+
+        if let Some(library) = self
+            .workspace(cx)
+            .and_then(|workspace| workspace.state.library(&workspace.state.default_library))
+            .filter(|library| {
+                self.cached_location_check(library)
+                    .is_some_and(|check| check.needs_reassociation)
+            })
+        {
+            let id = library.id.clone();
+            actions.push(
+                material_button("workbench-reassociate-location", ButtonVariant::Tonal)
+                    .icon(symbols::database())
+                    .child(course2md::tr!("重新关联此保存位置"))
+                    .disabled(self.storage_ui.busy)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.begin_library_reassociation(id.clone(), window, cx)
+                    })),
+            );
+        }
+
+        if issue.needs_settings {
+            let reason_for_tab = raw.clone();
+            actions.push(
+                material_button("workbench-open-settings", ButtonVariant::Tonal)
+                    .icon(symbols::settings())
+                    .child(course2md::tr!("打开设置"))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.save_current_draft(cx);
+                        this.open_settings_for_message(&reason_for_tab, window, cx);
+                        if let Some((_, focus)) = &mut this.settings_origin {
+                            *focus = Some(this.import_submit_focus.clone());
+                        }
+                    })),
+            );
+        }
+
+        let kind = if issue.kind == WorkbenchIssueKind::Preview
+            && !components_missing
+            && !issue.needs_settings
+        {
+            NoticeKind::Danger
+        } else if !actions.is_empty() || issue.kind == WorkbenchIssueKind::Subtitle {
+            NoticeKind::Warning
+        } else {
+            NoticeKind::Danger
+        };
+
+        let is_subtitle = issue.kind == WorkbenchIssueKind::Subtitle;
+        Some(motion::state_enter(
+            "workbench-issue-banner-enter",
+            notice_banner("workbench-issue-banner", kind, summary)
+                .rounded(RADIUS_LARGE)
+                .when(!actions.is_empty(), |banner| {
+                    banner.child(h_flex().gap(rem(8.)).flex_wrap().children(actions))
+                })
+                .when(show_technical, |banner| {
+                    banner.child(
+                        v_flex()
+                            .w_full()
+                            .min_w_0()
+                            .child(h_flex().w_full().child(
+                                details_toggle("workbench-issue-details", open).on_click(
+                                    cx.listener(move |this, _, _, cx| {
+                                        if is_subtitle {
+                                            this.import.subtitle_issue_open = !open;
+                                        } else {
+                                            this.import.show_preview_details = !open;
+                                        }
+                                        cx.notify();
+                                    }),
+                                ),
+                            ))
+                            .child(motion::disclosure(
+                                "workbench-issue-disclosure",
+                                open,
+                                v_flex().child(supporting_info("workbench-issue-raw", raw)),
                             )),
-                        )),
-                ),
-            ),
+                    )
+                }),
         ))
     }
 
@@ -1332,16 +1395,14 @@ impl Desktop {
         cx.notify();
     }
 
-    /// The previewed video: cover, identity, what its text will come from and the one
-    /// action that submits it. Decisions about this source stay in the card.
     fn selected_video(
         &mut self,
+        has_blocking_issue: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let source = self.import.source_preview.clone()?;
-        // First, so the start action below sees this frame's plan.
-        let recovery = self.conversion_recovery(cx);
+        let context = self.preview_context(has_blocking_issue, cx);
         let duration = (source.duration.is_finite() && source.duration > 0.)
             .then(|| course2md::render::fmt_ts(source.duration));
         let details_open = self.import.show_preview_details;
@@ -1369,7 +1430,6 @@ impl Desktop {
                     )
                 },
             );
-        // The card's footer: under the cover and the facts, across the card.
         let actions = h_flex()
             .w_full()
             .min_w_0()
@@ -1388,7 +1448,6 @@ impl Desktop {
                     },
                 ))
             })
-            // The trailing actions wrap together and stay at the end.
             .child(
                 h_flex()
                     .ml_auto()
@@ -1408,28 +1467,29 @@ impl Desktop {
                                 }
                             })),
                     )
-                    .children(recovery.actions)
-                    .when(self.can_start_input(cx), |row| {
-                        row.child(
-                            material_button("start-conversion", ButtonVariant::Filled)
-                                .button_size(ButtonSize::Medium)
-                                .icon(symbols::play_arrow())
-                                .child(course2md::tr!("开始转换"))
-                                .track_focus(&self.import_submit_focus)
-                                // Not while the video's text still needs a choice: the
-                                // card says which.
-                                .disabled(
-                                    recovery.blocked
-                                        || self.import.pending_conversion.is_some()
-                                        || self.import.preview_cancel.is_some()
-                                        || self.subtitle_choice_missing(cx)
-                                        || self.text_source_missing(cx),
-                                )
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.start_conversion(window, cx)
-                                })),
-                        )
-                    }),
+                    .children(context.actions)
+                    .when(
+                        !context.has_primary_override && self.can_start_input(cx),
+                        |row| {
+                            row.child(
+                                material_button("start-conversion", ButtonVariant::Filled)
+                                    .button_size(ButtonSize::Medium)
+                                    .icon(symbols::play_arrow())
+                                    .child(course2md::tr!("开始转换"))
+                                    .track_focus(&self.import_submit_focus)
+                                    .disabled(
+                                        context.blocked
+                                            || self.import.preview_cancel.is_some()
+                                            || self.import.subtitle_loading
+                                            || self.subtitle_choice_missing(cx)
+                                            || self.text_source_missing(cx),
+                                    )
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.start_conversion(window, cx)
+                                    })),
+                            )
+                        },
+                    ),
             );
         let info = v_flex()
             .flex_1()
@@ -1447,7 +1507,6 @@ impl Desktop {
                             .flex_1()
                             .min_w_0()
                             .gap(rem(4.))
-                            // The name the note is saved under.
                             .child(video_title(
                                 "import-selected-title".to_owned(),
                                 self.draft(cx)
@@ -1489,6 +1548,7 @@ impl Desktop {
                                 } else {
                                     this.inputs[&Field::Source]
                                         .update(cx, |state, cx| state.set_value("", window, cx));
+                                    this.followed_task = None;
                                     this.invalidate_source();
                                     this.save_current_draft(cx);
                                     cx.notify();
@@ -1498,7 +1558,7 @@ impl Desktop {
                     )),
             )
             .child(self.text_source_control(&source, window, cx))
-            .children(recovery.facts);
+            .children(context.info_line);
         Some(motion::state_enter(
             "import-selected-source-enter",
             tile([true; 4])
@@ -1522,17 +1582,10 @@ impl Desktop {
                     details_open,
                     details,
                 ))
-                .children(
-                    recovery
-                        .notice
-                        .map(|notice| div().w_full().pt(rem(16.)).child(notice)),
-                )
                 .child(div().w_full().pt(rem(16.)).child(actions)),
         ))
     }
 
-    /// What this video's text will come from, and everything that changes it, in one
-    /// chip and its menu; a read in flight or a failure takes over beneath it.
     fn text_source_control(
         &self,
         source: &source::Source,
@@ -1541,20 +1594,14 @@ impl Desktop {
     ) -> Div {
         let speech = self.import_uses_speech(cx);
         let mode = self.text_mode(cx);
-        // A read error of this input, or the source's own failed read.
-        let read_error = self.import.subtitle_error.as_deref();
-        let source_failure = match &source.subtitles {
-            SubtitleEvidence::Failed { message } => Some(message.as_str()),
-            _ => None,
-        };
-        let failure =
-            read_error.or(source_failure.filter(|_| subtitle_needs_confirmation(source, mode)));
+        let has_sub_issue = self.has_subtitle_issue();
+        let source_failed = matches!(source.subtitles, SubtitleEvidence::Failed { .. })
+            && subtitle_needs_confirmation(source, mode);
+        let failure = has_sub_issue || source_failed;
         let pending = source.subtitle_request.is_some() || source.subtitle_read_error.is_some();
         let value: SharedString = if self.import.subtitle_loading {
             course2md::tr!("正在读取字幕…").into()
-        } else if !speech && failure.is_some() {
-            // The failure beneath says what happened; the chip does not also say
-            // the read is still going.
+        } else if !speech && failure {
             course2md::tr!("尚未选择文字来源").into()
         } else if !speech && pending {
             course2md::tr!("字幕还没读取完成").into()
@@ -1580,8 +1627,6 @@ impl Desktop {
             })
             .trailing_icon(symbols::arrow_drop_down())
             .on_toggle(|_, _, _| {});
-        // Settings' 文字来源 decides between subtitles and speech recognition. Set to
-        // speech recognition, the chip says so and offers no subtitles to choose.
         let chip = if mode == TranscriptSource::Asr {
             semantic_label(
                 "text-source",
@@ -1593,27 +1638,10 @@ impl Desktop {
             let menu = self.text_source_menu(source, &value, window, cx);
             ui::menu("text-source-menu", trigger, menu, window, cx).into_any_element()
         };
-        let login = source.online
-            && course2md::auth::is_bilibili_url(&source.input)
-            && read_error
-                .or(source_failure)
-                .is_some_and(source::legacy_login_failure_from_text);
-        // Subtitles only, and none to use: said with its repairs beneath the chip,
-        // unless a failed read already says what happened.
-        let missing = self.text_source_missing(cx);
         let notice = match &source.subtitles {
             _ if self.import.subtitle_loading => None,
             SubtitleEvidence::NoneFound if speech => Some(course2md::tr!("未找到字幕").to_owned()),
-            SubtitleEvidence::Unsupported { message } if speech || missing => Some(message.clone()),
-            _ => None,
-        };
-        let warning = match &source.subtitles {
-            SubtitleEvidence::Found {
-                warning: Some(message),
-                ..
-            } if self.import.subtitle_error.is_none() => {
-                Some(course2md::tr!("部分字幕无法读取：{}", message))
-            }
+            SubtitleEvidence::Unsupported { message } if speech => Some(message.clone()),
             _ => None,
         };
         v_flex()
@@ -1621,24 +1649,20 @@ impl Desktop {
             .min_w_0()
             .gap(rem(8.))
             .child(h_flex().min_w_0().child(chip))
-            // Why this video is recognized from speech, before what that takes.
             .when_some(notice, |view, notice| {
                 view.child(supporting_info("import-subtitle-message", notice))
             })
-            // Recognized on this computer: whether its model is ready, and the way
-            // to get it, before anything is submitted.
             .when_some(
                 self.import_model_request().filter(|_| speech),
                 |view, (provider, model, root)| {
                     view.child(self.model_status_line(provider, Some(&model), &root, window, cx))
                 },
             )
-            // A confirmed subtitle is good news, in the success role as before (U16).
             .when(
                 !speech
                     && !pending
                     && !self.import.subtitle_loading
-                    && failure.is_none()
+                    && !failure
                     && source.selected_subtitle.is_some(),
                 |view| {
                     view.children(ui::async_status(
@@ -1662,106 +1686,14 @@ impl Desktop {
                         .self_start()
                         .child(course2md::tr!("取消读取字幕"))
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.import.pending_conversion = None;
                             this.abort_subtitle_read();
                             this.save_current_draft(cx);
                             cx.notify();
                         })),
                 )
             })
-            .when_some(failure.map(str::to_owned).or(warning), |view, message| {
-                view.child(self.subtitle_issue(&message, failure.is_some(), source, login, cx))
-            })
-            .when(missing && failure.is_none(), |view| {
-                view.child(self.missing_text_source_notice(source, cx))
-            })
     }
 
-    /// Settings ask for subtitles only and this video has none: what stands in the
-    /// way, and the ways past it from the card.
-    fn missing_text_source_notice(&self, source: &source::Source, cx: &mut Context<Self>) -> Div {
-        let unchecked = matches!(source.subtitles, SubtitleEvidence::Unchecked);
-        let summary = if unchecked {
-            course2md::tr!("还没读取这个视频的字幕，而文字来源设置为仅字幕")
-        } else {
-            course2md::tr!("这个视频没有字幕，而文字来源设置为仅字幕")
-        };
-        // Never read: reading them is the first way on.
-        let retry = unchecked.then(|| {
-            material_button("read-missing-subtitles", ButtonVariant::Text)
-                .icon(symbols::refresh())
-                .child(course2md::tr!("重新读取字幕"))
-                .on_click(cx.listener(|this, _, _, cx| this.retry_subtitles(cx)))
-                .into_any_element()
-        });
-        v_flex()
-            .w_full()
-            .min_w_0()
-            .gap(rem(8.))
-            .children(ui::async_status(
-                "missing-text-source",
-                &ui::AsyncStatus::Warning(summary.into()),
-                retry,
-                cx,
-            ))
-            .child(
-                h_flex()
-                    .gap(rem(8.))
-                    .flex_wrap()
-                    .children(self.text_source_repairs(source, cx)),
-            )
-    }
-
-    /// Under subtitles only, what gives this video a text source: a subtitle file
-    /// beside a local video, or another 文字来源 in Settings, where it is decided.
-    fn text_source_repairs(
-        &self,
-        source: &source::Source,
-        cx: &mut Context<Self>,
-    ) -> Vec<MaterialButton> {
-        if self.text_mode(cx) != TranscriptSource::Subtitle {
-            return Vec::new();
-        }
-        let mut repairs = Vec::new();
-        if !source.online {
-            repairs.push(
-                material_button("attach-missing-subtitle", ButtonVariant::Outlined)
-                    .tone(ButtonTone::Accent)
-                    .icon(symbols::file_upload())
-                    .child(course2md::tr!("选择字幕文件"))
-                    .disabled(self.import.subtitle_loading)
-                    .on_click(
-                        cx.listener(|this, _, window, cx| {
-                            this.choose_attached_subtitle(window, cx)
-                        }),
-                    ),
-            );
-        }
-        repairs.push(
-            material_button("change-text-source", ButtonVariant::Outlined)
-                .tone(ButtonTone::Accent)
-                .icon(symbols::settings())
-                .child(course2md::tr!("更改文字来源"))
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.save_current_draft(cx);
-                    this.open_settings(window, cx);
-                    // Once resolved this action is gone: returning focuses the
-                    // card's primary action instead.
-                    if let Some((_, focus)) = &mut this.settings_origin {
-                        *focus = Some(this.import_submit_focus.clone());
-                    }
-                    // 文字来源 is the category's first row.
-                    this.select_settings_tab(
-                        crate::settings_ui::SettingsTab::Generation,
-                        window,
-                        cx,
-                    );
-                })),
-        );
-        repairs
-    }
-
-    /// The video's subtitle tracks, and the ways to get more of them.
     fn text_source_menu(
         &self,
         source: &source::Source,
@@ -1786,8 +1718,6 @@ impl Desktop {
             .map(|track| track.id.clone())
             .or_else(|| cached.clone())
             .filter(|_| !speech);
-        // Two tracks of one language differ by their kind (机器翻译, 人工字幕), so it is
-        // the item's supporting text, where a long name cannot push it out of view.
         let mut texts = vec![];
         let mut items: Vec<MaterialMenuItem> = tracks
             .into_iter()
@@ -1851,102 +1781,6 @@ impl Desktop {
             .items(items)
     }
 
-    /// A subtitle that could not be read: what it means, and the ways on from here.
-    fn subtitle_issue(
-        &self,
-        message: &str,
-        failed: bool,
-        source: &source::Source,
-        login: bool,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let summary = if source::legacy_login_failure_from_text(message) {
-            course2md::tr!("字幕需要登录，或改用语音识别")
-        } else {
-            readable_first_line(message)
-                .unwrap_or(course2md::tr!("无法读取字幕，可重试或改用语音识别"))
-        };
-        let open = self.import.subtitle_issue_open;
-        let details = (summary != message).then(|| message.to_owned());
-        let retry = material_button("retry-subtitles", ButtonVariant::Text)
-            .icon(symbols::refresh())
-            .child(course2md::tr!("重新读取字幕"))
-            .disabled(self.import.subtitle_loading)
-            .on_click(cx.listener(|this, _, _, cx| this.retry_subtitles(cx)))
-            .into_any_element();
-        let status = if failed {
-            ui::AsyncStatus::Warning(course2md::tr!("字幕未读取成功：{}", summary).into())
-        } else {
-            ui::AsyncStatus::Warning(summary.to_owned().into())
-        };
-        v_flex()
-            .w_full()
-            .min_w_0()
-            .gap(rem(8.))
-            .children(ui::async_status("subtitle-issue", &status, Some(retry), cx))
-            .child(
-                h_flex()
-                    .gap(rem(8.))
-                    .flex_wrap()
-                    .when_some(
-                        source.selected_subtitle.as_ref().filter(|_| failed),
-                        |row, previous| {
-                            row.child(
-                                MaterialTooltip::plain(
-                                    "use-previous-subtitle-tooltip",
-                                    previous.label.clone(),
-                                )
-                                .trigger(
-                                    material_button(
-                                        "use-previous-subtitle",
-                                        ButtonVariant::Outlined,
-                                    )
-                                    .tone(ButtonTone::Accent)
-                                    .icon(symbols::subtitles())
-                                    .child(course2md::tr!("继续使用之前的字幕"))
-                                    .on_click(
-                                        cx.listener(|this, _, _, cx| {
-                                            this.use_confirmed_subtitle(cx)
-                                        }),
-                                    ),
-                                ),
-                            )
-                        },
-                    )
-                    // Subtitles only: no fallback to speech, so the issue offers what
-                    // gives the video a text source.
-                    .when(failed, |row| {
-                        row.children(self.text_source_repairs(source, cx))
-                    })
-                    .when(login, |row| {
-                        row.child(
-                            material_button("login-for-subtitles", ButtonVariant::Outlined)
-                                .tone(ButtonTone::Accent)
-                                .icon(symbols::bilibili())
-                                .child(course2md::tr!("登录 Bilibili"))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.open_account_dialog(window, cx)
-                                })),
-                        )
-                    })
-                    .when(details.is_some(), |row| {
-                        row.child(details_toggle("subtitle-issue-details", open).on_click(
-                            cx.listener(move |this, _, _, cx| {
-                                this.import.subtitle_issue_open = !open;
-                                cx.notify();
-                            }),
-                        ))
-                    }),
-            )
-            .when_some(details, |view, details| {
-                view.child(motion::disclosure(
-                    "subtitle-technical",
-                    open,
-                    v_flex().child(supporting_info("import-subtitle-issue-details", details)),
-                ))
-            })
-    }
-
     fn import_uses_speech(&self, cx: &App) -> bool {
         self.import
             .source_preview
@@ -1954,46 +1788,10 @@ impl Desktop {
             .is_some_and(|source| uses_speech(source, self.text_mode(cx)))
     }
 
-    /// The service Settings' conversion needs for this video and does not have: the
-    /// speech service when this video is recognized in the cloud, the AI service when
-    /// proofreading, a summary or a translation is on.
-    fn missing_import_service(&self, cx: &App) -> Option<ServicePurpose> {
-        let settings = ConversionOptions::from_config(&self.preferences.defaults_config());
-        let uses_ai = settings.llm
-            || settings.summarize
-            || settings
-                .translate
-                .as_deref()
-                .and_then(course2md::language::target)
-                .is_some();
-        let separate_subtitle = self.text_mode(cx) != TranscriptSource::Asr
-            && self
-                .workspace(cx)
-                .and_then(|workspace| workspace.state.draft())
-                .is_some_and(|draft| draft.subtitle.is_some());
-        [
-            (
-                ServicePurpose::Speech,
-                settings.uses_cloud_provider() && self.import_uses_speech(cx) && !separate_subtitle,
-            ),
-            (ServicePurpose::Ai, uses_ai),
-        ]
-        .into_iter()
-        .find_map(|(purpose, required)| {
-            (required
-                && self.default_service(purpose).is_none_or(|version| {
-                    self.preferences
-                        .service_retired_in_snapshot(&version.service_id)
-                }))
-            .then_some(purpose)
-        })
-    }
-
-    /// The preview card is on screen (not replaced by reading or a task).
     fn preview_card_shown(&self, cx: &App) -> bool {
         self.import.preview_cancel.is_none()
             && self.import.source_preview.is_some()
-            && self.workbench_linked_task(cx).is_none()
+            && self.followed_live_task(cx).is_none()
     }
 
     fn existing_source_note<'a>(&self, cx: &'a App) -> Option<&'a Course> {
@@ -2005,66 +1803,42 @@ impl Desktop {
         self.library(cx).preferred_note(&source.identity, preferred)
     }
 
-    fn can_start_input(&self, cx: &App) -> bool {
-        // While candidates show, batch and single actions live in the list's own action area; the input row's
-        // 「开始转换」 would always fail for a collection link, so two primary actions never share the screen.
-        self.import.source_collection_title.is_none()
-            && (self.online(cx) || !self.value(Field::Source, cx).is_empty())
-            && self.import.preview_error.is_none()
-            && self.existing_source_note(cx).is_none()
-            && !self.has_matching_task(cx)
-            && self.current_input_task(cx).is_none_or(|task| {
-                matches!(
-                    task.state,
-                    workspace::TaskState::Complete | workspace::TaskState::Cancelled
-                ) && !(self.opened(cx).reading
-                    && self
-                        .import
-                        .following_conversion
-                        .as_ref()
-                        .is_some_and(|follow| {
-                            follow.follows(&task.id, self.import.preview_generation)
-                        }))
-            })
+    fn current_preview_task<'a>(&'a self, cx: &'a App) -> Option<&'a workspace::TaskRecord> {
+        let workspace = self.workspace(cx)?;
+        current_course_task(workspace.state.draft()?, &workspace.state)
     }
 
-    /// Whether the plan shown has a task already doing its work: then 查看任务 is the
-    /// one way forward, and starting again would only lead there.
-    fn has_matching_task(&self, cx: &App) -> bool {
-        self.import
-            .preview_plan_cache
-            .as_ref()
-            .and_then(|(_, plan)| plan.as_ref().ok())
-            .is_some_and(|plan| self.matching_task(plan, cx).is_some())
-    }
-
-    pub(super) fn current_input_task<'a>(
-        &'a self,
-        cx: &'a App,
-    ) -> Option<&'a workspace::TaskRecord> {
-        let state = &self.workspace(cx)?.state;
-        submitted_input_task(state.draft()?, &state.tasks, &self.value(Field::Source, cx))
-    }
-
-    /// The source card and hero share one definition of the submitted task.
-    fn workbench_linked_task<'a>(&'a self, cx: &'a App) -> Option<&'a workspace::TaskRecord> {
-        let opening_result = self.opened(cx).reading && self.import.following_conversion.is_some();
-        self.current_input_task(cx).filter(|task| {
-            (opening_result
+    /// The task just submitted from Home while it is actively `Running` or `Queued`.
+    fn followed_live_task<'a>(&'a self, cx: &'a App) -> Option<&'a workspace::TaskRecord> {
+        let followed_id = self.followed_task.as_deref()?;
+        self.current_preview_task(cx).filter(|task| {
+            task.id == followed_id
                 && matches!(
-                    task.state,
-                    workspace::TaskState::Complete | workspace::TaskState::Partial
-                ))
-                || !task.state.finished()
-                || (task.state == workspace::TaskState::Partial
-                    && task.artifact.is_some()
-                    && !desktop_tasks::task_view::task_component_failures(task).is_empty())
+                    task.status,
+                    workspace::TaskStatus::Running | workspace::TaskStatus::Queued
+                )
         })
     }
 
-    /// Capture builds only: `COURSE2MD_CAPTURE_SOURCE` fills the link field
-    /// once at startup and previews it, so preview states can be rendered. A path
-    /// to a file is taken as a local video, as if dropped on the window.
+    fn can_start_input(&self, cx: &App) -> bool {
+        let preview_error = self
+            .import
+            .issue
+            .as_ref()
+            .is_some_and(|i| i.kind == WorkbenchIssueKind::Preview);
+        let active_matching = self.current_preview_task(cx).is_some_and(|task| {
+            matches!(
+                task.status,
+                workspace::TaskStatus::Running | workspace::TaskStatus::Queued
+            )
+        });
+        self.import.source_collection_title.is_none()
+            && (self.online(cx) || !self.value(Field::Source, cx).is_empty())
+            && !preview_error
+            && self.existing_source_note(cx).is_none()
+            && !active_matching
+    }
+
     #[cfg(feature = "capture")]
     fn capture_source(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use std::sync::atomic::Ordering;
@@ -2083,61 +1857,17 @@ impl Desktop {
         self.inspect_source(window, cx);
     }
 
-    /// Called by explicit workbench entry and initial restoration, never render.
-    /// Terminal tasks remain in the task list and recent notes after their input
-    /// has become a fresh form; an in-flight or edited input is never replaced.
     pub(super) fn prepare_workbench_input(
         &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
+        #[allow(unused_variables)] window: &mut Window,
+        #[allow(unused_variables)] cx: &mut Context<Self>,
     ) -> bool {
         #[cfg(feature = "capture")]
         self.capture_source(window, cx);
-        if self.import.pending_conversion.is_some() || self.import.following_conversion.is_some() {
-            return true;
-        }
-        let input = self.value(Field::Source, cx);
-        let has_old_result = self.workspace(cx).is_some_and(|workspace| {
-            workspace.state.draft().is_some_and(|draft| {
-                retired_input_task(draft, &workspace.state.tasks, &input).is_some()
-            })
-        });
-        if !has_old_result {
-            return true;
-        }
-        if !self.save_current_draft(cx) {
-            return false;
-        }
-        let online = self.online(cx);
-        let Some(workspace) = &self.records.read(cx).workspace else {
-            return true;
-        };
-        let Some(draft) = workspace.state.draft() else {
-            return true;
-        };
-        if retired_input_task(draft, &workspace.state.tasks, &input).is_none() {
-            return true;
-        }
-        let reset = self.transact(
-            course2md::tr!("新的视频输入尚未建立：{}"),
-            |state| {
-                state.reset_input(online);
-                Ok(())
-            },
-            cx,
-        );
-        if reset.is_none() {
-            cx.notify();
-            return false;
-        }
-        self.invalidate_source();
-        self.restore_draft(window, cx);
         true
     }
 
     pub fn new_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        // Capture builds only: hold the page at a scroll offset to render
-        // its lower region.
         #[cfg(feature = "capture")]
         if let Some(offset) = std::env::var("COURSE2MD_CAPTURE_SCROLL")
             .ok()
@@ -2145,26 +1875,25 @@ impl Desktop {
         {
             self.scrolls[Page::New as usize].set_offset(point(px(0.), px(-offset)));
         }
-        self.workbench_notice = None;
         let compact = is_compact(window);
-        let opening_result = self.opened(cx).reading && self.import.following_conversion.is_some();
-        let linked_task = self.workbench_linked_task(cx).cloned();
-        let cancelled = self
-            .current_input_task(cx)
-            .filter(|task| task.state == workspace::TaskState::Cancelled)
-            .map(|task| task.id.clone());
-        // The current input's own task takes the preview card's place and shape: a
-        // running task shows its live status, a settled one what it needs or what opens.
-        let card = match linked_task {
-            Some(task) if opening_result && task.state.finished() => {
-                Some(self.task_opening_result(&task, cx))
-            }
+        let followed_live = self.followed_live_task(cx).cloned();
+        let active_issue = if followed_live.is_some() {
+            None
+        } else {
+            self.active_workbench_issue(cx)
+        };
+        let has_blocking_issue = active_issue.is_some();
+
+        let card = match followed_live {
             Some(task) => Some(self.tasks.update(cx, |page, cx| {
                 page.task_card(&task, CardPlace::Home, window, cx)
             })),
-            None if self.preview_card_shown(cx) => self.selected_video(window, cx),
+            None if self.preview_card_shown(cx) => {
+                self.selected_video(has_blocking_issue, window, cx)
+            }
             None => None,
         };
+        let issue_banner = self.workbench_issue_banner(active_issue, cx);
         let reading = self
             .import
             .preview_cancel
@@ -2175,7 +1904,8 @@ impl Desktop {
             .source_collection_title
             .clone()
             .map(|title| self.candidate_list(&title, cx));
-        let something_below = card.is_some() || reading.is_some() || candidates.is_some();
+        let something_below =
+            card.is_some() || reading.is_some() || candidates.is_some() || issue_banner.is_some();
         let title = TypeRole::DisplaySmall.scale();
         let hero = workbench_column()
             .gap(HERO_GAP)
@@ -2190,19 +1920,12 @@ impl Desktop {
             .child(self.source_input(window, cx))
             .children(reading)
             .children(candidates)
-            .children(self.source_preview_error(cx))
             .children(card)
-            .when_some(cancelled, |view, id| {
-                view.child(info_callout(
-                    SharedString::from(format!("cancelled-input-task-{id}")),
-                    course2md::tr!("任务已取消"),
-                ))
-            });
+            .children(issue_banner);
         let active = self.workbench_active_tasks_section(window, cx);
         let recent = self
             .recent_notes_section(cx)
             .map(|recent| motion::enter("home-recent-notes", recent));
-        // With nothing below it, the input moves toward the optical center.
         let quiet = !something_below && recent.is_none() && active.is_none();
         let top = motion::value("home-hero-top", hero_top(quiet, compact), window, cx);
         v_flex()
@@ -2216,42 +1939,12 @@ impl Desktop {
                 view.child(workbench_column().child(active))
             })
             .children(recent.map(|recent| workbench_column().child(recent)))
-            // The whole workbench accepts a dropped video, not just the local tab.
             .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
                 this.drop_source_files(paths.paths(), window, cx)
             }))
             .into_any_element()
     }
 
-    /// A followed result opening where its task ran.
-    fn task_opening_result(
-        &self,
-        task: &workspace::TaskRecord,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let id = &task.id;
-        motion::state_enter(
-            SharedString::from(format!("task-opening-result-{id}")),
-            tile([true; 4])
-                .rounded(RADIUS_HERO)
-                .flex()
-                .flex_col()
-                .gap(rem(12.))
-                .p(rem(16.))
-                .child(video_title(
-                    format!("workbench-task-title-{id}"),
-                    task.plan.title.clone(),
-                ))
-                .children(ui::async_status(
-                    SharedString::from(format!("task-opening-{id}")),
-                    &ui::AsyncStatus::Busy(course2md::tr!("正在打开…").into()),
-                    None,
-                    cx,
-                )),
-        )
-    }
-
-    /// Attach last to the full-window `workbench-drop` group, outside scrolling content.
     pub(super) fn workbench_drop_overlay(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         div()
             .id("workbench-drop-overlay")
@@ -2262,8 +1955,6 @@ impl Desktop {
             .bg(color(ColorRole::SURFACE_CONTAINER).opacity(0.88))
             .p(rem(24.))
             .child(
-                // Shown only while a file is over the window, so it draws the
-                // kit's dragged-over look outright.
                 drop_target(
                     "workbench-drop-target",
                     course2md::tr!("松开以添加视频"),
@@ -2289,9 +1980,7 @@ impl Desktop {
             }))
     }
 
-    /// Derived once per change of what the plan reads, not on every render. A result that
-    /// outlived a check it waited for would turn the wait into a failure in red.
-    fn cached_preview_plan(&mut self, cx: &mut App) -> Result<workspace::TaskPlan, (String, bool)> {
+    fn cached_preview_plan(&mut self, cx: &mut App) -> PreviewPlan {
         let key = PlanKey {
             workspace: self
                 .workspace(cx)
@@ -2307,7 +1996,7 @@ impl Desktop {
                 .is_blocked(crate::preferences::PreferenceGroup::Services),
             source: self.import.preview_generation,
             reading: self.import.reading(),
-            subtitle_failed: self.import.subtitle_error.is_some(),
+            subtitle_failed: self.has_subtitle_issue(),
             environment_ready: self.environment.is_some(),
             library: self.library(cx).generation,
             library_loading: self.library(cx).loading,
@@ -2321,67 +2010,27 @@ impl Desktop {
             let pending = error
                 .downcast_ref::<desktop_tasks::plan::PlanPending>()
                 .is_some();
-            (format!("{error:#}"), pending)
+            (
+                WorkbenchIssue::from_error(WorkbenchIssueKind::Plan, &error),
+                pending,
+            )
         });
         self.import.preview_plan_cache = Some((key, plan.clone()));
         plan
     }
 
-    /// What stands between this video and a conversion, each obstacle with its one
-    /// way forward. Only unresolved choices interrupt a submitted conversion.
-    fn conversion_recovery(&mut self, cx: &mut Context<Self>) -> Recovery {
-        let busy = self.work.read(cx).job.is_some()
-            || self.workspace(cx).is_some_and(|workspace| {
-                workspace.state.tasks.iter().any(|task| {
-                    matches!(
-                        task.state,
-                        workspace::TaskState::Queued | workspace::TaskState::Running
-                    )
-                })
-            });
+    /// Calm inline context when `current_course_task` is already `Running`/`Queued`
+    /// or when an existing note matches the previewed source on Home.
+    fn preview_context(
+        &mut self,
+        has_blocking_issue: bool,
+        cx: &mut Context<Self>,
+    ) -> PreviewContext {
         let reading = self.import.reading();
         let preview_plan = self.cached_preview_plan(cx);
         let plan_pending = matches!(&preview_plan, Err((_, true)));
-        let matching_task = preview_plan
-            .as_ref()
-            .ok()
-            .and_then(|plan| self.matching_task(plan, cx))
-            .map(|task| {
-                let location = self.task_library(task, cx).map(|library| library.label());
-                (task.id.clone(), task.plan.title.clone(), location)
-            });
-        let preferences_issue = self.ordinary_preferences_submit_issue();
-        let preferences_blocked = preferences_issue.is_some();
-        let submission_error = preferences_issue
-            .as_ref()
-            .map(|issue| issue.message.clone())
-            .or_else(|| {
-                let settled = self.import.source_preview.is_some()
-                    && !reading
-                    && !self.subtitle_attention_required(cx);
-                preview_plan
-                    .as_ref()
-                    .err()
-                    .filter(|_| settled)
-                    .map(|(message, _)| message.clone())
-            })
-            // A Start the plan refused: its reason stands on the card beside 取消转换 and
-            // 重试转换, not under the link field the card has replaced.
-            .or_else(|| {
-                self.import
-                    .source_validation
-                    .clone()
-                    .filter(|_| self.import.pending_conversion.is_some() && !reading)
-            });
-        // Waiting for the component or location checks is progress, not a failure.
-        let checking = !preferences_blocked && (self.environment.is_none() || plan_pending);
-        let mut facts: Vec<AnyElement> = Vec::new();
-        // Repairs belong to the obstacle's notice; the rest take the start action's place
-        // in the card's trailing group, the filled one last.
-        let mut repairs: Vec<MaterialButton> = Vec::new();
-        let mut actions: Vec<MaterialButton> = Vec::new();
-        let mut lead: Option<MaterialButton> = None;
-        // An outlined action reads as live: its label is primary (G3).
+        let checking = self.environment.is_none() || plan_pending;
+
         let button = |id: &'static str, variant, icon, label: &'static str| {
             material_button(id, variant)
                 .when(variant == ButtonVariant::Outlined, |button| {
@@ -2390,189 +2039,97 @@ impl Desktop {
                 .icon(icon)
                 .child(label)
         };
-        if self.environment.as_ref().is_some_and(|environment| {
-            !environment.engine
-                || !environment.ffmpeg
-                || !environment.ffprobe
-                || (self.online(cx) && !environment.ytdlp)
+
+        if let Some(active_task) = self.current_preview_task(cx).filter(|task| {
+            matches!(
+                task.status,
+                workspace::TaskStatus::Running | workspace::TaskStatus::Queued
+            )
         }) {
-            repairs.push(
-                button(
-                    "repair-conversion-components",
-                    ButtonVariant::Tonal,
-                    symbols::settings(),
-                    course2md::tr!("检查所需组件"),
-                )
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.open_settings(window, cx);
-                    this.select_settings_tab(
-                        crate::settings_ui::SettingsTab::Application,
-                        window,
-                        cx,
-                    );
-                })),
-            );
-        }
-        if let Some(issue) = preferences_issue {
-            repairs.push(
-                button(
-                    "repair-generation-preferences",
-                    ButtonVariant::Tonal,
-                    if issue.can_retry {
-                        symbols::refresh()
-                    } else {
-                        symbols::restart_alt()
-                    },
-                    if issue.can_retry {
-                        course2md::tr!("重试保存生成笔记设置")
-                    } else {
-                        course2md::tr!("重置生成笔记设置")
-                    },
-                )
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    if !this.save_current_draft(cx) {
-                        return;
-                    }
-                    let saved = if issue.can_retry {
-                        this.retry_ordinary_preferences(issue.group, cx)
-                    } else {
-                        this.restore_ordinary_preferences(issue.group, window, cx)
-                    };
-                    if saved {
-                        let focus = this.import_submit_focus.clone();
-                        window.defer(cx, move |window, cx| focus.focus(window, cx));
-                    }
-                })),
-            );
-        }
-        if let Some(library) = self
-            .workspace(cx)
-            .and_then(|workspace| workspace.state.library(&workspace.state.default_library))
-            .filter(|library| {
-                self.cached_location_check(library)
-                    .is_some_and(|check| check.needs_reassociation)
-            })
-        {
-            let id = library.id.clone();
-            repairs.push(
-                button(
-                    "reassociate-import-location",
-                    ButtonVariant::Tonal,
-                    symbols::database(),
-                    course2md::tr!("重新关联此保存位置"),
-                )
-                .disabled(self.storage_ui.busy)
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.begin_library_reassociation(id.clone(), window, cx)
-                })),
-            );
-        }
-        // Reopened from a task that is paused or stopped: converting starts over with
-        // the current settings and takes that task's place, said beside the action,
-        // and continuing that task instead stays one click away.
-        if let Some((id, title)) = self.workspace(cx).and_then(|workspace| {
-            let state = &workspace.state;
-            desktop_tasks::import::waiting_retried_task(state.draft()?, &state.tasks)
-                .map(|task| (task.id.clone(), task.plan.title.clone()))
-        }) {
-            // Named after the action shown: 重新生成 for a video with a note.
-            let consequence = if self.existing_source_note(cx).is_some() {
-                course2md::tr!("重新生成会按当前设置进行，并取代暂停的任务《{}》", title)
-            } else {
-                course2md::tr!(
-                    "开始转换会按当前设置重新生成，并取代暂停的任务《{}》",
-                    title
-                )
-            };
-            facts.push(supporting_info("retried-task-consequence", consequence).into_any_element());
-            actions.push(
-                button(
-                    "continue-retried-task",
-                    ButtonVariant::Text,
-                    symbols::play_arrow(),
-                    course2md::tr!("继续原任务"),
-                )
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.continue_retried_task(id.clone(), window, cx)
-                })),
-            );
-        }
-        let has_match = matching_task.is_some();
-        if let Some((id, title, location)) = matching_task {
-            let location = location.unwrap_or_else(|| course2md::tr!("原保存位置").into());
-            facts.push(
+            let id = active_task.id.clone();
+            let title = active_task.title.clone();
+            let location = self
+                .task_library(active_task, cx)
+                .map(|lib| lib.label())
+                .unwrap_or_else(|| course2md::tr!("原保存位置").into());
+            let info_line = Some(
                 supporting_info(
                     "conversion-fact-consequence",
                     course2md::tr!("已有相同处理任务：《{}》（{}）", title, location),
                 )
                 .into_any_element(),
             );
-            lead = Some(
-                button(
-                    "show-matching-task",
-                    ButtonVariant::Filled,
-                    symbols::task(),
-                    course2md::tr!("查看任务"),
-                )
-                .track_focus(&self.import_submit_focus)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.save_current_draft(cx);
-                    this.select_task(&id, cx);
-                    this.navigate(Page::Task, cx);
-                    cx.notify();
-                })),
-            );
-        } else if let Some(course) = self.existing_source_note(cx).cloned() {
+            let view_btn = button(
+                "show-matching-task",
+                ButtonVariant::Filled,
+                symbols::task(),
+                course2md::tr!("查看任务"),
+            )
+            .track_focus(&self.import_submit_focus)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.save_current_draft(cx);
+                this.select_task(&id, cx);
+                this.navigate(Page::Task, cx);
+                cx.notify();
+            }));
+            return PreviewContext {
+                info_line,
+                actions: vec![view_btn],
+                has_primary_override: true,
+                blocked: has_blocking_issue || checking,
+            };
+        }
+
+        if let Some(course) = self.existing_source_note(cx).cloned() {
             let location = self
                 .course_location(&course, cx)
                 .map(|library| library.label())
                 .unwrap_or_else(|| course2md::tr!("笔记库").into());
-            facts.push(
+            let info_line = Some(
                 supporting_info(
                     "existing-note-notice",
-                    course2md::tr!("已有笔记，保存在「{}」", location),
+                    course2md::tr!("已有笔记，保存在「{}」；重新生成会更新现有笔记", location),
                 )
                 .into_any_element(),
             );
-            if busy {
-                facts.push(
-                    supporting_info(
-                        "conversion-fact-queued",
-                        course2md::tr!("将排在当前任务之后"),
+            let title = self.library(cx).course_display_title(&course);
+            let disabled = reading
+                || checking
+                || has_blocking_issue
+                || self.records.read(cx).workspace.is_none()
+                || self.text_source_missing(cx);
+
+            let mut actions = Vec::new();
+            if course.incomplete() {
+                let resume_course = course.clone();
+                actions.push(
+                    button(
+                        "resume-incomplete-note",
+                        ButtonVariant::Outlined,
+                        symbols::refresh(),
+                        course2md::tr!("补全未完成部分"),
                     )
-                    .into_any_element(),
+                    .disabled(disabled)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.save_current_draft(cx);
+                        this.retry_or_regenerate_course(
+                            resume_course.clone(),
+                            workspace::RunMode::Resume,
+                            cx,
+                        );
+                    })),
                 );
             }
-            let title = self.library(cx).course_display_title(&course);
-            lead = Some(
-                button(
-                    "open-existing-note",
-                    ButtonVariant::Filled,
-                    symbols::menu_book(),
-                    course2md::tr!("打开笔记"),
-                )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.save_current_draft(cx);
-                    this.open_course(course.clone(), cx);
-                })),
-            );
             actions.push(
                 button(
                     "regenerate-note",
                     ButtonVariant::Outlined,
-                    symbols::refresh(),
+                    symbols::restart_alt(),
                     course2md::tr!("重新生成"),
                 )
                 .track_focus(&self.import_submit_focus)
-                .disabled(
-                    reading
-                        || checking
-                        || self.records.read(cx).workspace.is_none()
-                        || preferences_blocked
-                        || self.text_source_missing(cx),
-                )
+                .disabled(disabled)
                 .on_click(cx.listener(move |_, _, window, cx| {
-                    // The note is replaced, not kept beside the new one: ask first.
                     ui::Confirm::new(
                         course2md::tr!("重新生成笔记"),
                         course2md::tr!("保留当前笔记"),
@@ -2584,113 +2141,65 @@ impl Desktop {
                     ))
                     .ask(
                         cx.listener(|this, _, window, cx| {
-                            this.import.following_conversion =
-                                Some(ConversionFollow::Preparing(this.import.preview_generation));
-                            this.enqueue_current(window, cx);
+                            this.enqueue_current_with_mode(workspace::RunMode::Fresh, window, cx);
                         }),
                         window,
                         cx,
                     );
                 })),
             );
-        } else if let Some(purpose) = self.missing_import_service(cx) {
-            repairs.push(
+            actions.push(
                 button(
-                    "configure-conversion-service",
-                    ButtonVariant::Tonal,
-                    symbols::add(),
-                    // The one name the app gives this action, here and in Settings.
-                    desktop_prefs::service_binding::add_service_label(purpose),
+                    "open-existing-note",
+                    ButtonVariant::Filled,
+                    symbols::menu_book(),
+                    course2md::tr!("打开笔记"),
                 )
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    // Saved as the default: that is the service the conversion uses.
-                    this.open_settings_service_editor(purpose, None, window, cx);
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.save_current_draft(cx);
+                    this.open_course(course.clone(), cx);
                 })),
             );
+            return PreviewContext {
+                info_line,
+                actions,
+                has_primary_override: true,
+                blocked: has_blocking_issue || checking,
+            };
         }
-        if self.import.pending_conversion.is_some() && !reading {
-            if self.import.source_validation.is_some()
-                && self.missing_import_service(cx).is_none()
-                && self.existing_source_note(cx).is_none()
-                && !has_match
-            {
-                actions.push(
-                    button(
-                        "retry-conversion-validation",
-                        ButtonVariant::Outlined,
-                        symbols::refresh(),
-                        course2md::tr!("重试转换"),
-                    )
-                    .on_click(cx.listener(|this, _, window, cx| this.start_conversion(window, cx))),
-                );
-            }
-            actions.insert(
-                0,
-                button(
-                    "cancel-pending-conversion",
-                    ButtonVariant::Text,
-                    symbols::close(),
-                    course2md::tr!("取消转换"),
-                )
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.import.cancel_start();
-                    cx.notify();
-                })),
-            );
-        }
-        // A check still under way is status beside the video; an obstacle is one notice
-        // in the card with the way past it, and the conversion cannot start until then.
-        let mut notice = None;
-        match submission_error {
-            Some(message) if checking => facts.extend(
-                ui::async_status(
-                    "import-submit-status",
-                    &ui::AsyncStatus::Busy(message.into()),
-                    None,
-                    cx,
-                )
-                .map(IntoElement::into_any_element),
-            ),
-            Some(message) => {
-                notice = Some(
-                    // An obstacle the notice can repair is amber; one it cannot is red.
-                    notice_banner(
-                        "import-submit-status",
-                        if repairs.is_empty() {
-                            NoticeKind::Danger
-                        } else {
-                            NoticeKind::Warning
-                        },
-                        message.clone(),
-                    )
-                    .rounded(RADIUS_LARGE)
-                    .children(repairs.drain(..)),
-                );
-                self.workbench_notice = Some(message);
-            }
-            None => {}
-        }
-        // Without an obstacle to explain them, repairs wait with the card's actions.
-        actions.splice(0..0, repairs);
-        Recovery {
-            facts,
-            blocked: notice.is_some(),
-            notice,
-            actions: actions.into_iter().chain(lead).collect(),
+
+        let info_line = match &preview_plan {
+            Err((issue, true)) if checking => ui::async_status(
+                "import-submit-status",
+                &ui::AsyncStatus::Busy(issue.message.clone().into()),
+                None,
+                cx,
+            )
+            .map(IntoElement::into_any_element),
+            _ => None,
+        };
+
+        PreviewContext {
+            info_line,
+            actions: Vec::new(),
+            has_primary_override: false,
+            blocked: has_blocking_issue || checking,
         }
     }
 }
 
-/// The sign-ins as the workbench needs them: what a failed source preview may retry
-/// once signed in.
+/// Sign-in dialogs for online sources on Home.
 impl Desktop {
-    /// The source preview a sign-in may retry: the workbench's failed online link.
     fn sign_in_source(&self, subtitles: bool, cx: &App) -> bool {
+        let preview_err = self
+            .import
+            .issue
+            .as_ref()
+            .is_some_and(|i| i.kind == WorkbenchIssueKind::Preview);
         !self.onboarding.active
             && matches!(self.page, Page::New)
             && self.online(cx)
-            && (self.import.preview_error.is_some()
-                || (subtitles && self.subtitle_attention_required(cx)))
+            && (preview_err || (subtitles && self.subtitle_attention_required(cx)))
     }
 
     fn source_now(&self, cx: &App) -> (u64, String) {
@@ -2700,7 +2209,6 @@ impl Desktop {
         )
     }
 
-    /// The Bilibili sign-in dialog, retrying the source preview it was opened from.
     pub(crate) fn open_account_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let retry = (self.sign_in_source(true, cx)
             && course2md::auth::is_bilibili_url(&self.value(Field::Source, cx)))
@@ -2710,12 +2218,10 @@ impl Desktop {
         });
     }
 
-    /// The YouTube connection dialog, retrying the source preview it was opened from.
     pub(crate) fn open_youtube_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let retry = (self.sign_in_source(false, cx)
             && course2md::auth::is_youtube_url(&self.value(Field::Source, cx)))
         .then(|| self.source_now(cx));
-        // Where a reopen for Full Disk Access brings the person back to.
         let origin = if self.onboarding.active {
             GuideOrigin::Onboarding
         } else if self.page == Page::Settings {
@@ -2731,7 +2237,6 @@ impl Desktop {
         });
     }
 
-    /// Whether the Bilibili sign-in can retry the source preview it was opened from.
     fn can_retry_account_source(&self, cx: &App) -> bool {
         let (generation, input) = self.source_now(cx);
         self.accounts.read(cx).account.can_resume_source(
@@ -2741,7 +2246,6 @@ impl Desktop {
         )
     }
 
-    /// The Bilibili sign-in dialog, drawn over the page.
     pub(crate) fn account_dialog(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let ready = self.can_retry_account_source(cx);
         self.accounts.update(cx, |accounts, cx| {
@@ -2749,13 +2253,11 @@ impl Desktop {
         })
     }
 
-    /// The YouTube connection dialog, drawn over the page.
     pub(crate) fn youtube_dialog(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         self.accounts
             .update(cx, |accounts, cx| accounts.youtube_dialog(window, cx))
     }
 
-    /// What the sign-ins ask of the window.
     pub(crate) fn accounts_event(
         &mut self,
         _: &Entity<crate::account_ui::AccountsView>,
@@ -2786,35 +2288,26 @@ impl Desktop {
     }
 }
 
-/// Whether the hero field's 预览视频 keeps its label: the field (the home column
-/// within the window's gutters) still leaves the link at least this much room
-/// beside the labeled action, measured at the current text scale.
 fn preview_label_fits(label: &str, window: &Window) -> bool {
     let scale = f32::from(window.rem_size()) / gpui_kit_material::tokens::typography::BASE_PX;
     let width = f32::from(window.bounds().size.width) / scale;
-    // The home column, inside 16px gutters at the narrowest.
     let field = (width - 32.).min(760.);
-    // A medium tonal button: 24 + 20 icon + 8 before its label, 24 after; the field's
-    // leading icon and insets take about 72 more.
     let action =
         crate::views::shaped_width(label, 16. * scale, FontWeight::MEDIUM, window) / scale + 76.;
-    field - action - 72. >= 280.
+    field - action >= 240.
 }
 
-/// The text source menu's width in design px: at least its chip's, and wide enough
-/// for its longest track name, within the window.
 fn text_source_menu_width(chip_value: &str, texts: &[String], window: &Window) -> f32 {
     let scale = f32::from(window.rem_size()) / gpui_kit_material::tokens::typography::BASE_PX;
-    let measure = |text: &str, size: f32, weight| {
-        crate::views::shaped_width(text, size * scale, weight, window) / scale
-    };
-    // An assist chip: 8 + 18 icon + 8 before its label, 16 after.
-    let chip = measure(chip_value, 14., FontWeight::MEDIUM) + 50.;
-    // A menu item: 12 + 24 icon + 12 before its label, 12 + 24 check + 12 after.
-    let item = texts
-        .iter()
-        .map(|text| measure(text, 16., FontWeight::NORMAL) + 96.)
-        .fold(0., f32::max);
-    let room = f32::from(window.bounds().size.width) / scale - 32.;
-    chip.max(item).max(200.).min(room.max(200.))
+    let longest = std::iter::once(chip_value)
+        .chain(texts.iter().map(String::as_str))
+        .chain([
+            course2md::tr!("重新读取字幕"),
+            course2md::tr!("选择字幕文件"),
+        ])
+        .map(|text| {
+            crate::views::shaped_width(text, 14. * scale, FontWeight::NORMAL, window) / scale
+        })
+        .fold(0_f32, f32::max);
+    (longest + 88.).clamp(220., 400.)
 }

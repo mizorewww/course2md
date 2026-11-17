@@ -89,6 +89,8 @@ struct ImageViewer {
     /// The ⋮ button's screenshot commands: the button, and Shift+F10 or the
     /// Menu key anywhere in the viewer, open them beside it.
     menu: ContextMenuHandle,
+    /// Inline error shown inside the full-screen viewer if an image action fails.
+    notice: Option<String>,
     /// From the window's bottom to the top of the action row, as last laid out:
     /// a snackbar shown over the viewer stays above it.
     actions_clearance: Rc<Cell<Option<Pixels>>>,
@@ -164,19 +166,14 @@ pub(crate) enum ReaderEvent {
     Navigate(Page),
     /// Show this task on the task page.
     OpenTask(String),
-    /// Redo these parts of this task's note.
-    Reprocess {
-        id: String,
-        components: Vec<course2md::execution::Component>,
-    },
-    /// Choose an AI service for this task's repair.
-    RepairService(String),
-    /// Say this where the window says things.
+    /// Retry or resume unfinished work for this note's course in place.
+    RetryCourse(Box<Course>),
+    /// Open Settings to fix the configuration or service named by this message.
+    OpenSettings(String),
+    /// Positive transient confirmation for the window's snackbar.
     Message(String),
     /// A record the reader writes could not be saved.
     RecordError(String),
-    /// The screenshot viewer opened over the note.
-    ViewerOpened,
 }
 
 impl EventEmitter<ReaderEvent> for ReaderPage {}
@@ -198,6 +195,7 @@ pub(crate) struct ReaderPage {
     focus: FocusHandle,
     details_open: bool,
     processing_details_open: bool,
+    inline_notice: Option<String>,
     /// The contents over the article, when they cannot sit beside it.
     toc_open: bool,
     toc_scroll: ScrollHandle,
@@ -445,6 +443,7 @@ impl ReaderPage {
             focus: cx.focus_handle(),
             details_open: false,
             processing_details_open: false,
+            inline_notice: None,
             toc_open: false,
             toc_scroll: ScrollHandle::new(),
             toc_revealed: None,
@@ -802,6 +801,21 @@ impl ReaderPage {
         self.viewer.as_ref().is_some_and(|viewer| viewer.open)
     }
 
+    pub(crate) fn set_inline_notice(&mut self, notice: Option<String>, cx: &mut Context<Self>) {
+        self.inline_notice = notice;
+        cx.notify();
+    }
+
+    fn show_reader_error(&mut self, message: impl Into<String>, cx: &mut Context<Self>) {
+        let message = message.into();
+        if let Some(viewer) = self.viewer.as_mut().filter(|viewer| viewer.open) {
+            viewer.notice = Some(message);
+        } else {
+            self.inline_notice = Some(message);
+        }
+        cx.notify();
+    }
+
     /// While the viewer is open, how far above the window's bottom a snackbar
     /// must stay to leave the viewer's action row uncovered.
     pub(super) fn viewer_snackbar_clearance(&self) -> Option<Pixels> {
@@ -1043,6 +1057,7 @@ impl ReaderPage {
         self.find.matches = Rc::default();
         self.details_open = false;
         self.processing_details_open = false;
+        self.inline_notice = None;
         self.rebuild_note_document(&preview, cx);
         // Clearing an input needs the window, which this entity is being
         // updated inside; clear both searches once the update ends.
@@ -1255,14 +1270,17 @@ impl ReaderPage {
         let course = &self.opened.preview.as_ref()?.course;
         let manifest = course.manifest.as_ref()?;
         let state = &self.workspace(cx)?.state;
-        if let Some(task) = state.task(&manifest.task_id) {
-            let library = state.library(&task.plan.library_id)?;
-            return OfflineVideoRequest::for_note(course, task, library);
-        }
         let library = state
             .libraries
             .iter()
             .find(|library| course.dir.starts_with(&library.root))?;
+        if let Some(task) = state
+            .task_for_course(&library.id, &manifest.course_id)
+            .or_else(|| state.task(&manifest.task_id))
+            && let Some(request) = OfflineVideoRequest::for_note(course, task, library)
+        {
+            return Some(request);
+        }
         OfflineVideoRequest::for_library_note(course, library)
     }
     fn play_reader_offline_video(&mut self, cx: &mut Context<Self>) {
@@ -1294,9 +1312,7 @@ impl ReaderPage {
                     if let OfflineVideo::Available(path) = &status {
                         cx.open_with_system(path);
                     } else {
-                        cx.emit(ReaderEvent::Message(
-                            course2md::tr!("保留的视频已不在").into(),
-                        ));
+                        this.show_reader_error(course2md::tr!("保留的视频已不在"), cx);
                     }
                 }
                 this.offline_video = status;
@@ -1380,11 +1396,13 @@ impl ReaderPage {
             Some(nav::SourceTarget::Web(url)) => cx.open_url(&url),
             Some(nav::SourceTarget::Local(path)) if path.is_file() => cx.open_with_system(&path),
             Some(nav::SourceTarget::Local(path)) => {
-                cx.emit(ReaderEvent::Message(course2md::tr!(
-                    "原视频不在 {}，请用「找到原视频…」指定新位置",
-                    path.display()
-                )));
-                cx.notify();
+                self.show_reader_error(
+                    course2md::tr!(
+                        "原视频不在 {}，请用「找到原视频…」指定新位置",
+                        path.display()
+                    ),
+                    cx,
+                );
             }
             None => {}
         }
@@ -1451,14 +1469,22 @@ impl ReaderPage {
                     })
                     .and_then(|saved| saved)
                 });
-                let message = match result {
+                match result {
                     Ok(()) => {
+                        this.inline_notice = None;
                         this.refresh_reader_data(cx);
-                        course2md::tr!("已定位原视频：{}", path.display())
+                        cx.emit(ReaderEvent::Message(course2md::tr!(
+                            "已定位原视频：{}",
+                            path.display()
+                        )));
                     }
-                    Err(error) => course2md::tr!("原视频位置没有更改：{}", error.to_string()),
-                };
-                cx.emit(ReaderEvent::Message(message));
+                    Err(error) => {
+                        this.show_reader_error(
+                            course2md::tr!("原视频位置没有更改：{}", error.to_string()),
+                            cx,
+                        );
+                    }
+                }
                 cx.notify();
             });
         })
@@ -1627,6 +1653,7 @@ impl ReaderPage {
                         this.opened.preview = Some(Rc::new(preview));
                         this.opened.result_tab = tab;
                         this.loaded = None;
+                        this.inline_notice = None;
                         if reload == Reload::Replaced && this.visible {
                             cx.emit(ReaderEvent::Message(course2md::tr!("笔记已更新").into()));
                         }
@@ -1640,10 +1667,10 @@ impl ReaderPage {
                     // The note on screen is gone from disk: the reader says so until
                     // it is read again.
                     Err(_) if reload == Reload::Replaced => this.replaced_unreadable = true,
-                    Err(error) => cx.emit(ReaderEvent::Message(course2md::tr!(
-                        "笔记暂时无法读取：{}",
-                        error.to_string()
-                    ))),
+                    Err(error) => this.show_reader_error(
+                        course2md::tr!("笔记暂时无法读取：{}", error.to_string()),
+                        cx,
+                    ),
                 }
                 cx.notify();
             });
@@ -1737,9 +1764,11 @@ impl ReaderPage {
             self.paint_reader_matches(cx);
         }
         let metrics = ReaderMetrics::new(window, !self.outline.is_empty());
-        let strip = self.reader_strip(&preview, cx);
-        let attention = (!metrics.short)
-            .then(|| self.reader_attention(&preview, cx))
+        let export_feedback = self
+            .exports
+            .update(cx, |exports, cx| exports.feedback(&preview.course, cx));
+        let banner = (!metrics.short)
+            .then(|| self.reader_banner(&preview, cx))
             .flatten();
         let tabs = (!metrics.short).then(|| self.reader_tabs(&preview, metrics, cx));
         let find = self.reader_find_bar(cx);
@@ -1803,8 +1832,8 @@ impl ReaderPage {
                 })
                 .pb(rem(16.))
                 .gap(rem(12.))
-                .children(strip)
-                .children(attention)
+                .children(export_feedback)
+                .children(banner)
                 .children(tabs)
                 .children(find)
                 .child(view)
@@ -1858,134 +1887,20 @@ impl ReaderPage {
         )
     }
 
-    /// What passes over the note while reading it, kept in view: a finished export, a
-    /// task replacing the note, and the note being read again.
-    fn reader_strip(
-        &mut self,
-        preview: &Rc<notes::Preview>,
-        cx: &mut Context<Self>,
-    ) -> Option<Div> {
-        let feedback = self
-            .exports
-            .update(cx, |exports, cx| exports.feedback(&preview.course, cx));
-        let line = |id: &'static str, lead: AnyElement, text: &'static str| {
-            h_flex()
-                .flex_wrap()
-                .items_center()
-                .gap(rem(8.))
-                .child(lead)
-                .child(
-                    accessible_text(SharedString::from(format!("{id}-label")), text)
-                        .role(Role::Status)
-                        .text_color(color(ON_SURFACE_VARIANT)),
-                )
-        };
-        let icon = |icon: SymbolIcon, role| {
-            Icon::from(icon)
-                .size(rem(20.))
-                .color(color(role))
-                .into_any_element()
-        };
-        let reading = self.opened.reading.then(|| {
-            let text = course2md::tr!("正在读取笔记…");
-            motion::enter(
-                "reader-reading",
-                line(
-                    "reader-reading",
-                    spinner("reader-reading-spinner", text, cx).into_any_element(),
-                    text,
-                ),
-            )
-        });
-        // The note was replaced and could not be read: the one on screen is gone.
-        let unreadable = (!self.opened.reading && self.replaced_unreadable).then(|| {
-            let course = preview.course.clone();
-            motion::enter(
-                "reader-replaced-unreadable",
-                line(
-                    "reader-replaced-unreadable",
-                    icon(symbols::warning(), WARNING),
-                    course2md::tr!("笔记已更新，但暂时无法读取"),
-                )
-                .child(
-                    material_button("reader-replaced-reread", ButtonVariant::Text)
-                        .icon(symbols::refresh())
-                        .child(course2md::tr!("重新读取"))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            let mut course = course.clone();
-                            course.manifest = None;
-                            this.reload_note(course, Reload::Replaced, cx)
-                        })),
-                ),
-            )
-        });
-        // The task that will replace this note: the note stays readable meanwhile, and
-        // is read again in place once the task has replaced it.
-        let updating = (!self.opened.reading)
-            .then(|| self.replacing_task(preview, cx))
-            .flatten()
-            .map(|(id, state)| {
-                use workspace::TaskState::*;
-                let (lead, text) = match state {
-                    // A still icon: a spinner would draw the reader every frame for as
-                    // long as the task runs.
-                    Running | Pausing => (
-                        icon(symbols::refresh(), ON_SURFACE_VARIANT),
-                        course2md::tr!("正在更新这份笔记，完成后这里会自动刷新"),
-                    ),
-                    Queued => (
-                        icon(symbols::schedule(), ON_SURFACE_VARIANT),
-                        course2md::tr!("这份笔记等待更新，完成后这里会自动刷新"),
-                    ),
-                    Paused => (
-                        icon(symbols::pause(), ON_SURFACE_VARIANT),
-                        course2md::tr!("这份笔记的更新已暂停"),
-                    ),
-                    _ => (
-                        icon(symbols::warning(), WARNING),
-                        course2md::tr!("这份笔记的更新未完成，这里仍是原来的笔记"),
-                    ),
-                };
-                motion::enter(
-                    "reader-updating",
-                    line("reader-updating", lead, text).child(
-                        material_button("reader-updating-task", ButtonVariant::Text)
-                            .tone(ButtonTone::Neutral)
-                            .icon(symbols::task())
-                            .child(course2md::tr!("查看任务"))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.save_reading_position(cx);
-                                cx.emit(ReaderEvent::OpenTask(id.clone()));
-                            })),
-                    ),
-                )
-            });
-        (feedback.is_some() || reading.is_some() || updating.is_some() || unreadable.is_some())
-            .then(|| {
-                v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .flex_shrink_0()
-                    .gap(rem(8.))
-                    .children(feedback)
-                    .children(unreadable)
-                    .children(updating)
-                    .children(reading)
-            })
-    }
-
-    /// The unfinished task for the open note, which will replace it when it finishes.
-    fn replacing_task(
+    /// Looks up the single in-place task record for this note's course, if any.
+    fn course_task<'a>(
         &self,
         preview: &notes::Preview,
-        cx: &App,
-    ) -> Option<(String, workspace::TaskState)> {
+        cx: &'a App,
+    ) -> Option<&'a workspace::TaskRecord> {
         let manifest = preview.course.manifest.as_ref()?;
-        let library = self.course_location(&preview.course, cx)?;
-        let tasks = &self.workspace(cx)?.state.tasks;
-        desktop_store::library::note_unfinished_task(tasks, &library.id, Some(&manifest.source_id))
-            .filter(|task| !task.exports_only())
-            .map(|task| (task.id.clone(), task.state))
+        let state = &self.workspace(cx)?.state;
+        if let Some(library) = self.course_location(&preview.course, cx)
+            && let Some(task) = state.task_for_course(&library.id, &manifest.course_id)
+        {
+            return Some(task);
+        }
+        state.task(&manifest.task_id)
     }
 
     /// The peer views, and the contents button when they cannot sit beside the article.
@@ -2426,11 +2341,10 @@ impl ReaderPage {
             })
             .children(self.reader_obstacles(cx))
             .children(self.reader_details(preview, cx))
-            .children(self.reader_notices(preview, cx))
             // Where the views have no line of their own, the page has none to spare either.
             .when(
                 ReaderMetrics::new(window, !self.outline.is_empty()).short,
-                |head| head.children(self.reader_attention(preview, cx)),
+                |head| head.children(self.reader_banner(preview, cx)),
             )
     }
 
@@ -2531,47 +2445,13 @@ impl ReaderPage {
                     .into_owned(),
             ));
         }
-        let task = preview
-            .course
-            .manifest
-            .as_ref()
-            .and_then(|manifest| self.workspace(cx)?.state.task(&manifest.task_id));
-        if let Some(subtitle) = task.and_then(|task| task.plan.source.selected_subtitle.as_ref()) {
+        let task = self.course_task(preview, cx);
+        if let Some(subtitle) = task.and_then(|task| task.source.selected_subtitle.as_ref()) {
             details.push((
                 course2md::tr!("所选字幕"),
                 symbols::subtitles(),
                 subtitle.label.clone(),
             ));
-        }
-        // What the note was made with: the settings its task's run used.
-        if let Some(config) = task
-            .and_then(|task| task.ran_with.as_ref())
-            .map(|ran_with| &ran_with.config)
-        {
-            let defaults = &config.defaults;
-            if defaults.transcript_source == Some(course2md::config::TranscriptSource::Asr) {
-                if let Some(model) = &defaults.asr_model {
-                    details.push((
-                        course2md::tr!("语音识别模型"),
-                        symbols::mic(),
-                        model.clone(),
-                    ));
-                }
-                if let Some(provider) = defaults.provider {
-                    details.push((
-                        course2md::tr!("识别设备"),
-                        symbols::computer(),
-                        crate::provider_label(Some(provider)).to_owned(),
-                    ));
-                }
-            }
-            if config.llm.uses_service() {
-                details.push((
-                    course2md::tr!("AI 模型"),
-                    symbols::auto_fix_high(),
-                    config.llm.model.clone(),
-                ));
-            }
         }
         let rows = details
             .into_iter()
@@ -2612,217 +2492,283 @@ impl ReaderPage {
         ))
     }
 
-    /// What is unfinished about this note: it concerns the note and its screenshots
-    /// alike, so it heads the page above the views.
-    fn reader_attention(
+    /// Single unified banner at the top of the note reader (Rule 1 & Rule 3):
+    /// 1. Unreadable/missing note files on disk (`Danger` + `[重试读取]`).
+    /// 2. Course task actively updating (`Info` + `[查看任务]`).
+    /// 3. Partial note or failed course task (`Warning` naming unfinished part(s) & reason + `[重试]` + `[打开设置]`).
+    /// 4. Inline action error (`Warning` + dismiss).
+    fn reader_banner(
         &mut self,
         preview: &Rc<notes::Preview>,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let notice = processing_notice(&preview.processing_issues)?;
-        Some(self.reader_processing_notice(preview, notice, cx))
-    }
-
-    /// The file-reload notice.
-    fn reader_notices(
-        &mut self,
-        preview: &Rc<notes::Preview>,
-        cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
-        let mut notices = Vec::new();
-        if files_need_reload(preview, &self.issues, &self.frames) {
-            let course = preview.course.clone();
-            let issues: Vec<&str> = preview
-                .issues
-                .iter()
-                .chain(self.issues.iter())
-                .map(String::as_str)
-                .collect();
-            let text = if issues.is_empty() {
-                course2md::tr!("部分截图无法读取").to_owned()
+        // 1. Unreadable or missing note files on disk.
+        if self.replaced_unreadable || files_need_reload(preview, &self.issues, &self.frames) {
+            let reload_kind = if self.replaced_unreadable {
+                Reload::Replaced
             } else {
-                issues.join("\n")
+                Reload::Reread
+            };
+            let mut course = preview.course.clone();
+            if self.replaced_unreadable {
+                course.manifest = None;
+            }
+            let text = if self.replaced_unreadable {
+                course2md::tr!("笔记已更新，但暂时无法读取").to_owned()
+            } else {
+                let issues: Vec<&str> = preview
+                    .issues
+                    .iter()
+                    .chain(self.issues.iter())
+                    .map(String::as_str)
+                    .collect();
+                if issues.is_empty() {
+                    course2md::tr!("部分截图无法读取").to_owned()
+                } else {
+                    issues.join("\n")
+                }
             };
             let reading = self.opened.reading;
-            notices.push(motion::enter(
+            let retry_label = course2md::tr!("重试读取");
+            return Some(motion::enter(
                 "reader-file-notice",
-                notice_banner("reader-file-notice-text", NoticeKind::Danger, text).child(
-                    material_button("reload-reader-files", ButtonVariant::Outlined)
-                        .tone(ButtonTone::Accent)
-                        .icon(symbols::refresh())
-                        .child(course2md::tr!("重新读取"))
-                        .loading(reading, course2md::tr!("重新读取"))
-                        .disabled(reading)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.reload_note(course.clone(), Reload::Reread, cx)
-                        })),
-                ),
+                notice_banner("reader-file-notice-text", NoticeKind::Danger, text)
+                    .flex_shrink_0()
+                    .rounded(RADIUS_HERO)
+                    .px(rem(20.))
+                    .py(rem(16.))
+                    .child(
+                        material_button("reload-reader-files", ButtonVariant::Outlined)
+                            .tone(ButtonTone::Accent)
+                            .icon(symbols::refresh())
+                            .child(retry_label)
+                            .loading(reading, retry_label)
+                            .disabled(reading)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.reload_note(course.clone(), reload_kind, cx)
+                            })),
+                    ),
             ));
         }
-        notices
-    }
 
-    /// What did not finish, with the ways to finish it and what was recorded.
-    fn reader_processing_notice(
-        &mut self,
-        preview: &Rc<notes::Preview>,
-        notice: String,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let task = preview
-            .course
-            .manifest
-            .as_ref()
-            .and_then(|manifest| self.workspace(cx)?.state.note_task(&manifest.task_id));
-        let requires_repair =
-            task.is_some_and(desktop_tasks::task_view::task_requires_service_repair);
-        let can_retry = task.is_some_and(|task| {
-            task.handled_by.is_none()
-                && !matches!(
-                    task.state,
-                    workspace::TaskState::Running
-                        | workspace::TaskState::Pausing
-                        | workspace::TaskState::Queued
-                        | workspace::TaskState::Uncertain
-                )
-                && !task
-                    .events
-                    .blocked
-                    .iter()
-                    .any(|blocked| blocked.is_uncertain())
-                && task.artifact.as_ref() == Some(&preview.course.dir)
-        });
-        let id = task.map(|task| task.id.clone());
-        let components = preview
-            .processing_issues
-            .iter()
-            .filter_map(|issue| match issue.stage {
-                notes::ProcessingStage::Screenshots => Some("screenshots".to_owned()),
-                notes::ProcessingStage::Proofreading if !requires_repair => {
-                    Some("proofreading".to_owned())
-                }
-                notes::ProcessingStage::Translation if !requires_repair => {
-                    Some("translation".to_owned())
-                }
-                notes::ProcessingStage::Summary if !requires_repair => Some("summary".to_owned()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        let needs_service = preview.processing_issues.iter().any(|issue| {
-            matches!(
-                issue.stage,
-                notes::ProcessingStage::Proofreading
-                    | notes::ProcessingStage::Translation
-                    | notes::ProcessingStage::Summary
+        let task = self.course_task(preview, cx).cloned();
+
+        // 2. Course task is Running, Queued, or Paused.
+        if let Some(ref task) = task
+            && matches!(
+                task.status,
+                workspace::TaskStatus::Running
+                    | workspace::TaskStatus::Queued
+                    | workspace::TaskStatus::Paused
             )
-        });
-        let mut actions = h_flex().w_full().gap(rem(8.)).flex_wrap();
-        if let Some(id) = id {
-            if can_retry && !components.is_empty() {
-                let retry = id.clone();
-                let label =
-                    desktop_tasks::task_view::task_retry_components_label(task, &components);
-                actions = actions.child(
-                    material_button("reader-retry-incomplete", ButtonVariant::Outlined)
-                        .tone(ButtonTone::Accent)
-                        .icon(symbols::refresh())
-                        .child(label)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.save_reading_position(cx);
-                            cx.emit(ReaderEvent::Reprocess {
-                                id: retry.clone(),
-                                components: components
-                                    .iter()
-                                    .filter_map(|component| {
-                                        course2md::execution::Component::parse(component)
-                                    })
-                                    .collect(),
-                            });
-                        })),
-                );
-            }
-            if can_retry && needs_service {
-                let repair = id.clone();
-                actions = actions.child(
-                    material_button("reader-repair-ai", ButtonVariant::Outlined)
-                        .tone(ButtonTone::Accent)
-                        .icon(symbols::settings())
-                        .child(course2md::tr!("检查 AI 服务后重试"))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.save_reading_position(cx);
-                            cx.emit(ReaderEvent::RepairService(repair.clone()));
-                        })),
-                );
-            }
-            actions = actions.child(
-                material_button("reader-view-incomplete-task", ButtonVariant::Text)
-                    .tone(ButtonTone::Neutral)
-                    .icon(symbols::task())
-                    .child(course2md::tr!("查看任务"))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.save_reading_position(cx);
-                        cx.emit(ReaderEvent::OpenTask(id.clone()));
-                        cx.notify();
-                    })),
-            );
+        {
+            let id = task.id.clone();
+            let text = if task.status == workspace::TaskStatus::Paused {
+                course2md::tr!("这份笔记的更新已暂停")
+            } else {
+                course2md::tr!("正在更新笔记，完成后自动刷新")
+            };
+            return Some(motion::enter(
+                "reader-updating-notice",
+                notice_banner("reader-updating-banner", NoticeKind::Info, text)
+                    .flex_shrink_0()
+                    .rounded(RADIUS_HERO)
+                    .px(rem(20.))
+                    .py(rem(16.))
+                    .child(
+                        material_button("reader-updating-task", ButtonVariant::Text)
+                            .tone(ButtonTone::Neutral)
+                            .icon(symbols::task())
+                            .child(course2md::tr!("查看任务"))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.save_reading_position(cx);
+                                cx.emit(ReaderEvent::OpenTask(id.clone()));
+                            })),
+                    ),
+            ));
         }
-        let open = self.processing_details_open;
-        let details = preview
-            .processing_issues
-            .iter()
-            .enumerate()
-            .filter_map(|(index, issue)| {
-                let detail = issue.detail()?;
-                Some(
-                    v_flex()
-                        .gap(rem(4.))
-                        .child(
-                            accessible_text(
-                                ("reader-processing-label", index),
-                                issue.stage.label(),
-                            )
-                            .text_size(TEXT_BODY)
-                            .font_weight(FontWeight::MEDIUM),
-                        )
-                        .child(
-                            accessible_text(("reader-processing-detail", index), detail)
-                                .text_size(TEXT_BODY)
-                                .text_color(color(ON_SURFACE_VARIANT))
-                                .whitespace_normal(),
-                        ),
+
+        // 3. Partial note (`!processing_issues.is_empty()`) or `Failed` course task.
+        let task_failed = task
+            .as_ref()
+            .is_some_and(|t| t.status == workspace::TaskStatus::Failed);
+        if !preview.processing_issues.is_empty() || task_failed {
+            let unfinished = processing_notice(&preview.processing_issues).unwrap_or_else(|| {
+                course2md::tr!("这份笔记的更新未完成，这里仍是原来的笔记").to_owned()
+            });
+            let raw_reason = task
+                .as_ref()
+                .filter(|t| t.status == workspace::TaskStatus::Failed)
+                .and_then(desktop_tasks::task_view::task_error_summary)
+                .or_else(|| {
+                    preview
+                        .processing_issues
+                        .iter()
+                        .find_map(|issue| issue.detail())
+                        .map(|d| {
+                            crate::import_ui::readable_first_line(&d)
+                                .unwrap_or(&d)
+                                .to_owned()
+                        })
+                })
+                .filter(|s| !s.trim().is_empty());
+            let summary = match &raw_reason {
+                Some(reason) if !unfinished.contains(reason.as_str()) => {
+                    course2md::tr!("{}：{}", unfinished, reason)
+                }
+                _ => unfinished,
+            };
+
+            let ai_stage_issue = preview.processing_issues.iter().any(|issue| {
+                matches!(
+                    issue.stage,
+                    notes::ProcessingStage::Proofreading
+                        | notes::ProcessingStage::Translation
+                        | notes::ProcessingStage::Summary
                 )
             });
-        let details: Vec<_> = details.collect();
-        if !details.is_empty() {
-            actions = actions.child(
-                material_button("reader-processing-details", ButtonVariant::Text)
-                    .tone(ButtonTone::Neutral)
-                    .icon(symbols::info())
-                    .child(if open {
-                        course2md::tr!("收起处理详情")
+            let task_needs_settings = task
+                .as_ref()
+                .and_then(|t| t.error.as_ref())
+                .is_some_and(|e| e.needs_settings);
+            let issue_needs_settings = preview.processing_issues.iter().any(|issue| {
+                issue
+                    .detail()
+                    .is_some_and(|d| desktop_tasks::run::message_indicates_settings(&d))
+            });
+            let needs_settings = task_needs_settings || issue_needs_settings || ai_stage_issue;
+            let settings_hint = task
+                .as_ref()
+                .and_then(|t| t.error.as_ref())
+                .map(|e| e.message.clone())
+                .or_else(|| raw_reason.clone())
+                .unwrap_or_else(|| {
+                    if ai_stage_issue {
+                        "AI 服务".to_owned()
                     } else {
-                        course2md::tr!("查看处理详情")
-                    })
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.processing_details_open = !this.processing_details_open;
-                        cx.notify();
+                        String::new()
+                    }
+                });
+
+            let retry_course = preview.course.clone();
+            let mut actions = h_flex().w_full().gap(rem(8.)).flex_wrap().child(
+                material_button("reader-retry-incomplete", ButtonVariant::Filled)
+                    .icon(symbols::refresh())
+                    .child(course2md::tr!("重试"))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.save_reading_position(cx);
+                        cx.emit(ReaderEvent::RetryCourse(Box::new(retry_course.clone())));
                     })),
             );
+            if needs_settings {
+                actions = actions.child(
+                    material_button("reader-open-settings", ButtonVariant::Tonal)
+                        .icon(symbols::settings())
+                        .child(course2md::tr!("打开设置"))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.save_reading_position(cx);
+                            cx.emit(ReaderEvent::OpenSettings(settings_hint.clone()));
+                        })),
+                );
+            }
+            if let Some(ref task) = task {
+                let id = task.id.clone();
+                actions = actions.child(
+                    material_button("reader-view-incomplete-task", ButtonVariant::Text)
+                        .tone(ButtonTone::Neutral)
+                        .icon(symbols::task())
+                        .child(course2md::tr!("查看任务"))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.save_reading_position(cx);
+                            cx.emit(ReaderEvent::OpenTask(id.clone()));
+                        })),
+                );
+            }
+
+            let open = self.processing_details_open;
+            let details: Vec<_> = preview
+                .processing_issues
+                .iter()
+                .enumerate()
+                .filter_map(|(index, issue)| {
+                    let detail = issue.detail()?;
+                    Some(
+                        v_flex()
+                            .gap(rem(4.))
+                            .child(
+                                accessible_text(
+                                    ("reader-processing-label", index),
+                                    issue.stage.label(),
+                                )
+                                .text_size(TEXT_BODY)
+                                .font_weight(FontWeight::MEDIUM),
+                            )
+                            .child(
+                                accessible_text(("reader-processing-detail", index), detail)
+                                    .text_size(TEXT_BODY)
+                                    .text_color(color(ON_SURFACE_VARIANT))
+                                    .whitespace_normal(),
+                            ),
+                    )
+                })
+                .collect();
+            if !details.is_empty() {
+                actions = actions.child(
+                    material_button("reader-processing-details", ButtonVariant::Text)
+                        .tone(ButtonTone::Neutral)
+                        .icon(symbols::info())
+                        .child(if open {
+                            course2md::tr!("收起处理详情")
+                        } else {
+                            course2md::tr!("查看处理详情")
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.processing_details_open = !this.processing_details_open;
+                            cx.notify();
+                        })),
+                );
+            }
+
+            return Some(motion::enter(
+                "reader-processing-notice",
+                notice_banner("reader-incomplete-processing", NoticeKind::Warning, summary)
+                    .flex_shrink_0()
+                    .rounded(RADIUS_HERO)
+                    .px(rem(20.))
+                    .py(rem(16.))
+                    .child(actions)
+                    .when(!details.is_empty(), |banner| {
+                        banner.child(motion::disclosure(
+                            "reader-processing-detail-panel",
+                            open,
+                            v_flex().w_full().gap(rem(8.)).children(details),
+                        ))
+                    }),
+            ));
         }
-        motion::enter(
-            "reader-processing-notice",
-            notice_banner("reader-incomplete-processing", NoticeKind::Warning, notice)
-                .flex_shrink_0()
-                .rounded(RADIUS_HERO)
-                .px(rem(20.))
-                .py(rem(16.))
-                .child(actions)
-                .child(motion::disclosure(
-                    "reader-processing-detail-panel",
-                    open,
-                    v_flex().w_full().gap(rem(8.)).children(details),
-                )),
-        )
+
+        // 4. Inline error notice from a reader action (Rule 3).
+        if let Some(message) = self.inline_notice.clone() {
+            return Some(motion::enter(
+                "reader-inline-notice-enter",
+                notice_banner("reader-inline-notice", NoticeKind::Warning, message)
+                    .flex_shrink_0()
+                    .rounded(RADIUS_HERO)
+                    .px(rem(20.))
+                    .py(rem(16.))
+                    .child(
+                        material_button("dismiss-reader-inline-notice", ButtonVariant::Text)
+                            .tone(ButtonTone::Neutral)
+                            .child(course2md::tr!("关闭"))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.inline_notice = None;
+                                cx.notify();
+                            })),
+                    ),
+            ));
+        }
+
+        None
     }
 
     /// The tools in the title bar: find, the video, copy and export, the rest. Narrow
@@ -3695,7 +3641,9 @@ impl ReaderPage {
             move |_, cx| {
                 // A file moved or deleted since the note opened has nothing to show.
                 if !path.exists() {
-                    say(&reader, course2md::tr!("找不到这张截图的文件"), cx);
+                    let _ = reader.update(cx, |this, cx| {
+                        this.show_reader_error(course2md::tr!("找不到这张截图的文件"), cx)
+                    });
                 } else if !crate::youtube_ui::stubbed(&format!("reveal {}", path.display())) {
                     cx.reveal_path(&path);
                 }
@@ -3717,18 +3665,22 @@ impl ReaderPage {
                 if !this.image_copy.is_current(copy) {
                     return;
                 }
-                let message = match result {
+                match result {
                     Ok(item) => {
                         crate::clipboard::write(item, cx);
-                        course2md::tr!("已复制图片").to_owned()
+                        if let Some(viewer) = this.viewer.as_mut() {
+                            viewer.notice = None;
+                        }
+                        cx.emit(ReaderEvent::Message(
+                            course2md::tr!("已复制图片").to_owned(),
+                        ));
                     }
                     Err(error) => {
                         // The person is told it failed; the reason is for a report.
                         eprintln!("course2md: could not copy {}: {error:#}", path.display());
-                        course2md::tr!("无法复制图片").to_owned()
+                        this.show_reader_error(course2md::tr!("无法复制图片"), cx);
                     }
-                };
-                cx.emit(ReaderEvent::Message(message));
+                }
             });
         })
         .detach();
@@ -3759,7 +3711,6 @@ impl ReaderPage {
         let Some(viewer_index) = visible.iter().position(|candidate| *candidate == index) else {
             return;
         };
-        cx.emit(ReaderEvent::ViewerOpened);
         self.viewer = Some(ImageViewer {
             open: true,
             focused: false,
@@ -3778,6 +3729,7 @@ impl ReaderPage {
             text_open: None,
             focus: cx.focus_handle(),
             menu: ContextMenuHandle::default(),
+            notice: None,
             actions_clearance: Rc::default(),
         });
         let _ = window;
@@ -4031,6 +3983,7 @@ impl ReaderPage {
                 .into_any_element(),
         };
         let controls = self.reader_viewer_controls(window, cx);
+        let viewer_notice = self.viewer.as_ref().and_then(|v| v.notice.clone());
         let viewer = self.viewer.as_mut()?;
         let focus = viewer.focus.clone();
         // The dialog takes focus as this frame draws it; its keys live on the content.
@@ -4081,6 +4034,21 @@ impl ReaderPage {
             .w_full()
             .gap(rem(8.))
             .pb(rem(12.))
+            .when_some(viewer_notice, |view, notice| {
+                view.child(
+                    notice_banner("reader-viewer-notice", NoticeKind::Warning, notice).child(
+                        material_button("dismiss-viewer-notice", ButtonVariant::Text)
+                            .tone(ButtonTone::Neutral)
+                            .child(course2md::tr!("关闭"))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(v) = this.viewer.as_mut() {
+                                    v.notice = None;
+                                }
+                                cx.notify();
+                            })),
+                    ),
+                )
+            })
             .child(body)
             .child(controls);
         let dismiss = cx.weak_entity();

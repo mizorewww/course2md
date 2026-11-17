@@ -61,7 +61,6 @@ impl Library {
             course_id: "course".into(),
             source_id: "source".into(),
             course_dir: self.note.clone(),
-            replaces: None,
         }
     }
 
@@ -324,8 +323,7 @@ fn in_place_repairs_always_replace_the_note_cleanly() {
     library
         .publish(&library.target("task-2"), "Regenerated", "")
         .unwrap();
-    let mut repair = library.target("repair");
-    repair.replaces = Some("task-1".into());
+    let repair = library.target("repair");
     library.publish(&repair, "Repaired", "").unwrap();
     assert!(
         std::fs::read_to_string(library.note.join("course.md"))

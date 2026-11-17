@@ -582,7 +582,6 @@ mod tests {
             course_id: "course-1".into(),
             source_id: "source-1".into(),
             course_dir: root.path().join("note"),
-            replaces: None,
         };
         let meta = c2m_source::fetch::VideoMeta {
             title: "course".into(),
@@ -643,7 +642,6 @@ mod tests {
             course_id: "course-1".into(),
             source_id: "source-1".into(),
             course_dir: dir.path().join("course"),
-            replaces: None,
         };
         let meta = c2m_source::fetch::VideoMeta {
             title: "Course".into(),

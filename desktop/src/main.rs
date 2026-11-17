@@ -43,7 +43,6 @@ use desktop_ui::{note_text, symbols, ui};
 
 use desktop_prefs::conversion::provider_label;
 use desktop_reader_core::reader::note_read_failure;
-use desktop_reader_core::reader::settle_reader_notice;
 use desktop_store::library::FolderFilter;
 use desktop_store::page::{Kind, Page};
 use desktop_tasks::job::{Work, earliest_deadline, job_exit_status, poll_timeout};
@@ -121,10 +120,11 @@ struct Desktop {
     /// The workspace record and the libraries' notes, which every page reads.
     records: Entity<desktop_store::records::Records>,
     workspace_error: Option<String>,
-    /// The obstacle the workbench's video card shows this frame, so nothing else on the
-    /// page repeats it.
-    workbench_notice: Option<String>,
     import: desktop_tasks::import::ImportSession,
+    /// `keep_video` setting captured for the currently running task job.
+    active_keep_video: bool,
+    /// Task ID submitted from Home while the user stays on Home to follow its result.
+    followed_task: Option<String>,
     /// The running job, a task's or a model's, and the event loop's deadlines.
     work: Entity<Work>,
     /// The task page, whose cards the workbench and the library also show.
@@ -251,6 +251,13 @@ impl Desktop {
         }
         self.save_reading_position(cx);
         self.cancel_storage_for_close();
+        let active_work_dir = self
+            .work
+            .read(cx)
+            .active_task
+            .as_deref()
+            .and_then(|id| self.task(id, cx))
+            .map(|task| task.effective_work_dir().to_path_buf());
         if let Some(Err(error)) = self.with_workspace(cx, |workspace| {
             workspace.transaction(|state| {
                 state.stop_session();
@@ -264,13 +271,15 @@ impl Desktop {
             cx.notify();
             return false;
         }
+        if let Some(work_dir) = active_work_dir {
+            let _ = desktop_tasks::run::write_control(&work_dir, workspace::Intent::Pause);
+        }
         self.import.cancel_background_reads();
         self.codex.cancel_authorization();
         self.work.update(cx, |work, _| {
             work.closing = true;
             work.quit_deadline = Some(Instant::now() + Duration::from_secs(10));
         });
-        self.refresh_dispatch_controls(cx);
         let work = self.work.read(cx);
         if work.active_task.is_none()
             && let Some(job) = &work.job
@@ -332,16 +341,13 @@ impl Desktop {
                         // The draft records the input once autosave or a
                         // preview accepts it; anything else is a new edit.
                         if this.draft(cx).is_some_and(|draft| draft.input != value) {
-                            this.import.following_conversion = None;
+                            this.followed_task = None;
                             if this.page == Page::New {
                                 this.reader.change(cx, |reader, _| {
                                     if reader.opened.reading {
                                         reader.opened.stop_reading();
                                     }
                                 });
-                            }
-                            if !this.prepare_next_import(&value, cx) {
-                                return;
                             }
                             this.invalidate_source();
                         }
@@ -432,9 +438,6 @@ impl Desktop {
             ),
         };
         let work = cx.new(|_| Work::new());
-        if let Some(workspace) = &workspace {
-            workspace.set_wake_sender(work.read(cx).waker());
-        }
         let settings_ui = settings_ui::State::new(preferences.application().font_scale, window, cx);
         let onboarding = onboarding::State::new(window, cx);
         let records = cx.new(|_| {
@@ -467,8 +470,9 @@ impl Desktop {
             storage_ui: Default::default(),
             records,
             workspace_error,
-            workbench_notice: None,
             import: Default::default(),
+            active_keep_video: false,
+            followed_task: None,
             work,
             tasks,
             theme_frame_pending: false,
@@ -517,39 +521,16 @@ impl Desktop {
         }
         this
     }
-    /// Reports record writes that failed after the event loop moved on, and
-    /// reconciles a freshly opened record with the libraries off the UI thread.
+    /// Reconciles a freshly opened workspace record with the libraries off the UI thread.
     fn poll_workspace(&mut self, cx: &mut Context<Self>) {
-        let Some(workspace) = &self.records.read(cx).workspace else {
-            return;
-        };
-        if let Some(failure) = workspace.take_write_error() {
-            self.workspace_error = Some(if failure.control {
-                course2md::tr!("任务指令尚未保存：{}", failure.message)
-            } else {
-                course2md::tr!("任务进度尚未保存：{}", failure.message)
-            });
-            // A job that missed its instruction must not send anything new.
-            if failure.control
-                && let Some(job) = &self.work.read(cx).job
-            {
-                job.cancel();
-            }
-            cx.notify();
-        }
-        if self.workspace_reconciling {
+        if self.records.read(cx).workspace.is_none() || self.workspace_reconciling {
             return;
         }
-        let wake = self.work.read(cx).waker();
-        // Asked on every poll; nothing a page shows changes, so the records'
-        // readers are not told.
         let Some(Some(reconciliation)) = self.records.update(cx, |records, _| {
-            records.workspace.as_mut().map(|workspace| {
-                let reconciliation = workspace.reconciliation()?;
-                // A record reopened elsewhere needs the wake sender too.
-                workspace.set_wake_sender(wake);
-                Some(reconciliation)
-            })
+            records
+                .workspace
+                .as_mut()
+                .map(|workspace| workspace.reconciliation())
         }) else {
             return;
         };
@@ -577,7 +558,6 @@ impl Desktop {
                     this.with_workspace(cx, |workspace| workspace.take_migrated())
                 {
                     if let Some(notice) = migrated.notice {
-                        this.message = Some(notice.clone());
                         this.migration_notice = Some(notice);
                     }
                     if migrated.notes_changed {
@@ -618,7 +598,6 @@ impl Desktop {
             let _ = this.update(cx, |this, cx| {
                 this.environment = Some(environment);
                 this.refresh_model_diagnostics(cx);
-                this.advance_conversion_when_ready(cx);
                 // Tasks wait for it: an automatic speech engine is resolved from it.
                 this.start_next_task(cx);
                 cx.notify();
@@ -653,37 +632,6 @@ impl Desktop {
         root
     }
 
-    fn prepare_next_import(&mut self, value: &str, cx: &mut Context<Self>) -> bool {
-        let Some(workspace) = &self.records.read(cx).workspace else {
-            return false;
-        };
-        if !workspace
-            .state
-            .draft()
-            .is_some_and(|draft| draft.submitted_task.is_some() && draft.input != value)
-        {
-            return true;
-        }
-        let prepared = self.with_workspace(cx, |workspace| {
-            workspace.transaction(|state| Ok(state.prepare_next_import(value)))
-        });
-        match prepared.unwrap_or(Ok(false)) {
-            Ok(true) => {
-                self.invalidate_source();
-                self.message = None;
-                self.scrolls[Page::New as usize].set_offset(point(px(0.), px(0.)));
-                true
-            }
-            Err(error) => {
-                self.workspace_error =
-                    Some(course2md::tr!("新链接未能保存：{}", format!("{error:#}")));
-                cx.notify();
-                false
-            }
-            Ok(false) => true,
-        }
-    }
-
     fn import_video_from_action(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.prepare_workbench_input(window, cx) {
             return;
@@ -711,14 +659,14 @@ impl Desktop {
     }
 
     fn navigate(&mut self, page: Page, cx: &mut Context<Self>) {
-        self.work.update(cx, |work, _| work.result_shown = None);
-        if page != Page::New
-            || matches!(
-                self.import.following_conversion,
-                Some(desktop_tasks::import::ConversionFollow::ReaderTask { .. })
-            )
-        {
-            self.import.following_conversion = None;
+        if page != Page::New {
+            self.followed_task = None;
+        }
+        if page != Page::Library {
+            self.library_ui.notice = None;
+        }
+        if page != Page::Task {
+            self.set_task_page_notice(None, cx);
         }
         self.save_reading_position(cx);
         self.reader.change(cx, |reader, cx| {
@@ -792,7 +740,10 @@ impl Desktop {
                     }
                     Ok(Ok(None)) => {}
                     Ok(Err(_)) | Err(_) => {
-                        this.message = Some(course2md::tr!("无法打开文件选择器").into())
+                        this.import
+                            .set_issue(desktop_tasks::import::WorkbenchIssue::input(
+                                course2md::tr!("无法打开文件选择器"),
+                            ));
                     }
                 }
                 cx.notify();
@@ -824,13 +775,6 @@ impl Desktop {
         let mut deadline = self.work.read(cx).deadline(Instant::now());
         if self.storage_ui.resume_ready() {
             deadline = earliest_deadline(deadline, Some(Instant::now()));
-        }
-        // A worker that outlived an earlier session is waited for. A check in flight
-        // wakes the loop itself when it ends.
-        if let Some(workspace) = &self.records.read(cx).workspace
-            && !self.workspace_reconciling
-        {
-            deadline = earliest_deadline(deadline, workspace.held_check_due(Instant::now()));
         }
         deadline
     }
@@ -1014,7 +958,6 @@ impl Desktop {
                         .unwrap_or_default();
                     records.library.settle_root(registered);
                 });
-                this.advance_conversion_when_ready(cx);
                 cx.notify();
             });
         })
@@ -1032,32 +975,9 @@ impl Desktop {
         self.records.read(cx).course_folder(course)
     }
     fn open_course(&mut self, course: impl Into<Rc<Course>>, cx: &mut Context<Self>) {
-        self.import.following_conversion = None;
-        self.open_course_with_conversion_guard(course.into(), None, cx);
-    }
-
-    fn open_completed_conversion(&mut self, course: Course, cx: &mut Context<Self>) {
-        let follow = self.import.following_conversion.clone();
-        self.open_course_with_conversion_guard(Rc::new(course), follow, cx);
-    }
-
-    fn open_course_with_conversion_guard(
-        &mut self,
-        course: Rc<Course>,
-        follow: Option<desktop_tasks::import::ConversionFollow>,
-        cx: &mut Context<Self>,
-    ) {
-        // Reading needs its own copy on the worker; rendering shares the rest.
-        let course = Rc::unwrap_or_clone(course);
+        let course = Rc::unwrap_or_clone(course.into());
+        self.followed_task = None;
         self.save_reading_position(cx);
-        let opened = &self.reader.read(cx).opened;
-        let reader_revision = opened.read_generation;
-        let reader_origin = follow.as_ref().is_some_and(|follow| {
-            matches!(
-                follow,
-                desktop_tasks::import::ConversionFollow::ReaderTask { .. }
-            )
-        });
         cx.notify();
         let reading_path = course.dir.clone();
         let origin = self.page;
@@ -1073,53 +993,21 @@ impl Desktop {
                 if this.opened(cx).read_generation != generation || this.page != origin {
                     return;
                 }
-                let viewer_open = this.reader.change(cx, |reader, _| {
+                this.reader.change(cx, |reader, _| {
                     reader.opened.reading = false;
                     reader.opened.opening_course = None;
-                    reader.reader_viewer_open()
                 });
-                if viewer_open {
-                    desktop_tasks::import::ConversionFollow::interrupt_for_reader_viewer(
-                        &mut this.import.following_conversion,
-                    );
-                }
-                if follow.as_ref().is_some_and(|follow| {
-                    this.import.following_conversion.as_ref() != Some(follow)
-                        || !follow.context_is_current(
-                            this.page,
-                            this.import.preview_generation,
-                            reader_revision,
-                            this.opened(cx)
-                                .preview
-                                .as_ref()
-                                .map(|preview| preview.course.dir.as_path()),
-                        )
-                }) {
-                    cx.notify();
-                    return;
-                }
                 match result {
                     Ok(preview) => {
                         this.note_opened(&preview.course, cx);
-                        // The same duties as navigate() when leaving a page: save the draft when leaving the workbench;
-                        // opening another note stops following an unrelated conversion, and a background completion never takes over.
                         if this.page == Page::New {
                             this.save_current_draft(cx);
                         }
-                        if follow.is_none() {
-                            this.import.following_conversion = None;
-                        }
-                        // The note as it was remains scrollable during the read. Its
-                        // current anchor, after all ownership guards pass, is the
-                        // one that belongs in the repaired note, under the same key.
-                        if reader_origin {
-                            this.save_reading_position(cx);
-                        }
-                        let artifact = preview.course.dir.clone();
+                        let note_dir = preview.course.dir.clone();
                         let saved = this.with_workspace(cx, |workspace| {
                             workspace.transaction(|state| {
                                 for task in &mut state.tasks {
-                                    if task.artifact.as_ref() == Some(&artifact) {
+                                    if task.note_dir.as_ref() == Some(&note_dir) {
                                         task.unread = false;
                                     }
                                 }
@@ -1130,12 +1018,10 @@ impl Desktop {
                             this.workspace_error =
                                 Some(course2md::tr!("阅读进度未能保存：{}", format!("{error:#}")));
                         }
-                        let message = &mut this.message;
                         this.reader.change(cx, |reader, cx| {
-                            settle_reader_notice(message, &mut reader.opened.reader_failure_notice);
-                            if !reader_origin {
-                                reader.opened.result_tab = 0;
-                            }
+                            reader.opened.reader_failure_notice = None;
+                            reader.set_inline_notice(None, cx);
+                            reader.opened.result_tab = 0;
                             reader.opened.preview = Some(Rc::new(preview));
                             reader.ensure_reader_data(cx);
                         });
@@ -1144,22 +1030,14 @@ impl Desktop {
                             .change(cx, |reader, cx| reader.restore_reading_position(cx));
                         this.set_page(Page::Result, cx);
                         this.show_validation_panels(cx);
-                        if follow.is_some() {
-                            this.import.following_conversion = None;
-                        }
                     }
                     Err(error) => {
                         let message = note_read_failure(&error).to_owned();
-                        let notice = (origin != Page::Library).then(|| message.clone());
                         this.reader.change(cx, |reader, _| {
-                            reader.opened.reader_course_error = Some((reading_path, message));
-                            if notice.is_some() {
-                                reader.opened.reader_failure_notice = notice.clone();
-                            }
+                            reader.opened.reader_course_error =
+                                Some((reading_path, message.clone()));
                         });
-                        if notice.is_some() {
-                            this.message = notice;
-                        }
+                        this.route_note_action_error(message, cx);
                     }
                 }
                 cx.notify();
@@ -1205,17 +1083,14 @@ impl Desktop {
                 self.select_task(id, cx);
                 self.navigate(Page::Task, cx);
             }
-            ReaderEvent::Reprocess { id, components } => {
-                self.reprocess_task(id.clone(), components.clone(), Vec::new(), cx)
+            ReaderEvent::RetryCourse(course) => {
+                self.retry_or_regenerate_course((**course).clone(), workspace::RunMode::Resume, cx);
             }
-            ReaderEvent::RepairService(id) => self.repair_task_service(id.clone(), window, cx),
+            ReaderEvent::OpenSettings(reason) => {
+                self.open_settings_for_message(reason, window, cx);
+            }
             ReaderEvent::Message(text) => self.message = Some(text.clone()),
             ReaderEvent::RecordError(text) => self.workspace_error = Some(text.clone()),
-            ReaderEvent::ViewerOpened => {
-                desktop_tasks::import::ConversionFollow::interrupt_for_reader_viewer(
-                    &mut self.import.following_conversion,
-                )
-            }
         }
         cx.notify();
     }

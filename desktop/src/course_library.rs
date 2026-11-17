@@ -8,7 +8,6 @@ use crate::library_ui::{Moving, NameTarget};
 use crate::{symbols, ui};
 use desktop_store::library::*;
 use desktop_store::order::{self, NoteFacts, Place, Sort, SortRule};
-use desktop_tasks::task_view::{TaskAction, TaskSurface, lead_action};
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit_material::components::MaterialContextMenu;
 use gpui_kit_material::{
@@ -17,8 +16,8 @@ use gpui_kit_material::{
     motion,
     prelude::{
         ButtonIconPosition, ButtonShape, ButtonSize, ButtonTone, ButtonVariant, CardVariant,
-        ConnectedButtonGroup, FilterChip, ITEM_INSET, IconButton, IconButtonVariant, ListDensity,
-        ListItem, ListLeading, MaterialCard, MaterialMenu, MaterialMenuItem, MaterialSideSheet,
+        ConnectedButtonGroup, FilterChip, IconButton, IconButtonVariant, ListDensity, ListItem,
+        ListLeading, MaterialCard, MaterialMenu, MaterialMenuItem, MaterialSideSheet,
         MaterialTooltip, NoticeKind, RADIUS_LARGE, RADIUS_SMALL, SearchField, SearchFieldStyle,
         StatusKind, TEXT_AUX, TEXT_BODY, TILE_GAP, TILE_RADIUS, TileScale, Tint, TypeRole,
         accessible_text, color, disclosure_chevron, list_corners, material_button, media_label,
@@ -59,7 +58,11 @@ fn cover(image: Option<PathBuf>, icon: SymbolIcon) -> Div {
 
 /// A task's video length as its cover shows it, when known.
 fn task_duration(task: &crate::workspace::TaskRecord) -> Option<String> {
-    let seconds = task.plan.source.duration;
+    let seconds = if task.duration.is_finite() && task.duration > 0. {
+        task.duration
+    } else {
+        task.source.duration
+    };
     (seconds.is_finite() && seconds > 0.).then(|| course2md::render::fmt_ts(seconds))
 }
 
@@ -105,6 +108,8 @@ fn note_drag(course: &Course) -> NoteDrag {
 enum LibraryItem {
     /// Work in progress, with its message.
     Status(&'static str),
+    /// Inline notice for a library or folder action error.
+    ActionNotice(String),
     Recovery(crate::storage::LibraryAccess),
     /// What the startup migration removed, until the person closes it.
     Migrated(String),
@@ -143,6 +148,7 @@ impl LibraryItem {
     fn key(&self) -> String {
         match self {
             LibraryItem::Status(message) => format!("status-{message}"),
+            LibraryItem::ActionNotice(_) => "action-notice".to_owned(),
             LibraryItem::Recovery(_) => "recovery".to_owned(),
             LibraryItem::Migrated(_) => "migrated".to_owned(),
             LibraryItem::Coverage(_) => "coverage".to_owned(),
@@ -333,7 +339,7 @@ impl Desktop {
             .course_location(&course, cx)
             .map(|library| library.root.clone())
         else {
-            self.message = Some(
+            self.library_ui.notice = Some(
                 course2md::tr!("这份笔记的保存位置暂时无法确认，请在笔记库菜单中重新扫描。").into(),
             );
             cx.notify();
@@ -355,7 +361,7 @@ impl Desktop {
             .course_location(&course, cx)
             .map(|library| (library.root.clone(), library.id.clone()))
         else {
-            self.message = Some(
+            self.library_ui.notice = Some(
                 course2md::tr!("这份笔记的保存位置暂时无法确认，请在笔记库菜单中重新扫描。").into(),
             );
             cx.notify();
@@ -369,7 +375,7 @@ impl Desktop {
             note_has_unfinished_task(&workspace.state.tasks, &library_id, source)
         });
         if busy {
-            self.message =
+            self.library_ui.notice =
                 Some(course2md::tr!("这份笔记还有未完成的任务，请在任务结束或取消后再删除").into());
             cx.notify();
             return;
@@ -416,6 +422,7 @@ impl Desktop {
                         this.reader
                             .change(cx, |reader, _| reader.opened.preview = None);
                     }
+                    this.library_ui.notice = None;
                     this.message = Some(course2md::tr!(
                         "已将《{}》移到{}",
                         title,
@@ -423,15 +430,29 @@ impl Desktop {
                     ));
                 }
                 Err(error) => {
-                    this.message = Some(course2md::tr!("笔记尚未删除：{}", format!("{error}")))
+                    this.library_ui.notice =
+                        Some(course2md::tr!("笔记尚未删除：{}", format!("{error}")))
                 }
             },
             cx,
         );
     }
 
+    fn course_task<'a>(
+        &'a self,
+        course: &Course,
+        cx: &'a App,
+    ) -> Option<&'a crate::workspace::TaskRecord> {
+        let location = self.course_location(course, cx)?;
+        let manifest = course.manifest.as_ref()?;
+        let state = &self.workspace(cx)?.state;
+        state
+            .task_for_course(&location.id, &manifest.course_id)
+            .or_else(|| state.task_for_source(&location.id, &manifest.source_id))
+    }
+
     /// Every note offers the same commands wherever it appears, ordered
-    /// 打开 → 处理 → 管理: behind its ⋮ button and on right-click.
+    /// 打开 → 处理 → 导出 → 管理: behind its ⋮ button and on right-click.
     fn note_commands(&self, course: &Rc<Course>, cx: &mut Context<Self>) -> Vec<Command> {
         let desktop = cx.weak_entity();
         let path = course.dir.clone();
@@ -439,6 +460,13 @@ impl Desktop {
             .library(cx)
             .note_source(course)
             .and_then(|source| source.link.clone());
+        let task_status = self.course_task(course, cx).map(|task| task.status);
+        let active_processing = matches!(
+            task_status,
+            Some(crate::workspace::TaskStatus::Running | crate::workspace::TaskStatus::Queued)
+        );
+        let incomplete =
+            course.incomplete() || task_status == Some(crate::workspace::TaskStatus::Failed);
         let on_course =
             |label: &'static str,
              icon,
@@ -483,6 +511,53 @@ impl Desktop {
         if let Some(last) = commands.pop() {
             commands.push(last.ends_group());
         }
+        if incomplete {
+            commands.push(
+                on_course(
+                    course2md::tr!("补全未完成部分"),
+                    symbols::refresh(),
+                    |this, course, _, cx| {
+                        this.retry_or_regenerate_course(
+                            Course::clone(&course),
+                            crate::workspace::RunMode::Resume,
+                            cx,
+                        )
+                    },
+                )
+                .disabled(active_processing),
+            );
+        }
+        commands.push(
+            on_course(
+                course2md::tr!("重新生成"),
+                symbols::restart_alt(),
+                |this, course, window, cx| {
+                    let title = this.library(cx).course_display_title(&course);
+                    ui::Confirm::new(
+                        course2md::tr!("重新生成笔记"),
+                        course2md::tr!("保留当前笔记"),
+                        course2md::tr!("重新生成"),
+                    )
+                    .text(course2md::tr!(
+                        "《{}》将被新生成的笔记覆盖。你手动改过的文件会以 .edited 为名保留在笔记旁。",
+                        title
+                    ))
+                    .ask(
+                        cx.listener(move |this, _, _, cx| {
+                            this.retry_or_regenerate_course(
+                                Course::clone(&course),
+                                crate::workspace::RunMode::Fresh,
+                                cx,
+                            )
+                        }),
+                        window,
+                        cx,
+                    );
+                },
+            )
+            .disabled(active_processing)
+            .ends_group(),
+        );
         use course2md::config::OutputFormat;
         commands.extend([
             export(course2md::tr!("导出为 Markdown 包…"), OutputFormat::Md),
@@ -550,7 +625,8 @@ impl Desktop {
                     this.refresh_library(cx);
                 }
                 Err(error) => {
-                    this.message = Some(course2md::tr!("文件夹尚未恢复：{}", format!("{error:#}")))
+                    this.library_ui.notice =
+                        Some(course2md::tr!("文件夹尚未恢复：{}", format!("{error:#}")))
                 }
             },
             cx,
@@ -566,7 +642,8 @@ impl Desktop {
                     this.refresh_library(cx);
                 }
                 Err(error) => {
-                    this.message = Some(course2md::tr!("名称尚未恢复：{}", format!("{error:#}")))
+                    this.library_ui.notice =
+                        Some(course2md::tr!("名称尚未恢复：{}", format!("{error:#}")))
                 }
             },
             cx,
@@ -588,7 +665,7 @@ impl Desktop {
                         .title_recovery
                         .contains_key(&location.root)
             })
-        }) || !self.library(cx).note_attention.is_empty()
+        })
     }
 
     fn library_recovery_view(
@@ -709,67 +786,6 @@ impl Desktop {
                 );
             }
         }
-        // A note whose replacement stopped is not listed until it is sorted out;
-        // copies kept beside a note are named so they do not pile up unseen.
-        use course2md::artifact::NoteAttention;
-        for (index, attention) in self
-            .library(cx)
-            .note_attention
-            .clone()
-            .into_iter()
-            .enumerate()
-        {
-            let (kind, message, folder) = match attention {
-                NoteAttention::Blocked { swap, .. } => (
-                    NoticeKind::Danger,
-                    course2md::outcome::recovery_blocked_message(&swap, course2md::i18n::lang()),
-                    swap,
-                ),
-                // At the limit, new tasks for the note stop: say so and what frees it.
-                NoteAttention::Kept { swap, copies, .. }
-                    if copies.len() >= course2md::artifact::MAX_KEPT_COPIES =>
-                {
-                    (
-                        NoticeKind::Danger,
-                        course2md::outcome::copies_kept_message(&swap, course2md::i18n::lang()),
-                        swap,
-                    )
-                }
-                NoteAttention::Kept { note, swap, copies } => (
-                    NoticeKind::Info,
-                    course2md::tr!(
-                        "{} 的文件夹里保留了 {} 份副本，无法确认是否还需要，请查看后删除不需要的",
-                        note.display(),
-                        copies.len()
-                    )
-                    .to_string(),
-                    swap,
-                ),
-                NoteAttention::Failed { .. } => continue,
-            };
-            // The message holds long paths: its actions take a row of their own below
-            // it instead of narrowing it.
-            notices.push(
-                notice_banner(("note-attention", index), kind, message).child(
-                    h_flex()
-                        .w_full()
-                        .flex_wrap()
-                        .gap(rem(8.))
-                        .child(
-                            material_button(("open-note-attention", index), ButtonVariant::Filled)
-                                .icon(symbols::folder_open())
-                                .child(course2md::tr!("打开需要处理的文件夹"))
-                                .on_click(move |_, _, cx| cx.open_with_system(&folder)),
-                        )
-                        .child(
-                            material_button(("recheck-note-attention", index), ButtonVariant::Text)
-                                .icon(symbols::refresh())
-                                .child(course2md::tr!("重新检查保存位置"))
-                                .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx))),
-                        ),
-                ),
-            );
-        }
         (!notices.is_empty()).then(|| v_flex().gap(rem(12.)).children(notices))
     }
 
@@ -883,6 +899,9 @@ impl Desktop {
         let courses = self.arrange_courses(courses, cx);
         if self.library_needs_recovery(&all_access, cx) {
             items.push(LibraryItem::Recovery(all_access.clone()));
+        }
+        if let Some(notice) = &self.library_ui.notice {
+            items.push(LibraryItem::ActionNotice(notice.clone()));
         }
         if let Some(notice) = &self.migration_notice {
             items.push(LibraryItem::Migrated(notice.clone()));
@@ -1285,6 +1304,23 @@ impl Desktop {
             .unwrap_or_else(div)
             .py(rem(24.))
             .into_any_element(),
+            LibraryItem::ActionNotice(message) => notice_banner(
+                "library-action-notice",
+                NoticeKind::Warning,
+                message.clone(),
+            )
+            .child(
+                IconButton::new(
+                    "dismiss-library-action-notice",
+                    symbols::close(),
+                    course2md::tr!("关闭提示"),
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.library_ui.notice = None;
+                    cx.notify();
+                })),
+            )
+            .into_any_element(),
             LibraryItem::Recovery(access) => self
                 .library_recovery_view(access, cx)
                 .unwrap_or_else(div)
@@ -1628,15 +1664,6 @@ impl Desktop {
         cx.notify();
     }
 
-    fn course_has_reading_position(&self, course: &Course, cx: &App) -> bool {
-        course.manifest.as_ref().is_some_and(|manifest| {
-            let key = desktop_reader_core::reader::manifest_reading_key(&manifest.course_id, 0);
-            self.workspace(cx)
-                .and_then(|workspace| workspace.state.positions.get(&key))
-                .is_some_and(desktop_reader_core::reader::has_reading_position)
-        })
-    }
-
     /// Why a note did not open, with ways to retry and to look at its files.
     fn course_read_error(
         &self,
@@ -1720,33 +1747,16 @@ impl Desktop {
             }))
     }
 
-    /// A note's real state worth flagging on its cover or row: opening now, a task
-    /// still replacing it, or content that still needs completing.
+    /// At most one calm status chip on note cards and note rows:
+    /// `"正在打开笔记…"` while opening, `"生成中"` when `Running`/`Queued`, or
+    /// `"部分未完成"` when `partial`/`Failed`.
     fn note_status(&self, course: &Course, cx: &App) -> Option<Div> {
-        let task = self
-            .course_location(course, cx)
-            .zip(self.workspace(cx))
-            .and_then(|(location, workspace)| {
-                note_unfinished_task(
-                    &workspace.state.tasks,
-                    &location.id,
-                    course
-                        .manifest
-                        .as_ref()
-                        .map(|manifest| manifest.source_id.as_str()),
-                )
-            })
-            .map(|task| task.state);
         if self.opened(cx).opening_course.as_ref() == Some(&course.dir) {
-            Some(status_chip(StatusKind::Progress).child(course2md::tr!("正在打开笔记…")))
-        } else if let Some(state) = task {
-            let (kind, label) = task_status(state);
-            Some(status_chip(kind).child(label))
-        } else if course.incomplete() {
-            Some(status_chip(StatusKind::Warning).child(course2md::tr!("部分内容待补全")))
-        } else {
-            None
+            return Some(status_chip(StatusKind::Progress).child(course2md::tr!("正在打开笔记…")));
         }
+        let task_status = self.course_task(course, cx).map(|task| task.status);
+        note_chip_for_state(task_status, course.incomplete())
+            .map(|(kind, label)| status_chip(kind).child(label))
     }
 
     /// The note grid's card: a 16:9 cover carrying the note's status and commands,
@@ -1932,45 +1942,35 @@ impl Desktop {
         .into_any_element()
     }
 
-    /// Tasks waiting on the person, then every queued/running task, without replacing
-    /// the source input. A task is not a note: these stay out of 最近的笔记.
+    /// Queued and running tasks on Home, without replacing the source input.
     pub fn workbench_active_tasks_section(
         &self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Div> {
-        use crate::workspace::{Intent, TaskState};
-        let linked = self.current_input_task(cx).map(|task| task.id.clone());
-        let attention = self.workbench_attention_tasks(cx);
+        use crate::workspace::TaskStatus;
+        let followed = self.followed_task.as_deref();
         let tasks: Vec<_> = self
             .workspace(cx)?
             .state
             .tasks
             .iter()
             .filter(|task| {
-                Some(&task.id) != linked.as_ref()
-                    && task.handled_by.is_none()
-                    && (matches!(
-                        task.state,
-                        TaskState::Queued | TaskState::Running | TaskState::Pausing
-                    ) || self.is_running_task(&task.id, cx))
+                followed != Some(task.id.as_str())
+                    && (matches!(task.status, TaskStatus::Queued | TaskStatus::Running)
+                        || self.is_running_task(&task.id, cx))
             })
             .cloned()
             .collect();
-        if tasks.is_empty() && attention.is_empty() {
+        if tasks.is_empty() {
             return None;
         }
         let scale = TileScale::Regular;
-        let waiting = attention.len();
-        let count = waiting + tasks.len();
+        let count = tasks.len();
         let mut list = v_flex().w_full().min_w_0().gap(TILE_GAP);
-        for (index, task) in attention.iter().enumerate() {
-            list = list.child(self.attention_row(task.clone(), list_corners(index, count), cx));
-        }
         for (index, task) in tasks.iter().enumerate() {
-            let index = waiting + index;
             let id = task.id.clone();
-            let queued = task.state == TaskState::Queued && !self.is_running_task(&id, cx);
+            let queued = task.status == TaskStatus::Queued && !self.is_running_task(&id, cx);
             let cancel = id.clone();
             let menu = self.tasks.read(cx).task_menu(task, cx);
             let row = scale
@@ -1987,7 +1987,7 @@ impl Desktop {
                         .row()
                         .child(
                             row_cover(
-                                task.plan.source.cover.clone().filter(|_| !queued),
+                                task.source.cover.clone().filter(|_| !queued),
                                 if queued {
                                     symbols::schedule()
                                 } else {
@@ -2020,7 +2020,7 @@ impl Desktop {
                                             SharedString::from(format!(
                                                 "workbench-task-title-{cancel}"
                                             )),
-                                            task.plan.title.clone(),
+                                            task.title.clone(),
                                         )
                                         .truncate(),
                                 )
@@ -2032,7 +2032,6 @@ impl Desktop {
                                 )),
                         )
                         .child(
-                            // Labelled as on the running card and the Tasks page.
                             material_button(
                                 SharedString::from(format!("workbench-task-cancel-{cancel}")),
                                 ButtonVariant::Text,
@@ -2040,11 +2039,10 @@ impl Desktop {
                             .tone(ButtonTone::Neutral)
                             .icon(symbols::close())
                             .child(course2md::tr!("取消任务"))
-                            .disabled(task.intent == Intent::Cancel)
                             .on_click({
                                 let id = cancel.clone();
                                 cx.listener(move |this, _, _, cx| {
-                                    this.set_task_intent(id.clone(), Intent::Cancel, cx);
+                                    this.cancel_or_remove_task(&id, cx);
                                 })
                             }),
                         ),
@@ -2061,12 +2059,8 @@ impl Desktop {
                 .w_full(),
             );
         }
-        // The design names this section 正在处理 whatever its tasks wait for; each
-        // card's own chip says which one needs the person.
-        let total_actionable = self.workspace(cx).map_or(0, |ws| {
-            desktop_tasks::task_view::task_navigation_summary(&ws.state.tasks).0
-        });
-        let more_tasks = (total_actionable > tasks.len() + attention.len()).then(|| {
+        let total_tasks = self.workspace(cx).map_or(0, |ws| ws.state.tasks.len());
+        let more_tasks = (total_tasks > tasks.len()).then(|| {
             material_button("workbench-all-tasks", ButtonVariant::Text)
                 .icon(symbols::chevron_right())
                 .icon_position(ButtonIconPosition::Trailing)
@@ -2082,40 +2076,6 @@ impl Desktop {
         ))
     }
 
-    /// Tasks that wait on the person, newest first: stopped, unconfirmed, paused, or a
-    /// note with parts left to redo. The current input's own task shows in its card.
-    fn workbench_attention_tasks(&self, cx: &App) -> Vec<crate::workspace::TaskRecord> {
-        use crate::workspace::TaskState;
-        let linked = self.current_input_task(cx).map(|task| task.id.clone());
-        // A task the video card above offers to continue is decided there, once.
-        let reopened = self.workspace(cx).and_then(|workspace| {
-            let state = &workspace.state;
-            desktop_tasks::import::waiting_retried_task(state.draft()?, &state.tasks)
-                .map(|task| task.id.clone())
-        });
-        let mut attention: Vec<_> = self
-            .records
-            .read(cx)
-            .workspace
-            .iter()
-            .flat_map(|workspace| &workspace.state.tasks)
-            .filter(|task| {
-                Some(&task.id) != linked.as_ref()
-                    && Some(&task.id) != reopened.as_ref()
-                    && task.handled_by.is_none()
-                    && (matches!(
-                        task.state,
-                        TaskState::NeedsAttention | TaskState::Uncertain | TaskState::Paused
-                    ) || (task.state == TaskState::Partial
-                        && task.artifact.is_some()
-                        && !desktop_tasks::task_view::task_component_failures(task).is_empty()))
-            })
-            .collect();
-        attention.sort_by_key(|task| std::cmp::Reverse(task.updated));
-        attention.truncate(2);
-        attention.into_iter().cloned().collect()
-    }
-
     /// A queued or running task's live status: the status line (a spinner
     /// on its first line for unmeasured work) and, for measured work, a bar.
     pub(crate) fn task_status_lines(
@@ -2125,16 +2085,11 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        use crate::workspace::{Intent, TaskState};
+        use crate::workspace::TaskStatus;
         let id = &task.id;
-        let queued = task.state == TaskState::Queued && !self.is_running_task(id, cx);
-        let cancelling = task.intent == Intent::Cancel;
+        let queued = task.status == TaskStatus::Queued && !self.is_running_task(id, cx);
         let progress_now = self.tasks.read(cx).compact_task_progress(task, cx);
-        let status = if cancelling {
-            course2md::tr!("正在取消…").to_owned()
-        } else if task.state == TaskState::Pausing {
-            course2md::tr!("正在保存进度…").to_owned()
-        } else if queued {
+        let status = if queued {
             course2md::tr!("排队中").to_owned()
         } else {
             progress_now
@@ -2150,9 +2105,7 @@ impl Desktop {
                     }
                 })
         };
-        // Measured work gets a bar under the status; unmeasured work a
-        // spinner leading the status line, never one on a line of its own.
-        let active = !queued && !cancelling;
+        let active = !queued;
         let fraction = progress_now.and_then(|(_, fraction)| fraction);
         let line = rem(20.);
         let mut lines = vec![
@@ -2161,7 +2114,6 @@ impl Desktop {
                 .gap(rem(8.))
                 .items_start()
                 .when(active && fraction.is_none(), |row| {
-                    // Centred on the first line when the status wraps.
                     row.child(
                         h_flex()
                             .h(line)
@@ -2193,230 +2145,9 @@ impl Desktop {
         lines
     }
 
-    /// One task waiting on the person: title, status, summary and what can be done.
-    fn attention_row(
-        &self,
-        task: crate::workspace::TaskRecord,
-        outer: OuterCorners,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        use crate::workspace::TaskState;
-        let id = task.id.clone();
-        let action = |kind: &str, variant| {
-            material_button(SharedString::from(format!("recent-{kind}-{id}")), variant)
-        };
-        let uncertain = task.state == TaskState::Uncertain
-            || task
-                .events
-                .blocked
-                .iter()
-                .any(|request| request.is_uncertain());
-        let requires_repair =
-            !uncertain && desktop_tasks::task_view::task_requires_service_repair(&task);
-        let partial_components = if task.state == TaskState::Partial && task.artifact.is_some() {
-            desktop_tasks::task_view::task_component_failures(&task)
-                .into_iter()
-                .filter_map(|(component, _, _)| course2md::execution::Component::parse(&component))
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
-        let mut actions = h_flex().gap(rem(8.)).flex_wrap();
-        if let Some(course) = task.artifact.as_ref().and_then(|path| {
-            self.library(cx)
-                .courses
-                .iter()
-                .find(|course| &course.dir == path)
-                .cloned()
-        }) {
-            let label = if self.course_has_reading_position(&course, cx) {
-                course2md::tr!("继续阅读")
-            } else {
-                course2md::tr!("阅读笔记")
-            };
-            actions = actions.child(
-                action("attention-read", ButtonVariant::Outlined)
-                    .tone(ButtonTone::Accent)
-                    .icon(symbols::menu_book())
-                    .child(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open_course(course.clone(), cx);
-                    })),
-            );
-        }
-        // The row's way on is the one its task leads with elsewhere: 调整后重试 for a task
-        // whose service is gone, a repair, a resume, otherwise the task itself.
-        let lead = {
-            let tasks = self.tasks.read(cx);
-            let actions = tasks.task_actions(&task, TaskSurface::Home, cx);
-            // A task whose service is gone can only go on as a new attempt, whatever
-            // else it offers.
-            let adjust = tasks.services_missing(&task.id) && actions.contains(&TaskAction::Adjust);
-            adjust
-                .then_some(&TaskAction::Adjust)
-                .or_else(|| lead_action(&actions, &task, TaskSurface::Home))
-                .filter(|action| {
-                    matches!(
-                        action,
-                        TaskAction::Adjust | TaskAction::Repair | TaskAction::Resume
-                    )
-                })
-                .cloned()
-        };
-        let recoverable_stop = crate::task_ui::recoverable(lead.as_ref());
-        let next =
-            if lead.is_none() && !requires_repair && !uncertain && !partial_components.is_empty() {
-                let labels = partial_components
-                    .iter()
-                    .map(|component| component.as_str().to_owned())
-                    .collect::<Vec<_>>();
-                let task_id = id.clone();
-                action("retry", ButtonVariant::Tonal)
-                    .icon(symbols::refresh())
-                    .child(desktop_tasks::task_view::task_retry_components_label(
-                        Some(&task),
-                        &labels,
-                    ))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        let parts = partial_components.clone();
-                        this.reprocess_task(task_id.clone(), parts, Vec::new(), cx);
-                    }))
-            } else {
-                let next = lead.unwrap_or(if requires_repair {
-                    TaskAction::Repair
-                } else if !uncertain && task.state == TaskState::Paused {
-                    TaskAction::Resume
-                } else {
-                    TaskAction::ViewTask
-                });
-                let (label, icon, _) = self.tasks.read(cx).present(&next, &task, cx);
-                action(label, ButtonVariant::Tonal)
-                    .icon(icon)
-                    .child(label)
-                    .on_click(crate::task_ui::action_click(
-                        self.tasks.downgrade(),
-                        id.clone(),
-                        next,
-                    ))
-            };
-        actions = actions.child(next);
-        let scale = TileScale::Regular;
-        let summary = desktop_tasks::task_view::task_attention_summary(&task);
-        // The video card above already says this obstacle; one place is enough.
-        let summary = (summary != task.state.label()
-            && self.workbench_notice.as_deref() != Some(summary.as_str()))
-        .then_some(summary);
-        let has_notice = summary.is_some();
-        let cover = task.plan.source.cover.clone().or_else(|| {
-            self.library(cx)
-                .cover_by_source
-                .get(&task.plan.source_id)
-                .cloned()
-        });
-        list_surface(outer).child(
-            h_flex()
-                .w_full()
-                .min_w_0()
-                .px(ITEM_INSET)
-                .py(rem(16.))
-                .gap(rem(16.))
-                .items_start()
-                .child(
-                    row_cover(
-                        cover,
-                        if task.state == TaskState::Paused {
-                            symbols::pause()
-                        } else {
-                            symbols::movie()
-                        },
-                    )
-                    // The cover carries the video's length, as a note's does.
-                    .children(task_duration(&task).map(|duration| {
-                        media_label(
-                            SharedString::from(format!("attention-duration-{id}")),
-                            duration,
-                        )
-                        .absolute()
-                        .right(rem(4.))
-                        .bottom(rem(4.))
-                    })),
-                )
-                .child(
-                    v_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .gap(rem(8.))
-                        .child(
-                            h_flex()
-                                .w_full()
-                                .min_w_0()
-                                .gap(rem(12.))
-                                .items_center()
-                                .flex_wrap()
-                                .child(
-                                    scale
-                                        .label(
-                                            SharedString::from(format!("recent-attention-{id}")),
-                                            task.plan.title.clone(),
-                                        )
-                                        // The state and action move under a title that
-                                        // needs the width, not one character of it.
-                                        .flex_1()
-                                        .flex_basis(rem(240.))
-                                        .min_w_0()
-                                        .whitespace_normal()
-                                        .line_clamp(2)
-                                        .text_ellipsis(),
-                                )
-                                // The same colour as on Tasks: a failure is red, a pause amber.
-                                // A notice below that says why already says it waits.
-                                .when(!has_notice, |row| {
-                                    row.child(
-                                        status_chip(crate::task_ui::task_status_kind(task.state))
-                                            .child(task.state.label()),
-                                    )
-                                }),
-                        )
-                        // Why it waits, with the way on inside the same notice as on
-                        // Tasks; the action never stands above its cause.
-                        .child(match summary {
-                            Some(summary) => notice_banner(
-                                SharedString::from(format!("recent-summary-{id}")),
-                                // As on Tasks: an obstacle with its repair is amber.
-                                if task.state == TaskState::NeedsAttention && !recoverable_stop {
-                                    NoticeKind::Danger
-                                } else {
-                                    NoticeKind::Warning
-                                },
-                                summary,
-                            )
-                            .rounded(RADIUS_LARGE)
-                            .child(actions)
-                            .into_any_element(),
-                            None => actions.into_any_element(),
-                        }),
-                ),
-        )
-    }
-
     /// Workbench "最近的笔记": recent readable notes, or first use's compact explanation.
-    /// Tasks waiting on the person are listed with the other tasks above it.
     pub fn recent_notes_section(&self, cx: &mut Context<Self>) -> Option<Div> {
-        // A note whose task waits on the person is listed with that task, above.
-        let attention = self.workbench_attention_tasks(cx);
-        let notes: Vec<usize> = self
-            .library(cx)
-            .courses
-            .iter()
-            .enumerate()
-            .filter(|(_, course)| {
-                !attention
-                    .iter()
-                    .any(|task| task.artifact.as_ref() == Some(&course.dir))
-            })
-            .take(4)
-            .map(|(index, _)| index)
-            .collect();
+        let notes: Vec<usize> = (0..self.library(cx).courses.len().min(4)).collect();
         if notes.is_empty() {
             return Some(home_section(
                 "recent-title",
@@ -2611,15 +2342,19 @@ impl RenderOnce for SortMenu {
     }
 }
 
-/// How a note's unfinished task shows on it: by its own state, so one stopped for
-/// the person, such as at the limit of copies kept beside the note, does not read
-/// as still processing.
-fn task_status(state: crate::workspace::TaskState) -> (StatusKind, &'static str) {
-    use crate::workspace::TaskState;
-    match state {
-        TaskState::Paused => (StatusKind::Neutral, state.label()),
-        TaskState::NeedsAttention | TaskState::Uncertain => (StatusKind::Warning, state.label()),
-        _ => (StatusKind::Progress, course2md::tr!("正在处理")),
+/// Calm status chip for a note card or row.
+fn note_chip_for_state(
+    task: Option<crate::workspace::TaskStatus>,
+    incomplete: bool,
+) -> Option<(StatusKind, &'static str)> {
+    use crate::workspace::TaskStatus;
+    match task {
+        Some(TaskStatus::Running | TaskStatus::Queued) => {
+            Some((StatusKind::Progress, course2md::tr!("生成中")))
+        }
+        Some(TaskStatus::Failed) => Some((StatusKind::Warning, course2md::tr!("部分未完成"))),
+        _ if incomplete => Some((StatusKind::Warning, course2md::tr!("部分未完成"))),
+        _ => None,
     }
 }
 
@@ -2900,7 +2635,7 @@ impl Desktop {
                     // Still unsaved: the next change or scan tries again.
                     Err(error) => {
                         this.library_ui.all_notes_unsaved = true;
-                        this.message =
+                        this.library_ui.notice =
                             Some(course2md::tr!("排序方式尚未保存：{}", format!("{error:#}")));
                     }
                 }
@@ -3091,7 +2826,7 @@ impl Desktop {
                         // Kept in view and not claimed saved: the change stays waiting,
                         // and saving pauses until the next change or scan tries again.
                         this.library_ui.order_save_paused = true;
-                        this.message =
+                        this.library_ui.notice =
                             Some(course2md::tr!("排序方式尚未保存：{}", format!("{error:#}")));
                     }
                 }
@@ -3547,23 +3282,26 @@ mod tests {
     }
 
     #[test]
-    fn a_note_whose_task_stopped_for_the_person_does_not_read_as_processing() {
-        use crate::workspace::TaskState;
+    fn note_status_chip_is_single_and_calm() {
+        use crate::workspace::TaskStatus;
         use gpui_kit_material::prelude::StatusKind;
-        let shown = |state| super::task_status(state).0;
-        assert!(matches!(
-            shown(TaskState::NeedsAttention),
-            StatusKind::Warning
-        ));
-        assert_eq!(
-            super::task_status(TaskState::NeedsAttention).1,
-            TaskState::NeedsAttention.label()
-        );
-        assert!(matches!(shown(TaskState::Uncertain), StatusKind::Warning));
-        assert!(matches!(shown(TaskState::Paused), StatusKind::Neutral));
-        for state in [TaskState::Queued, TaskState::Running, TaskState::Pausing] {
-            assert!(matches!(shown(state), StatusKind::Progress));
+        for active in [TaskStatus::Running, TaskStatus::Queued] {
+            assert!(matches!(
+                super::note_chip_for_state(Some(active), true),
+                Some((StatusKind::Progress, label)) if label == course2md::tr!("生成中")
+            ));
         }
+        assert!(matches!(
+            super::note_chip_for_state(Some(TaskStatus::Failed), false),
+            Some((StatusKind::Warning, label)) if label == course2md::tr!("部分未完成")
+        ));
+        assert!(matches!(
+            super::note_chip_for_state(None, true),
+            Some((StatusKind::Warning, label)) if label == course2md::tr!("部分未完成")
+        ));
+        assert!(super::note_chip_for_state(Some(TaskStatus::Paused), false).is_none());
+        assert!(super::note_chip_for_state(Some(TaskStatus::Completed), false).is_none());
+        assert!(super::note_chip_for_state(None, false).is_none());
     }
 
     fn course(dir: &str) -> Course {

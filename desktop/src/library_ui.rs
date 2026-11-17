@@ -69,6 +69,8 @@ pub(crate) struct ArrangeKey {
 pub(crate) struct LibraryUi {
     pub name_dialog: Option<NameDialog>,
     pub move_dialog: Option<MoveDialog>,
+    /// Inline page notice for library or folder action errors.
+    pub notice: Option<String>,
     /// The folder navigation's sheet on narrow windows.
     pub places_open: bool,
     /// Tree nodes the person toggled: opened folders, or closed library tops (id 0).
@@ -116,6 +118,7 @@ impl LibraryUi {
         Self {
             name_dialog: None,
             move_dialog: None,
+            notice: None,
             places_open: false,
             folder_tree_open: HashSet::new(),
             folder_tree_scroll: ScrollHandle::new(),
@@ -181,44 +184,30 @@ impl Desktop {
     }
 
     pub fn inspect_source(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use desktop_tasks::import::{WorkbenchIssue, WorkbenchIssueKind, validate_workbench_input};
         let mut input = self.value(Field::Source, cx);
-        if !self.prepare_next_import(&input, cx) {
-            return;
-        }
         if self.import.preview_cancel.is_some()
             && self.draft(cx).is_some_and(|draft| draft.input == input)
         {
             return;
         }
         let previous_source = self.import.source_preview.clone();
-        // Reading a confirmed video again (after adjusting a task, or signing in)
-        // keeps it one video, though its link names the playlist it plays in.
         let single = [
             previous_source.as_ref(),
             self.draft(cx).and_then(|draft| draft.source.as_ref()),
         ]
         .into_iter()
         .any(|known| source::reads_one_video(&input, known));
+        self.followed_task = None;
         self.invalidate_source();
-        if input.is_empty() {
-            self.import.source_validation = Some(
-                if self.online(cx) {
-                    course2md::tr!("先粘贴视频链接")
-                } else {
-                    course2md::tr!("先选择一个视频")
-                }
-                .into(),
-            );
-            cx.notify();
-            return;
-        }
-        if self.online(cx)
+        if !input.is_empty()
+            && self.online(cx)
             && let Some(path) = source::pasted_local_path(&input)
         {
             self.drop_source_files(&[path], window, cx);
             return;
         }
-        if self.online(cx) {
+        if self.online(cx) && !input.is_empty() {
             let links = source::video_links(&input);
             if links.len() > 1 {
                 let candidates: Vec<_> = links
@@ -264,14 +253,12 @@ impl Desktop {
                 });
                 input = link;
             }
-            if let Err(error) = source::validate_url(&input) {
-                // Record the input first: otherwise the field's own notification after
-                // Enter reads as a new edit and clears the message before it is drawn (V4).
-                self.save_current_draft(cx);
-                self.import.source_validation = Some(error.to_string());
-                cx.notify();
-                return;
-            }
+        }
+        if let Err(issue) = validate_workbench_input(self.online(cx), &input) {
+            self.save_current_draft(cx);
+            self.import.set_issue(issue);
+            cx.notify();
+            return;
         }
         if !self.save_current_draft(cx) {
             return;
@@ -287,12 +274,10 @@ impl Desktop {
         self.import.preview_cancel = Some(cancel.clone());
         let online = self.online(cx);
         let handle = window.window_handle();
-        // probe is blocking network/subprocess work; see crate::spawn_blocking_io.
         let task =
             crate::spawn_blocking_result(move || source::probe(input, online, single, cancel));
         cx.spawn(async move |this, cx| {
             let result = task.await;
-            // Always return the worker count, window or not (request_close waits for zero).
             let _ = this.update(cx, |this, _| {
                 this.import.preview_workers = this.import.preview_workers.saturating_sub(1);
             });
@@ -320,7 +305,7 @@ impl Desktop {
                             if let Some(previous) = previous_source { source.selected_subtitle = previous.selected_subtitle.clone(); }
                             if wanted.is_some() && default_track.is_none() {
                                 let message = course2md::tr!("原来选择的字幕无法读取，请重新选择文字来源").to_owned();
-                                this.import.subtitle_error = Some(message.clone());
+                                this.import.set_issue(WorkbenchIssue::subtitle(message.clone()));
                                 source.subtitle_read_error = Some(course2md::subtitle::SubtitleReadError::Failed { message });
                             }
                             this.import.source_preview = Some(source);
@@ -342,15 +327,28 @@ impl Desktop {
                                 })
                                 .collect();
                             if this.import.source_candidates.is_empty() {
-                                this.import.preview_error = Some(course2md::tr!("还无法确定要处理哪个视频。请复制具体视频的链接。").into());
+                                this.import.set_issue(WorkbenchIssue::preview(
+                                    course2md::tr!("还无法确定要处理哪个视频。请复制具体视频的链接。"),
+                                    false,
+                                ));
                             } else if unavailable_entries > 0 {
-                                this.import.preview_error = Some(course2md::tr!("另有 {} 个条目无法确认", unavailable_entries));
+                                this.import.set_issue(WorkbenchIssue::preview(
+                                    course2md::tr!("另有 {} 个条目无法确认", unavailable_entries),
+                                    false,
+                                ));
                             }
                         }
-                        Ok(source::SourceProbe::Unresolved { message }) => this.import.preview_error = Some(message),
-                        Err(error) => this.import.preview_error = Some(format!("{error:#}")),
+                        Ok(source::SourceProbe::Unresolved { message }) => {
+                            let needs_settings = desktop_tasks::run::message_indicates_settings(&message);
+                            this.import.set_issue(WorkbenchIssue::preview(message, needs_settings));
+                        }
+                        Err(error) => {
+                            this.import.set_issue(WorkbenchIssue::from_error(
+                                WorkbenchIssueKind::Preview,
+                                &error,
+                            ));
+                        }
                     }
-                    this.advance_conversion(window, cx);
                     cx.notify();
                 }));
             }
@@ -488,7 +486,7 @@ impl Desktop {
             NameTarget::NewFolder { .. } => String::new(),
             NameTarget::Folder { root, id } => {
                 let Some(library) = self.library(cx).indexes.get(root) else {
-                    self.message = Some(folders_unavailable().into());
+                    self.library_ui.notice = Some(folders_unavailable().into());
                     cx.notify();
                     return;
                 };
@@ -992,7 +990,7 @@ impl Desktop {
                             })
                         }
                         Err(error) => {
-                            this.message =
+                            this.library_ui.notice =
                                 Some(course2md::tr!("无法删除文件夹：{}", format!("{error:#}")))
                         }
                     },

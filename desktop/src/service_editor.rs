@@ -3,16 +3,6 @@ use super::*;
 use desktop_prefs::service_binding::*;
 
 impl Desktop {
-    /// The service Settings use for `purpose`: what every conversion runs with.
-    pub fn default_service(&self, purpose: ServicePurpose) -> Option<ServiceVersion> {
-        let refs = self.preferences.default_refs();
-        let id = match purpose {
-            ServicePurpose::Speech => refs.asr,
-            ServicePurpose::Ai => refs.llm,
-        }?;
-        self.preferences.version(&id).cloned()
-    }
-
     /// The service a choice currently names, its saved alternatives with what changed in
     /// each, and the menu that picks among them. A superseded current version is listed
     /// beside its latest, so changing it stays an explicit choice.
@@ -200,6 +190,19 @@ impl Desktop {
             self.open_settings(window, cx);
         }
     }
+
+    fn invalidate_service_dependent_plan(&mut self) {
+        self.import.preview_plan_cache = None;
+        if self
+            .import
+            .issue
+            .as_ref()
+            .is_some_and(|issue| issue.kind == desktop_tasks::import::WorkbenchIssueKind::Plan)
+        {
+            self.import.issue = None;
+        }
+    }
+
     pub(crate) fn bind_service(
         &mut self,
         purpose: ServicePurpose,
@@ -210,7 +213,7 @@ impl Desktop {
         match result {
             Ok(()) => {
                 self.clear_settings_failure(PreferenceGroup::Services);
-                self.advance_conversion_when_ready(cx);
+                self.invalidate_service_dependent_plan();
                 cx.notify();
                 true
             }
@@ -225,34 +228,6 @@ impl Desktop {
         }
     }
 
-    pub(crate) fn open_reprocess_service_editor(
-        &mut self,
-        task_id: String,
-        components: Vec<Component>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if !self
-            .workspace(cx)
-            .is_some_and(|workspace| workspace.state.tasks.iter().any(|task| task.id == task_id))
-        {
-            self.workspace_error =
-                Some(course2md::tr!("原任务已不可用，尚未修改服务或创建补做任务").into());
-            cx.notify();
-            return;
-        }
-        // The repair runs with the default AI service: that is the one to fix.
-        let draft = self
-            .default_service(ServicePurpose::Ai)
-            .filter(|version| {
-                !self
-                    .preferences
-                    .service_retired_in_snapshot(&version.service_id)
-            })
-            .map(|version| ServiceDraft::from_version(&version))
-            .unwrap_or_else(|| ServiceDraft::new(ServicePurpose::Ai));
-        self.open_service_draft(draft, Some((task_id, components)), window, cx);
-    }
     pub(crate) fn open_settings_service_editor(
         &mut self,
         purpose: ServicePurpose,
@@ -265,14 +240,14 @@ impl Desktop {
             .and_then(|id| self.preferences.version(id))
             .map(ServiceDraft::from_version)
             .unwrap_or_else(|| ServiceDraft::new(purpose));
-        self.open_service_draft(draft, None, window, cx)
+        self.open_service_draft(draft, window, cx)
     }
+
     /// Opens the editor over whatever the person is doing. It closes back to that place,
     /// and only its save action publishes anything.
     pub(crate) fn open_service_draft(
         &mut self,
         draft: ServiceDraft,
-        repair_task: Option<(String, Vec<Component>)>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -321,7 +296,6 @@ impl Desktop {
         self.settings_ui.closed_editor = None;
         self.settings_ui.editor = Some(ServiceEditor {
             form,
-            repair_task,
             scroll: ScrollHandle::new(),
             also_default,
             status: None,
@@ -329,8 +303,6 @@ impl Desktop {
             test_running: None,
             evidence,
             received_tests: BTreeMap::new(),
-            pending_binding: None,
-            saved_configuration: None,
             test_details_open: false,
             save_failed: false,
         });
@@ -344,9 +316,10 @@ impl Desktop {
         cx.notify();
         true
     }
+
     /// Capture builds: opens the service editor over Settings › 服务与账号 (`speech`, or
-    /// `dialog` for one note's service; `confirm` the delete confirmation for a
-    /// placeholder service). Nothing is saved.
+    /// `dialog` for an AI service; `confirm` the delete confirmation for a placeholder
+    /// service). Nothing is saved.
     #[cfg(feature = "capture")]
     pub(crate) fn capture_service_editor(
         &mut self,
@@ -366,7 +339,7 @@ impl Desktop {
                 } else {
                     draft.address = preferences::QWEN_ADDRESS_EXAMPLE.into();
                 }
-                self.open_service_draft(draft, None, window, cx);
+                self.open_service_draft(draft, window, cx);
             }
             "confirm" => self.confirm_delete_service("capture".into(), window, cx),
             _ => {
@@ -374,6 +347,7 @@ impl Desktop {
             }
         }
     }
+
     /// Capture builds: one dialog per shot.
     #[cfg(feature = "capture")]
     pub(crate) fn close_settings_dialogs(&mut self, cx: &mut Context<Self>) {
@@ -384,6 +358,7 @@ impl Desktop {
             accounts.youtube.close();
         });
     }
+
     /// The editor's dialog, while it is open or playing its exit.
     pub(crate) fn service_editor_dialog(
         &self,
@@ -401,85 +376,44 @@ impl Desktop {
         };
         let speech = editor.form.draft.protocol.purpose() == ServicePurpose::Speech;
         let editing = editor.form.draft.based_on.is_some();
-        let title = if editor.repair_task.is_some() {
-            course2md::tr!("修复服务并补做")
-        } else {
-            match (speech, editing) {
-                (true, false) => course2md::tr!("添加语音服务"),
-                (true, true) => course2md::tr!("编辑语音服务"),
-                (false, false) => course2md::tr!("添加 AI 服务"),
-                (false, true) => course2md::tr!("编辑 AI 服务"),
-            }
+        let title = match (speech, editing) {
+            (true, false) => course2md::tr!("添加语音服务"),
+            (true, true) => course2md::tr!("编辑语音服务"),
+            (false, false) => course2md::tr!("添加 AI 服务"),
+            (false, true) => course2md::tr!("编辑 AI 服务"),
         };
         let busy = editor.test_running.is_some() || editor.form.vault_busy;
-        let awaiting_binding = editor.pending_binding.is_some();
-        let configuration_saved = editor.saved_configuration.is_some() || awaiting_binding;
-        let repairing = editor.repair_task.is_some();
-        let repair_submit_label = if awaiting_binding {
-            course2md::tr!("重试补做")
-        } else if configuration_saved {
-            course2md::tr!("开始补做")
-        } else {
-            course2md::tr!("保存并补做")
-        };
-        let repair_refusal = self.repair_service_refusal(cx);
         let cancel = material_button("close-service-editor", ButtonVariant::Text)
-            .child(if configuration_saved {
-                course2md::tr!("关闭")
-            } else {
-                course2md::tr!("取消")
-            })
+            .child(course2md::tr!("取消"))
             .on_click(cx.listener(|this, _, _, cx| this.close_service_editor(cx)));
         let test = material_button("run-service-test", ButtonVariant::Outlined)
             .tone(ButtonTone::Accent)
             .icon(symbols::science())
             .loading(busy, course2md::tr!("正在测试服务…"))
-            .disabled(busy || awaiting_binding)
+            .disabled(busy)
             .child(if editor.evidence.is_some() {
                 course2md::tr!("重新测试")
             } else {
                 course2md::tr!("测试连接")
             })
             .on_click(cx.listener(|this, _, window, cx| this.start_service_test(window, cx)));
-        let save_only =
-            repairing.then(|| {
-                material_button("save-repair-service-only", ButtonVariant::Text)
-                    .icon(symbols::save())
-                    .child(course2md::tr!("仅保存"))
-                    .disabled(busy || awaiting_binding || editor.saved_configuration.is_some())
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.publish_service_editor(false, window, cx)
-                    }))
-            });
-        let adding = !repairing && !editing;
         let save = material_button("save-service", ButtonVariant::Filled)
             .icon(symbols::check())
-            .child(if repairing {
-                repair_submit_label
-            } else if adding {
+            .child(if !editing {
                 course2md::tr!("添加")
             } else {
                 course2md::tr!("保存")
             })
             .loading(editor.form.vault_busy, course2md::tr!("正在保存密钥…"))
-            .disabled(editor.form.vault_busy || repairing && (busy || repair_refusal.is_some()))
-            .on_click(
-                cx.listener(|this, _, window, cx| this.publish_service_editor(true, window, cx)),
-            );
+            .disabled(editor.form.vault_busy)
+            .on_click(cx.listener(|this, _, window, cx| this.publish_service_editor(window, cx)));
         MaterialDialog::new("service-editor-dialog")
             .container(ColorRole::SURFACE)
             .headline(title)
             .size(DialogSize::Medium)
-            .content(self.service_editor_content(
-                editor,
-                repair_refusal,
-                repair_submit_label,
-                window,
-                cx,
-            ))
+            .content(self.service_editor_content(editor, window, cx))
             .action(cancel)
             .action(test)
-            .when_some(save_only, |dialog, save_only| dialog.action(save_only))
             .action(save)
             .dismiss_on_scrim(false)
             .modal(open)
@@ -492,18 +426,14 @@ impl Desktop {
             .into_any_element()
     }
 
-    /// The form scrolls; the failure, what was saved and what a request may cost stay
-    /// beside the actions.
+    /// The form scrolls; the failure and what a request may cost stay beside the actions.
     fn service_editor_content(
         &self,
         editor: &ServiceEditor,
-        repair_refusal: Option<(TestKind, preferences::ServiceTestEvidence)>,
-        repair_submit_label: &'static str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let busy = editor.test_running.is_some() || editor.form.vault_busy;
-        let awaiting_binding = editor.pending_binding.is_some();
         let protocol = editor.form.draft.protocol;
         let reveal = |id: &'static str, part: AnyElement| {
             RevealFocus::new(id, part, editor.scroll.clone()).into_any_element()
@@ -513,7 +443,7 @@ impl Desktop {
             self.service_type_field(
                 FormOwner::Editor,
                 "service-protocol",
-                awaiting_binding,
+                false,
                 rem(40.).to_pixels(window.rem_size()),
                 cx,
             )
@@ -524,7 +454,7 @@ impl Desktop {
             parts.push(
                 self.codex_account_section(
                     desktop_accounts::codex::CodexSurface::Editor,
-                    awaiting_binding,
+                    false,
                     cx,
                 )
                 .into_any_element(),
@@ -536,7 +466,7 @@ impl Desktop {
                           label: &'static str,
                           hint: Option<String>,
                           cx: &mut Context<Self>| {
-            this.service_text_field(FormOwner::Editor, field, label, hint, awaiting_binding, cx)
+            this.service_text_field(FormOwner::Editor, field, label, hint, false, cx)
                 .map(|field| reveal(id, field.into_any_element()))
         };
         parts.extend(text_field(
@@ -606,7 +536,7 @@ impl Desktop {
                         material_button(("capture-environment-key", index), ButtonVariant::Text)
                             .icon(symbols::content_copy())
                             .child(course2md::tr!("使用环境变量 {}", name))
-                            .disabled(awaiting_binding || editor.form.vault_busy)
+                            .disabled(editor.form.vault_busy)
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.use_environment_credential(name, cx)
                             }))
@@ -616,58 +546,42 @@ impl Desktop {
         }
         parts.push(reveal(
             "service-model-reveal",
-            self.service_model_field(FormOwner::Editor, "service-models", awaiting_binding, cx)
+            self.service_model_field(FormOwner::Editor, "service-models", false, cx)
                 .into_any_element(),
         ));
-        if editor.repair_task.is_none() {
-            parts.push(
-                ListItem::new("service-also-default", course2md::tr!("设为默认服务"))
-                    .supporting(course2md::tr!("新笔记默认使用这个服务"))
-                    .trailing(ListTrailing::Switch(editor.also_default))
-                    .switch_icons(SwitchIcons::Both)
-                    .segment([true; 4])
-                    .disabled(awaiting_binding)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        if let Some(editor) = &mut this.settings_ui.editor {
-                            editor.also_default = !editor.also_default;
-                        }
-                        cx.notify();
-                    }))
-                    .into_any_element(),
-            );
-        }
+        parts.push(
+            ListItem::new("service-also-default", course2md::tr!("设为默认服务"))
+                .supporting(course2md::tr!("新笔记默认使用这个服务"))
+                .trailing(ListTrailing::Switch(editor.also_default))
+                .switch_icons(SwitchIcons::Both)
+                .segment([true; 4])
+                .on_click(cx.listener(|this, _, _, cx| {
+                    if let Some(editor) = &mut this.settings_ui.editor {
+                        editor.also_default = !editor.also_default;
+                    }
+                    cx.notify();
+                }))
+                .into_any_element(),
+        );
         parts.extend(self.service_test_section(editor, cx));
         let fixed_failure = if busy {
             None
         } else {
-            repair_refusal.clone().or_else(|| {
-                editor
-                    .evidence
-                    .as_ref()
-                    .filter(|evidence| evidence.outcome != preferences::TestOutcome::Passed)
-                    .map(|evidence| (editor.test_kind, evidence.clone()))
-            })
+            editor
+                .evidence
+                .as_ref()
+                .filter(|evidence| evidence.outcome != preferences::TestOutcome::Passed)
+                .map(|evidence| (editor.test_kind, evidence.clone()))
         };
-        let repairing = editor.repair_task.is_some();
         let outcome_unknown = editor
             .evidence
             .as_ref()
             .is_some_and(|evidence| evidence.outcome == preferences::TestOutcome::OutcomeUnknown);
-        let notice = if outcome_unknown && repairing {
-            course2md::tr!(
-                "上次结果未确认；重测或「{}」都会再次发送请求，可能计费",
-                repair_submit_label
-            )
-        } else if outcome_unknown {
+        let notice = if outcome_unknown {
             course2md::tr!("上次结果未确认；重测会再次发送，可能计费").to_owned()
-        } else if repairing {
-            course2md::tr!("「{}」会重新发送失败部分，可能计费", repair_submit_label)
         } else {
             service_test::test_notice().to_owned()
         };
-        let saved_only =
-            repairing && (editor.saved_configuration.is_some() || editor.pending_binding.is_some());
-        let refused = repair_refusal.is_some();
         v_flex()
             .w_full()
             .min_w_0()
@@ -701,16 +615,7 @@ impl Desktop {
                     .px(rem(24.))
                     .gap(rem(8.))
                     .when_some(fixed_failure, |view, (kind, evidence)| {
-                        let message = course2md::tr!(
-                            "{}：{}{}",
-                            kind.label(),
-                            evidence.message,
-                            if refused {
-                                course2md::tr!("。修改配置或重新测试后再补做。")
-                            } else {
-                                ""
-                            }
-                        );
+                        let message = course2md::tr!("{}：{}", kind.label(), evidence.message);
                         view.children(ui::async_status(
                             "service-test-fixed-reason",
                             &if matches!(
@@ -728,12 +633,6 @@ impl Desktop {
                     })
                     .when_some(editor.status.clone().filter(|_| !busy), |view, status| {
                         view.child(error_text("service-editor-status", status))
-                    })
-                    .when(saved_only, |view| {
-                        view.child(TileScale::Regular.support(
-                            "service-config-saved-only",
-                            course2md::tr!("服务配置已保存，尚未开始补做"),
-                        ))
                     })
                     .child(supporting_info("service-test-notice", notice)),
             )
@@ -888,10 +787,6 @@ impl Desktop {
         if editor.form.vault_busy {
             return;
         }
-        if editor.pending_binding.is_some() || editor.saved_configuration.is_some() {
-            self.continue_after_draft(after, window, cx);
-            return;
-        }
         let draft = editor.form.current_draft(cx);
         let key = Some(editor.form.typed_key(cx)).filter(|key| !key.trim().is_empty());
         let empty = draft.revision == 0
@@ -968,9 +863,7 @@ impl Desktop {
         if valid {
             match after {
                 AfterDraftSaved::Test => self.run_service_test(cx),
-                AfterDraftSaved::Publish { continue_repair } => {
-                    self.publish_saved_draft(continue_repair, window, cx)
-                }
+                AfterDraftSaved::Publish => self.publish_saved_draft(window, cx),
             }
         }
     }
@@ -1047,86 +940,20 @@ impl Desktop {
         .detach();
         cx.notify();
     }
-    fn repair_service_refusal(
-        &self,
-        cx: &App,
-    ) -> Option<(TestKind, preferences::ServiceTestEvidence)> {
-        let editor = self.settings_ui.editor.as_ref()?;
-        let (_, components) = editor.repair_task.as_ref()?;
-        if !editor.form.typed_key(cx).trim().is_empty() {
-            return None;
-        }
-        let config = editor.form.current_draft(cx).configuration().ok()?;
-        // The repair runs with Settings as they are.
-        let uses_vision = self.settings_options.llm && self.settings_options.vision;
-        let required: Vec<_> = [TestKind::Proofread, TestKind::Summary, TestKind::Vision]
-            .into_iter()
-            .filter(|kind| match kind {
-                TestKind::Proofread => components.contains(&Component::Proofreading),
-                TestKind::Vision => uses_vision && components.contains(&Component::Proofreading),
-                TestKind::Summary => components.contains(&Component::Summary),
-                TestKind::Speech => false,
-            })
-            .map(TestKind::contract)
-            .collect();
-        [TestKind::Proofread, TestKind::Summary, TestKind::Vision]
-            .into_iter()
-            .filter_map(|kind| {
-                let evidence = editor
-                    .received_tests
-                    .get(&config.fingerprint(kind.contract()))
-                    .or_else(|| self.preferences.test_evidence(&config, kind.contract()))?;
-                service_test::blocks_reprocessing(evidence, &config, &required)
-                    .then(|| (kind, evidence.clone()))
-            })
-            .max_by_key(|(_, evidence)| evidence.tested_at)
-    }
-    pub(super) fn publish_service_editor(
-        &mut self,
-        continue_repair: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.save_service_draft_then(AfterDraftSaved::Publish { continue_repair }, window, cx);
+
+    pub(super) fn publish_service_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.save_service_draft_then(AfterDraftSaved::Publish, window, cx);
     }
 
-    fn publish_saved_draft(
-        &mut self,
-        continue_repair: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn publish_saved_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(editor) = &self.settings_ui.editor else {
             return;
         };
-        let repair_task = editor.repair_task.clone();
-        let repairing = repair_task.is_some();
-        if repairing && editor.test_running.is_some() {
-            return;
-        }
-        if repairing && continue_repair && self.repair_service_refusal(cx).is_some() {
-            cx.notify();
-            return;
-        }
-        let scope = publish_scope(repairing, editor.also_default);
-        let plan = PublishPlan {
-            continue_repair,
-            repair_task,
-            scope,
-        };
-        if let Some(version) = editor
-            .pending_binding
-            .as_ref()
-            .or(editor.saved_configuration.as_ref())
-        {
-            let version = version.clone();
-            self.finish_service_publish(Ok(version), plan, cx);
-            return;
-        }
+        let scope = publish_scope(editor.also_default);
         self.publish_form_draft(
             FormOwner::Editor,
             scope,
-            move |this, published, _, cx| this.finish_service_publish(published, plan, cx),
+            move |this, published, _, cx| this.finish_service_publish(published, cx),
             window,
             cx,
         );
@@ -1164,7 +991,6 @@ impl Desktop {
                         editor.form.models.invalidate();
                         editor.form.clear_key(window, cx);
                         editor.evidence = None;
-                        editor.saved_configuration = None;
                         editor.save_failed = false;
                         editor.status =
                             Some(course2md::tr!("已使用环境变量中的密钥，点击保存后生效").into());
@@ -1181,62 +1007,22 @@ impl Desktop {
         cx.notify();
     }
 
-    /// Publication's commit continues here: bind the version where the
-    /// editor was opened from, start a repair, report and close.
-    fn finish_service_publish(
-        &mut self,
-        result: Result<ServiceVersion>,
-        plan: PublishPlan,
-        cx: &mut Context<Self>,
-    ) {
-        let PublishPlan {
-            continue_repair,
-            repair_task,
-            ..
-        } = plan;
-        let repairing = repair_task.is_some();
-        let version = match result {
-            Ok(version) => version,
-            Err(error) => {
-                if let Some(editor) = &mut self.settings_ui.editor {
-                    editor.status = Some(course2md::tr!("服务尚未保存：{}", format!("{error:#}")));
-                    editor.save_failed = true;
-                }
-                cx.notify();
-                return;
-            }
-        };
-        if repairing && !continue_repair {
+    /// Publication's commit continues here: report any save failure or close cleanly.
+    fn finish_service_publish(&mut self, result: Result<ServiceVersion>, cx: &mut Context<Self>) {
+        if let Err(error) = result {
             if let Some(editor) = &mut self.settings_ui.editor {
-                editor.form.draft = ServiceDraft::from_version(&version);
-                editor.saved_configuration = Some(version);
-                editor.pending_binding = None;
-                editor.status = None;
-                editor.save_failed = false;
-            }
-            self.refresh_dispatch_controls(cx);
-            cx.notify();
-            return;
-        }
-        if let Some((task_id, components)) = repair_task
-            && !self.reprocess_task_after_service(task_id, components, cx)
-        {
-            if let Some(editor) = &mut self.settings_ui.editor {
-                editor.pending_binding = Some(version);
-                editor.status =
-                    Some(course2md::tr!("服务正在保存，补做任务尚未创建。请重试补做。").into());
+                editor.status = Some(course2md::tr!("服务尚未保存：{}", format!("{error:#}")));
+                editor.save_failed = true;
             }
             cx.notify();
             return;
         }
-        self.refresh_dispatch_controls(cx);
+        self.invalidate_service_dependent_plan();
         self.clear_settings_failure(PreferenceGroup::Services);
         self.dismiss_service_editor(cx);
-        if !repairing {
-            self.advance_conversion_when_ready(cx);
-        }
         cx.notify();
     }
+
     pub(crate) fn close_service_editor(&mut self, cx: &mut Context<Self>) {
         if let Some(editor) = &self.settings_ui.editor {
             // Tests can stage a private edit, but cancelling never publishes
@@ -1250,6 +1036,7 @@ impl Desktop {
         }
         self.dismiss_service_editor(cx);
     }
+
     fn dismiss_service_editor(&mut self, cx: &mut Context<Self>) {
         if let Some(editor) = self.settings_ui.editor.take() {
             if let Some(cancel) = &editor.test_running {
@@ -1259,6 +1046,7 @@ impl Desktop {
         }
         cx.notify();
     }
+
     pub(super) fn confirm_default_service(
         &mut self,
         version_id: String,
@@ -1273,7 +1061,10 @@ impl Desktop {
             .preferences
             .set_default_service(purpose, Some(&version_id))
         {
-            Ok(()) => self.clear_settings_failure(PreferenceGroup::Services),
+            Ok(()) => {
+                self.clear_settings_failure(PreferenceGroup::Services);
+                self.invalidate_service_dependent_plan();
+            }
             Err(error) => {
                 self.set_settings_failure(
                     PreferenceGroup::Services,
@@ -1286,48 +1077,20 @@ impl Desktop {
         }
         cx.notify();
     }
+
     pub(super) fn confirm_delete_service(
         &mut self,
         service_id: String,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let version_ids: Vec<_> = self
-            .preferences
-            .versions()
-            .filter(|v| v.service_id == service_id)
-            .map(|v| v.id.clone())
-            .collect();
-        let uses = |id: &Option<String>| id.as_ref().is_some_and(|id| version_ids.contains(id));
-        let affected = self.workspace(cx).map_or(0, |w| {
-            w.state
-                .tasks
-                .iter()
-                .filter(|task| {
-                    !task.state.finished()
-                        && task.ran_with.as_ref().is_some_and(|ran_with| {
-                            uses(&ran_with.asr_service) || uses(&ran_with.ai_service)
-                        })
-                })
-                .count()
-        });
-        let mut confirm = ui::Confirm::new(
+        let confirm = ui::Confirm::new(
             course2md::tr!("删除此服务"),
             course2md::tr!("保留服务"),
             course2md::tr!("删除服务"),
         )
         .danger()
         .text(course2md::tr!("将删除此服务配置，已有笔记不受影响。"));
-        if affected == 1 {
-            confirm = confirm.text(course2md::tr!(
-                "有 1 个未完成任务引用此服务；这个任务中用到此服务的步骤将不再继续。"
-            ));
-        } else if affected > 0 {
-            confirm = confirm.text(course2md::tr!(
-                "有 {} 个未完成任务引用此服务；这些任务中用到此服务的步骤将不再继续。",
-                affected
-            ));
-        }
         confirm.ask(
             cx.listener(move |this, _, _, cx| {
                 match this.preferences.retire_service(&service_id) {
@@ -1354,7 +1117,7 @@ impl Desktop {
                         );
                     }
                 }
-                this.refresh_dispatch_controls(cx);
+                this.invalidate_service_dependent_plan();
                 cx.notify();
             }),
             window,
@@ -1377,7 +1140,6 @@ impl Desktop {
                 self.clear_settings_failure(PreferenceGroup::Generation);
                 self.refresh_preference_defaults(cx);
                 self.clear_resolved_generation_errors(previous);
-                self.advance_conversion_when_ready(cx);
                 true
             }
             Err(error) => {
@@ -1388,6 +1150,7 @@ impl Desktop {
             }
         }
     }
+
     pub(crate) fn refresh_preference_defaults(&mut self, cx: &mut Context<Self>) {
         let out = self.config.defaults.out.clone();
         self.config = self.preferences.defaults_config();
@@ -1395,7 +1158,7 @@ impl Desktop {
         self.settings_options = ConversionOptions::from_config(&self.config);
         self.desktop_settings = self.preferences.application().desktop.clone();
         // A preview checked against the old settings is checked again.
-        self.import.preview_plan_cache = None;
+        self.invalidate_service_dependent_plan();
         self.check_import_model(cx);
         self.confirm_default_subtitle_if_needed(cx);
         cx.notify();

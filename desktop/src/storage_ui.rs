@@ -210,13 +210,13 @@ impl Desktop {
     ) {
         cx.spawn_in(window, async move |this, cx| {
             let (link, finished) = crate::spawn_blocking_io(move || {
-                let tasks = storage::finish_link(&link);
-                (link, tasks)
+                let done = storage::finish_link(&link);
+                (link, done)
             })
             .await
             .unwrap_or_else(|| unreachable!("the blocking pool outlives this task"));
             let _ = this.update_in(cx, |this, window, cx| {
-                let result = finished.and_then(|tasks| {
+                let result = finished.and_then(|()| {
                     ensure!(
                         !this.work.read(cx).closing && !cancel.load(Ordering::Relaxed),
                         course2md::tr!("已取消重新定位")
@@ -226,7 +226,7 @@ impl Desktop {
                         course2md::tr!("内容仍在处理中，请停止后重新定位")
                     );
                     this.with_workspace(cx, |workspace| {
-                        workspace.transaction(|state| storage::publish_link(state, &link, tasks))
+                        workspace.transaction(|state| storage::publish_link(state, &link))
                     })
                     .context(registry_unavailable())??;
                     Ok(link)
@@ -385,7 +385,7 @@ impl Desktop {
             .registered_library(&id, cx)
             .map(|library| library.root.clone())
         else {
-            self.workspace_error = Some(course2md::tr!("这个笔记库已被移除").into());
+            self.storage_ui.error = Some(course2md::tr!("这个笔记库已被移除").into());
             cx.notify();
             return;
         };
@@ -414,8 +414,12 @@ impl Desktop {
                 match result {
                     Ok(()) => this.message = Some(course2md::tr!("已设为默认保存位置").into()),
                     Err(error) => {
-                        this.workspace_error =
-                            Some(course2md::tr!("默认位置尚未更改：{}", format!("{error:#}")))
+                        let msg = course2md::tr!("默认位置尚未更改：{}", format!("{error:#}"));
+                        if this.page == crate::Page::Library {
+                            this.library_ui.notice = Some(msg);
+                        } else {
+                            this.storage_ui.error = Some(msg);
+                        }
                     }
                 }
                 cx.notify();
@@ -432,12 +436,9 @@ impl Desktop {
             let can_resume = self
                 .workspace(cx)
                 .and_then(|workspace| workspace.state.task(&id))
-                .is_some_and(|task| {
-                    task.state == workspace::TaskState::Paused
-                        && task.intent == workspace::Intent::Pause
-                });
+                .is_some_and(|task| task.status == workspace::TaskStatus::Paused);
             if can_resume {
-                self.set_task_intent(id, workspace::Intent::Run, cx);
+                self.resume_task_by_id(&id, cx);
             }
         }
     }
@@ -525,10 +526,10 @@ impl Desktop {
         if let Some(id) = self.work.read(cx).active_task.clone() {
             let running = state
                 .task(&id)
-                .is_some_and(|task| task.intent == workspace::Intent::Run);
+                .is_some_and(|task| task.status == workspace::TaskStatus::Running);
             if running {
                 self.storage_ui.resume_task = Some(id.clone());
-                self.set_task_intent(id, workspace::Intent::Pause, cx);
+                self.pause_task_by_id(&id, cx);
             }
         }
         self.open_storage_dialog(cx);

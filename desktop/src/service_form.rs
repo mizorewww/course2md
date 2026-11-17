@@ -391,7 +391,6 @@ impl Desktop {
         match owner {
             FormOwner::Editor => {
                 if let Some(editor) = &mut self.settings_ui.editor {
-                    editor.saved_configuration = None;
                     editor.status = None;
                     if affects_tests {
                         editor.evidence = None;
