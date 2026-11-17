@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from package import macos_versions, parse_args, verify_tools
+from package import macos_versions, metal_available, parse_args, verify_tools
 
 
 class MacOSVersionTests(unittest.TestCase):
@@ -77,6 +77,16 @@ class VerifyToolsTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 verify_tools(Path(tmp), 'Darwin')
             verify_tools(Path(tmp), 'Darwin', skip=['ffmpeg'])
+
+
+class MetalToolchainTests(unittest.TestCase):
+    def test_metal_available_checks_actual_compiler_execution(self):
+        ok = subprocess_result = mock.Mock(returncode=0)
+        with mock.patch('package.subprocess.run', return_value=ok):
+            self.assertTrue(metal_available())
+        stub = mock.Mock(returncode=1)
+        with mock.patch('package.subprocess.run', return_value=stub):
+            self.assertFalse(metal_available())
 
 
 if __name__ == '__main__':

@@ -8,6 +8,7 @@ import platform
 import plistlib
 import shutil
 import subprocess
+import sys
 import tomllib
 import zipfile
 
@@ -80,6 +81,19 @@ def third_party_notices(dest, swift, required):
 def notarize(path, key_path, key_id, issuer):
     run("xcrun", "notarytool", "submit", str(path), "--key", key_path,
         "--key-id", key_id, "--issuer", issuer, "--wait")
+
+
+def metal_available():
+    """Whether Xcode's Metal compiler runs (`xcrun --find metal` succeeds even for the stub)."""
+    try:
+        return subprocess.run(
+            ["xcrun", "metal", "-v"],
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            timeout=15,
+        ).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def bundle_ytdlp(parent, required, local=None, suffix=""):
@@ -196,6 +210,17 @@ def main():
     distribution = not args.debug and not args.app_only
     # Release builds, and CI's development packages, stop if a tool is missing.
     tools_required = distribution or args.require_tools
+    if (system == "Darwin" and platform.machine() == "arm64"
+            and not args.no_apple and not args.debug and not metal_available()):
+        if tools_required:
+            raise SystemExit(
+                "Release builds on Apple Silicon need Xcode's Metal Toolchain "
+                "(xcodebuild -downloadComponent MetalToolchain), or pass --no-apple."
+            )
+        print("warning: Xcode Metal Toolchain is unavailable "
+              "(xcodebuild -downloadComponent MetalToolchain); "
+              "building without the Apple speech module", file=sys.stderr, flush=True)
+        args.no_apple = True
     # Fail before expensive builds if the platform's packaging tools are absent.
     try:
         if system == "Darwin" and not args.app_only:
