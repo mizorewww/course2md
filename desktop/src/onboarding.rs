@@ -1217,7 +1217,8 @@ impl Desktop {
                             cx,
                         )),
                 ),
-            );
+            )
+            .children(self.setup_check_status(purpose, cx));
         let uses = (purpose == ServicePurpose::Ai).then(|| {
             let (proofread, summary) = (self.onboarding.ai_proofread, self.onboarding.ai_summary);
             v_flex()
@@ -1264,7 +1265,6 @@ impl Desktop {
             .child(types)
             .child(form)
             .children(uses)
-            .children(self.setup_check_status(purpose, cx))
     }
 
     /// The running check, or what the last one found, with its details.
@@ -1272,7 +1272,7 @@ impl Desktop {
         let service = self.onboarding.service(purpose);
         let suffix = purpose as usize;
         let id = |part: &str| SharedString::from(format!("setup-check-{part}-{suffix}"));
-        let view = v_flex().w_full().min_w_0().gap(rem(8.)).px(ITEM_INSET);
+        let view = v_flex().w_full().min_w_0().gap(rem(8.));
         if let Some(cancel) = &service.running {
             let stopping = cancel.load(Ordering::Acquire);
             let status = AsyncStatus::Busy(
@@ -1305,14 +1305,15 @@ impl Desktop {
                     h_flex().child(
                         material_button(id("recheck"), ButtonVariant::Outlined)
                             .tone(ButtonTone::Accent)
-                            .icon(symbols::refresh())
+                            .icon(symbols::science())
                             .child(course2md::tr!("检查配置"))
                             .disabled(service.busy())
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.start_setup_test(purpose, window, cx)
                             })),
                     ),
-                ),
+                )
+                .child(supporting_info(id("notice"), service_test::test_notice())),
             );
         }
         let results =
@@ -1347,11 +1348,7 @@ impl Desktop {
                         material_button(id("recheck"), ButtonVariant::Outlined)
                             .tone(ButtonTone::Accent)
                             .icon(symbols::refresh())
-                            .child(if service.evidence.is_empty() {
-                                course2md::tr!("检查配置")
-                            } else {
-                                course2md::tr!("重新检查")
-                            })
+                            .child(course2md::tr!("重新检查"))
                             .disabled(service.busy())
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.start_setup_test(purpose, window, cx)
@@ -1376,6 +1373,7 @@ impl Desktop {
                             })),
                     ),
             )
+            .child(supporting_info(id("notice"), service_test::test_notice()))
             .child(motion::disclosure(
                 id("details-content"),
                 open,

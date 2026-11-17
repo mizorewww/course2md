@@ -90,7 +90,7 @@ enum QueueItem {
     CompletedToggle {
         count: usize,
         open: bool,
-        state: Entity<bool>,
+        state: Entity<Option<bool>>,
     },
 }
 
@@ -457,18 +457,20 @@ impl TasksPage {
         if self.records.read(cx).workspace.is_some() {
             items.insert(0, QueueItem::Header);
         }
-        let completed_state = window.use_keyed_state("task-history-open", cx, |_, _| false);
+        let completed_state = window.use_keyed_state("task-history-open", cx, |_, _| None::<bool>);
         let queue_open = window.use_keyed_state("task-queue-open", cx, |_, _| false);
         let done = |task: &TaskRecord| task_group(task).settled();
-        // Finished work and earlier records fold behind one tile; a task the
-        // person went to (from the library or a notice) stays visible.
+        let count = tasks.iter().filter(|task| done(task)).count();
+        let only_settled = count > 0 && count == tasks.len();
+        // Finished work and earlier records fold behind one tile while active work is
+        // above them, and open by default when nothing else is on the page; a task the
+        // person went to (from the library or a notice) also stays visible.
         let expanded_done = self
             .task_list
             .expanded
             .as_ref()
             .is_some_and(|id| tasks.iter().any(|task| &task.id == id && done(task)));
-        let completed_open = *completed_state.read(cx) || expanded_done;
-        let count = tasks.iter().filter(|task| done(task)).count();
+        let completed_open = expanded_done || completed_state.read(cx).unwrap_or(only_settled);
         for group in TaskGroup::ORDER {
             let members: Vec<usize> = tasks
                 .iter()
@@ -791,7 +793,7 @@ impl TasksPage {
                         this.task_list.expanded = None;
                     }
                     toggle.update(cx, |state, cx| {
-                        *state = !open;
+                        *state = Some(!open);
                         cx.notify();
                     });
                 }))
@@ -2279,7 +2281,7 @@ mod tests {
         use gpui::AppContext as _;
         cx.update(|cx| {
             let tasks = vec![task_record("task-a"), task_record("task-b")];
-            let open = cx.new(|_| false);
+            let open = cx.new(|_| None);
             let row = |task: usize| QueueItem::Task {
                 task,
                 place: super::CardPlace::Row {
