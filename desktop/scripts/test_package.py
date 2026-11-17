@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from package import macos_versions, metal_available, parse_args, verify_tools
+from package import local_signing_identity, macos_versions, metal_available, parse_args, verify_tools
 
 
 class MacOSVersionTests(unittest.TestCase):
@@ -81,12 +81,23 @@ class VerifyToolsTests(unittest.TestCase):
 
 class MetalToolchainTests(unittest.TestCase):
     def test_metal_available_checks_actual_compiler_execution(self):
-        ok = subprocess_result = mock.Mock(returncode=0)
+        ok = mock.Mock(returncode=0)
         with mock.patch('package.subprocess.run', return_value=ok):
             self.assertTrue(metal_available())
         stub = mock.Mock(returncode=1)
         with mock.patch('package.subprocess.run', return_value=stub):
             self.assertFalse(metal_available())
+
+    def test_local_signing_identity_prefers_developer_id_then_apple_development(self):
+        listing = mock.Mock(stdout=(
+            '  1) AAA "Apple Development: Example (TEAM1)"\n'
+            '  2) BBB "Developer ID Application: Example (TEAM2)"\n'
+        ))
+        with mock.patch('package.subprocess.run', return_value=listing):
+            self.assertEqual(local_signing_identity(), 'Developer ID Application: Example (TEAM2)')
+        empty = mock.Mock(stdout='     0 valid identities found\n')
+        with mock.patch('package.subprocess.run', return_value=empty):
+            self.assertEqual(local_signing_identity(), '-')
 
 
 if __name__ == '__main__':

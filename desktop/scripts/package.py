@@ -96,6 +96,32 @@ def metal_available():
         return False
 
 
+def cached_metal_toolchain_available():
+    """Whether macOS holds a downloaded MetalToolchain asset image that build.rs can mount."""
+    assets = Path("/System/Library/AssetsV2/com_apple_MobileAsset_MetalToolchain")
+    return assets.is_dir() and any(assets.glob("*.asset/AssetData/Restore/*.dmg"))
+
+
+def local_signing_identity():
+    """A valid local signing certificate in Keychain so --app-only keeps a stable TCC requirement."""
+    try:
+        out = subprocess.run(
+            ["security", "find-identity", "-v", "-p", "codesigning"],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=10,
+        ).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return "-"
+    quoted = [line.split('"')[1] for line in out.splitlines() if '"' in line]
+    for prefix in ("Developer ID Application:", "Apple Development:"):
+        for name in quoted:
+            if name.startswith(prefix):
+                return name
+    return "-"
+
+
 def bundle_ytdlp(parent, required, local=None, suffix=""):
     """Place yt-dlp's pinned onedir build in parent/yt-dlp (ytdlp_bundle.py).
 
@@ -211,7 +237,8 @@ def main():
     # Release builds, and CI's development packages, stop if a tool is missing.
     tools_required = distribution or args.require_tools
     if (system == "Darwin" and platform.machine() == "arm64"
-            and not args.no_apple and not args.debug and not metal_available()):
+            and not args.no_apple and not args.debug
+            and not (metal_available() or cached_metal_toolchain_available())):
         if tools_required:
             raise SystemExit(
                 "Release builds on Apple Silicon need Xcode's Metal Toolchain "
@@ -273,7 +300,7 @@ def main():
         # user-supplied relative source, output, and model paths.
         # c2m-asr's build.rs copies it beside the CLI executable; see the note there.
         metal = TARGET / profile / "mlx.metallib"
-        if metal.is_file():
+        if not args.no_apple and metal.is_file():
             shutil.copy2(metal, resources / "mlx.metallib")
             (binaries / "mlx.metallib").symlink_to("../Resources/mlx.metallib")
         elif platform.machine() == "arm64" and not args.no_apple:
@@ -324,11 +351,14 @@ def main():
     shutil.copy2(PROJECT / "readme.md", base / "README.md")
     if system == "Darwin":
         copy_licenses(resources, tool_licenses)
-        identity = "-" if args.app_only else args.signing_identity
+        identity = args.signing_identity
+        if args.app_only and identity == "-":
+            identity = local_signing_identity()
         signed = identity != "-"
         signing = ["--force", "--sign", identity]
         if signed:
-            signing.extend(["--options", "runtime", "--timestamp"])
+            signing.extend(["--options", "runtime",
+                            "--timestamp=none" if args.app_only else "--timestamp"])
         run("codesign", *signing, str(binaries / "course2md"))
         run("codesign", *signing, str(binaries / "course2md-desktop"))
         # Bundled ffmpeg/ffprobe are nested code: hardened runtime, no entitlements.

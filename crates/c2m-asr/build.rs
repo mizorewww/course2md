@@ -27,28 +27,43 @@ fn main() {
 
     let pkg = workspace_root().join("native/apple-asr");
     let build_dir = pkg.join(".build/release");
+    let has_metal = xcrun_metal_available();
 
     // 无条件跑 swift build：SPM 自己做增量（无变动时秒级返回）。
     // 曾经的「libCAppleASR.a 存在即跳过」stamp 判断是真 bug：
     // 只改 Swift 源码（不碰 Package.swift）时会链上旧的静态库。
     //
-    // 优先 swiftbuild 构建系统（Swift 6.2+）：旧 native 系统不会编译
-    // mlx-swift Cmlx 里的 .metal shader，产不出 default.metallib，
-    // CoreML 推理运行时必挂（CI macos-26 默认 Xcode 较老时踩中）。
-    //
-    // 关闭 swift-syntax 预编译包：新工具链首次构建会从 download.swift.org
-    // 下载预编译宏库，SwiftPM 的下载没有超时，网络慢时整个 cargo build
-    // 无限挂起；从源码构建宏库只慢在首次。不认识该参数的旧工具链本就不下载
-    // 预编译包。
-    //
-    // 不认识这两个参数的旧工具链依次回退。`--help` 的文字因版本而异，不能据此
-    // 判断（旧 Xcode 的帮助不列出 swiftbuild，却支持它），所以按实际构建结果
-    // 选择；成功的参数组合按工具链版本缓存在 OUT_DIR，之后只跑一次 swift build。
-    if let Err(reports) = build_swift_package(&pkg) {
+    // 当系统 xcrun metal 可用时优先 swiftbuild（Swift 6.2+），直接产出 default.metallib；
+    // 若 Xcode 升级后 MetalToolchain 版本脱节导致 xcrun metal 失败，则回退 native 构建
+    // 编译 libCAppleASR.a，并挂载本机 AssetsV2 缓存的 Metal.xctoolchain 编译 metallib。
+    if let Err(reports) = build_swift_package(&pkg, has_metal) {
         without_apple_module(
             "swift build 失败（见上方输出），跳过 Apple 原生模块；coreml 后端不可用",
             &reports,
         );
+        return;
+    }
+
+    let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR"));
+    let Some(bundle) = resolve_metallib(&pkg, &build_dir, &out_dir, has_metal) else {
+        without_metallib(&format!(
+            "未找到或无法编译 mlx.metallib（{}），跳过 Apple 原生模块；coreml 后端不可用",
+            pkg.join(".build").display()
+        ));
+        return;
+    };
+    // OUT_DIR = <target>/[<triple>/]<profile>/build/<pkg>-<hash>/out, so
+    // this is the executable's directory. Cargo has no stable way to
+    // name it; the layout is also hard-coded by the consumers of this
+    // copy: release.yml ("Collect mlx.metallib"),
+    // desktop/scripts/package.py and desktop/scripts/ux_fixture.py.
+    let exe_dir = out_dir.join("../../../");
+    let dest = exe_dir.join("mlx.metallib");
+    if let Err(error) = std::fs::copy(&bundle, &dest) {
+        without_metallib(&format!(
+            "无法复制 mlx.metallib 到 {}：{error}",
+            exe_dir.display()
+        ));
         return;
     }
 
@@ -116,45 +131,6 @@ fn main() {
     // A link argument stops at this package too; each executable above sets its own.
     println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
 
-    // MLX 运行时需要 metallib 与可执行文件同目录（mlx.metallib）。
-    // 默认取 SPM build 产物（mlx-swift_Cmlx.bundle 内的 default.metallib）；
-    // 仅当仓库根存在手动放置的 mlx.metallib 时才优先用它（便于 runner 固定版本）。
-    // 注意 .build 下的布局随构建系统不同（swiftbuild: out/Products/Release，
-    // native: <triple>/release），canonical 路径找不到就递归搜索兜底。
-    let vendored = pkg.join("mlx.metallib");
-    let products = build_dir.canonicalize().unwrap_or(build_dir);
-    let bundle = if vendored.is_file() {
-        Some(vendored)
-    } else {
-        let expect = products.join("mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib");
-        if expect.is_file() {
-            Some(expect)
-        } else {
-            find_file_recursive(&pkg.join(".build"), "default.metallib", 8)
-        }
-    };
-    if let Some(bundle) = bundle {
-        if let Ok(out_dir) = std::env::var("OUT_DIR") {
-            // OUT_DIR = <target>/[<triple>/]<profile>/build/<pkg>-<hash>/out, so
-            // this is the executable's directory. Cargo has no stable way to
-            // name it; the layout is also hard-coded by the consumers of this
-            // copy: release.yml ("Collect mlx.metallib"),
-            // desktop/scripts/package.py and desktop/scripts/ux_fixture.py.
-            let exe_dir = PathBuf::from(out_dir).join("../../../");
-            let dest = exe_dir.join("mlx.metallib");
-            if let Err(error) = std::fs::copy(&bundle, &dest) {
-                without_metallib(&format!(
-                    "无法复制 mlx.metallib 到 {}：{error}",
-                    exe_dir.display()
-                ));
-            }
-        }
-    } else {
-        without_metallib(&format!(
-            "未找到 mlx.metallib（{} 下递归搜索无果），CoreML 推理可能失败",
-            pkg.join(".build").display()
-        ));
-    }
     // Swift 5 语言模式包的兼容钩子 + clang 运行时（___isPlatformVersionAtLeast 等）
     let devdir = xcode_devdir();
     if let Some(swift_lib) = devdir.as_deref().and_then(toolchain_swift_lib_dir) {
@@ -204,10 +180,10 @@ fn without_metallib(reason: &str) {
 
 /// Builds the Swift package with the newest option set the toolchain accepts:
 /// the Swift Build engine (which compiles MLX's Metal shaders into
-/// default.metallib) and no prebuilt swift-syntax download. The set that
-/// worked is cached per toolchain version, so a rebuild runs swift once.
-fn build_swift_package(pkg: &Path) -> Result<(), Vec<String>> {
-    const ATTEMPTS: [&[&str]; 4] = [
+/// default.metallib) when `xcrun metal` runs, or `--build-system native` when
+/// Xcode's MetalToolchain is version-skewed.
+fn build_swift_package(pkg: &Path, has_metal: bool) -> Result<(), Vec<String>> {
+    const SWIFTBUILD_ATTEMPTS: [&[&str]; 4] = [
         &[
             "--build-system",
             "swiftbuild",
@@ -217,12 +193,28 @@ fn build_swift_package(pkg: &Path) -> Result<(), Vec<String>> {
         &["--disable-experimental-prebuilts"],
         &[],
     ];
+    const NATIVE_ATTEMPTS: [&[&str]; 2] = [
+        &[
+            "--build-system",
+            "native",
+            "--disable-experimental-prebuilts",
+        ],
+        &["--build-system", "native"],
+    ];
+    let attempts: &[&[&str]] = if has_metal {
+        &SWIFTBUILD_ATTEMPTS
+    } else {
+        &NATIVE_ATTEMPTS
+    };
     let version = Command::new("swift")
         .arg("--version")
         .output()
         .map(|out| {
             let text = String::from_utf8_lossy(&out.stdout);
-            text.lines().next().unwrap_or_default().trim().to_owned()
+            format!(
+                "{}|metal={has_metal}",
+                text.lines().next().unwrap_or_default().trim()
+            )
         })
         .unwrap_or_default();
     let cache = PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("swift-build-args");
@@ -243,7 +235,7 @@ fn build_swift_package(pkg: &Path) -> Result<(), Vec<String>> {
         return Ok(());
     }
     let mut reports = Vec::new();
-    for attempt in ATTEMPTS {
+    for attempt in attempts {
         let extra: Vec<String> = attempt.iter().map(|arg| (*arg).to_owned()).collect();
         if cached.as_ref() == Some(&extra) {
             continue;
@@ -257,6 +249,186 @@ fn build_swift_package(pkg: &Path) -> Result<(), Vec<String>> {
         }
     }
     Err(reports)
+}
+
+fn resolve_metallib(
+    pkg: &Path,
+    build_dir: &Path,
+    out_dir: &Path,
+    has_metal: bool,
+) -> Option<PathBuf> {
+    let vendored = pkg.join("mlx.metallib");
+    if vendored.is_file() {
+        return Some(vendored);
+    }
+    if has_metal {
+        let products = build_dir
+            .canonicalize()
+            .unwrap_or_else(|_| build_dir.to_path_buf());
+        let expect = products.join("mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib");
+        if expect.is_file() {
+            return Some(expect);
+        }
+        if let Some(found) = find_file_recursive(&pkg.join(".build"), "default.metallib", 8) {
+            return Some(found);
+        }
+    }
+    compile_metallib_from_cached_asset(pkg, out_dir)
+        .or_else(|| find_file_recursive(&pkg.join(".build"), "default.metallib", 8))
+}
+
+struct MountedImage(PathBuf);
+
+impl Drop for MountedImage {
+    fn drop(&mut self) {
+        let _ = Command::new("hdiutil")
+            .args(["detach", "-quiet"])
+            .arg(&self.0)
+            .status();
+        let _ = std::fs::remove_dir(&self.0);
+    }
+}
+
+/// Compiles MLX's `.metal` kernels using a downloaded macOS `MetalToolchain` asset
+/// image when Xcode upgraded ahead of its active toolchain registration.
+fn compile_metallib_from_cached_asset(pkg: &Path, out_dir: &Path) -> Option<PathBuf> {
+    let resolved = std::fs::read_to_string(pkg.join("Package.resolved")).ok()?;
+    let cached_lib = out_dir.join("cached-mlx.metallib");
+    let cached_stamp = out_dir.join("cached-mlx.resolved");
+    if cached_lib.is_file()
+        && std::fs::read_to_string(&cached_stamp).ok().as_deref() == Some(resolved.as_str())
+    {
+        return Some(cached_lib);
+    }
+    let metal_root = pkg.join(".build/checkouts/mlx-swift/Source/Cmlx/mlx-generated/metal");
+    if !metal_root.is_dir() {
+        return None;
+    }
+    let dmg = find_cached_metal_dmg()?;
+    let sdk_out = Command::new("xcrun")
+        .arg("--show-sdk-path")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    let sdk = String::from_utf8_lossy(&sdk_out.stdout).trim().to_owned();
+
+    let mount_dir = out_dir.join(format!("metal-mnt-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&mount_dir);
+    std::fs::create_dir_all(&mount_dir).ok()?;
+    let attached = Command::new("diskutil")
+        .args([
+            "image",
+            "attach",
+            "--readOnly",
+            "--mountOptions",
+            "nobrowse",
+            "--mountPoint",
+        ])
+        .arg(&mount_dir)
+        .arg(&dmg)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !attached {
+        let _ = std::fs::remove_dir(&mount_dir);
+        return None;
+    }
+    let _mount_guard = MountedImage(mount_dir.clone());
+    let metal_bin = mount_dir.join("Metal.xctoolchain/usr/bin/metal");
+    let metallib_bin = mount_dir.join("Metal.xctoolchain/usr/bin/metallib");
+    if !metal_bin.is_file() || !metallib_bin.is_file() {
+        return None;
+    }
+
+    let air_dir = out_dir.join("metal-air");
+    let _ = std::fs::remove_dir_all(&air_dir);
+    std::fs::create_dir_all(&air_dir).ok()?;
+    let mut sources = Vec::new();
+    collect_ext_files(&metal_root, "metal", &mut sources);
+    sources.sort();
+    if sources.is_empty() {
+        return None;
+    }
+    let mlx_inc = pkg.join(".build/checkouts/mlx-swift/Source/Cmlx/mlx");
+    let mut airs = Vec::with_capacity(sources.len());
+    for (idx, src) in sources.iter().enumerate() {
+        let air = air_dir.join(format!("{idx}.air"));
+        let ok = Command::new(&metal_bin)
+            .args([
+                "-c",
+                "-target",
+                "air64-apple-macos14.0",
+                "-isysroot",
+                &sdk,
+                "-fmetal-math-mode=fast",
+                "-fmetal-math-fp32-functions=fast",
+            ])
+            .arg(format!("-I{}", metal_root.display()))
+            .arg(format!("-I{}", mlx_inc.display()))
+            .arg(src)
+            .arg("-o")
+            .arg(&air)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !ok {
+            return None;
+        }
+        airs.push(air);
+    }
+    let linked = Command::new(&metallib_bin)
+        .args(&airs)
+        .arg("-o")
+        .arg(&cached_lib)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    let _ = std::fs::remove_dir_all(&air_dir);
+    if linked && cached_lib.is_file() {
+        let _ = std::fs::write(&cached_stamp, resolved);
+        Some(cached_lib)
+    } else {
+        None
+    }
+}
+
+fn find_cached_metal_dmg() -> Option<PathBuf> {
+    let assets = Path::new("/System/Library/AssetsV2/com_apple_MobileAsset_MetalToolchain");
+    let mut dmgs = Vec::new();
+    for entry in std::fs::read_dir(assets).ok()?.flatten() {
+        let restore = entry.path().join("AssetData/Restore");
+        if let Ok(files) = std::fs::read_dir(restore) {
+            for file in files.flatten() {
+                let p = file.path();
+                if p.extension().and_then(|s| s.to_str()) == Some("dmg") && p.is_file() {
+                    dmgs.push(p);
+                }
+            }
+        }
+    }
+    dmgs.sort();
+    dmgs.pop()
+}
+
+fn collect_ext_files(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                collect_ext_files(&p, ext, out);
+            } else if p.extension().and_then(|s| s.to_str()) == Some(ext) {
+                out.push(p);
+            }
+        }
+    }
+}
+
+fn xcrun_metal_available() -> bool {
+    Command::new("xcrun")
+        .args(["metal", "-v"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 fn xcode_devdir() -> Option<PathBuf> {

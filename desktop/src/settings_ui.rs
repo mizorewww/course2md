@@ -315,9 +315,23 @@ fn settings_row_width(window: &Window) -> f32 {
     pane - 24. / unit - 2. * 20.
 }
 
-/// Whether a small segmented group of `labels` fits one settings row.
-pub(super) fn segmented_fits(labels: &[&str], icons: bool, window: &Window) -> bool {
-    ui::segmented_fits(labels, icons, settings_row_width(window), window)
+/// Places a small segmented group inline beside its label while both fit the row,
+/// and stretches it across the full row width (or stacks vertically) when narrower.
+pub(super) fn segmented_field(
+    id: impl Into<SharedString>,
+    label: &'static str,
+    labels: &[&str],
+    icons: bool,
+    group: ConnectedButtonGroup,
+    window: &Window,
+) -> ui::Field {
+    let row = settings_row_width(window);
+    if ui::segmented_fits(labels, icons, (row - 216.).max(0.), window) {
+        ui::Field::inline(id, label, group.segmented().fit_content())
+    } else {
+        let horizontal = ui::segmented_fits(labels, icons, row, window);
+        ui::Field::below(id, label, group.segmented().vertical(!horizontal))
+    }
 }
 
 /// Settings categories in navigation order.
@@ -758,13 +772,14 @@ impl Desktop {
         cx.notify();
     }
 
-    /// Services and accounts: bring the ChatGPT account up to date (busy and checked guards avoid repeats).
+    /// Services and accounts: bring account statuses and permissions up to date.
     fn ensure_account_cards(&mut self, cx: &mut Context<Self>) {
-        if self.settings_tab == SettingsTab::Services
-            && self.codex.status.is_none()
-            && !self.codex.busy()
-        {
-            self.codex_refresh_status(desktop_accounts::codex::CodexSurface::Settings, cx);
+        if self.settings_tab == SettingsTab::Services {
+            self.accounts
+                .update(cx, |accounts, cx| accounts.refresh_youtube_access(cx));
+            if self.codex.status.is_none() && !self.codex.busy() {
+                self.codex_refresh_status(desktop_accounts::codex::CodexSurface::Settings, cx);
+            }
         }
     }
 

@@ -394,9 +394,13 @@ impl Desktop {
         subscriptions.push(cx.observe_window_appearance(window, |this, window, cx| {
             this.prepare_theme(window, cx);
         }));
-        // The system's scrollbar preference can change while the window is away.
-        subscriptions.push(cx.observe_window_activation(window, |_, _, cx| {
+        // System preferences and TCC folder access can change while the window is away.
+        subscriptions.push(cx.observe_window_activation(window, |this, window, cx| {
             sync_scrollbars(cx);
+            if window.is_window_active() {
+                this.accounts
+                    .update(cx, |accounts, cx| accounts.refresh_youtube_access(cx));
+            }
         }));
         let options = ConversionOptions::from_config(&config);
         let poll = cx.spawn_in(window, async |this, cx| {

@@ -203,23 +203,32 @@ impl AccountsView {
         // at once, so no note written before it can outlive it), and the saved
         // browser's folder may have opened meanwhile.
         let _ = std::fs::remove_file(resume_marker_path());
-        let browser = self.youtube.choice.as_ref().map(|choice| choice.browser);
-        let task = crate::spawn_blocking_io(move || browser.map(look));
+        self.refresh_youtube_access(cx);
+        if let Some(source) = resume {
+            cx.emit(AccountsEvent::YoutubeConnected { source });
+        }
+        cx.notify();
+    }
+
+    /// Re-checks whether the saved browser's folder is readable now.
+    pub(crate) fn refresh_youtube_access(&mut self, cx: &mut Context<Self>) {
+        let Some(browser) = self.youtube.choice.as_ref().map(|choice| choice.browser) else {
+            return;
+        };
+        let task = crate::spawn_blocking_io(move || look(browser));
         cx.spawn(async move |this, cx| {
             if let Some(access) = task.await {
                 let _ = this.update(cx, |this, cx| {
-                    if this.youtube.choice.as_ref().map(|choice| choice.browser) == browser {
-                        this.youtube.access = access;
+                    if this.youtube.choice.as_ref().map(|choice| choice.browser) == Some(browser)
+                        && this.youtube.access != Some(access)
+                    {
+                        this.youtube.access = Some(access);
                         cx.notify();
                     }
                 });
             }
         })
         .detach();
-        if let Some(source) = resume {
-            cx.emit(AccountsEvent::YoutubeConnected { source });
-        }
-        cx.notify();
     }
 
     /// Looks at the chosen browser's folder again every [`ACCESS_POLL`] while the
@@ -435,8 +444,12 @@ impl AccountsView {
                     },
                 };
                 let refused = matches!(step, YoutubeStep::Failed { blocked: true, .. });
-                if refused && this.youtube.choice.is_some() && !save {
-                    this.youtube.access = Some(Access::Blocked);
+                if this.youtube.choice.is_some() {
+                    if refused && !save {
+                        this.youtube.access = Some(Access::Blocked);
+                    } else if !refused {
+                        this.youtube.access = Some(Access::Open);
+                    }
                 }
                 if save && let Some(dialog) = &mut this.youtube.dialog {
                     if refused {

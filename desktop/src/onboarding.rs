@@ -321,8 +321,10 @@ impl Desktop {
             self.onboarding.model_return_page = None;
         }
         if step == Step::Account {
-            self.accounts
-                .update(cx, |accounts, cx| accounts.refresh_account(cx));
+            self.accounts.update(cx, |accounts, cx| {
+                accounts.refresh_account(cx);
+                accounts.refresh_youtube_access(cx);
+            });
         }
         if step == Step::Ai && self.onboarding.ai.form.is_codex() {
             self.codex_refresh_status(CodexSurface::Onboarding, cx);

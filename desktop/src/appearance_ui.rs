@@ -881,12 +881,8 @@ impl Desktop {
             course2md::tr!("浅色"),
             course2md::tr!("深色"),
         ];
-        let modes_fit = crate::settings_ui::segmented_fits(&mode_labels, true, window);
         let modes = ConnectedButtonGroup::new("appearance-mode", course2md::tr!("外观模式"))
             .tone(ButtonTone::Neutral)
-            .segmented()
-            .when(modes_fit, |group| group.fit_content())
-            .vertical(!modes_fit)
             .button_size(ButtonSize::Small)
             .options([
                 ("system", mode_labels[0]),
@@ -1031,11 +1027,14 @@ impl Desktop {
                 .child(dark)
                 .into_any_element()
         });
-        let mode_field = if modes_fit {
-            ui::Field::inline("appearance-mode-row", course2md::tr!("外观模式"), modes)
-        } else {
-            ui::Field::below("appearance-mode-row", course2md::tr!("外观模式"), modes)
-        };
+        let mode_field = crate::settings_ui::segmented_field(
+            "appearance-mode-row",
+            course2md::tr!("外观模式"),
+            &mode_labels,
+            true,
+            modes,
+            window,
+        );
         v_flex()
             .w_full()
             .min_w_0()

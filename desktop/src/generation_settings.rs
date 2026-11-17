@@ -45,13 +45,8 @@ impl Desktop {
             .iter()
             .map(|(_, label)| *label)
             .collect();
-        let fits = super::segmented_fits(&labels, true, window);
         let group = ConnectedButtonGroup::new("default-text-source", course2md::tr!("文字来源"))
             .tone(ButtonTone::Neutral)
-            .segmented()
-            // As wide as its options while they fit the row; else they stack whole.
-            .when(fits, |group| group.fit_content())
-            .vertical(!fits)
             .button_size(ButtonSize::Small)
             .options(text_source_choices().map(|(mode, label)| (text_source_id(mode), label)))
             .icon("auto", symbols::auto_fix_high())
@@ -103,17 +98,15 @@ impl Desktop {
             }),
         );
         let mut fields = vec![
-            // The group, then what its choice means, as on home's options.
-            ui::Field::below(
+            super::segmented_field(
                 "default-text-source-row",
                 course2md::tr!("文字来源"),
-                v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .gap(rem(8.))
-                    .child(div().when(fits, |row| row.flex()).child(group))
-                    .child(supporting_info("default-text-source-hint", source_hint)),
-            ),
+                &labels,
+                true,
+                group,
+                window,
+            )
+            .hint(source_hint),
             ui::Field::menu(
                 "default-subtitle-language",
                 course2md::tr!("字幕语言"),
@@ -176,12 +169,8 @@ impl Desktop {
         let selected_provider = preferences.options.provider;
         let online = selected_provider == Some(AsrProvider::Api);
         let methods = [course2md::tr!("本机识别"), course2md::tr!("在线语音服务")];
-        let fits = super::segmented_fits(&methods, true, window);
         let group = ConnectedButtonGroup::new("default-asr-device", course2md::tr!("识别方式"))
             .tone(ButtonTone::Neutral)
-            .segmented()
-            .when(fits, |group| group.fit_content())
-            .vertical(!fits)
             .button_size(ButtonSize::Small)
             .options([("local", methods[0]), ("online", methods[1])])
             // The same icons the choice has in first use.
@@ -193,10 +182,13 @@ impl Desktop {
                 next.select_recognition_location(selected.as_ref() == "online");
                 this.commit_generation(next, cx);
             }));
-        let method = ui::Field::below(
+        let method = super::segmented_field(
             "default-asr-method",
             course2md::tr!("识别方式"),
-            div().when(fits, |row| row.flex()).child(group),
+            &methods,
+            true,
+            group,
+            window,
         )
         .hint(if online {
             course2md::tr!("音频会发送到所选服务")
