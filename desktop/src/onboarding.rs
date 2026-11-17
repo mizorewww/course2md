@@ -1184,7 +1184,7 @@ impl Desktop {
             ),
         );
         let form = setup_tile()
-            .gap(rem(20.))
+            .gap(rem(16.))
             .when(!codex, |form| {
                 form.children(self.setup_field(
                     purpose,
@@ -1299,21 +1299,34 @@ impl Desktop {
                     ),
             );
         }
+        let inline_notice = || {
+            supporting_info(id("notice"), service_test::test_notice())
+                .w_auto()
+                .flex_1()
+                .min_w(rem(200.))
+        };
         if service.evidence.is_empty() {
             return Some(
                 view.child(
-                    h_flex().child(
-                        material_button(id("recheck"), ButtonVariant::Outlined)
-                            .tone(ButtonTone::Accent)
-                            .icon(symbols::science())
-                            .child(course2md::tr!("检查配置"))
-                            .disabled(service.busy())
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.start_setup_test(purpose, window, cx)
-                            })),
-                    ),
-                )
-                .child(supporting_info(id("notice"), service_test::test_notice())),
+                    h_flex()
+                        .w_full()
+                        .min_w_0()
+                        .items_center()
+                        .flex_wrap()
+                        .gap_x(rem(12.))
+                        .gap_y(rem(8.))
+                        .child(
+                            material_button(id("recheck"), ButtonVariant::Outlined)
+                                .tone(ButtonTone::Accent)
+                                .icon(symbols::science())
+                                .child(course2md::tr!("检查配置"))
+                                .disabled(service.busy())
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.start_setup_test(purpose, window, cx)
+                                })),
+                        )
+                        .child(inline_notice()),
+                ),
             );
         }
         let results =
@@ -1341,9 +1354,12 @@ impl Desktop {
             .children(results)
             .child(
                 h_flex()
+                    .w_full()
                     .min_w_0()
+                    .items_center()
                     .flex_wrap()
-                    .gap(rem(8.))
+                    .gap_x(rem(12.))
+                    .gap_y(rem(8.))
                     .child(
                         material_button(id("recheck"), ButtonVariant::Outlined)
                             .tone(ButtonTone::Accent)
@@ -1371,9 +1387,9 @@ impl Desktop {
                                 service.details_open = !service.details_open;
                                 cx.notify();
                             })),
-                    ),
+                    )
+                    .child(inline_notice()),
             )
-            .child(supporting_info(id("notice"), service_test::test_notice()))
             .child(motion::disclosure(
                 id("details-content"),
                 open,
