@@ -1087,4 +1087,78 @@ mod tests {
         assert!(palette_columns(520., 28.) <= palette_columns(760., 28.));
         assert_eq!(palette_columns(100., 28.), 1);
     }
+
+    #[gpui::test]
+    fn scale_slider_steps_by_keyboard_arrows(cx: &mut gpui::TestAppContext) {
+        use super::ScaleSlider;
+        use gpui::{Modifiers, Render, px};
+        use gpui_base::slider::{SliderEvent, SliderState};
+        use gpui_kit::prelude::*;
+        use std::{cell::Cell, rc::Rc};
+
+        struct Harness(gpui::Entity<ScaleSlider>);
+        impl Render for Harness {
+            fn render(
+                &mut self,
+                window: &mut gpui::Window,
+                _: &mut gpui::Context<Self>,
+            ) -> impl gpui::IntoElement {
+                window.set_rem_size(px(14.));
+                gpui_base::v_flex()
+                    .w(px(320.))
+                    .p(px(24.))
+                    .debug_selector(|| "scale-slider".into())
+                    .child(self.0.clone())
+            }
+        }
+
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            gpui_kit_material::init(cx);
+        });
+        let state = cx.new(|_| {
+            SliderState::new()
+                .min(75.)
+                .max(200.)
+                .step(5.)
+                .default_value(100.)
+        });
+        let dragging = Rc::new(Cell::new(false));
+        let changes = Rc::new(Cell::new(0usize));
+        cx.update(|cx| {
+            let changes = changes.clone();
+            cx.subscribe(&state, move |_, _: &SliderEvent, _| {
+                changes.set(changes.get() + 1);
+            })
+            .detach();
+        });
+        let slider_state = state.clone();
+        let (_, cx) = cx.add_window_view(move |_, cx| {
+            Harness(cx.new(|cx| ScaleSlider::new(slider_state, dragging, cx)))
+        });
+        cx.update(|w, cx| {
+            w.refresh();
+            w.draw(cx).clear(cx);
+        });
+        let center = state.read_with(cx, |s, _| s.bounds().center());
+        cx.simulate_click(center, Modifiers::default());
+        cx.update(|w, cx| {
+            w.refresh();
+            w.draw(cx).clear(cx);
+        });
+        let before = state.read_with(cx, |s, _| s.value().end());
+        cx.simulate_keystrokes("right right");
+        cx.update(|w, cx| {
+            w.refresh();
+            w.draw(cx).clear(cx);
+        });
+        assert_eq!(state.read_with(cx, |s, _| s.value().end()), before + 10.);
+        cx.simulate_keystrokes("left");
+        cx.update(|w, cx| {
+            w.refresh();
+            w.draw(cx).clear(cx);
+        });
+        assert_eq!(state.read_with(cx, |s, _| s.value().end()), before + 5.);
+        assert!(changes.get() >= 3);
+    }
 }
