@@ -98,7 +98,9 @@ jobs:
         run: |
           pr=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number')
           if [ "$(git rev-parse HEAD)" != "$START" ]; then
-            git push -q "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" "HEAD:refs/heads/$BRANCH"
+            # Bypass the read-only credentials the Claude action configured for this checkout.
+            git -c credential.helper= -c http.https://github.com/.extraheader= \
+              push -q "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" "HEAD:refs/heads/$BRANCH"
           fi
           summary=$(jq -r '.summary // empty' <<<"$OUTPUT")
           printf '%s\n\n<sub>Automated port by Claude Code ([run](%s)).</sub>\n' \
