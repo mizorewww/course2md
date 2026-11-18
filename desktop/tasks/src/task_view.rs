@@ -478,9 +478,12 @@ pub fn task_reasons(task: &TaskRecord) -> Vec<String> {
     }
     let failures = task_note_failures(task);
     if !failures.is_empty() {
-        return failures
+        let items: Vec<_> = failures
             .iter()
-            .map(|(_, part, outcome)| activity::outcome_failure_message(*part, outcome))
+            .map(|(_, part, outcome)| (*part, outcome))
+            .collect();
+        return activity::join_outcome_failure_messages(&items)
+            .into_iter()
             .collect();
     }
     task_error_summary(task).into_iter().collect()

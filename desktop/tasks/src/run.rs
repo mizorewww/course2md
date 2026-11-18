@@ -555,7 +555,7 @@ fn outcomes_need_settings(outcomes: &Outcomes) -> bool {
 }
 
 fn build_partial_failure_message(outcomes: &Outcomes) -> String {
-    let mut messages = Vec::new();
+    let mut items = Vec::new();
     for (part, outcome) in [
         (NotePart::Screenshots, &outcomes.screenshots),
         (NotePart::Proofreading, &outcomes.proofreading),
@@ -563,24 +563,16 @@ fn build_partial_failure_message(outcomes: &Outcomes) -> String {
         (NotePart::Summary, &outcomes.summary),
     ] {
         if outcome.is_incomplete() {
-            messages.push(desktop_store::activity::outcome_failure_message(
-                part, outcome,
-            ));
+            items.push((part, outcome));
         }
     }
     for outcome in outcomes.exports.values() {
         if outcome.is_incomplete() {
-            messages.push(desktop_store::activity::outcome_failure_message(
-                NotePart::Exports,
-                outcome,
-            ));
+            items.push((NotePart::Exports, outcome));
         }
     }
-    if messages.is_empty() {
-        c2m_i18n::tr!("部分未完成").into()
-    } else {
-        messages.join(c2m_i18n::tr!("；"))
-    }
+    desktop_store::activity::join_outcome_failure_messages(&items)
+        .unwrap_or_else(|| c2m_i18n::tr!("部分未完成").into())
 }
 
 /// Settles a task's state when its worker process exits.

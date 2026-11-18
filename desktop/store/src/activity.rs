@@ -853,6 +853,56 @@ pub fn outcome_failure_message(
     c2m_i18n::tr!("{}：{}", missing_term(part), cause)
 }
 
+/// Summarizes one or more unfinished note parts without repeating a shared cause.
+///
+/// When several parts failed for the exact same reason (such as `Proofreading`
+/// and `Summary` both rejected by an invalid API key), their missing terms are
+/// listed once and followed by that single cause:
+/// `"校对未完成、摘要未生成：服务拒绝了 API Key"`.
+pub fn join_outcome_failure_messages(
+    items: &[(NotePart, &c2m_artifact::artifact::Outcome)],
+) -> Option<String> {
+    match items {
+        [] => None,
+        [(part, outcome)] => Some(outcome_failure_message(*part, outcome)),
+        many => {
+            let mut terms = Vec::with_capacity(many.len());
+            let mut messages = Vec::with_capacity(many.len());
+            let mut causes: Vec<Option<String>> = Vec::with_capacity(many.len());
+            for (part, outcome) in many {
+                let term = missing_term(*part);
+                let message = outcome_failure_message(*part, outcome);
+                let prefix = c2m_i18n::tr!("{}：{}", &term, "");
+                let cause = message
+                    .strip_prefix(&prefix)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned);
+                if terms.last() != Some(&term) {
+                    terms.push(term);
+                }
+                causes.push(cause);
+                if messages.last() != Some(&message) {
+                    messages.push(message);
+                }
+            }
+            if causes.iter().all(Option::is_none) {
+                return Some(terms.join(c2m_i18n::tr!("、")));
+            }
+            if let Some(Some(first)) = causes.first()
+                && causes.iter().all(|c| c.as_ref() == Some(first))
+            {
+                return Some(c2m_i18n::tr!(
+                    "{}：{}",
+                    terms.join(c2m_i18n::tr!("、")),
+                    first
+                ));
+            }
+            Some(messages.join(c2m_i18n::tr!("；")))
+        }
+    }
+}
+
 /// The cause a classified failure words in the interface language.
 fn classified_cause(outcome: &c2m_artifact::artifact::Outcome) -> Option<&'static str> {
     use c2m_artifact::artifact::FailureKind;
@@ -2061,6 +2111,47 @@ mod tests {
         assert!(
             detail.contains("3.0 MB") && !detail.contains("预计剩余"),
             "{detail}"
+        );
+    }
+
+    #[test]
+    fn multi_stage_outcome_failures_collapse_a_shared_cause_and_preserve_distinct_causes() {
+        use c2m_artifact::artifact::{FailureKind, Outcome};
+        let auth = Outcome {
+            kind: Some(FailureKind::Authentication),
+            ..Outcome::failed("HTTP 401")
+        };
+        let rate_limit = Outcome {
+            kind: Some(FailureKind::RateLimit),
+            ..Outcome::failed("429")
+        };
+        assert_eq!(
+            join_outcome_failure_messages(&[(NotePart::Summary, &auth)]).as_deref(),
+            Some("摘要未生成：服务拒绝了 API Key")
+        );
+        assert_eq!(
+            join_outcome_failure_messages(&[
+                (NotePart::Proofreading, &auth),
+                (NotePart::Summary, &auth),
+            ])
+            .as_deref(),
+            Some("校对未完成、摘要未生成：服务拒绝了 API Key")
+        );
+        assert_eq!(
+            join_outcome_failure_messages(&[
+                (NotePart::Exports, &auth),
+                (NotePart::Exports, &auth)
+            ])
+            .as_deref(),
+            Some("导出未完成：服务拒绝了 API Key")
+        );
+        assert_eq!(
+            join_outcome_failure_messages(&[
+                (NotePart::Proofreading, &auth),
+                (NotePart::Summary, &rate_limit),
+            ])
+            .as_deref(),
+            Some("校对未完成：服务拒绝了 API Key；摘要未生成：服务暂时限制了请求次数")
         );
     }
 }

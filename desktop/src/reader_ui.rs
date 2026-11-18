@@ -2593,30 +2593,62 @@ impl ReaderPage {
             .as_ref()
             .is_some_and(|t| t.status == workspace::TaskStatus::Failed);
         if !preview.processing_issues.is_empty() || task_failed {
-            let unfinished = processing_notice(&preview.processing_issues).unwrap_or_else(|| {
-                course2md::tr!("这份笔记的更新未完成，这里仍是原来的笔记").to_owned()
-            });
-            let raw_reason = task
-                .as_ref()
-                .filter(|t| t.status == workspace::TaskStatus::Failed)
-                .and_then(desktop_tasks::task_view::task_error_summary)
-                .or_else(|| {
-                    preview
-                        .processing_issues
-                        .iter()
-                        .find_map(|issue| issue.detail())
-                        .map(|d| {
-                            crate::import_ui::readable_first_line(&d)
-                                .unwrap_or(&d)
-                                .to_owned()
-                        })
+            let issue_parts: Vec<_> = preview
+                .processing_issues
+                .iter()
+                .filter_map(|issue| {
+                    let part = match issue.stage {
+                        notes::ProcessingStage::Screenshots => {
+                            desktop_store::activity::NotePart::Screenshots
+                        }
+                        notes::ProcessingStage::Proofreading => {
+                            desktop_store::activity::NotePart::Proofreading
+                        }
+                        notes::ProcessingStage::Translation => {
+                            desktop_store::activity::NotePart::Translation
+                        }
+                        notes::ProcessingStage::Summary => {
+                            desktop_store::activity::NotePart::Summary
+                        }
+                        notes::ProcessingStage::Transcript => return None,
+                    };
+                    Some((part, &issue.outcome))
                 })
-                .filter(|s| !s.trim().is_empty());
-            let summary = match &raw_reason {
-                Some(reason) if !unfinished.contains(reason.as_str()) => {
-                    course2md::tr!("{}：{}", unfinished, reason)
+                .collect();
+            let summary = if !issue_parts.is_empty() {
+                desktop_store::activity::join_outcome_failure_messages(&issue_parts)
+                    .or_else(|| processing_notice(&preview.processing_issues))
+                    .unwrap_or_else(|| course2md::tr!("部分未完成").to_owned())
+            } else if let Some(unfinished) = processing_notice(&preview.processing_issues) {
+                match preview
+                    .processing_issues
+                    .iter()
+                    .find_map(|issue| issue.detail())
+                    .map(|d| {
+                        crate::import_ui::readable_first_line(&d)
+                            .unwrap_or(&d)
+                            .to_owned()
+                    })
+                    .filter(|s| !s.trim().is_empty())
+                {
+                    Some(reason) if !unfinished.contains(reason.as_str()) => {
+                        course2md::tr!("{}：{}", unfinished, reason)
+                    }
+                    _ => unfinished,
                 }
-                _ => unfinished,
+            } else {
+                let base = course2md::tr!("这份笔记的更新未完成，这里仍是原来的笔记");
+                match task
+                    .as_ref()
+                    .filter(|t| t.status == workspace::TaskStatus::Failed)
+                    .and_then(desktop_tasks::task_view::task_error_summary)
+                    .filter(|s| !s.trim().is_empty())
+                {
+                    Some(reason) if !base.contains(reason.as_str()) => {
+                        course2md::tr!("{}：{}", base, reason)
+                    }
+                    _ => base.to_owned(),
+                }
             };
 
             let ai_stage_issue = preview.processing_issues.iter().any(|issue| {
@@ -2641,7 +2673,12 @@ impl ReaderPage {
                 .as_ref()
                 .and_then(|t| t.error.as_ref())
                 .map(|e| e.message.clone())
-                .or_else(|| raw_reason.clone())
+                .or_else(|| {
+                    preview
+                        .processing_issues
+                        .iter()
+                        .find_map(|issue| issue.detail())
+                })
                 .unwrap_or_else(|| {
                     if ai_stage_issue {
                         "AI 服务".to_owned()
