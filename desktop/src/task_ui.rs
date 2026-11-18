@@ -289,13 +289,16 @@ fn stage_row(stage: TaskStage, window: &mut Window, cx: &mut App) -> Div {
                         .text_color(color(ink)),
                 ),
         )
-        .when_some(stage.fraction, |row, fraction| {
-            row.child(
-                div()
-                    .pl(LABEL_INSET)
-                    .child(progress(progress_id, fraction, window, cx)),
-            )
-        })
+        .when_some(
+            stage.fraction.filter(|_| stage.status.running()),
+            |row, fraction| {
+                row.child(
+                    div()
+                        .pl(LABEL_INSET)
+                        .child(progress(progress_id, fraction, window, cx)),
+                )
+            },
+        )
 }
 
 impl TasksPage {
