@@ -27,6 +27,10 @@ ignore = [
     { id = "RUSTSEC-2026-0370", reason = "zvariant: Linux desktop D-Bus stack, merged into zbus 6" },
     { id = "RUSTSEC-2026-0371", reason = "zbus_names: Linux desktop D-Bus stack, merged into zbus 6" },
     { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: Linux desktop D-Bus stack, merged into zbus 6" },
+    # Desktop only: gpui-base, gpui-component and gpui-fast use it, and the desktop formats
+    # local timestamps with it; the engine does not depend on it. Revisit when the gpui-kit
+    # stack moves to jiff or time, then replace the desktop's own use.
+    { id = "RUSTSEC-2026-0543", reason = "chrono: desktop only, gpui-kit stack and desktop timestamps" },
     # The Marvin timing attack recovers a private key from decryption or signing
     # timings. The Bilibili login only encrypts with the server's public key
     # (c2m-source auth/passport.rs); no private-key operation exists here.
