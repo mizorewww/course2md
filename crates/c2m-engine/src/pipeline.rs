@@ -1422,7 +1422,8 @@ impl Task<'_> {
             Err(error) => {
                 tracing::warn!(
                     error = %format!("{error:#}"),
-                    "生成摘要未完成 / Summary generation incomplete"
+                    "{}",
+                    tr!("生成摘要未完成 / Summary generation incomplete")
                 );
                 outcomes.summary =
                     Outcome::from_error_with_message(&error, summarize::failure_message(&error));
@@ -1555,7 +1556,10 @@ fn cached_transcript(cache_path: &Path) -> Result<Option<TranscriptCache>> {
         return Ok(Some(cache));
     }
     tracing::warn!(
-        "已保存的文字为空，丢弃并重新识别 / Saved transcript is empty; discarding it and transcribing again"
+        "{}",
+        tr!(
+            "已保存的文字为空，丢弃并重新识别 / Saved transcript is empty; discarding it and transcribing again"
+        )
     );
     let _ = std::fs::remove_file(cache_path);
     Ok(None)
