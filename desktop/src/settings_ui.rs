@@ -1084,48 +1084,44 @@ impl Desktop {
             return self.settings_single_column(heading, notices, content, cx);
         }
         let navigation = self.settings_navigation(compact, cx);
-        let panel =
-            v_flex()
-                .relative()
-                .id("settings-panel")
-                .flex_1()
-                .max_w(rem(760.))
-                .min_w_0()
-                .min_h_0()
-                .h_full()
-                .gap(rem(16.))
-                .when(!notices.is_empty(), |panel| {
-                    panel.child(
+        let panel = v_flex()
+            .relative()
+            .id("settings-panel")
+            .flex_1()
+            .max_w(rem(760.))
+            .min_w_0()
+            .min_h_0()
+            .h_full()
+            .gap(rem(16.))
+            .when(!notices.is_empty(), |panel| {
+                panel.child(
+                    v_flex()
+                        .w_full()
+                        .min_w_0()
+                        .flex_shrink_0()
+                        .pr(px(24.))
+                        .gap(rem(8.))
+                        .children(notices),
+                )
+            })
+            .child(
+                self.settings_content_scroll(
+                    // Ordinary category navigation retains stable composition without
+                    // page re-entry fades; the right inset is the scrollbar's gutter.
+                    div().w_full().min_w_0().pr(px(24.)).pb(rem(64.)).child(
                         v_flex()
                             .w_full()
                             .min_w_0()
-                            .flex_shrink_0()
-                            .pr(px(24.))
-                            .gap(rem(8.))
-                            .children(notices),
-                    )
-                })
-                .child(
-                    self.settings_content_scroll(
-                        // A category arrives as one unit; the navigation stays a landmark.
-                        // The right inset is the scrollbar's gutter, so it never covers a tile.
-                        div().w_full().min_w_0().pr(px(24.)).pb(rem(64.)).child(
-                            motion::page_enter(
-                                ("settings-category", self.settings_tab.index()),
-                                v_flex()
-                                    .w_full()
-                                    .min_w_0()
-                                    .gap(rem(28.))
-                                    .children(heading)
-                                    .child(content),
-                            ),
-                        ),
-                        cx,
-                    )
-                    .flex_1()
-                    .w_full(),
+                            .gap(rem(28.))
+                            .children(heading)
+                            .child(content),
+                    ),
+                    cx,
                 )
-                .child(Scrollbar::vertical(scroll));
+                .flex_1()
+                .w_full(),
+            )
+            .child(Scrollbar::vertical(scroll));
         h_flex()
             .size_full()
             .max_w(rem(1120.))
@@ -1184,8 +1180,7 @@ impl Desktop {
                             column.child(self.settings_category_menu(cx))
                         })
                         .children(notices)
-                        .child(motion::page_enter(
-                            ("settings-category", self.settings_tab.index()),
+                        .child(
                             v_flex()
                                 .w_full()
                                 .min_w_0()
@@ -1193,7 +1188,7 @@ impl Desktop {
                                 .gap(rem(28.))
                                 .children(heading)
                                 .child(content),
-                        )),
+                        ),
                     cx,
                 )
                 .size_full(),
