@@ -156,14 +156,6 @@ struct ScalePreviewOverlay {
     child: AnyElement,
 }
 
-impl IntoElement for ScalePreviewOverlay {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
 impl Element for ScalePreviewOverlay {
     type RequestLayoutState = LayoutId;
     type PrepaintState = ();
@@ -464,14 +456,6 @@ fn scale_preview_surface(target: f32, panel_size: Size<Pixels>) -> LocalScale {
 struct LocalScale {
     rem_size: Pixels,
     child: AnyElement,
-}
-
-impl IntoElement for LocalScale {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
 }
 
 impl Element for LocalScale {

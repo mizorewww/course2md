@@ -46,15 +46,15 @@ which = "8.0.6"
 sys-locale = "0.3"
 # The desktop: Kit, Base and gpui-kit-material from crates.io. Members add the features
 # they use. The root's [patch] applies Material's optional engine patches to these.
-gpui-kit = { version = "0.9.1", features = ["gpui-fast"] }
-gpui-base = "0.9.1"
+gpui-kit = { version = "0.10.0", features = ["gpui-fast"] }
+gpui-base = "0.10.0"
 # Renovate moves this to each new gpui-kit-material release tag, and the automated port
 # (.github/upstream-port.md) moves every gpui-kit-material revision here to it.
 # gpui-kit-material release: material-v0.2.0
-gpui-kit-material = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2", default-features = false, features = ["serde", "gpui-fast"] }
-gpui-kit-material-color = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2", features = ["serde"] }
+gpui-kit-material = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "f61ae0c1bc90934fd2b002c10533472ea59f778a", default-features = false, features = ["serde", "gpui-fast"] }
+gpui-kit-material-color = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "f61ae0c1bc90934fd2b002c10533472ea59f778a", features = ["serde"] }
 # The release gpui-kit-material depends on.
-gpui-material-symbols = { version = "0.1", default-features = false }
+gpui-material-symbols = { version = "0.2", default-features = false }
 smol = "2"
 chrono = "0.4"
 uuid = "1"
@@ -85,15 +85,15 @@ strip = true
 
 # Only the workspace root's patches count, so the desktop's stack is pinned here.
 [patch.crates-io]
-# gpui-kit-material's optional Git patch set (its README's quick start, 0.1.4), which
-# changes engine behavior only: spaces that overflow a wrapped row hang instead of
-# starting the next one, and a wheel over nested scroll containers (a list inside a
-# scrolling page) scrolls only the innermost one it moves, for the whole gesture, instead
-# of every container under the pointer. Each crate is the same version crates.io has
-# (gpui-fast 0.1.15, which releases the `measure_all` list's remeasurement, #42); drop
-# the set once both patches are released upstream.
-gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2" }
-gpui-pre = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2" }
-gpui-pre-apple = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2" }
-gpui-pre-web = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2" }
-gpui-fast = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1ab6e5480b1eb8a15ee5120ca16ef6261ac9dab2" }
+# gpui-kit-material's optional Git patch set (its docs/ARCHITECTURE.md consumer patch
+# set, 0.2.0), which changes engine behavior only: spaces that overflow a wrapped row
+# hang instead of starting the next one, and a wheel over nested scroll containers (a
+# list inside a scrolling page) scrolls only the innermost one it moves, for the whole
+# gesture, instead of every container under the pointer. Each crate is the same version
+# crates.io has (Kit 0.10.0, whose manifest keeps WASM single-threaded by default, and
+# gpui-fast 0.1.16); drop the set once both patches are released upstream.
+gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "f61ae0c1bc90934fd2b002c10533472ea59f778a" }
+gpui-pre = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "f61ae0c1bc90934fd2b002c10533472ea59f778a" }
+gpui-pre-apple = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "f61ae0c1bc90934fd2b002c10533472ea59f778a" }
+gpui-pre-web = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "f61ae0c1bc90934fd2b002c10533472ea59f778a" }
+gpui-fast = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "f61ae0c1bc90934fd2b002c10533472ea59f778a" }

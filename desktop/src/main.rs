@@ -1223,13 +1223,13 @@ fn main() {
         };
         let min_size = size(px(720.), px(620.));
         let window_bounds = match (validation_size, cx.primary_display()) {
-            (Some(exact), _) => WindowBounds::centered(exact, cx),
+            (Some(exact), _) => WindowBounds::centered(None, exact, cx),
             (None, Some(display)) => WindowBounds::Windowed(initial_window_bounds(
                 size(px(1140.), px(820.)),
                 min_size,
                 display.visible_bounds(),
             )),
-            (None, None) => WindowBounds::centered(size(px(1140.), px(820.)), cx),
+            (None, None) => WindowBounds::centered(None, size(px(1140.), px(820.)), cx),
         };
         // The old macOS redraw fallback (drawing synchronously when the display link
         // stopped ticking) was not ported: the kit restarts the link on occlusion and
