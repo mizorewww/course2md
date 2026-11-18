@@ -46,7 +46,21 @@
       "enabled": false
     },
     {
+      "description": "The Git revisions themselves: the port moves them all to the release tag the marker names",
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchDepNames": [
+        "gpui-kit-material",
+        "gpui-kit-material-color"
+      ],
+      "enabled": false
+    },
+    {
       "description": "gpui-kit-material releases: one PR on a fixed branch, which upstream-port.yml hands to Claude Code",
+      "matchManagers": [
+        "custom.regex"
+      ],
       "matchDepNames": [
         "gpui-kit-material"
       ],
