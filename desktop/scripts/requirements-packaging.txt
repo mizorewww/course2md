@@ -5,9 +5,9 @@ dmgbuild==1.6.7; sys_platform == "darwin" \
     --hash=sha256:37ee5771c377beb3203d9164aae8046ffed8531c06edf9227f5788b3c599b1bf \
     --hash=sha256:676b17acd448899f6d4a83b2184e0657480444ecb6ac9c4922889efad9e5dbfb
 # dmg.py imports ds_store directly to verify the install window layout.
-ds_store==1.3.3; sys_platform == "darwin" \
-    --hash=sha256:a7380896ea1e880f7ba07c5cdc24bd1530fb86836cad0be531f3e80e2d721ac5 \
-    --hash=sha256:b92a371efbf1b4ccce2a04d1ed13fceacc4736c81ba09cf5aefb74c088160a35
+ds-store==1.3.4; sys_platform == "darwin" \
+    --hash=sha256:6d8ae662921846c96b03c244a92aab19a5b4fb3d9cada118fc83cace9250f049 \
+    --hash=sha256:fc9f8cac2fc9274c7271288c4a1b0802fa418489cded5e28363a35fa5061294a
 # Required by dmgbuild and ds_store.
 mac_alias==2.2.3; sys_platform == "darwin" \
     --hash=sha256:1c7fa367687d66979f2ce4d1a8b2716cf1c9fb811741cab3cf3ca356555c2beb \
