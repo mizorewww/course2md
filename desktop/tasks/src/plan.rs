@@ -440,7 +440,7 @@ impl PlanInputs<'_> {
         ensure!(
             !draft.input.is_empty(),
             if draft.online {
-                c2m_i18n::tr!("先粘贴视频链接")
+                c2m_i18n::tr!("请输入视频链接（http:// 或 https://）、BV 号或 AV 号")
             } else {
                 c2m_i18n::tr!("先选择一个视频")
             }

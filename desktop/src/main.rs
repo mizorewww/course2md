@@ -75,7 +75,7 @@ impl Field {
     /// What an empty field says, in the interface language.
     fn placeholder(self) -> &'static str {
         match self {
-            Self::Source => course2md::tr!("粘贴 YouTube 或 Bilibili 视频链接"),
+            Self::Source => course2md::tr!("YouTube 或 Bilibili 链接、BV 号或 AV 号"),
             Self::Search => course2md::tr!("搜索笔记标题"),
             Self::Name => "",
         }

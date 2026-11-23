@@ -331,7 +331,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 保留的视频已不在	保留的视频已不在	The kept video is no longer there	保留的影片已不在	保持していた動画が見つかりません
 修改接口不能改变此服务的用途，请添加另一用途的服务	修改接口不能改变此服务的用途，请添加另一用途的服务	Modifying the interface cannot change the purpose of this service. Please add a service with another purpose.	修改介面不能改變此服務的用途，請新增另一用途的服務	インターフェイスを変更しても、このサービスの目的を変更することはできません。別の目的のサービスを追加してください。
 停止检查	停止检查	Stop checking	停止檢查	チェックを停止
-先粘贴视频链接	先粘贴视频链接	Paste a video link first	請先貼上影片連結	先に動画リンクを貼り付けてください
 先选择一个视频	先选择一个视频	Choose a video first	請先選擇影片	先に動画を選択してください
 全不选	全不选	Select none	全不選	何も選択しない
 全选	全选	Select all	全選	すべて選択
@@ -1445,7 +1444,7 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 管理本地识别模型 / Manage local speech models	管理本地识别模型 / Manage local speech models	Manage local speech models	管理本機語音辨識模型	ローカル音声認識モデルを管理
 管理模型与下载	管理模型与下载	Manage models and downloads	管理模型與下載	モデルとダウンロードを管理する
 管理配置文件 / Manage the configuration file	管理配置文件 / Manage the configuration file	Manage the configuration file	管理設定檔案	設定ファイルを管理
-粘贴 YouTube 或 Bilibili 视频链接	粘贴 YouTube 或 Bilibili 视频链接	Paste YouTube or Bilibili video link	貼上 YouTube 或 Bilibili 影片連結	YouTube または Bilibili 動画のリンクを貼り付けます
+YouTube 或 Bilibili 链接、BV 号或 AV 号	YouTube 或 Bilibili 链接、BV 号或 AV 号	YouTube or Bilibili link, BV ID, or AV ID	YouTube 或 Bilibili 連結、BV 號或 AV 號	YouTube・Bilibili のリンク、BV 番号、AV 番号
 粘贴链接或拖入视频	粘贴链接或拖入视频	Paste a link or drag in a video	貼上連結或拖入影片	リンクを貼り付けるか動画をドラッグ
 系统凭据库当前不可用，此服务的凭据可能保存在其中。请确认系统凭据服务已启动，或重新保存 API Key	系统凭据库当前不可用，此服务的凭据可能保存在其中。请确认系统凭据服务已启动，或重新保存 API Key	The system credential store is unavailable, and this service's credential may be saved there. Make sure the credential service is running, or save the API key again.	系統憑據庫目前無法使用，此服務的憑據可能儲存在其中。請確認系統憑據服務已啟動，或重新儲存 API Key	システムの資格情報ストアを利用できません。このサービスの資格情報はそこに保存されている可能性があります。資格情報サービスが起動していることを確認するか、API キーを保存し直してください。
 系统凭据库中找不到此服务的凭据，请重新保存 API Key	系统凭据库中找不到此服务的凭据，请重新保存 API Key	Credentials for this service were not found in the system credential store. Save the API key again.	系統憑證庫中找不到此服務的憑證，請重新儲存 API Key	このサービスの認証情報がシステム認証情報ストアに見つかりませんでした。API キーを再度保存してください。
@@ -1586,7 +1585,7 @@ Z 到 A	Z 到 A	Z to A	Z 到 A	Z から A
 请用哔哩哔哩 App 扫描二维码，并在手机上确认登录（Ctrl+C 取消）：/ Scan with the Bilibili app and confirm the login on your phone (Ctrl+C to cancel):	请用哔哩哔哩 App 扫描二维码，并在手机上确认登录（Ctrl+C 取消）：/ Scan with the Bilibili app and confirm the login on your phone (Ctrl+C to cancel):	Scan with the Bilibili app and confirm the login on your phone (Ctrl+C to cancel):	請用嗶哩嗶哩 App 掃描 QR 碼，並在手機上確認登入（Ctrl+C 取消）：/ Scan with the Bilibili app and confirm the login on your phone (Ctrl+C to cancel):	Bilibili アプリでスキャンし、携帯電話でログインを確認します (キャンセルするには Ctrl+C):
 请输入 API Key	请输入 API Key	Enter an API key	請輸入 API 金鑰	APIキーを入力してください
 请输入包含 http:// 或 https:// 的服务地址	请输入包含 http:// 或 https:// 的服务地址	Enter a service URL that includes http:// or https://	請輸入包含 http:// 或 https:// 的服務網址	http:// または https:// を含むサービスURLを入力してください
-请输入完整的视频链接，以 https:// 或 http:// 开头	请输入完整的视频链接，以 https:// 或 http:// 开头	Please enter the complete video link, starting with https:// or http://	請輸入完整的影片連結，以 https:// 或 http:// 開頭	https:// または http:// で始まる完全な動画リンクを入力してください。
+请输入视频链接（http:// 或 https://）、BV 号或 AV 号	请输入视频链接（http:// 或 https://）、BV 号或 AV 号	Enter a video link (http:// or https://), a BV ID, or an AV ID.	請輸入影片連結（http:// 或 https://）、BV 號或 AV 號	動画のリンク（http:// または https://）、BV 番号、AV 番号のいずれかを入力してください。
 请输入文件夹名称	请输入文件夹名称	Please enter a folder name	請輸入資料夾名稱	フォルダー名を入力してください
 请输入服务提供的模型 ID	请输入服务提供的模型 ID	Please enter the model ID provided by the service	請輸入服務提供的模型 ID	サービスから提供されたモデルIDを入力してください
 请输入笔记名称	请输入笔记名称	Please enter a note name	請輸入筆記名稱	ノート名を入力してください
