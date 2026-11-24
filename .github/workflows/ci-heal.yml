@@ -13,7 +13,7 @@ name: CI heal
 
 on:
   workflow_run:
-    workflows: ["ci", "native desktop", "Upstream port"]
+    workflows: ["ci", "native desktop", "Upstream port", "release"]
     types: [completed]
 
 permissions:
@@ -47,6 +47,7 @@ jobs:
           CI_WORKFLOWS: "ci,native desktop"
           PORT_WORKFLOW: "upstream-port.yml"
           PORT_BRANCH_INPUT: "true"
+          RELEASE_WORKFLOW: "release"
 
   fix:
     needs: triage
