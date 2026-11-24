@@ -229,7 +229,7 @@ pub fn validate_workbench_input(online: bool, input: &str) -> Result<(), Workben
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return Err(WorkbenchIssue::input(if online {
-            c2m_i18n::tr!("先粘贴视频链接")
+            c2m_i18n::tr!("请输入视频链接（http:// 或 https://）、BV 号或 AV 号")
         } else {
             c2m_i18n::tr!("先选择一个视频")
         }));
@@ -367,7 +367,7 @@ mod tests {
             preview_cancel: Some(preview.clone()),
             subtitle_cancel: Some(subtitles.clone()),
             subtitle_loading: true,
-            issue: Some(WorkbenchIssue::input("先粘贴视频链接")),
+            issue: Some(WorkbenchIssue::input("missing input")),
             ..Default::default()
         };
         assert!(session.reading());
@@ -385,7 +385,13 @@ mod tests {
             validate_workbench_input(true, "  ").unwrap_err().kind,
             WorkbenchIssueKind::Input
         );
-        assert!(validate_workbench_input(true, "https://www.bilibili.com/video/BV1xx").is_ok());
+        for input in [
+            "https://www.bilibili.com/video/BV1xx",
+            "BV1WCyGzqE3h",
+            "AV170001",
+        ] {
+            assert!(validate_workbench_input(true, input).is_ok(), "{input}");
+        }
         assert!(validate_workbench_input(true, "not a url").is_err());
 
         let dir = tempfile::tempdir().unwrap();

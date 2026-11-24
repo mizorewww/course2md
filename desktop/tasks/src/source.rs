@@ -421,19 +421,39 @@ pub fn pasted_local_path(input: &str) -> Option<PathBuf> {
 }
 
 pub fn validate_url(input: &str) -> Result<url::Url> {
-    let url = url::Url::parse(input).context(c2m_i18n::tr!(
-        "请输入完整的视频链接，以 https:// 或 http:// 开头"
-    ))?;
+    let message = c2m_i18n::tr!("请输入视频链接（http:// 或 https://）、BV 号或 AV 号");
+    let url = url::Url::parse(input).context(message)?;
     ensure!(
         matches!(url.scheme(), "http" | "https") && url.host_str().is_some(),
-        c2m_i18n::tr!("请输入完整的视频链接，以 https:// 或 http:// 开头")
+        message
     );
     Ok(url)
+}
+
+fn bilibili_video_url(input: &str) -> Option<String> {
+    let (prefix, id) = input.trim().split_at_checked(2)?;
+    let prefix = if prefix.eq_ignore_ascii_case("BV")
+        && id.len() == 10
+        && id.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    {
+        "BV"
+    } else if prefix.eq_ignore_ascii_case("av")
+        && !id.is_empty()
+        && id.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        "av"
+    } else {
+        return None;
+    };
+    Some(format!("https://www.bilibili.com/video/{prefix}{id}"))
 }
 
 /// Share text is data. Extract actual HTTP(S) links and require an explicit
 /// choice when more than one is present; never execute surrounding text.
 pub fn video_links(input: &str) -> Vec<String> {
+    if let Some(link) = bilibili_video_url(input) {
+        return vec![link];
+    }
     let mut links = Vec::new();
     for word in input.split_whitespace() {
         let mut rest = word;
@@ -1549,6 +1569,32 @@ mod tests {
             ("no link here", vec![]),
         ] {
             assert_eq!(video_links(input), expected, "{input}");
+        }
+    }
+
+    #[test]
+    fn standalone_bilibili_ids_resolve_to_video_links() {
+        let bv_url = "https://www.bilibili.com/video/BV1WCyGzqE3h";
+        let av_url = "https://www.bilibili.com/video/av170001";
+        for (input, expected) in [
+            ("BV1WCyGzqE3h", bv_url),
+            ("  bv1WCyGzqE3h\n", bv_url),
+            ("av170001", av_url),
+            (" AV170001 ", av_url),
+        ] {
+            assert_eq!(video_links(input), [expected], "{input}");
+        }
+        for input in [
+            "BV123",
+            "BV12345678901",
+            "BV123456789!",
+            "av",
+            "av12x",
+            "av１２",
+            "170001",
+            "see av170001",
+        ] {
+            assert!(video_links(input).is_empty(), "{input}");
         }
     }
 
