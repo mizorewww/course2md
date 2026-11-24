@@ -55,6 +55,13 @@ allow = [
     "Zlib",
 ]
 confidence-threshold = 0.9
+# Never compiled: rav1e depends on libfuzzer-sys only under cfg(fuzzing). rav1e comes in
+# through image's default AVIF encoder, which gpui-base 0.11's test-support feature
+# enables (the desktop's capture feature and dev-dependencies); nothing of it ships.
+# Goes when gpui-base takes image without default features.
+exceptions = [
+    { crate = "libfuzzer-sys", allow = ["NCSA"] },
+]
 
 [bans]
 multiple-versions = "warn"
