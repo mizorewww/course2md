@@ -50,7 +50,7 @@ gpui-kit = { version = "0.10.0", features = ["gpui-fast"] }
 gpui-base = "0.10.0"
 # Renovate moves this to each new gpui-kit-material release tag, and the automated port
 # (.github/upstream-port.md) moves every gpui-kit-material revision here to it.
-# gpui-kit-material release: material-v0.2.0
+# gpui-kit-material release: material-v0.3.0
 gpui-kit-material = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "f61ae0c1bc90934fd2b002c10533472ea59f778a", default-features = false, features = ["serde", "gpui-fast"] }
 gpui-kit-material-color = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "f61ae0c1bc90934fd2b002c10533472ea59f778a", features = ["serde"] }
 # The release gpui-kit-material depends on.
