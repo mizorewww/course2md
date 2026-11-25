@@ -16,12 +16,12 @@ use gpui_kit_material::{
     motion,
     prelude::{
         ButtonIconPosition, ButtonShape, ButtonSize, ButtonTone, ButtonVariant, CardVariant,
-        ConnectedButtonGroup, FilterChip, IconButton, IconButtonVariant, ListDensity, ListItem,
-        ListLeading, MaterialCard, MaterialMenu, MaterialMenuItem, MaterialSideSheet,
-        MaterialTooltip, NoticeKind, RADIUS_LARGE, RADIUS_SMALL, SearchField, SearchFieldStyle,
-        StatusKind, TEXT_AUX, TEXT_BODY, TILE_GAP, TILE_RADIUS, TileScale, Tint, TypeRole,
-        accessible_text, color, disclosure_chevron, list_corners, material_button, media_label,
-        notice_banner, progress, rem, spinner, status_chip, tile, tile_chevron, tinted_icon,
+        ConnectedButtonGroup, IconButton, IconButtonVariant, ListDensity, ListItem, ListLeading,
+        MaterialCard, MaterialMenu, MaterialMenuItem, MaterialSideSheet, MaterialTooltip,
+        NoticeKind, RADIUS_LARGE, RADIUS_SMALL, SearchField, SearchFieldStyle, StatusKind,
+        TEXT_AUX, TEXT_BODY, TILE_GAP, TILE_RADIUS, TileScale, Tint, TypeRole, accessible_text,
+        color, disclosure_chevron, list_corners, material_button, media_label, notice_banner,
+        progress, rem, spinner, status_chip, tile, tile_chevron, tinted_icon,
     },
     tokens::shape::OuterCorners,
 };
@@ -1482,8 +1482,6 @@ impl Desktop {
             ])
             .icon("cards", symbols::grid_view())
             .icon("list", symbols::list())
-            // The views are icons, named for assistive technology, so the toolbar's
-            // only colour is the one selected view.
             .labels(gpui_kit_material::components::GroupLabels::Never)
             .selected(if self.desktop_settings.library_cards {
                 "cards"
@@ -1505,29 +1503,36 @@ impl Desktop {
             .gap(rem(12.))
             .flex_wrap()
             .items_center()
+            .justify_between()
             .child(
-                div().flex_1().flex_basis(rem(280.)).min_w(rem(200.)).child(
-                    SearchField::new(&self.inputs[&Field::Search])
-                        .field_style(SearchFieldStyle::Tonal)
-                        .leading(Icon::from(symbols::search()))
-                        .when(!self.value(Field::Search, cx).is_empty(), |field| {
-                            field.trailing(
-                                IconButton::new(
-                                    "library-search-clear",
-                                    symbols::close(),
-                                    course2md::tr!("清除搜索"),
+                div()
+                    .flex_1()
+                    .flex_basis(rem(240.))
+                    .min_w(rem(200.))
+                    .max_w(rem(400.))
+                    .child(
+                        SearchField::new(&self.inputs[&Field::Search])
+                            .h(rem(40.))
+                            .field_style(SearchFieldStyle::Tonal)
+                            .leading(Icon::from(symbols::search()))
+                            .when(!self.value(Field::Search, cx).is_empty(), |field| {
+                                field.trailing(
+                                    IconButton::new(
+                                        "library-search-clear",
+                                        symbols::close(),
+                                        course2md::tr!("清除搜索"),
+                                    )
+                                    .on_click(cx.listener(
+                                        |this, _, window, cx| {
+                                            this.inputs[&Field::Search].update(cx, |state, cx| {
+                                                state.set_value("", window, cx)
+                                            });
+                                            cx.notify();
+                                        },
+                                    )),
                                 )
-                                .on_click(cx.listener(
-                                    |this, _, window, cx| {
-                                        this.inputs[&Field::Search].update(cx, |state, cx| {
-                                            state.set_value("", window, cx)
-                                        });
-                                        cx.notify();
-                                    },
-                                )),
-                            )
-                        }),
-                ),
+                            }),
+                    ),
             )
             .child(
                 h_flex()
@@ -1538,6 +1543,7 @@ impl Desktop {
                         row.child(
                             material_button("library-places", ButtonVariant::Tonal)
                                 .tone(ButtonTone::Neutral)
+                                .button_size(ButtonSize::Small)
                                 .icon(symbols::folder_open())
                                 .child(places)
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -1550,11 +1556,15 @@ impl Desktop {
                     // worth reading, not only finding under a tooltip.
                     .child(self.sort_menu(cx))
                     .child(
-                        FilterChip::new("library-group-folders", course2md::tr!("按文件夹分组"))
+                        material_button("library-group-folders", ButtonVariant::Tonal)
+                            .tone(ButtonTone::Neutral)
+                            .button_size(ButtonSize::Small)
                             .icon(symbols::account_tree())
+                            .child(course2md::tr!("按文件夹分组"))
+                            .toggle(true)
                             .selected(group_on && can_group)
                             .disabled(!can_group)
-                            .on_toggle(cx.listener(move |this, _: &bool, _, cx| {
+                            .on_click(cx.listener(move |this, _, _, cx| {
                                 this.desktop_settings.library_group_folders = !group_on;
                                 this.save_library_presentation(cx);
                             })),
@@ -1575,6 +1585,7 @@ impl Desktop {
                                 )
                                 .variant(IconButtonVariant::Tonal)
                                 .tone(ButtonTone::Neutral)
+                                .button_size(ButtonSize::Small)
                                 .disabled(self.library(cx).loading)
                                 .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx))),
                             ),
@@ -2328,6 +2339,7 @@ impl RenderOnce for SortMenu {
         };
         let trigger = material_button("library-sort-button", ButtonVariant::Tonal)
             .tone(ButtonTone::Neutral)
+            .button_size(ButtonSize::Small)
             .icon(icon)
             .child(label)
             .accessibility_label(spoken)
