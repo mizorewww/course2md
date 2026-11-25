@@ -15,6 +15,7 @@ mod exports_ui;
 mod folder_tree;
 mod i18n;
 mod import_ui;
+mod layout;
 mod library_ui;
 mod login_ui;
 mod ollama_ui;
@@ -1246,7 +1247,7 @@ fn main() {
                 focus: !capturing,
                 ..gpui_kit_material::components::title_bar_window_options(
                     "course2md",
-                    views::APP_BAR_HEIGHT,
+                    layout::APP_BAR_MIN_HEIGHT,
                     min_size,
                     cx,
                 )

@@ -5,7 +5,7 @@ use crate::folder_tree::{
     with_context_menu,
 };
 use crate::library_ui::{Moving, NameTarget};
-use crate::{symbols, ui};
+use crate::{layout, symbols, ui};
 use desktop_store::library::*;
 use desktop_store::order::{self, NoteFacts, Place, Sort, SortRule};
 use gpui_kit::component::scroll::Scrollbar;
@@ -15,20 +15,18 @@ use gpui_kit_material::{
     icons::{Icon, SymbolIcon},
     motion,
     prelude::{
-        ButtonIconPosition, ButtonShape, ButtonSize, ButtonTone, ButtonVariant, CardVariant,
-        ConnectedButtonGroup, IconButton, IconButtonVariant, ListDensity, ListItem, ListLeading,
-        MaterialCard, MaterialMenu, MaterialMenuItem, MaterialSideSheet, MaterialTooltip,
-        NoticeKind, RADIUS_LARGE, RADIUS_SMALL, SearchField, SearchFieldStyle, StatusKind,
-        TEXT_AUX, TEXT_BODY, TILE_GAP, TILE_RADIUS, TileScale, Tint, TypeRole, accessible_text,
-        color, disclosure_chevron, list_corners, material_button, media_label, notice_banner,
-        progress, rem, spinner, status_chip, tile, tile_chevron, tinted_icon,
+        ButtonIconPosition, ButtonTone, ButtonVariant, CardVariant, ConnectedButtonGroup,
+        IconButton, IconButtonVariant, ListDensity, ListItem, ListLeading, MaterialCard,
+        MaterialMenu, MaterialMenuItem, MaterialSideSheet, MaterialTooltip, NoticeKind,
+        RADIUS_LARGE, RADIUS_SMALL, SearchField, SearchFieldStyle, StatusKind, TEXT_AUX, TEXT_BODY,
+        TILE_GAP, TILE_RADIUS, TileScale, Tint, TypeRole, accessible_text, color,
+        disclosure_chevron, list_corners, material_button, media_label, notice_banner, progress,
+        rem, spinner, status_chip, tile, tile_chevron, tinted_icon,
     },
     tokens::shape::OuterCorners,
 };
 use std::sync::Arc;
 
-/// Space between note cards and between the rows of their grid.
-const GRID_GAP: f32 = 12.;
 /// A grid column is at least this wide; both scale with text.
 const CARD_MIN_WIDTH: f32 = 240.;
 /// The scrollbar's lane beside the notes, inside the page's gutter.
@@ -796,14 +794,13 @@ impl Desktop {
         let sidebar = controls && self.folder_sidebar_fits(window);
         let content = crate::views::shell_content_width(Page::Library, window)
             - if sidebar {
-                (crate::folder_tree::FOLDER_SIDEBAR + crate::folder_tree::FOLDER_SIDEBAR_GAP)
-                    * scale
+                (layout::SIDEBAR_WIDTH + layout::SIDEBAR_GAP) * scale
             } else {
                 0.
             };
         // Narrow windows always list notes.
         let columns = (self.desktop_settings.library_cards && content >= 528. * scale).then(|| {
-            let gap = GRID_GAP * scale;
+            let gap = layout::NOTE_GRID_GAP * scale;
             (((content + gap) / (CARD_MIN_WIDTH * scale + gap)).floor() as usize).max(1)
         });
         let (items, count) = self.library_items(columns, cx);
@@ -841,21 +838,25 @@ impl Desktop {
             .min_w_0()
             .h_full()
             .min_h_0()
-            .gap(rem(20.))
+            .gap(layout::LIBRARY_SECTION_SPACING)
             .child(self.library_header(count, cx))
             .children(controls.then(|| self.library_toolbar(sidebar, cx)))
             .child(notes);
         v_flex()
             .size_full()
             .min_h_0()
-            .pt(rem(16.))
+            .pt(layout::LIBRARY_SECTION_SPACING)
             .child(
                 h_flex()
+                    .relative()
                     .size_full()
                     .min_h_0()
                     .items_start()
-                    .gap(rem(crate::folder_tree::FOLDER_SIDEBAR_GAP))
-                    .when(sidebar, |page| page.child(self.folder_sidebar(cx)))
+                    .gap(rem(layout::SIDEBAR_GAP))
+                    .when(sidebar, |page| {
+                        page.child(self.folder_sidebar(cx))
+                            .child(layout::library_sidebar_divider())
+                    })
                     .child(pane),
             )
             .when(controls && !sidebar, |page| {
@@ -1185,9 +1186,9 @@ impl Desktop {
             .w_full()
             .min_w_0()
             .flex_shrink_0()
-            .gap(rem(16.))
+            .gap(layout::LIBRARY_SECTION_SPACING)
             .flex_wrap()
-            .items_center()
+            .items_start()
             .child(
                 v_flex()
                     .flex_1()
@@ -1202,9 +1203,8 @@ impl Desktop {
             .children(folder_commands)
             .when(self.library_controls_visible(cx), |row| {
                 row.child(
-                    material_button("library-new-note", ButtonVariant::Tonal)
-                        .button_size(ButtonSize::Medium)
-                        .shape(ButtonShape::Square)
+                    material_button("library-new-note", ButtonVariant::Filled)
+                        .button_size(layout::CONTROL_SIZE)
                         .icon(symbols::add())
                         .child(course2md::tr!("导入视频"))
                         .on_click(cx.listener(|this, _, window, cx| {
@@ -1402,7 +1402,7 @@ impl Desktop {
             _ if last => wrapper,
             LibraryItem::GroupHeader { .. } => wrapper.pb(rem(8.)),
             LibraryItem::Note { .. } => wrapper,
-            LibraryItem::Cards { .. } => wrapper.pb(rem(GRID_GAP)),
+            LibraryItem::Cards { .. } => wrapper.pb(rem(layout::NOTE_GRID_GAP)),
             _ => wrapper.pb(rem(24.)),
         };
         // A note's id follows the note, not its row, so the control holding focus
@@ -1488,7 +1488,7 @@ impl Desktop {
             } else {
                 "list"
             })
-            .button_size(ButtonSize::Small)
+            .button_size(layout::CONTROL_SIZE)
             .on_change(move |value, _, cx| {
                 let cards = value.as_ref() == "cards";
                 let _ = desktop.update(cx, |this, cx| {
@@ -1500,7 +1500,7 @@ impl Desktop {
             .w_full()
             .min_w_0()
             .flex_shrink_0()
-            .gap(rem(12.))
+            .gap(layout::CONTROL_SPACING)
             .flex_wrap()
             .items_center()
             .justify_between()
@@ -1512,7 +1512,7 @@ impl Desktop {
                     .max_w(rem(400.))
                     .child(
                         SearchField::new(&self.inputs[&Field::Search])
-                            .h(rem(40.))
+                            .h(layout::CONTROL_HEIGHT)
                             .field_style(SearchFieldStyle::Tonal)
                             .leading(Icon::from(symbols::search()))
                             .when(!self.value(Field::Search, cx).is_empty(), |field| {
@@ -1522,6 +1522,7 @@ impl Desktop {
                                         symbols::close(),
                                         course2md::tr!("清除搜索"),
                                     )
+                                    .button_size(layout::CONTROL_SIZE)
                                     .on_click(cx.listener(
                                         |this, _, window, cx| {
                                             this.inputs[&Field::Search].update(cx, |state, cx| {
@@ -1536,14 +1537,14 @@ impl Desktop {
             )
             .child(
                 h_flex()
-                    .gap(rem(12.))
+                    .gap(layout::CONTROL_SPACING)
                     .flex_wrap()
                     .items_center()
                     .when(!sidebar, |row| {
                         row.child(
                             material_button("library-places", ButtonVariant::Tonal)
                                 .tone(ButtonTone::Neutral)
-                                .button_size(ButtonSize::Small)
+                                .button_size(layout::CONTROL_SIZE)
                                 .icon(symbols::folder_open())
                                 .child(places)
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -1558,7 +1559,7 @@ impl Desktop {
                     .child(
                         material_button("library-group-folders", ButtonVariant::Tonal)
                             .tone(ButtonTone::Neutral)
-                            .button_size(ButtonSize::Small)
+                            .button_size(layout::CONTROL_SIZE)
                             .icon(symbols::account_tree())
                             .child(course2md::tr!("按文件夹分组"))
                             .toggle(true)
@@ -1572,24 +1573,30 @@ impl Desktop {
                     // How the notes are shown and reading them again: one group of
                     // icon actions at the toolbar's end.
                     .child(
-                        h_flex().gap(rem(4.)).items_center().child(view).child(
-                            MaterialTooltip::plain(
-                                "library-rescan-tip",
-                                course2md::tr!("重新扫描笔记库"),
-                            )
-                            .trigger(
-                                IconButton::new(
-                                    "library-rescan",
-                                    symbols::refresh(),
+                        h_flex()
+                            .gap(layout::CONTROL_CLUSTER_SPACING)
+                            .items_center()
+                            .child(view)
+                            .child(
+                                MaterialTooltip::plain(
+                                    "library-rescan-tip",
                                     course2md::tr!("重新扫描笔记库"),
                                 )
-                                .variant(IconButtonVariant::Tonal)
-                                .tone(ButtonTone::Neutral)
-                                .button_size(ButtonSize::Small)
-                                .disabled(self.library(cx).loading)
-                                .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx))),
+                                .trigger(
+                                    IconButton::new(
+                                        "library-rescan",
+                                        symbols::refresh(),
+                                        course2md::tr!("重新扫描笔记库"),
+                                    )
+                                    .variant(IconButtonVariant::Tonal)
+                                    .tone(ButtonTone::Neutral)
+                                    .button_size(layout::CONTROL_SIZE)
+                                    .disabled(self.library(cx).loading)
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.refresh_library(cx)),
+                                    ),
+                                ),
                             ),
-                        ),
                     ),
             )
     }
@@ -1731,7 +1738,7 @@ impl Desktop {
     ) -> Div {
         let rows = v_flex().w_full();
         match columns {
-            Some(columns) => rows.gap(rem(GRID_GAP)).children(
+            Some(columns) => rows.gap(rem(layout::NOTE_GRID_GAP)).children(
                 courses
                     .chunks(columns)
                     .map(|row| self.note_grid_row(row, columns, cx)),
@@ -1751,7 +1758,7 @@ impl Desktop {
             .grid()
             .grid_cols(columns as u16)
             .w_full()
-            .gap(rem(GRID_GAP))
+            .gap(rem(layout::NOTE_GRID_GAP))
             .children(row.iter().filter_map(|index| {
                 let course = self.library(cx).courses.get(*index)?.clone();
                 Some(self.note_card(&course, *index, cx))
@@ -1773,8 +1780,6 @@ impl Desktop {
     /// The note grid's card: a 16:9 cover above the title, metadata and commands.
     fn note_card(&self, course: &Rc<Course>, index: usize, cx: &mut Context<Self>) -> AnyElement {
         let scale = TileScale::Compact;
-        let card_inset = rem(10.);
-        let footer_inset = rem(4.);
         let commands = self.note_commands(course, cx);
         let open = course.clone();
         let cover = cover(course.thumbnail.clone(), symbols::description())
@@ -1795,12 +1800,14 @@ impl Desktop {
             .id(("note-card-action", index))
             .flex_shrink_0()
             .items_center()
+            .mr(-layout::NOTE_CARD_ACTION_OFFSET)
+            .mb(-layout::NOTE_CARD_ACTION_OFFSET)
             .on_click(|_, _, cx| cx.stop_propagation())
             .child(self.note_commands_button(course, index, false, cx));
         let footer = v_flex()
             .min_h(scale.label_line_height() * 2. + scale.support_line_height() + rem(2.))
             .justify_end()
-            .px(footer_inset)
+            .px(layout::NOTE_CARD_TEXT_INSET)
             .child(
                 h_flex()
                     .items_end()
@@ -1824,8 +1831,8 @@ impl Desktop {
                 v_flex()
                     .w_full()
                     .min_w_0()
-                    .p(card_inset)
-                    .pb(card_inset + footer_inset)
+                    .p(layout::NOTE_CARD_INSET)
+                    .pb(layout::NOTE_CARD_INSET + layout::NOTE_CARD_TEXT_INSET)
                     .gap(rem(12.))
                     .child(cover)
                     .child(footer),
@@ -2339,7 +2346,7 @@ impl RenderOnce for SortMenu {
         };
         let trigger = material_button("library-sort-button", ButtonVariant::Tonal)
             .tone(ButtonTone::Neutral)
-            .button_size(ButtonSize::Small)
+            .button_size(layout::CONTROL_SIZE)
             .icon(icon)
             .child(label)
             .accessibility_label(spoken)

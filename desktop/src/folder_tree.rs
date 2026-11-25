@@ -3,27 +3,20 @@
 //! dragging onto a folder or through the same commands on right-click.
 use super::*;
 use crate::library_ui::Moving;
-use crate::symbols;
+use crate::{layout, symbols};
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit_material::components::MaterialContextMenu;
 use gpui_kit_material::{
     color::ColorRole,
     icons::{Icon, SymbolIcon},
     prelude::{
-        AssistChip, ButtonSize, ButtonVariant, IconButton, ListDensity, ListItem, ListLeading,
-        ListTrailing, MaterialMenu, MaterialMenuItem, color, material_button, rem, section_title,
+        AssistChip, ButtonSize, ButtonVariant, IconButton, ListItem, ListLeading, ListTrailing,
+        MaterialMenu, MaterialMenuItem, color, material_button, rem, section_title,
     },
     tokens::shape::RADIUS_CARD,
 };
 use std::{collections::HashMap, path::Path, sync::Arc};
 
-/// Width of the folder navigation beside the notes.
-pub(crate) const FOLDER_SIDEBAR: f32 = 256.;
-/// Space between the folder navigation and the notes.
-pub(crate) const FOLDER_SIDEBAR_GAP: f32 = 32.;
-/// Below this content width (navigation, gap and a note column) the navigation
-/// moves into a sheet opened from the toolbar.
-const FOLDER_SIDEBAR_MIN_CONTENT: f32 = 832.;
 /// Nested folders step in by this much per level.
 const TREE_INDENT: f32 = 12.;
 
@@ -285,7 +278,7 @@ impl Desktop {
     pub(crate) fn folder_sidebar_fits(&self, window: &Window) -> bool {
         let scale = f32::from(window.rem_size()) / 14.;
         crate::views::shell_content_width(Page::Library, window)
-            >= FOLDER_SIDEBAR_MIN_CONTENT * scale
+            >= layout::SIDEBAR_MIN_CONTENT * scale
     }
 
     fn selected_target(&self, cx: &App) -> TreeTarget {
@@ -642,9 +635,8 @@ impl Desktop {
             TreeTarget::Folder(root, id) => (Some(root.clone()), Some(*id)),
         };
         let id = folder.unwrap_or(0);
-        // A sidebar row is 44 tall, as before the migration (L1).
         let item = ListItem::new(SharedString::from(key.clone()), label.clone())
-            .density(ListDensity::Minus3)
+            .density(layout::SIDEBAR_DENSITY)
             .leading(ListLeading::Icon(icon.into()))
             .container(ground)
             // A sidebar destination's selection is a pill (L1).
@@ -764,7 +756,7 @@ impl Desktop {
                 commands,
             ),
             ListItem::new("library-header", name)
-                .density(ListDensity::Compact)
+                .density(layout::SIDEBAR_DENSITY)
                 .container(ground)
                 .segment([true; 4])
                 .leading(ListLeading::Icon(symbols::database().into()))
@@ -779,7 +771,7 @@ impl Desktop {
                 .on_click(cx.listener(move |this, _, _, cx| this.toggle_tree_node(&toggle, 0, cx))),
         )
         .w_full()
-        .mt(rem(8.))
+        .mt(layout::RELATED_SPACING)
     }
 
     /// The folder navigation: every note, each library's unfiled notes and its
@@ -849,8 +841,8 @@ impl Desktop {
             if !several && !library.folders.is_empty() {
                 tree = tree.child(
                     section_title("folder-tree-folders", course2md::tr!("文件夹"))
-                        .pt(rem(8.))
-                        .pl(rem(16.)),
+                        .pt(layout::RELATED_SPACING)
+                        .pl(layout::LIBRARY_SECTION_SPACING),
                 );
             }
             // A closed folder hides everything deeper than itself.
@@ -897,22 +889,28 @@ impl Desktop {
             self.library(cx).root.clone(),
             self.library(cx).folder_filter.folder_id(),
         );
-        v_flex().w_full().min_w_0().gap(rem(8.)).child(tree).child(
-            material_button("folder-tree-new", ButtonVariant::Text)
-                .self_start()
-                .icon(symbols::add())
-                .child(course2md::tr!("新建文件夹"))
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.begin_folder_at(create_root.clone(), None, create_parent, window, cx)
-                })),
-        )
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(layout::RELATED_SPACING)
+            .child(tree)
+            .child(
+                material_button("folder-tree-new", ButtonVariant::Text)
+                    .button_size(layout::CONTROL_SIZE)
+                    .self_start()
+                    .icon(symbols::add())
+                    .child(course2md::tr!("新建文件夹"))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.begin_folder_at(create_root.clone(), None, create_parent, window, cx)
+                    })),
+            )
     }
 
     /// The navigation beside the notes, scrolling on its own.
     pub(crate) fn folder_sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
         div()
             .relative()
-            .w(rem(FOLDER_SIDEBAR))
+            .w(rem(layout::SIDEBAR_WIDTH))
             .flex_shrink_0()
             .h_full()
             .min_h_0()

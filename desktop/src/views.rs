@@ -1,34 +1,28 @@
 //! Native pages: stable navigation and actions surround independently scrolling content.
 use super::*;
-use crate::symbols;
+use crate::{layout, symbols};
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit_material::{
     color::{ColorRole, Scheme},
     components::{
-        Badge, ButtonTone, ButtonVariant, CaptionLabels, MaterialTooltip, NoticeKind, Snackbar,
-        SnackbarDuration, SnackbarPosition, TitleBar as AppBar, material_button, notice_banner,
-        spinner, title_bar_control,
+        Badge, ButtonTone, ButtonVariant, Caption, CaptionLabels, MaterialTooltip, NoticeKind,
+        Snackbar, SnackbarDuration, SnackbarPosition, TitleBar as AppBar, material_button,
+        notice_banner, spinner, title_bar_control, title_bar_room,
     },
     icons::SymbolIcon,
     motion,
-    prelude::{ButtonSize, CaptionButtons, accessible_text, color, is_compact, rem},
+    prelude::{CaptionButtons, accessible_text, color, is_compact, rem},
     theme::{advance_component_theme, init_component_theme, system_dark},
 };
 
-const SHELL_GUTTER: f32 = 24.;
 const SETTINGS_SHELL_WIDTH: f32 = 1108.;
 
-/// The height the window opens for: the traffic lights sit centred on it.
-pub(crate) const APP_BAR_HEIGHT: Pixels = px(56.);
-
-/// Where the title bar's content starts, after the macOS traffic lights.
-pub(crate) fn title_bar_leading(window: &Window) -> f32 {
-    gpui_kit_material::components::title_bar_leading(APP_BAR_HEIGHT, window)
-}
-
-/// Where the title bar's content ends, before any caption buttons.
-pub(crate) fn title_bar_trailing(window: &Window) -> f32 {
-    CaptionButtons::trailing(window)
+fn app_bar_caption(window: &Window) -> Caption {
+    #[cfg(feature = "capture")]
+    if let Some(caption) = crate::capture::caption_override() {
+        return caption;
+    }
+    Caption::detect(window)
 }
 
 /// The window's title bar on the page's ground. It moves the window and draws what
@@ -36,7 +30,7 @@ pub(crate) fn title_bar_trailing(window: &Window) -> f32 {
 /// presses. The Linux close button asks first, as the window manager's close does.
 pub(crate) fn app_bar(height: Pixels, window: &Window, cx: &mut Context<Desktop>) -> AppBar {
     let view = cx.weak_entity();
-    let bar = AppBar::new(
+    AppBar::new(
         "app-bar",
         height,
         CaptionLabels {
@@ -46,21 +40,13 @@ pub(crate) fn app_bar(height: Pixels, window: &Window, cx: &mut Context<Desktop>
             close: course2md::tr!("关闭").into(),
         },
     )
+    .caption(app_bar_caption(window))
     .w_full()
     .bg(color(ColorRole::SURFACE_CONTAINER))
     .on_close(move |_, cx| {
         view.update(cx, |this, cx| this.request_close(cx))
             .unwrap_or(true)
-    });
-    // A capture can ask for another platform's caption buttons.
-    #[cfg(feature = "capture")]
-    let bar = bar.caption(
-        crate::capture::caption_override()
-            .unwrap_or_else(|| gpui_kit_material::components::Caption::detect(window)),
-    );
-    #[cfg(not(feature = "capture"))]
-    let _ = window;
-    bar
+    })
 }
 
 /// The course2md mark, with the wordmark when there is room.
@@ -116,7 +102,7 @@ fn nav_destination(
             } else {
                 ButtonTone::Neutral
             })
-            .button_size(ButtonSize::Small)
+            .button_size(layout::CONTROL_SIZE)
             .icon(icon)
             .accessibility_label(label.clone())
             .children(shown)
@@ -161,10 +147,10 @@ fn shell_column_width(page: Page) -> AbsoluteLength {
     match page {
         // Each task gets a useful content width: a gallery needs room for covers.
         Page::Settings => rems(SETTINGS_SHELL_WIDTH / 14.).into(),
-        Page::Library => rems(1280. / 14.).into(),
+        Page::Library => rem(layout::LIBRARY_WIDTH).into(),
         Page::New => rems(1200. / 14.).into(),
         // Tasks read at home's column, centred on the same axis.
-        Page::Task => rems((760. + SHELL_GUTTER * 2.) / 14.).into(),
+        Page::Task => rems((760. + layout::SHELL_GUTTER * 2.) / 14.).into(),
         // Sections set the screenshot beside the text, as on the canvas.
         Page::Result => rems(1180. / 14.).into(),
     }
@@ -176,7 +162,7 @@ pub(super) fn shell_content_width(page: Page, window: &Window) -> f32 {
     let gutter = if matches!(page, Page::New | Page::Settings) && is_compact(window) {
         16.
     } else {
-        SHELL_GUTTER
+        layout::SHELL_GUTTER
     };
     (width.min(f32::from(
         shell_column_width(page).to_pixels(window.rem_size()),
@@ -198,11 +184,13 @@ enum AppBarDensity {
 /// The fullest app bar that fits, measured from the shaped text at the current scale:
 /// the brand, each destination, the gaps, and a little open space. `tasks` is the task
 /// destination's label and its count, when it is shown.
-fn app_bar_density(tasks: Option<(&str, Option<&str>)>, window: &Window) -> AppBarDensity {
+fn app_bar_density(
+    tasks: Option<(&str, Option<&str>)>,
+    available: f32,
+    window: &Window,
+) -> AppBarDensity {
     let scaled = |value: f32| value * f32::from(window.rem_size()) / 14.;
-    let available = f32::from(window.viewport_size().width)
-        - title_bar_leading(window)
-        - title_bar_trailing(window);
+    let gap = f32::from(layout::CONTROL_CLUSTER_SPACING.to_pixels(window.rem_size()));
     let fits = |density: AppBarDensity| {
         let brand = match density {
             AppBarDensity::Mark => scaled(4. + 32. + 4.),
@@ -219,7 +207,7 @@ fn app_bar_density(tasks: Option<(&str, Option<&str>)>, window: &Window) -> AppB
         ]
         .into_iter()
         .flatten()
-        .map(|shown| nav_destination_width(shown, window) + 4.)
+        .map(|shown| nav_destination_width(shown, window) + gap)
         .sum::<f32>();
         brand + destinations + scaled(24.) <= available
     };
@@ -235,7 +223,7 @@ fn shell_column_at(width: AbsoluteLength) -> Div {
         .min_w_0()
         .max_w(width)
         .mx_auto()
-        .px(px(SHELL_GUTTER))
+        .px(px(layout::SHELL_GUTTER))
 }
 
 impl Desktop {
@@ -246,22 +234,22 @@ impl Desktop {
                 desktop_tasks::task_view::task_navigation_summary(&workspace.state.tasks)
             });
         let page = self.page;
+        let height = title_bar_height(window);
         let bar = h_flex()
             .flex_1()
             .min_w_0()
             .h_full()
-            .gap(px(4.))
+            .gap(layout::CONTROL_CLUSTER_SPACING)
             .items_center();
         if page == Page::Settings {
             // Settings is a place of its own: window controls and dragging only; the way
             // back and its title lead its navigation pane instead.
-            return app_bar(title_bar_height(window), window, cx).child(bar);
+            return app_bar(height, window, cx).child(bar);
         }
         if page == Page::Result {
             // The reader draws its own part, so the shell does not read it. Drawn cached:
             // it is built again when it, the reader, the records or the exports change,
             // not with every repaint of a task's progress in the shell around it.
-            let height = title_bar_height(window);
             return app_bar(height, window, cx).child(
                 self.reader_bar.clone().cached(
                     StyleRefinement::default()
@@ -284,11 +272,23 @@ impl Desktop {
         };
         let task_count_text = (task_count > 0).then(|| task_count.to_string());
         let show_tasks = has_any_tasks || tasks_need_attention || page == Page::Task;
+        let width = window.viewport_size().width;
+        let caption = app_bar_caption(window);
+        let room = f32::from(title_bar_room(width, height, Some(caption), window));
+        let (start, end) = if page == Page::Library {
+            let edge = (f32::from(width) - shell_content_width(page, window)) / 2.;
+            let trailing = CaptionButtons::trailing_for_style(caption, window);
+            let leading = f32::from(width) - room - trailing;
+            ((edge - leading).max(0.), (edge - trailing).max(0.))
+        } else {
+            (0., 0.)
+        };
         // Destinations keep their labels; once the bar, measured with the
         // current text, cannot hold them, every destination becomes its icon
         // (the label as its tooltip), and then the wordmark goes.
         let density = app_bar_density(
             show_tasks.then_some((task_label.as_str(), task_count_text.as_deref())),
+            room - start - end,
             window,
         );
         let labels = density == AppBarDensity::Labels;
@@ -296,7 +296,7 @@ impl Desktop {
         let shown = |label: &str| labels.then(|| SharedString::from(label.to_owned()));
         let home_button = title_bar_control(
             material_button("nav-home", ButtonVariant::Text)
-                .button_size(ButtonSize::Small)
+                .button_size(layout::CONTROL_SIZE)
                 .px(rem(4.))
                 .pr(rem(if wordmark { 12. } else { 4. }))
                 .accessibility_label(course2md::tr!("主页"))
@@ -356,8 +356,10 @@ impl Desktop {
             cx.listener(|this, _, window, cx| this.open_settings(window, cx)),
         );
         // The bar between them stays a place to move the window from.
-        app_bar(title_bar_height(window), window, cx).child(
-            bar.child(home)
+        app_bar(height, window, cx).child(
+            bar.pl(px(start))
+                .pr(px(end))
+                .child(home)
                 .child(div().flex_1())
                 .child(library)
                 .children(tasks)
@@ -619,6 +621,7 @@ impl Render for Desktop {
             .text_color(color(ColorRole::ON_SURFACE))
             .text_size(rems(1.))
             .child(topbar)
+            .children((self.page == Page::Library).then(layout::library_app_bar_divider))
             .child(body);
         crate::clipboard::intercept_view_copies(div().id("desktop-action-root"))
             .relative()

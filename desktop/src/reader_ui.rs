@@ -722,7 +722,8 @@ const SEARCH_MAX_WIDTH: Rems = rem(560.);
 
 /// The shared app bar height at this rem size, with native button clearance.
 pub(crate) fn title_bar_height_for_rem(rem_size: Pixels) -> Pixels {
-    (rem(40.).to_pixels(rem_size) + px(16.)).max(crate::views::APP_BAR_HEIGHT)
+    (crate::layout::CONTROL_HEIGHT.to_pixels(rem_size) + crate::layout::APP_BAR_VERTICAL_SPACE)
+        .max(crate::layout::APP_BAR_MIN_HEIGHT)
 }
 
 impl ReaderMetrics {
@@ -4692,7 +4693,7 @@ mod tests {
     #[test]
     fn the_screenshot_viewer_header_starts_below_the_window_buttons() {
         use gpui_kit_material::components::traffic_light_position;
-        let lights = traffic_light_position(crate::views::APP_BAR_HEIGHT);
+        let lights = traffic_light_position(crate::layout::APP_BAR_MIN_HEIGHT);
         for scale in [0.75, 1., 2.] {
             let rem_size = px(gpui_kit_material::tokens::typography::BASE_PX * scale);
             let row = super::title_bar_height_for_rem(rem_size);
