@@ -7830,9 +7830,9 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "slide-detect"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ef3e41f563c9ba7eaeca2581a8c7a80b28baa5cc4cce7dbafbbf19a8992e88d"
+checksum = "34da3c77ba476e73a71e601ba7cba6553261466ba24eb672ba4c9edd6d13f8b1"
 dependencies = [
  "image",
  "image-compare",
