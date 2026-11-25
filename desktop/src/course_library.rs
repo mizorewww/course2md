@@ -15,9 +15,9 @@ use gpui_kit_material::{
     icons::{Icon, SymbolIcon},
     motion,
     prelude::{
-        ButtonIconPosition, ButtonShape, ButtonSize, ButtonTone, ButtonVariant, CONTROL_HEIGHT,
-        CardVariant, ConnectedButtonGroup, FilterChip, IconButton, IconButtonVariant, ListDensity,
-        ListItem, ListLeading, MaterialCard, MaterialMenu, MaterialMenuItem, MaterialSideSheet,
+        ButtonIconPosition, ButtonSize, ButtonTone, ButtonVariant, CONTROL_HEIGHT, CardVariant,
+        ConnectedButtonGroup, FilterChip, IconButton, IconButtonVariant, ListDensity, ListItem,
+        ListLeading, MaterialCard, MaterialMenu, MaterialMenuItem, MaterialSideSheet,
         MaterialTooltip, NoticeKind, RADIUS_LARGE, RADIUS_SMALL, SearchField, SearchFieldDensity,
         SearchFieldStyle, StatusKind, TEXT_AUX, TEXT_BODY, TILE_GAP, TILE_RADIUS, TileScale, Tint,
         TypeRole, accessible_text, color, disclosure_chevron, list_corners, material_button,
@@ -1205,7 +1205,6 @@ impl Desktop {
                 row.child(
                     material_button("library-new-note", ButtonVariant::Tonal)
                         .button_size(ButtonSize::Medium)
-                        .shape(ButtonShape::Square)
                         .icon(symbols::add())
                         .child(course2md::tr!("导入视频"))
                         .on_click(cx.listener(|this, _, window, cx| {
