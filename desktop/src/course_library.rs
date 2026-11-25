@@ -1759,8 +1759,7 @@ impl Desktop {
             .map(|(kind, label)| status_chip(kind).child(label))
     }
 
-    /// The note grid's card: a 16:9 cover carrying the note's status and commands,
-    /// then the title and its line. The card is one action: reading the note.
+    /// The note grid's card: a 16:9 cover above the title, metadata and commands.
     fn note_card(&self, course: &Rc<Course>, index: usize, cx: &mut Context<Self>) -> AnyElement {
         let scale = TileScale::Compact;
         let commands = self.note_commands(course, cx);
@@ -1771,7 +1770,41 @@ impl Desktop {
                 self.note_status(course, cx)
                     .map(|status| div().absolute().left(rem(8.)).top(rem(8.)).child(status)),
             );
+        let title = scale
+            .label(("note-card-title", index), course.title.clone())
+            .whitespace_normal()
+            .line_clamp(2)
+            .text_ellipsis();
+        let metadata = scale
+            .support(("note-card-meta", index), self.note_line(course, true, cx))
+            .truncate();
+        let action = h_flex()
+            .id(("note-card-action", index))
+            .h(scale.label_line_height())
+            .flex_shrink_0()
+            .items_center()
+            .on_click(|_, _, cx| cx.stop_propagation())
+            .child(self.note_commands_button(course, index, false, cx));
+        let footer = v_flex()
+            .min_h(scale.label_line_height() * 2. + scale.support_line_height() + rem(2.))
+            .justify_end()
+            .px(rem(4.))
+            .child(
+                h_flex()
+                    .items_start()
+                    .gap(rem(4.))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap(rem(2.))
+                            .child(title)
+                            .child(metadata),
+                    )
+                    .child(action),
+            );
         let card = MaterialCard::new(("note-card", index), CardVariant::Surface)
+            .rounded(TILE_RADIUS)
             .accessibility_label(course2md::tr!("阅读 {}", course.title))
             .on_click(cx.listener(move |this, _, _, cx| this.open_course(open.clone(), cx)))
             .w_full()
@@ -1783,30 +1816,7 @@ impl Desktop {
                     .pb(rem(14.))
                     .gap(rem(12.))
                     .child(cover)
-                    .child(
-                        v_flex()
-                            .w_full()
-                            .min_w_0()
-                            .gap(rem(2.))
-                            .px(rem(4.))
-                            .child(
-                                scale
-                                    .label(("note-card-title", index), course.title.clone())
-                                    .pr(rem(36.))
-                                    // Room for two lines, so a row's cards end together.
-                                    .whitespace_normal()
-                                    .line_clamp(2)
-                                    .text_ellipsis(),
-                            )
-                            .child(
-                                scale
-                                    .support(
-                                        ("note-card-meta", index),
-                                        self.note_line(course, true, cx),
-                                    )
-                                    .truncate(),
-                            ),
-                    ),
+                    .child(footer),
             );
         v_flex()
             .id(("note", index))
@@ -1814,27 +1824,17 @@ impl Desktop {
             .min_w_0()
             .gap(rem(4.))
             .child(
-                div()
-                    .relative()
-                    .w_full()
-                    .min_w_0()
-                    .child(with_context_menu(
-                        ("note-card-scope", index),
-                        command_context_menu(
-                            ("note-card-context", index),
-                            Some(COMMAND_MENU_WIDTH),
-                            commands,
-                        ),
-                        card,
-                    ))
-                    .child(
-                        // Placed beside the title row rather than bottom-right over metadata.
-                        div()
-                            .absolute()
-                            .bottom(rem(30.))
-                            .right(rem(6.))
-                            .child(self.note_commands_button(course, index, false, cx)),
+                with_context_menu(
+                    ("note-card-scope", index),
+                    command_context_menu(
+                        ("note-card-context", index),
+                        Some(COMMAND_MENU_WIDTH),
+                        commands,
                     ),
+                    card,
+                )
+                .w_full()
+                .min_w_0(),
             )
             .children(self.course_read_error(course, index, cx))
             .children(
