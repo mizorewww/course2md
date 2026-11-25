@@ -1192,14 +1192,17 @@ pub(crate) fn secondary_binding<A: gpui::Action>(
 
 fn main() {
     validation::init_validation_diagnostics();
+    let capturing = cfg!(feature = "capture") && std::env::var_os("COURSE2MD_CAPTURE").is_some();
     let app = gpui_kit::application().with_assets(symbols::Assets);
-    app.on_reopen(|cx| {
-        cx.activate(true);
-        for handle in cx.windows() {
-            let _ = cx.update_window(handle, |_, window, _| window.activate_window());
-        }
-    });
-    app.run(|cx| {
+    if !capturing {
+        app.on_reopen(|cx| {
+            cx.activate(true);
+            for handle in cx.windows() {
+                let _ = cx.update_window(handle, |_, window, _| window.activate_window());
+            }
+        });
+    }
+    app.run(move |cx| {
         symbols::register_fonts(cx);
         gpui_kit::init(cx);
         gpui_kit_material::init(cx);
@@ -1239,6 +1242,8 @@ fn main() {
             WindowOptions {
                 window_bounds: Some(window_bounds),
                 window_min_size: Some(min_size),
+                show: !capturing,
+                focus: !capturing,
                 ..gpui_kit_material::components::title_bar_window_options(
                     "course2md",
                     views::APP_BAR_HEIGHT,
@@ -1325,7 +1330,9 @@ fn main() {
             secondary_binding("secondary-f", SearchContent, None, cx),
         ]);
         install_menus(cx);
-        cx.activate(true);
+        if !capturing {
+            cx.activate(true);
+        }
     });
 }
 
