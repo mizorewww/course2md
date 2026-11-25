@@ -15,7 +15,7 @@ use gpui_kit_material::{
     icons::{Icon, SymbolIcon},
     motion,
     prelude::{
-        ButtonIconPosition, ButtonShape, ButtonSize, ButtonTone, ButtonVariant, CardVariant,
+        ButtonIconPosition, ButtonSize, ButtonTone, ButtonVariant, CONTROL_HEIGHT, CardVariant,
         ConnectedButtonGroup, FilterChip, IconButton, IconButtonVariant, ListDensity, ListItem,
         ListLeading, MaterialCard, MaterialMenu, MaterialMenuItem, MaterialSideSheet,
         MaterialTooltip, NoticeKind, RADIUS_LARGE, RADIUS_SMALL, SearchField, SearchFieldStyle,
@@ -1204,7 +1204,6 @@ impl Desktop {
                 row.child(
                     material_button("library-new-note", ButtonVariant::Tonal)
                         .button_size(ButtonSize::Medium)
-                        .shape(ButtonShape::Square)
                         .icon(symbols::add())
                         .child(course2md::tr!("导入视频"))
                         .on_click(cx.listener(|this, _, window, cx| {
@@ -1771,7 +1770,36 @@ impl Desktop {
                 self.note_status(course, cx)
                     .map(|status| div().absolute().left(rem(8.)).top(rem(8.)).child(status)),
             );
+        let action_inset = (CONTROL_HEIGHT - scale.label_line_height()) / 2.;
+        let title_row = h_flex()
+            .w_full()
+            .min_w_0()
+            .items_start()
+            .gap(rem(4.))
+            .child(
+                scale
+                    .label(("note-card-title", index), course.title.clone())
+                    .flex_1()
+                    .min_w_0()
+                    // Room for two lines, so a row's cards end together.
+                    .min_h(scale.label_line_height() * 2.)
+                    .whitespace_normal()
+                    .line_clamp(2)
+                    .text_ellipsis(),
+            )
+            .child(
+                div()
+                    .id(("note-card-action", index))
+                    .flex_shrink_0()
+                    .mt(-action_inset)
+                    .mb(-action_inset)
+                    .mr(-rem(8.))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .child(self.note_commands_button(course, index, false, cx)),
+            );
         let card = MaterialCard::new(("note-card", index), CardVariant::Surface)
+            .rounded(TILE_RADIUS)
             .accessibility_label(course2md::tr!("阅读 {}", course.title))
             .on_click(cx.listener(move |this, _, _, cx| this.open_course(open.clone(), cx)))
             .w_full()
@@ -1789,15 +1817,7 @@ impl Desktop {
                             .min_w_0()
                             .gap(rem(2.))
                             .px(rem(4.))
-                            .child(
-                                scale
-                                    .label(("note-card-title", index), course.title.clone())
-                                    .pr(rem(36.))
-                                    // Room for two lines, so a row's cards end together.
-                                    .whitespace_normal()
-                                    .line_clamp(2)
-                                    .text_ellipsis(),
-                            )
+                            .child(title_row)
                             .child(
                                 scale
                                     .support(
@@ -1814,27 +1834,17 @@ impl Desktop {
             .min_w_0()
             .gap(rem(4.))
             .child(
-                div()
-                    .relative()
-                    .w_full()
-                    .min_w_0()
-                    .child(with_context_menu(
-                        ("note-card-scope", index),
-                        command_context_menu(
-                            ("note-card-context", index),
-                            Some(COMMAND_MENU_WIDTH),
-                            commands,
-                        ),
-                        card,
-                    ))
-                    .child(
-                        // Placed beside the title row rather than bottom-right over metadata.
-                        div()
-                            .absolute()
-                            .bottom(rem(30.))
-                            .right(rem(6.))
-                            .child(self.note_commands_button(course, index, false, cx)),
+                with_context_menu(
+                    ("note-card-scope", index),
+                    command_context_menu(
+                        ("note-card-context", index),
+                        Some(COMMAND_MENU_WIDTH),
+                        commands,
                     ),
+                    card,
+                )
+                .w_full()
+                .min_w_0(),
             )
             .children(self.course_read_error(course, index, cx))
             .children(
