@@ -902,7 +902,7 @@ checksum = "cd17eb909a8c6a894926bfcc3400a4bb0e732f5a57d37b1f14e8b29e329bace8"
 
 [[package]]
 name = "c2m-ai"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -930,7 +930,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-artifact"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -955,7 +955,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-asr"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -982,7 +982,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-config"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "c2m-core",
@@ -998,7 +998,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-core"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "c2m-i18n",
@@ -1012,7 +1012,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-dispatch"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "c2m-core",
@@ -1030,7 +1030,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-engine"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "c2m-ai",
@@ -1058,7 +1058,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-i18n"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "sys-locale",
  "whatlang",
@@ -1066,7 +1066,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-process"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -1087,7 +1087,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-protocol"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "c2m-core",
@@ -1102,7 +1102,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-source"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -1133,7 +1133,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-test-http"
-version = "3.0.0"
+version = "3.0.1"
 
 [[package]]
 name = "calloop"
@@ -1647,7 +1647,7 @@ dependencies = [
 
 [[package]]
 name = "course2md"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "c2m-ai",
@@ -1676,7 +1676,7 @@ dependencies = [
 
 [[package]]
 name = "course2md-desktop"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1902,7 +1902,7 @@ dependencies = [
 
 [[package]]
 name = "desktop-accounts"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "c2m-ai",
@@ -1914,7 +1914,7 @@ dependencies = [
 
 [[package]]
 name = "desktop-prefs"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -1943,7 +1943,7 @@ dependencies = [
 
 [[package]]
 name = "desktop-reader-core"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "c2m-artifact",
@@ -1959,7 +1959,7 @@ dependencies = [
 
 [[package]]
 name = "desktop-store"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "c2m-artifact",
@@ -1985,7 +1985,7 @@ dependencies = [
 
 [[package]]
 name = "desktop-tasks"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "c2m-artifact",
@@ -2011,7 +2011,7 @@ dependencies = [
 
 [[package]]
 name = "desktop-ui"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "c2m-artifact",
@@ -7871,9 +7871,9 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "slide-detect"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ef3e41f563c9ba7eaeca2581a8c7a80b28baa5cc4cce7dbafbbf19a8992e88d"
+checksum = "34da3c77ba476e73a71e601ba7cba6553261466ba24eb672ba4c9edd6d13f8b1"
 dependencies = [
  "image",
  "image-compare",
