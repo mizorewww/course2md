@@ -1780,7 +1780,7 @@ impl Desktop {
             .truncate();
         let action = h_flex()
             .id(("note-card-action", index))
-            .h(scale.label_line_height())
+            .h(scale.support_line_height())
             .flex_shrink_0()
             .items_center()
             .on_click(|_, _, cx| cx.stop_propagation())
@@ -1791,7 +1791,7 @@ impl Desktop {
             .px(rem(4.))
             .child(
                 h_flex()
-                    .items_start()
+                    .items_end()
                     .gap(rem(4.))
                     .child(
                         v_flex()
