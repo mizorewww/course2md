@@ -1762,6 +1762,8 @@ impl Desktop {
     /// The note grid's card: a 16:9 cover above the title, metadata and commands.
     fn note_card(&self, course: &Rc<Course>, index: usize, cx: &mut Context<Self>) -> AnyElement {
         let scale = TileScale::Compact;
+        let card_inset = rem(10.);
+        let footer_inset = rem(4.);
         let commands = self.note_commands(course, cx);
         let open = course.clone();
         let cover = cover(course.thumbnail.clone(), symbols::description())
@@ -1780,7 +1782,6 @@ impl Desktop {
             .truncate();
         let action = h_flex()
             .id(("note-card-action", index))
-            .h(scale.support_line_height())
             .flex_shrink_0()
             .items_center()
             .on_click(|_, _, cx| cx.stop_propagation())
@@ -1788,7 +1789,7 @@ impl Desktop {
         let footer = v_flex()
             .min_h(scale.label_line_height() * 2. + scale.support_line_height() + rem(2.))
             .justify_end()
-            .px(rem(4.))
+            .px(footer_inset)
             .child(
                 h_flex()
                     .items_end()
@@ -1812,8 +1813,8 @@ impl Desktop {
                 v_flex()
                     .w_full()
                     .min_w_0()
-                    .p(rem(10.))
-                    .pb(rem(14.))
+                    .p(card_inset)
+                    .pb(card_inset + footer_inset)
                     .gap(rem(12.))
                     .child(cover)
                     .child(footer),
