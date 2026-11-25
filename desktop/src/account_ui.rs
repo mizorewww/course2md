@@ -610,7 +610,7 @@ impl AccountsView {
         let visual = if let Some(modules) = self.account.modules.clone() {
             // A real QR code keeps its high-contrast white scanning surface.
             visual
-                .rounded(px(0.))
+                .rounded(RADIUS_NONE)
                 .bg(gpui::rgb(0xffffff))
                 .child(qr_canvas(modules))
         } else if let Some(icon) = status {
