@@ -18,10 +18,11 @@ use gpui_kit_material::{
         ButtonIconPosition, ButtonShape, ButtonSize, ButtonTone, ButtonVariant, CONTROL_HEIGHT,
         CardVariant, ConnectedButtonGroup, FilterChip, IconButton, IconButtonVariant, ListDensity,
         ListItem, ListLeading, MaterialCard, MaterialMenu, MaterialMenuItem, MaterialSideSheet,
-        MaterialTooltip, NoticeKind, RADIUS_LARGE, RADIUS_SMALL, SearchField, SearchFieldStyle,
-        StatusKind, TEXT_AUX, TEXT_BODY, TILE_GAP, TILE_RADIUS, TileScale, Tint, TypeRole,
-        accessible_text, color, disclosure_chevron, list_corners, material_button, media_label,
-        notice_banner, progress, rem, spinner, status_chip, tile, tile_chevron, tinted_icon,
+        MaterialTooltip, NoticeKind, RADIUS_LARGE, RADIUS_SMALL, SearchField, SearchFieldDensity,
+        SearchFieldStyle, StatusKind, TEXT_AUX, TEXT_BODY, TILE_GAP, TILE_RADIUS, TileScale, Tint,
+        TypeRole, accessible_text, color, disclosure_chevron, list_corners, material_button,
+        media_label, notice_banner, progress, rem, spinner, status_chip, tile, tile_chevron,
+        tinted_icon,
     },
     tokens::shape::OuterCorners,
 };
@@ -1509,6 +1510,7 @@ impl Desktop {
                 div().flex_1().flex_basis(rem(280.)).min_w(rem(200.)).child(
                     SearchField::new(&self.inputs[&Field::Search])
                         .field_style(SearchFieldStyle::Tonal)
+                        .density(SearchFieldDensity::Dense)
                         .leading(Icon::from(symbols::search()))
                         .when(!self.value(Field::Search, cx).is_empty(), |field| {
                             field.trailing(
